@@ -13,11 +13,28 @@ const INITIAL_VALUES = {
   assetCode: "USDC",
   targetAmount: "250",
   deadlineHours: "72",
+  imageUrl: "",
+  externalLink: "",
 };
 
 export function CreateCampaignForm({ onCreate, apiError }: CreateCampaignFormProps) {
   const [values, setValues] = useState(INITIAL_VALUES);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [allowedAssets, setAllowedAssets] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch("http://localhost:3001/api/config")
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.data?.allowedAssets) {
+          setAllowedAssets(json.data.allowedAssets);
+          if (json.data.allowedAssets.length > 0) {
+            update("assetCode", json.data.allowedAssets[0]);
+          }
+        }
+      })
+      .catch(console.error);
+  }, []);
 
   function update(field: keyof typeof INITIAL_VALUES, value: string) {
     setValues((current) => ({ ...current, [field]: value }));
@@ -36,6 +53,10 @@ export function CreateCampaignForm({ onCreate, apiError }: CreateCampaignFormPro
         assetCode: values.assetCode.trim().toUpperCase(),
         targetAmount: Number(values.targetAmount),
         deadline,
+        metadata: {
+          imageUrl: values.imageUrl.trim() || undefined,
+          externalLink: values.externalLink.trim() || undefined,
+        },
       });
 
       setValues(INITIAL_VALUES);
@@ -92,13 +113,18 @@ export function CreateCampaignForm({ onCreate, apiError }: CreateCampaignFormPro
         <div className="row">
           <label className="field-group">
             <span>Asset code</span>
-            <input
-              type="text"
+            <select
               value={values.assetCode}
               onChange={(event) => update("assetCode", event.target.value)}
-              maxLength={12}
               required
-            />
+            >
+              {allowedAssets.map((asset) => (
+                <option key={asset} value={asset}>
+                  {asset}
+                </option>
+              ))}
+              {allowedAssets.length === 0 && <option value="USDC">USDC</option>}
+            </select>
           </label>
 
           <label className="field-group">
@@ -125,6 +151,28 @@ export function CreateCampaignForm({ onCreate, apiError }: CreateCampaignFormPro
             required
           />
         </label>
+
+        <div className="row">
+          <label className="field-group">
+            <span>Image URL (optional)</span>
+            <input
+              type="url"
+              value={values.imageUrl}
+              onChange={(event) => update("imageUrl", event.target.value)}
+              placeholder="https://example.com/image.png"
+            />
+          </label>
+
+          <label className="field-group">
+            <span>External Link (optional)</span>
+            <input
+              type="url"
+              value={values.externalLink}
+              onChange={(event) => update("externalLink", event.target.value)}
+              placeholder="https://example.com/project"
+            />
+          </label>
+        </div>
 
         {apiError ? <p className="form-error">{apiError}</p> : null}
 

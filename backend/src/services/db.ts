@@ -45,7 +45,8 @@ function migrate(database: any): void {
       pledged_amount  REAL NOT NULL DEFAULT 0,
       deadline        INTEGER NOT NULL,
       created_at      INTEGER NOT NULL,
-      claimed_at      INTEGER
+      claimed_at      INTEGER,
+      metadata_json   TEXT
     );
 
     CREATE TABLE IF NOT EXISTS pledges (

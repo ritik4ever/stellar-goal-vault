@@ -210,6 +210,14 @@ app.get("/api/open-issues", async (_req: Request, res: Response) => {
   res.json({ data });
 });
 
+app.get("/api/config", (_req: Request, res: Response) => {
+  res.json({
+    data: {
+      allowedAssets: config.allowedAssets,
+    },
+  });
+});
+
 function startServer() {
   initCampaignStore();
   app.listen(port, () => {

@@ -10,6 +10,10 @@ export interface CampaignInput {
   assetCode: string;
   targetAmount: number;
   deadline: number;
+  metadata?: {
+    imageUrl?: string;
+    externalLink?: string;
+  };
 }
 
 export interface PledgeInput {
@@ -28,6 +32,10 @@ export interface CampaignRecord {
   deadline: number;
   createdAt: number;
   claimedAt?: number;
+  metadata?: {
+    imageUrl?: string;
+    externalLink?: string;
+  };
 }
 
 export interface CampaignProgress {
@@ -61,6 +69,7 @@ interface CampaignRow {
   deadline: number;
   created_at: number;
   claimed_at: number | null;
+  metadata_json: string | null;
 }
 
 interface PledgeRow {
@@ -100,6 +109,7 @@ function rowToCampaign(row: CampaignRow): CampaignRecord {
     deadline: row.deadline,
     createdAt: row.created_at,
     claimedAt: row.claimed_at ?? undefined,
+    metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined,
   };
 }
 
@@ -227,17 +237,19 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     pledgedAmount: 0,
     deadline: input.deadline,
     createdAt: nowInSeconds(),
+    metadata: input.metadata,
   };
 
   db.prepare(
     `INSERT INTO campaigns (
-      id, creator, title, description, asset_code, target_amount, pledged_amount, deadline, created_at, claimed_at
+      id, creator, title, description, asset_code, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
     ) VALUES (
-      @id, @creator, @title, @description, @assetCode, @targetAmount, @pledgedAmount, @deadline, @createdAt, @claimedAt
+      @id, @creator, @title, @description, @assetCode, @targetAmount, @pledgedAmount, @deadline, @createdAt, @claimedAt, @metadataJson
     )`,
   ).run({
     ...campaign,
     claimedAt: null,
+    metadataJson: campaign.metadata ? JSON.stringify(campaign.metadata) : null,
   });
 
   recordEvent(campaign.id, "created", campaign.createdAt, campaign.creator, undefined, {

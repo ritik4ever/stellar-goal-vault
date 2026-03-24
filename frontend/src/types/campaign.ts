@@ -52,6 +52,10 @@ export interface CreateCampaignPayload {
   assetCode: string;
   targetAmount: number;
   deadline: number;
+  metadata?: {
+    imageUrl?: string;
+    externalLink?: string;
+  };
 }
 
 export interface CreatePledgePayload {

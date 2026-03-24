@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { config } from "../config";
 
 export const STELLAR_ACCOUNT_REGEX = /^G[A-Z2-7]{55}$/;
 export const ASSET_CODE_REGEX = /^[A-Za-z0-9]{1,12}$/;
@@ -21,7 +21,13 @@ export const assetCodeSchema = z
   .string()
   .trim()
   .regex(ASSET_CODE_REGEX, "Asset code must be 1-12 alphanumeric characters.")
-  .transform((value) => value.toUpperCase());
+  .transform((value) => value.toUpperCase())
+  .refine(
+    (code) => config.allowedAssets.includes(code),
+    (code) => ({
+      message: `Asset code '${code}' is not supported. Supported assets: ${config.allowedAssets.join(", ")}`,
+    }),
+  );
 
 export const positiveAmountSchema = z.coerce
   .number()

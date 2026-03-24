@@ -141,6 +141,29 @@ export function CampaignDetailPanel({
 
       {actionError ? <p className="form-error">{actionError}</p> : null}
       {actionMessage ? <p className="form-success">{actionMessage}</p> : null}
+
+      {activeCampaign.metadata?.imageUrl && (
+        <div className="campaign-image-container">
+          <img
+            src={activeCampaign.metadata.imageUrl}
+            alt={activeCampaign.title}
+            className="campaign-image"
+          />
+        </div>
+      )}
+
+      {activeCampaign.metadata?.externalLink && (
+        <div className="external-link-container">
+          <a
+            href={activeCampaign.metadata.externalLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-ghost"
+          >
+            Visit Project Website
+          </a>
+        </div>
+      )}
     </section>
   );
 }
