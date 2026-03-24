@@ -8,6 +8,7 @@ import {
   addPledge,
   claimCampaign,
   createCampaign,
+  getCampaign,
   getCampaignHistory,
   listCampaigns,
   listOpenIssues,
@@ -65,6 +66,7 @@ function App() {
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -90,6 +92,15 @@ function App() {
     setHistory(data);
   }
 
+  async function refreshSelectedCampaign(campaignId: string | null) {
+    if (!campaignId) {
+      setSelectedCampaignDetails(null);
+      return;
+    }
+    const campaign = await getCampaign(campaignId);
+    setSelectedCampaignDetails(campaign);
+  }
+
   useEffect(() => {
     async function bootstrap() {
       const [campaignData, issueData] = await Promise.all([
@@ -106,11 +117,24 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void refreshHistory(selectedCampaignId);
+    setSelectedCampaignDetails(null);
+    void Promise.all([refreshHistory(selectedCampaignId), refreshSelectedCampaign(selectedCampaignId)]);
   }, [selectedCampaignId]);
 
-  const selectedCampaign =
-    campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
+  const selectedCampaign = useMemo(() => {
+    const baseCampaign =
+      campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
+    if (!baseCampaign) {
+      return null;
+    }
+    if (selectedCampaignDetails?.id !== baseCampaign.id) {
+      return baseCampaign;
+    }
+    return {
+      ...baseCampaign,
+      pledges: selectedCampaignDetails.pledges,
+    };
+  }, [campaigns, selectedCampaignDetails, selectedCampaignId]);
 
   const metrics = useMemo(() => {
     const open = campaigns.filter((campaign) => campaign.progress.status === "open").length;
@@ -133,7 +157,7 @@ function App() {
     try {
       const campaign = await createCampaign(payload);
       await refreshCampaigns(campaign.id);
-      await refreshHistory(campaign.id);
+      await Promise.all([refreshHistory(campaign.id), refreshSelectedCampaign(campaign.id)]);
       setActionMessage(`Campaign #${campaign.id} is live and ready for pledges.`);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "Failed to create campaign.");
@@ -146,6 +170,7 @@ function App() {
 
     const previousCampaigns = campaigns;
     const previousHistory = history;
+    const previousSelectedDetails = selectedCampaignDetails;
     const optimisticTimestamp = Math.floor(Date.now() / 1000);
     const optimisticEvent: CampaignEvent = {
       id: -Date.now(),
@@ -162,6 +187,22 @@ function App() {
         campaign.id === campaignId ? toOptimisticPledgedCampaign(campaign, amount) : campaign,
       ),
     );
+    setSelectedCampaignDetails((currentDetails) => {
+      if (!currentDetails || currentDetails.id !== campaignId) {
+        return currentDetails;
+      }
+      const optimisticPledge = {
+        id: -Date.now(),
+        campaignId,
+        contributor,
+        amount,
+        createdAt: optimisticTimestamp,
+      };
+      return {
+        ...toOptimisticPledgedCampaign(currentDetails, amount),
+        pledges: [optimisticPledge, ...(currentDetails.pledges ?? [])],
+      };
+    });
     setPendingPledgeCampaignId(campaignId);
     if (selectedCampaignId === campaignId) {
       setHistory((currentHistory) => [optimisticEvent, ...currentHistory]);
@@ -178,7 +219,7 @@ function App() {
         await delay(minimumPendingMs - elapsedMs);
       }
       await refreshCampaigns(campaignId);
-      await refreshHistory(campaignId);
+      await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
       setPendingPledgeCampaignId(null);
       setActionMessage("Pledge recorded in the local goal vault.");
     } catch (error) {
@@ -187,6 +228,8 @@ function App() {
         await delay(minimumPendingMs - elapsedMs);
       }
       setCampaigns(previousCampaigns);
+      setSelectedCampaignDetails(previousSelectedDetails);
+      await refreshSelectedCampaign(campaignId);
       if (selectedCampaignId === campaignId) {
         setHistory(previousHistory);
       }
@@ -203,7 +246,7 @@ function App() {
     try {
       await claimCampaign(campaign.id, campaign.creator);
       await refreshCampaigns(campaign.id);
-      await refreshHistory(campaign.id);
+      await Promise.all([refreshHistory(campaign.id), refreshSelectedCampaign(campaign.id)]);
       setActionMessage("Campaign claimed successfully.");
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Failed to claim campaign.");
@@ -217,7 +260,7 @@ function App() {
     try {
       await refundCampaign(campaignId, contributor);
       await refreshCampaigns(campaignId);
-      await refreshHistory(campaignId);
+      await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
       setActionMessage("Refund recorded for the selected contributor.");
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Failed to refund contributor.");

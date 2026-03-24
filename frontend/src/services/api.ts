@@ -22,6 +22,12 @@ export async function listCampaigns(): Promise<Campaign[]> {
   return body.data;
 }
 
+export async function getCampaign(campaignId: string): Promise<Campaign> {
+  const response = await fetch(`${API_BASE}/campaigns/${campaignId}`);
+  const body = await parseResponse<{ data: Campaign }>(response);
+  return body.data;
+}
+
 export async function createCampaign(payload: CreateCampaignPayload): Promise<Campaign> {
   const response = await fetch(`${API_BASE}/campaigns`, {
     method: "POST",

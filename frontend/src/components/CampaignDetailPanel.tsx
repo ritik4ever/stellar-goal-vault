@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Campaign } from "../types/campaign";
+import { ContributorSummary } from "./ContributorSummary";
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -89,6 +90,8 @@ export function CampaignDetailPanel({
           <strong>{activeCampaign.progress.pledgeCount}</strong>
         </article>
       </div>
+
+      <ContributorSummary pledges={activeCampaign.pledges} assetCode={activeCampaign.assetCode} />
 
       <form className="form-grid" onSubmit={handlePledge}>
         <label className="field-group">
