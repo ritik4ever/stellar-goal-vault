@@ -66,6 +66,7 @@ textarea {
   border: 1px solid #d7e3e1;
   border-radius: 18px;
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.05);
+  margin-bottom: 25px;
 }
 
 .metric-card {
@@ -393,7 +394,7 @@ td {
   margin-bottom: 6px;
 }
 
-.progress-bar > div {
+.progress-bar>div {
   height: 100%;
   background: linear-gradient(90deg, #0f766e, #2563eb);
 }
@@ -509,6 +510,38 @@ td {
   color: #0c4a6e;
 }
 
+.invalid-campaign-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+
+  margin: 0 auto 1.5rem;
+  max-width: var(--content-max-width, 1200px);
+  padding: 0.75rem 1rem;
+
+  background: hsl(38 90% 95%);
+  border: 1px solid hsl(38 80% 75%);
+  border-radius: 6px;
+  color: hsl(32 60% 28%);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.invalid-campaign-banner code {
+  font-family: monospace;
+  background: hsl(38 60% 88%);
+  padding: 0 0.3em;
+  border-radius: 3px;
+}
+
+.invalid-campaign-dismiss {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+}
+
 @media (min-width: 920px) {
   .layout-grid {
     grid-template-columns: 360px 1fr;
@@ -521,26 +554,4 @@ td {
   .row {
     grid-template-columns: 1fr 1fr;
   }
-}
 
-/* Skeleton loading utilities */
-.skeleton {
-  background: linear-gradient(90deg, #f1f5f9 0%, #eef2ff 50%, #f1f5f9 100%);
-  border-radius: 8px;
-  display: inline-block;
-  height: 16px;
-  animation: shimmer 1.2s linear infinite;
-}
-
-.skeleton-line {
-  height: 16px;
-  border-radius: 8px;
-}
-
-
-@keyframes shimmer {
-  0% { background-position: -200px 0; }
-  100% { background-position: 200px 0; }
-}
-
-.card .skeleton { margin: 6px 0; }
