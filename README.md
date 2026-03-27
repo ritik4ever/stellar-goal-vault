@@ -65,6 +65,8 @@ Base URL:
 - Returns all campaigns with computed progress
 - Query parameters:
   - `q` (optional): Search query to filter campaigns by title, creator, or campaign ID (case-insensitive)
+  - `asset` (optional): Filter campaigns by asset code (e.g., USDC, XLM)
+  - `status` (optional): Filter campaigns by status (open, funded, claimed, failed)
 
 ### `GET /api/campaigns/:id`
 - Returns one campaign with pledges and event history
