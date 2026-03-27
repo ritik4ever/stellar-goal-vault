@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   addPledge,
   calculateProgress,
+  CampaignStatus,
   claimCampaign,
   createCampaign,
   getCampaign,
@@ -31,12 +32,21 @@ import { randomUUID } from "crypto";
 
 export const app = express();
 const port = Number(process.env.PORT ?? 3001);
+const CAMPAIGN_STATUSES: CampaignStatus[] = ["open", "funded", "claimed", "failed"];
 
-// Initialize DB and start indexer
+type CampaignListItem = ReturnType<typeof calculateProgress> extends infer Progress
+  ? ReturnType<typeof listCampaigns>[number] & { progress: Progress }
+  : never;
+
+// Initialize DB
 initCampaignStore();
-startEventIndexer();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: config.corsAllowedOrigins,
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 // Request ID middleware
@@ -78,6 +88,63 @@ function parseCampaignId(campaignIdRaw: unknown):
   return { ok: true, value: parsed.data };
 }
 
+export function normalizeQueryValue(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+export function normalizeAssetFilter(assetRaw: unknown): string | undefined {
+  const asset = normalizeQueryValue(assetRaw)?.toUpperCase();
+  if (!asset) {
+    return undefined;
+  }
+
+  return config.allowedAssets.includes(asset) ? asset : undefined;
+}
+
+export function normalizeStatusFilter(statusRaw: unknown): CampaignStatus | undefined {
+  const status = normalizeQueryValue(statusRaw)?.toLowerCase();
+  if (!status) {
+    return undefined;
+  }
+
+  return CAMPAIGN_STATUSES.includes(status as CampaignStatus)
+    ? (status as CampaignStatus)
+    : undefined;
+}
+
+export function parseCampaignListFilters(query: {
+  asset?: unknown;
+  status?: unknown;
+}): {
+  asset?: string;
+  status?: CampaignStatus;
+} {
+  return {
+    asset: normalizeAssetFilter(query.asset),
+    status: normalizeStatusFilter(query.status),
+  };
+}
+
+export function filterCampaignList(
+  campaigns: CampaignListItem[],
+  filters: {
+    asset?: string;
+    status?: CampaignStatus;
+  },
+): CampaignListItem[] {
+  return campaigns.filter((campaign) => {
+    const matchesAsset = !filters.asset || campaign.assetCode.toUpperCase() === filters.asset;
+    const matchesStatus = !filters.status || campaign.progress.status === filters.status;
+
+    return matchesAsset && matchesStatus;
+  });
+}
+
 app.get("/api/health", (_req: Request, res: Response) => {
   res.json({
     service: "stellar-goal-vault-backend",
@@ -87,12 +154,7 @@ app.get("/api/health", (_req: Request, res: Response) => {
 });
 
 app.get("/api/campaigns", (req: Request, res: Response) => {
-  const searchQuery = typeof req.query.q === "string" ? req.query.q : undefined;
-  
-  const data = listCampaigns({ searchQuery }).map((campaign) => ({
-    ...campaign,
-    progress: calculateProgress(campaign),
-  }));
+
 
   res.json({ data });
 });
@@ -235,6 +297,7 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
 
 function startServer() {
   initCampaignStore();
+  startEventIndexer();
   app.listen(port, () => {
     console.log(`Stellar Goal Vault API listening on http://localhost:${port}`);
   });
