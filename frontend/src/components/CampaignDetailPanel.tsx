@@ -26,7 +26,10 @@ function networkName(config: AppConfig | null): string {
   if (config.networkPassphrase === "Test SDF Network ; September 2015") {
     return "Stellar Testnet";
   }
-  if (config.networkPassphrase === "Public Global Stellar Network ; September 2015") {
+  if (
+    config.networkPassphrase ===
+    "Public Global Stellar Network ; September 2015"
+  ) {
     return "Stellar Mainnet";
   }
   return "Configured network";
@@ -62,7 +65,10 @@ export function CampaignDetailPanel({
           <h2>
             <div className="skeleton skeleton-line" style={{ width: 220 }} />
           </h2>
-          <div className="skeleton skeleton-line" style={{ width: 320, height: 14 }} />
+          <div
+            className="skeleton skeleton-line"
+            style={{ width: 320, height: 14 }}
+          />
         </div>
         <div className="detail-grid">
           {Array.from({ length: 4 }).map((_, index) => (
@@ -131,7 +137,9 @@ export function CampaignDetailPanel({
       <div className="detail-grid">
         <article className="detail-stat">
           <span>Creator</span>
-          <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
+          <strong className="mono">
+            {activeCampaign.creator.slice(0, 16)}...
+          </strong>
         </article>
         <article className="detail-stat">
           <span>Asset</span>
@@ -151,7 +159,8 @@ export function CampaignDetailPanel({
         <div>
           <h3 className="wallet-status-title">Freighter pledge flow</h3>
           <p className="muted">
-            Simulate, sign, and submit the Soroban pledge from the contributor wallet.
+            Simulate, sign, and submit the Soroban pledge from the contributor
+            wallet.
           </p>
         </div>
         {connectedWallet ? (
@@ -219,7 +228,9 @@ export function CampaignDetailPanel({
               !walletReady
             }
           >
-            {isPledgePending ? "Simulating / waiting..." : "Sign pledge with Freighter"}
+            {isPledgePending
+              ? "Simulating / waiting..."
+              : "Sign pledge with Freighter"}
           </button>
 
           <button
@@ -251,7 +262,6 @@ export function CampaignDetailPanel({
             disabled={
               isSubmitting ||
               !activeCampaign.progress.canRefund ||
-              contributor.trim().length === 0
               refundContributor.trim().length === 0
             }
             onClick={handleRefund}
@@ -263,8 +273,8 @@ export function CampaignDetailPanel({
 
       {isPledgePending ? (
         <p className="pending-note">
-          The pledge transaction is in flight. The local campaign state will refresh after
-          the Soroban transaction confirms.
+          The pledge transaction is in flight. The local campaign state will
+          refresh after the Soroban transaction confirms.
         </p>
       ) : null}
 
@@ -283,7 +293,9 @@ export function CampaignDetailPanel({
           {actionError.code ? (
             <small className="error-meta">
               Code: {actionError.code}
-              {actionError.requestId ? ` | Request ID: ${actionError.requestId}` : ""}
+              {actionError.requestId
+                ? ` | Request ID: ${actionError.requestId}`
+                : ""}
             </small>
           ) : null}
         </div>

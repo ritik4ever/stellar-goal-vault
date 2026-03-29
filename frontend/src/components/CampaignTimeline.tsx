@@ -4,7 +4,6 @@ import { EmptyState } from "./EmptyState";
 
 interface CampaignTimelineProps {
   history: CampaignEvent[];
-  isLoading?: boolean;
 }
 
 function formatTimestamp(unixSeconds: number): string {
@@ -26,7 +25,7 @@ function describeEvent(event: CampaignEvent): string {
   }
 }
 
-export function CampaignTimeline({ history, isLoading }: CampaignTimelineProps) {
+export function CampaignTimeline({ history }: CampaignTimelineProps) {
   if (history.length === 0) {
     return (
       <EmptyState
@@ -43,7 +42,8 @@ export function CampaignTimeline({ history, isLoading }: CampaignTimelineProps) 
       <div className="section-heading">
         <h2>Timeline</h2>
         <p className="muted">
-          Each action is stored locally so contributors can follow campaign activity.
+          Each action is stored locally so contributors can follow campaign
+          activity.
         </p>
       </div>
 
@@ -63,19 +63,30 @@ export function CampaignTimeline({ history, isLoading }: CampaignTimelineProps) 
                 : event.blockchainMetadata?.txHash;
 
             return (
-              <article key={event.id} className={`timeline-item ${isPending ? "pending" : ""}`}>
+              <article
+                key={event.id}
+                className={`timeline-item ${isPending ? "pending" : ""}`}
+              >
                 <div className="timeline-dot" aria-hidden />
                 <div className="timeline-copy">
                   <strong>
                     {describeEvent(event)}
                     {isPending ? " (pending)" : ""}
                   </strong>
-                  <span className="muted">{formatTimestamp(event.timestamp)}</span>
                   <span className="muted">
-                    {event.actor ? `Actor: ${event.actor.slice(0, 12)}...` : "System event"}
-                    {typeof event.amount === "number" ? ` | Amount: ${event.amount}` : ""}
+                    {formatTimestamp(event.timestamp)}
                   </span>
-                  {txHash ? <span className="mono muted">Tx hash: {txHash}</span> : null}
+                  <span className="muted">
+                    {event.actor
+                      ? `Actor: ${event.actor.slice(0, 12)}...`
+                      : "System event"}
+                    {typeof event.amount === "number"
+                      ? ` | Amount: ${event.amount}`
+                      : ""}
+                  </span>
+                  {txHash ? (
+                    <span className="mono muted">Tx hash: {txHash}</span>
+                  ) : null}
                 </div>
               </article>
             );
