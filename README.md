@@ -8,7 +8,7 @@ It includes:
 - A Soroban contract scaffold for on-chain campaign creation, pledges, claims, and refunds
 - A seeded contribution backlog you can turn into GitHub issues after publishing
 
-## What the project does
+## What the project does?
 
 Creators open a campaign with a target amount and deadline.
 
