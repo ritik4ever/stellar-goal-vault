@@ -15,8 +15,18 @@ import {
   reconcilePledge,
   refundCampaign,
 } from "./services/api";
-import { connectFreighterWallet, submitFreighterClaim, submitFreighterPledge } from "./services/freighter";
-import { ApiError, AppConfig, Campaign, CampaignEvent, OpenIssue } from "./types/campaign";
+import {
+  connectFreighterWallet,
+  submitFreighterClaim,
+  submitFreighterPledge,
+} from "./services/freighter";
+import {
+  ApiError,
+  AppConfig,
+  Campaign,
+  CampaignEvent,
+  OpenIssue,
+} from "./types/campaign";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -64,13 +74,20 @@ function App() {
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
-  const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(
+    null,
+  );
+  const [selectedCampaignDetails, setSelectedCampaignDetails] =
+    useState<Campaign | null>(null);
   const [createError, setCreateError] = useState<ApiError | null>(null);
-  const [, setActionError] = useState<ApiError | null>(null);
+  const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
-  const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
+  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<
+    string | null
+  >(null);
+  const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<
+    string | null
+  >(null);
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
 
@@ -86,9 +103,11 @@ function App() {
       setCampaigns(data);
 
       const candidateId =
-        nextSelectedId ?? selectedCampaignId ?? (data.length > 0 ? data[0].id : null);
+        nextSelectedId ??
+        selectedCampaignId ??
+        (data.length > 0 ? data[0].id : null);
       const exists = data.some((campaign) => campaign.id === candidateId);
-      setSelectedCampaignId(exists ? candidateId : data[0]?.id ?? null);
+      setSelectedCampaignId(exists ? candidateId : (data[0]?.id ?? null));
     } finally {
       const elapsed = Date.now() - startedAt;
       const minMs = 250;
@@ -159,11 +178,15 @@ function App() {
         const urlCampaignId = getCampaignIdFromUrl();
         const defaultCampaignId = campaignList[0]?.id ?? null;
         const nextSelectedId =
-          urlCampaignId && campaignList.some((campaign) => campaign.id === urlCampaignId)
+          urlCampaignId &&
+          campaignList.some((campaign) => campaign.id === urlCampaignId)
             ? urlCampaignId
             : defaultCampaignId;
 
-        if (urlCampaignId && !campaignList.some((campaign) => campaign.id === urlCampaignId)) {
+        if (
+          urlCampaignId &&
+          !campaignList.some((campaign) => campaign.id === urlCampaignId)
+        ) {
           setInvalidUrlCampaignId(urlCampaignId);
         }
 
@@ -193,7 +216,9 @@ function App() {
 
     setSelectedCampaignDetails(null);
     void Promise.all([
-      refreshHistory(selectedCampaignId).catch((error) => setActionError(toApiError(error))),
+      refreshHistory(selectedCampaignId).catch((error) =>
+        setActionError(toApiError(error)),
+      ),
       refreshSelectedCampaign(selectedCampaignId).catch((error) =>
         setActionError(toApiError(error)),
       ),
@@ -201,7 +226,8 @@ function App() {
   }, [initialLoad, selectedCampaignId]);
 
   const selectedCampaign = useMemo(() => {
-    const baseCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
+    const baseCampaign =
+      campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
     if (!baseCampaign) {
       return null;
     }
@@ -212,9 +238,16 @@ function App() {
   }, [campaigns, selectedCampaignDetails, selectedCampaignId]);
 
   const metrics = useMemo(() => {
-    const open = campaigns.filter((campaign) => campaign.progress.status === "open").length;
-    const funded = campaigns.filter((campaign) => campaign.progress.status === "funded").length;
-    const pledged = campaigns.reduce((sum, campaign) => sum + campaign.pledgedAmount, 0);
+    const open = campaigns.filter(
+      (campaign) => campaign.progress.status === "open",
+    ).length;
+    const funded = campaigns.filter(
+      (campaign) => campaign.progress.status === "funded",
+    ).length;
+    const pledged = campaigns.reduce(
+      (sum, campaign) => sum + campaign.pledgedAmount,
+      0,
+    );
 
     return {
       total: campaigns.length,
@@ -236,7 +269,9 @@ function App() {
         refreshHistory(campaign.id),
         refreshSelectedCampaign(campaign.id),
       ]);
-      setActionMessage(`Campaign #${campaign.id} is live and ready for pledges.`);
+      setActionMessage(
+        `Campaign #${campaign.id} is live and ready for pledges.`,
+      );
     } catch (error) {
       setCreateError(error as ApiError);
     }
@@ -279,6 +314,13 @@ function App() {
 
     setActionError(null);
     setActionMessage("Simulating pledge transaction...");
+    // Snapshot state so we can rollback on failure while providing
+    // a minimum visible pending duration for the UI.
+    const pendingStartedAt = Date.now();
+    const minimumPendingMs = 300;
+    const previousCampaigns = campaigns;
+    const previousSelectedDetails = selectedCampaignDetails;
+    const previousHistory = history;
     setPendingPledgeCampaignId(campaignId);
 
     try {
@@ -309,7 +351,8 @@ function App() {
       setActionMessage("Pledge recorded in the local goal vault.");
     } catch (error) {
       const elapsedMs = Date.now() - pendingStartedAt;
-      if (elapsedMs < minimumPendingMs) await delay(minimumPendingMs - elapsedMs);
+      if (elapsedMs < minimumPendingMs)
+        await delay(minimumPendingMs - elapsedMs);
       setCampaigns(previousCampaigns);
       setSelectedCampaignDetails(previousSelectedDetails);
       await refreshSelectedCampaign(campaignId);
@@ -336,7 +379,8 @@ function App() {
 
     if (connectedWallet !== campaign.creator) {
       setActionError({
-        message: "Only the campaign creator can claim funds. Connect the creator wallet.",
+        message:
+          "Only the campaign creator can claim funds. Connect the creator wallet.",
         code: "FORBIDDEN",
       });
       return;
@@ -369,7 +413,9 @@ function App() {
         refreshSelectedCampaign(campaign.id),
       ]);
 
-      setActionMessage(`Campaign claimed. Tx hash: ${transactionResult.transactionHash}`);
+      setActionMessage(
+        `Campaign claimed. Tx hash: ${transactionResult.transactionHash}`,
+      );
     } catch (error) {
       setActionError(error as ApiError);
     }
@@ -402,8 +448,8 @@ function App() {
         <p className="eyebrow">Soroban crowdfunding MVP</p>
         <h1>Stellar Goal Vault</h1>
         <p className="hero-copy">
-          Create funding goals, connect Freighter, and reconcile real Soroban pledge
-          transactions back into the local campaign view.
+          Create funding goals, connect Freighter, and reconcile real Soroban
+          pledge transactions back into the local campaign view.
         </p>
       </header>
 
@@ -426,7 +472,10 @@ function App() {
         </article>
       </section>
 
-      <section className="layout-grid animate-fade-in" style={{ animationDelay: "0.2s" }}>
+      <section
+        className="layout-grid animate-fade-in"
+        style={{ animationDelay: "0.2s" }}
+      >
         <CreateCampaignForm
           onCreate={handleCreate}
           apiError={createError}
@@ -456,14 +505,11 @@ function App() {
           isLoading={isCampaignsLoading || initialLoad}
           invalidUrlCampaignId={invalidUrlCampaignId}
           onSelect={handleSelect}
-          isLoading={isCampaignsLoading || initialLoad}
         />
       </section>
 
       <section className="animate-fade-in" style={{ animationDelay: "0.6s" }}>
-        <CampaignTimeline
-          history={history}
-        />
+        <CampaignTimeline history={history} />
       </section>
 
       <section className="animate-fade-in" style={{ animationDelay: "0.8s" }}>

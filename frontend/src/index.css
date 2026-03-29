@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap");
 
 :root {
   /* Color Palette - Stellar Midnight */
@@ -27,7 +27,7 @@
 
 body {
   margin: 0;
-  font-family: 'Outfit', sans-serif;
+  font-family: "Outfit", sans-serif;
   background-color: var(--bg-deep);
   background-image:
     radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
@@ -37,7 +37,6 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
-
 
 * {
   box-sizing: border-box;
@@ -322,7 +321,11 @@ select {
   flex-direction: column;
   align-items: center;
   gap: 16px;
-  background: radial-gradient(circle at center, rgba(99, 102, 241, 0.05) 0%, transparent 70%);
+  background: radial-gradient(
+    circle at center,
+    rgba(99, 102, 241, 0.05) 0%,
+    transparent 70%
+  );
 }
 
 .empty-state-container.card {
@@ -444,7 +447,10 @@ select {
 
 .contributor-table-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.4fr) minmax(100px, 1fr) minmax(100px, 1fr);
+  grid-template-columns: minmax(120px, 1.4fr) minmax(100px, 1fr) minmax(
+      100px,
+      1fr
+    );
   gap: 12px;
   padding: 12px 14px;
   align-items: start;
@@ -801,8 +807,12 @@ tbody tr:hover td {
 }
 
 @keyframes shimmer {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
 }
 
 @media (max-width: 767px) {
@@ -825,3 +835,88 @@ tbody tr:hover td {
   }
 }
 
+/* Mobile card view overrides for campaign board */
+.cards-only {
+  display: none;
+}
+
+.table-only {
+  display: block;
+}
+
+@media (max-width: 767px) {
+  /* Hide the wide table and show stacked cards on small screens */
+  .table-only {
+    display: none;
+  }
+
+  .cards-only {
+    display: grid;
+    gap: 12px;
+    margin: 0 -8px;
+    padding: 0 8px;
+  }
+
+  .campaign-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-glass);
+  }
+
+  .campaign-card-main {
+    display: grid;
+    gap: 10px;
+  }
+
+  .campaign-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .campaign-title {
+    display: block;
+    font-size: 1.05rem;
+  }
+
+  .campaign-creator {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+  }
+
+  .campaign-progress .progress-copy {
+    margin-bottom: 8px;
+  }
+
+  .campaign-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .campaign-card-actions {
+    display: flex;
+    gap: 12px;
+  }
+
+  /* Make action buttons full-width and touch friendly on mobile */
+  .campaign-card .btn-primary,
+  .campaign-card .btn-secondary,
+  .campaign-card .btn-ghost {
+    flex: 1 1 auto;
+    min-height: 52px;
+    padding: 12px 16px;
+    font-size: 1rem;
+  }
+
+  .campaign-card-selected {
+    border-color: var(--border-glass-bright);
+    box-shadow: 0 6px 18px rgba(99, 102, 241, 0.08);
+  }
+}
