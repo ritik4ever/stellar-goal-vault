@@ -1,4 +1,5 @@
 import { Campaign } from "../types/campaign";
+import { CopyButton } from "./CopyButton";
 
 interface CampaignCardProps {
   campaign: Campaign;
@@ -24,8 +25,16 @@ export function CampaignCard({
             <strong className="campaign-title">{campaign.title}</strong>
             <div className="muted">#{campaign.id}</div>
           </div>
-          <div className="campaign-creator mono">
-            {campaign.creator.slice(0, 8)}...
+          <div
+            className="campaign-creator mono"
+            style={{ display: "flex", alignItems: "center", gap: 8 }}
+          >
+            <span>{campaign.creator.slice(0, 8)}...</span>
+            <CopyButton
+              value={campaign.creator}
+              ariaLabel="Copy creator address"
+              className="small"
+            />
           </div>
         </div>
 

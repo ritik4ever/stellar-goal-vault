@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { CopyButton } from "./CopyButton";
 import { Pledge } from "../types/campaign";
 
 function round2(value: number): number {
@@ -19,16 +20,26 @@ interface ContributorSummaryProps {
   assetCode: string;
   isLoading?: boolean;
 }
-export function ContributorSummary({ pledges, assetCode, isLoading }: ContributorSummaryProps) {
+export function ContributorSummary({
+  pledges,
+  assetCode,
+  isLoading,
+}: ContributorSummaryProps) {
   if (isLoading || pledges === undefined) {
     return (
-      <section className="contributor-summary contributor-summary-loading" aria-label="Contributor summary">
+      <section
+        className="contributor-summary contributor-summary-loading"
+        aria-label="Contributor summary"
+      >
         <h3 className="contributor-summary-title">Contributors</h3>
         <div className="contributor-summary-stats" style={{ marginTop: 12 }}>
           {Array.from({ length: 3 }).map((_, i) => (
             <article key={i} className="contributor-stat">
               <div className="skeleton skeleton-line" style={{ width: 100 }} />
-              <div className="skeleton skeleton-line" style={{ width: 60, height: 20, marginTop: 8 }} />
+              <div
+                className="skeleton skeleton-line"
+                style={{ width: 60, height: 20, marginTop: 8 }}
+              />
             </article>
           ))}
         </div>
@@ -36,7 +47,13 @@ export function ContributorSummary({ pledges, assetCode, isLoading }: Contributo
     );
   }
 
-  const { rows, uniqueAddresses, activeAddresses, activeGrandTotal, refundedGrandTotal } = useMemo(() => {
+  const {
+    rows,
+    uniqueAddresses,
+    activeAddresses,
+    activeGrandTotal,
+    refundedGrandTotal,
+  } = useMemo(() => {
     const list = pledges ?? [];
     const byContributor = new Map<
       string,
@@ -75,16 +92,16 @@ export function ContributorSummary({ pledges, assetCode, isLoading }: Contributo
       }
     }
 
-    const aggregated: AggregatedContributor[] = [...byContributor.entries()].map(
-      ([contributor, bucket]) => ({
-        contributor,
-        activeTotal: round2(bucket.activeTotal),
-        activePledgeCount: bucket.activePledgeCount,
-        refundedTotal: round2(bucket.refundedTotal),
-        refundedPledgeCount: bucket.refundedPledgeCount,
-        hasPending: bucket.hasPending,
-      }),
-    );
+    const aggregated: AggregatedContributor[] = [
+      ...byContributor.entries(),
+    ].map(([contributor, bucket]) => ({
+      contributor,
+      activeTotal: round2(bucket.activeTotal),
+      activePledgeCount: bucket.activePledgeCount,
+      refundedTotal: round2(bucket.refundedTotal),
+      refundedPledgeCount: bucket.refundedPledgeCount,
+      hasPending: bucket.hasPending,
+    }));
 
     aggregated.sort((a, b) => {
       if (b.activeTotal !== a.activeTotal) {
@@ -96,9 +113,15 @@ export function ContributorSummary({ pledges, assetCode, isLoading }: Contributo
       return a.contributor.localeCompare(b.contributor);
     });
 
-    const activeAddresses = aggregated.filter((row) => row.activePledgeCount > 0).length;
-    const activeGrandTotal = round2(aggregated.reduce((sum, row) => sum + row.activeTotal, 0));
-    const refundedGrandTotal = round2(aggregated.reduce((sum, row) => sum + row.refundedTotal, 0));
+    const activeAddresses = aggregated.filter(
+      (row) => row.activePledgeCount > 0,
+    ).length;
+    const activeGrandTotal = round2(
+      aggregated.reduce((sum, row) => sum + row.activeTotal, 0),
+    );
+    const refundedGrandTotal = round2(
+      aggregated.reduce((sum, row) => sum + row.refundedTotal, 0),
+    );
 
     return {
       rows: aggregated,
@@ -122,7 +145,6 @@ export function ContributorSummary({ pledges, assetCode, isLoading }: Contributo
     <section className="contributor-summary" aria-label="Contributor summary">
       <div className="contributor-summary-heading">
         <h3 className="contributor-summary-title">Contributor summary</h3>
-        
       </div>
 
       <div className="contributor-summary-stats">
@@ -145,32 +167,61 @@ export function ContributorSummary({ pledges, assetCode, isLoading }: Contributo
           <strong>
             {activeGrandTotal} {assetCode}
           </strong>
-          <span className="contributor-stat-hint muted">Sum of all non-refunded pledges.</span>
+          <span className="contributor-stat-hint muted">
+            Sum of all non-refunded pledges.
+          </span>
         </article>
         <article className="contributor-stat">
           <span className="contributor-stat-label">Refunded total</span>
           <strong>
             {refundedGrandTotal} {assetCode}
           </strong>
-          <span className="contributor-stat-hint muted">Historical refunds only; not counted in active.</span>
+          <span className="contributor-stat-hint muted">
+            Historical refunds only; not counted in active.
+          </span>
         </article>
       </div>
 
-      <div className="contributor-table-wrap" role="table" aria-label="Contributors by address">
-        <div className="contributor-table contributor-table-head" role="rowgroup">
+      <div
+        className="contributor-table-wrap"
+        role="table"
+        aria-label="Contributors by address"
+      >
+        <div
+          className="contributor-table contributor-table-head"
+          role="rowgroup"
+        >
           <div role="row" className="contributor-table-row">
             <span role="columnheader">Contributor</span>
             <span role="columnheader">Active</span>
             <span role="columnheader">Refunded</span>
           </div>
         </div>
-        <div className="contributor-table contributor-table-body" role="rowgroup">
+        <div
+          className="contributor-table contributor-table-body"
+          role="rowgroup"
+        >
           {rows.map((row) => (
-            <div key={row.contributor} role="row" className="contributor-table-row">
-              <div role="cell" className="contributor-address">
+            <div
+              key={row.contributor}
+              role="row"
+              className="contributor-table-row"
+            >
+              <div
+                role="cell"
+                className="contributor-address"
+                style={{ display: "flex", alignItems: "center", gap: 8 }}
+              >
                 <span className="mono">{row.contributor.slice(0, 12)}…</span>
+                <CopyButton
+                  value={row.contributor}
+                  ariaLabel={`Copy contributor ${row.contributor}`}
+                  className="small"
+                />
                 {row.hasPending ? (
-                  <span className="badge badge-neutral contributor-pending-badge">Pending</span>
+                  <span className="badge badge-neutral contributor-pending-badge">
+                    Pending
+                  </span>
                 ) : null}
               </div>
               <div role="cell" className="contributor-amounts">
@@ -181,7 +232,8 @@ export function ContributorSummary({ pledges, assetCode, isLoading }: Contributo
                     </strong>
                     <span className="muted">
                       {" "}
-                      ({row.activePledgeCount} pledge{row.activePledgeCount === 1 ? "" : "s"})
+                      ({row.activePledgeCount} pledge
+                      {row.activePledgeCount === 1 ? "" : "s"})
                     </span>
                   </span>
                 ) : (

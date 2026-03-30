@@ -1,6 +1,4 @@
 import { FormEvent, useEffect, useState } from "react";
-import { MousePointer2 } from "lucide-react";
-import { ApiError, Campaign } from "../types/campaign";
 import { ContributorSummary } from "./ContributorSummary";
 import { EmptyState } from "./EmptyState";
 
@@ -135,9 +133,15 @@ export function CampaignDetailPanel({
       <div className="detail-grid">
         <article className="detail-stat">
           <span>Creator</span>
-          <strong className="mono">
-            {activeCampaign.creator.slice(0, 16)}...
-          </strong>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <strong className="mono">
+              {activeCampaign.creator.slice(0, 16)}...
+            </strong>
+            <CopyButton
+              value={activeCampaign.creator}
+              ariaLabel="Copy creator address"
+            />
+          </div>
         </article>
         <article className="detail-stat">
           <span>Asset</span>
@@ -152,6 +156,7 @@ export function CampaignDetailPanel({
           <strong>{activeCampaign.progress.pledgeCount}</strong>
         </article>
       </div>
+
 
       <ContributorSummary
         pledges={activeCampaign.pledges}
