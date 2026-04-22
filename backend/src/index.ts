@@ -29,9 +29,9 @@ import {
 } from "./validation/schemas";
 import { AppError, ApiErrorResponse } from "./types/errors";
 import { randomUUID } from "crypto";
+import { logError, logInfo, logRequest } from "./logger";
 
 export const app = express();
-const port = Number(process.env.PORT ?? 3001);
 const CAMPAIGN_STATUSES: CampaignStatus[] = ["open", "funded", "claimed", "failed"];
 
 type CampaignListItem = ReturnType<typeof calculateProgress> extends infer Progress
@@ -49,9 +49,25 @@ app.use(
 );
 app.use(express.json());
 
-// Request ID middleware
-app.use((req: Request & { requestId?: string }, _res: Response, next: express.NextFunction) => {
+app.use((req: Request & { requestId?: string }, res: Response, next: express.NextFunction) => {
   req.requestId = randomUUID();
+  const startedAt = process.hrtime.bigint();
+
+  res.on("finish", () => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+
+    logRequest(
+      {
+        requestId: req.requestId,
+        method: req.method,
+        path: req.originalUrl || req.path,
+        status: res.statusCode,
+        durationMs,
+      },
+      config.logLevel,
+    );
+  });
+
   next();
 });
 
@@ -154,7 +170,17 @@ app.get("/api/health", (_req: Request, res: Response) => {
 });
 
 app.get("/api/campaigns", (req: Request, res: Response) => {
-
+  const campaigns = listCampaigns().map((campaign) => ({
+    ...campaign,
+    progress: calculateProgress(campaign),
+  }));
+  const data = filterCampaignList(
+    campaigns,
+    parseCampaignListFilters({
+      asset: req.query.asset,
+      status: req.query.status,
+    }),
+  );
 
   res.json({ data });
 });
@@ -292,14 +318,34 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     response.error.details = err.details;
   }
 
+  logError(
+    err,
+    {
+      event: "request_error",
+      requestId: (req as any).requestId,
+      method: req.method,
+      path: req.originalUrl || req.path,
+      status: statusCode,
+      code,
+    },
+    config.logLevel,
+  );
+
   res.status(statusCode).json(response);
 });
 
 function startServer() {
   initCampaignStore();
   startEventIndexer();
-  app.listen(port, () => {
-    console.log(`Stellar Goal Vault API listening on http://localhost:${port}`);
+  app.listen(config.port, () => {
+    logInfo(
+      "server_started",
+      {
+        message: `Stellar Goal Vault API listening on http://localhost:${config.port}`,
+        port: config.port,
+      },
+      config.logLevel,
+    );
   });
 }
 

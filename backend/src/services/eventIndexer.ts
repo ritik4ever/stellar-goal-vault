@@ -2,6 +2,8 @@ import axios from "axios";
 import { getDb } from "./db";
 import { recordEvent } from "./eventHistory";
 import dotenv from "dotenv";
+import { config } from "../config";
+import { logError, logInfo } from "../logger";
 
 dotenv.config();
 
@@ -39,7 +41,7 @@ async function fetchSorobanEvents() {
     }
     return [];
   } catch (err) {
-    console.error("[Indexer] Error fetching Soroban events:", err);
+    logError(err, { event: "soroban_event_fetch_error" }, config.logLevel);
     return [];
   }
 }
@@ -103,14 +105,31 @@ async function indexSorobanEvents() {
         parsed.metadata
       );
       lastIngestedTimestamp = Math.max(lastIngestedTimestamp, Math.floor(parsed.timestamp));
-      console.log(`[Indexer] Ingested event:`, parsed);
+      logInfo(
+        "soroban_event_ingested",
+        {
+          message: `Indexed ${parsed.eventType} event for campaign ${parsed.campaignId}`,
+          campaignId: parsed.campaignId,
+          eventType: parsed.eventType,
+          actor: parsed.actor,
+          amount: parsed.amount,
+        },
+        config.logLevel,
+      );
     }
   } catch (err) {
-    console.error("[Indexer] Error indexing events:", err);
+    logError(err, { event: "soroban_event_index_error" }, config.logLevel);
   }
 }
 
 export function startEventIndexer() {
   setInterval(indexSorobanEvents, POLL_INTERVAL);
-  console.log(`[Indexer] Soroban event indexer started. Polling every ${POLL_INTERVAL / 1000}s.`);
+  logInfo(
+    "soroban_event_indexer_started",
+    {
+      message: `Soroban event indexer started. Polling every ${POLL_INTERVAL / 1000}s.`,
+      pollIntervalSeconds: POLL_INTERVAL / 1000,
+    },
+    config.logLevel,
+  );
 }

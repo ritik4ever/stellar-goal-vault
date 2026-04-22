@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { normalizeLogLevel } from "./logger";
 
 const parseOrigins = (originsStr: string): string[] => {
   return originsStr
@@ -9,6 +10,7 @@ const parseOrigins = (originsStr: string): string[] => {
 
 export const config = {
   port: Number(process.env.PORT ?? 3001),
+  logLevel: normalizeLogLevel(process.env.LOG_LEVEL),
   allowedAssets: (process.env.ALLOWED_ASSETS ?? "USDC,XLM")
     .split(",")
     .map((s) => s.trim().toUpperCase())
