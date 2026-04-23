@@ -130,7 +130,13 @@ export function CampaignDetailPanel({
   return (
     <section className="card detail-panel">
       <div className="section-heading">
-        <h2>{activeCampaign.title}</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <h2>{activeCampaign.title}</h2>
+          <CopyButton
+            value={`Check out this campaign: ${activeCampaign.title} (ID: ${activeCampaign.id})`}
+            ariaLabel={`Share campaign ${activeCampaign.title}`}
+          />
+        </div>
         <p className="muted">{activeCampaign.description}</p>
       </div>
 
