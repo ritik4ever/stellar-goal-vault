@@ -259,13 +259,16 @@ impl StellarGoalVaultContract {
     }
 
     pub fn get_version(env: Env) -> String {
-        let stored_version: Option<String> = env.storage().instance().get(&DataKey::ContractVersion);
+        let stored_version: Option<String> =
+            env.storage().instance().get(&DataKey::ContractVersion);
 
         match stored_version {
             Some(version) => version,
             None => {
                 let version = String::from_str(&env, CONTRACT_VERSION);
-                env.storage().instance().set(&DataKey::ContractVersion, &version);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::ContractVersion, &version);
                 version
             }
         }

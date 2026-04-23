@@ -40,10 +40,17 @@ mod tests {
         let version = client.get_version();
         assert_eq!(version, String::from_str(&env, env!("CARGO_PKG_VERSION")));
 
-        let parts: Vec<&str> = env!("CARGO_PKG_VERSION").split('.').collect();
-        assert_eq!(parts.len(), 3, "version should have major.minor.patch");
+        let mut parts = env!("CARGO_PKG_VERSION").split('.');
+        let major = parts.next().unwrap_or("");
+        let minor = parts.next().unwrap_or("");
+        let patch = parts.next().unwrap_or("");
         assert!(
-            parts
+            parts.next().is_none(),
+            "version should have major.minor.patch"
+        );
+
+        assert!(
+            [major, minor, patch]
                 .iter()
                 .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit())),
             "version segments should be numeric"
