@@ -373,6 +373,91 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
   return campaign;
 }
 
+export interface UpdateCampaignInput {
+  creator: string;
+  title?: string;
+  description?: string;
+  targetAmount?: number;
+}
+
+export function updateCampaign(campaignId: string, input: UpdateCampaignInput): CampaignRecord {
+  const db = getDb();
+  const campaign = getCampaign(campaignId);
+  if (!campaign) {
+    throw toServiceError("Campaign not found.", 404, "NOT_FOUND");
+  }
+
+  if (campaign.creator !== input.creator) {
+    throw toServiceError(
+      "Only the campaign creator can update the campaign.",
+      403,
+      "FORBIDDEN",
+    );
+  }
+
+  const progress = calculateProgress(campaign);
+  if (progress.status !== "open") {
+    throw toServiceError(
+      "Campaign can only be updated while in open state.",
+      400,
+      "INVALID_CAMPAIGN_STATE",
+    );
+  }
+
+  const updates: Partial<CampaignRecord> = {};
+  const eventMetadata: Record<string, unknown> = {};
+
+  if (input.title !== undefined) {
+    updates.title = input.title.trim();
+    eventMetadata.title = updates.title;
+  }
+  if (input.description !== undefined) {
+    updates.description = input.description.trim();
+    eventMetadata.description = updates.description;
+  }
+  if (input.targetAmount !== undefined) {
+    updates.targetAmount = round(input.targetAmount);
+    eventMetadata.targetAmount = updates.targetAmount;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    throw toServiceError("No valid updates provided.", 400, "NO_UPDATES");
+  }
+
+  const setClauses: string[] = [];
+  const params: any[] = [];
+
+  if (updates.title !== undefined) {
+    setClauses.push("title = ?");
+    params.push(updates.title);
+  }
+  if (updates.description !== undefined) {
+    setClauses.push("description = ?");
+    params.push(updates.description);
+  }
+  if (updates.targetAmount !== undefined) {
+    setClauses.push("target_amount = ?");
+    params.push(updates.targetAmount);
+  }
+
+  params.push(campaignId);
+
+  db.prepare(`UPDATE campaigns SET ${setClauses.join(", ")} WHERE id = ?`).run(...params);
+
+  const updatedAt = nowInSeconds();
+  recordEvent(
+    campaignId,
+    "updated",
+    updatedAt,
+    input.creator,
+    undefined,
+    eventMetadata,
+    { source: "local" } as BlockchainMetadata,
+  );
+
+  return getCampaign(campaignId)!;
+}
+
 export function addPledge(campaignId: string, input: PledgeInput): CampaignRecord {
   const db = getDb();
   const campaign = getCampaign(campaignId);

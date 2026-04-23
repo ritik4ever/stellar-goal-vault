@@ -7,6 +7,8 @@ import { config, walletIntegrationReady } from "./config";
 import {
   addPledge,
   calculateProgress,
+  CampaignProgress,
+  CampaignRecord,
   CampaignStatus,
   claimCampaign,
   createCampaign,
@@ -16,6 +18,7 @@ import {
   listCampaigns,
   reconcileOnChainPledge,
   refundContributor,
+  updateCampaign,
 } from "./services/campaignStore";
 import { checkDbHealth } from "./services/db";
 import { getCampaignHistory } from "./services/eventHistory";
@@ -31,10 +34,14 @@ import {
   paginationSchema,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
+  updateCampaignPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
 } from "./validation/schemas";
 import { logError, logInfo, logRequest } from "./logger";
+
+type RequestWithId = Request & { requestId?: string };
+type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
 export const app = express();
 
@@ -254,6 +261,21 @@ app.post("/api/campaigns", (req: Request, res: Response) => {
 
   const campaign = createCampaign(parsedBody.data);
   res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+});
+
+app.patch("/api/campaigns/:id", (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  const parsedBody = updateCampaignPayloadSchema.safeParse(req.body);
+  if (!parsedBody.success) {
+    sendValidationError(parsedBody.error.issues);
+  }
+
+  const campaign = updateCampaign(parsedId.value, parsedBody.data);
+  res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
 });
 
 app.post("/api/campaigns/:id/pledges", (req: Request, res: Response) => {

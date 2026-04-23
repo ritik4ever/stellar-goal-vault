@@ -102,11 +102,23 @@ export const refundPayloadSchema = z.object({
   soroban: sorobanRefundMetadataSchema,
 });
 
+export const updateCampaignPayloadSchema = z.object({
+  creator: stellarAccountIdSchema,
+  title: z.string().trim().min(4, "Title must be at least 4 characters.").max(80).optional(),
+  description: z
+    .string()
+    .trim()
+    .min(20, "Description must be at least 20 characters.")
+    .max(500).optional(),
+  targetAmount: positiveAmountSchema.optional(),
+}).refine((data) => data.title || data.description || data.targetAmount, {
+  message: "At least one field (title, description, or targetAmount) must be provided for update.",
+});
+
 export const paginationSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(10),
 });
-
 
 export type ValidationIssue = {
   field: string;
