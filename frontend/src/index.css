@@ -752,6 +752,64 @@ tbody tr:hover td {
   min-width: 200px;
 }
 
+.status-filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-filter-tab {
+  min-height: 40px;
+  border-radius: 999px;
+  border: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.status-filter-tab:hover:not(:disabled) {
+  border-color: var(--border-glass-bright);
+  color: var(--text-main);
+}
+
+.status-filter-tab-active {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.45);
+  color: #c7d2fe;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.status-filter-tab:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.status-filter-count {
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.status-filter-tab-active .status-filter-count {
+  background: rgba(99, 102, 241, 0.4);
+  color: #eef2ff;
+}
+
 .stacked {
   display: grid;
   gap: 4px;
