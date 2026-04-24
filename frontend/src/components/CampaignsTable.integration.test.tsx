@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CampaignsTable } from "./CampaignsTable";
 import type { Campaign } from "../types/campaign";
@@ -78,7 +78,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -92,7 +92,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -112,7 +112,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -137,7 +137,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -159,7 +159,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -182,7 +182,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -203,10 +203,12 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
-      const searchInput = screen.getByPlaceholderText("Search campaigns...") as HTMLInputElement;
+      const searchInput = screen.getByPlaceholderText(
+        "Search campaigns...",
+      ) as HTMLInputElement;
 
       // First search
       await user.type(searchInput, "game");
@@ -234,7 +236,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -255,7 +257,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -292,19 +294,23 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Initially no clear button
-      expect(screen.queryByRole("button", { name: "Clear search" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Clear search" }),
+      ).not.toBeInTheDocument();
 
       // Type something
       await user.type(searchInput, "test");
 
       // Now clear button should appear
-      expect(screen.getByRole("button", { name: "Clear search" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Clear search" }),
+      ).toBeInTheDocument();
     });
 
     it("should clear search and show all campaigns when clear button clicked", async () => {
@@ -315,7 +321,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -349,7 +355,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -375,6 +381,81 @@ describe("CampaignsTable Search Integration", () => {
     });
   });
 
+  describe("Status Filter Tabs", () => {
+    it("should show counts per status and a clear active filter", () => {
+      render(
+        <CampaignsTable
+          campaigns={mockCampaigns}
+          selectedCampaignId={null}
+          onSelect={vi.fn()}
+          isLoading={false}
+        />,
+      );
+
+      const statusTabs = screen.getByRole("tablist", {
+        name: /Filter campaigns by status/i,
+      });
+
+      const allTab = within(statusTabs).getByRole("button", {
+        name: /Status: Filter campaigns by status/i,
+      });
+      const openTab = within(statusTabs).getByRole("button", {
+        name: /Open2/i,
+      });
+      const fundedTab = within(statusTabs).getByRole("button", {
+        name: /Funded1/i,
+      });
+      const claimedTab = within(statusTabs).getByRole("button", {
+        name: /Claimed0/i,
+      });
+      const failedTab = within(statusTabs).getByRole("button", {
+        name: /Failed0/i,
+      });
+
+      expect(allTab).toHaveAttribute("aria-pressed", "true");
+      expect(openTab).toHaveAttribute("aria-pressed", "false");
+      expect(fundedTab).toHaveAttribute("aria-pressed", "false");
+      expect(claimedTab).toHaveAttribute("aria-pressed", "false");
+      expect(failedTab).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("should filter to one status at a time and allow returning to all", () => {
+      render(
+        <CampaignsTable
+          campaigns={mockCampaigns}
+          selectedCampaignId={null}
+          onSelect={vi.fn()}
+          isLoading={false}
+        />,
+      );
+
+      const statusTabs = screen.getByRole("tablist", {
+        name: /Filter campaigns by status/i,
+      });
+      const fundedTab = within(statusTabs).getByRole("button", {
+        name: /Funded1/i,
+      });
+      fireEvent.click(fundedTab);
+
+      expect(screen.getAllByText("Write a Book").length).toBeGreaterThan(0);
+      expect(screen.queryAllByText("Build a Rocket Ship")).toHaveLength(0);
+      expect(screen.queryAllByText("Create a Game")).toHaveLength(0);
+      expect(fundedTab).toHaveAttribute("aria-pressed", "true");
+
+      const allTab = within(statusTabs).getByRole("button", {
+        name: /Status: Filter campaigns by status/i,
+      });
+      fireEvent.click(allTab);
+
+      expect(screen.getAllByText("Build a Rocket Ship").length).toBeGreaterThan(
+        0,
+      );
+      expect(screen.getAllByText("Create a Game").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Write a Book").length).toBeGreaterThan(0);
+      expect(allTab).toHaveAttribute("aria-pressed", "true");
+    });
+  });
+
   describe("Empty State Messages", () => {
     it("should show appropriate message when search finds no results", async () => {
       const user = userEvent.setup({ delay: null });
@@ -384,7 +465,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -394,7 +475,8 @@ describe("CampaignsTable Search Integration", () => {
       vi.advanceTimersByTime(350);
 
       // Should show no results message
-      const emptyStateText = screen.queryByText(/No campaigns found/i) ||
+      const emptyStateText =
+        screen.queryByText(/No campaigns found/i) ||
         screen.queryByText(/Try adjusting your search/i);
       // Note: Exact message depends on component implementation
       expect(screen.queryByText("Build a Rocket Ship")).not.toBeInTheDocument();
@@ -408,7 +490,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -434,24 +516,27 @@ describe("CampaignsTable Search Integration", () => {
       const user = userEvent.setup({ delay: null });
 
       // Create 100 campaigns
-      const largeCampaignList: Campaign[] = Array.from({ length: 100 }, (_, i) => ({
-        id: `camp-${i.toString().padStart(3, "0")}`,
-        title: `Campaign ${i + 1}`,
-        description: `Description ${i + 1}`,
-        creator: `CREATOR${i}@stellar.org`,
-        assetCode: i % 2 === 0 ? "USDC" : "native",
-        targetAmount: 100000 * (i + 1),
-        pledgedAmount: 50000 * (i + 1),
-        deadline: "2025-12-31",
-        progress: {
-          status: "open" as const,
-          percentFunded: (i % 100) + 1,
-          hoursLeft: 240,
-          canPledge: true,
-          canClaim: false,
-          canRefund: false,
-        },
-      }));
+      const largeCampaignList: Campaign[] = Array.from(
+        { length: 100 },
+        (_, i) => ({
+          id: `camp-${i.toString().padStart(3, "0")}`,
+          title: `Campaign ${i + 1}`,
+          description: `Description ${i + 1}`,
+          creator: `CREATOR${i}@stellar.org`,
+          assetCode: i % 2 === 0 ? "USDC" : "native",
+          targetAmount: 100000 * (i + 1),
+          pledgedAmount: 50000 * (i + 1),
+          deadline: "2025-12-31",
+          progress: {
+            status: "open" as const,
+            percentFunded: (i % 100) + 1,
+            hoursLeft: 240,
+            canPledge: true,
+            canClaim: false,
+            canRefund: false,
+          },
+        }),
+      );
 
       render(
         <CampaignsTable
@@ -459,7 +544,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
@@ -481,11 +566,11 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByLabelText(
-        "Search campaigns by title, creator, or ID"
+        "Search campaigns by title, creator, or ID",
       );
       expect(searchInput).toBeInTheDocument();
     });
@@ -498,7 +583,7 @@ describe("CampaignsTable Search Integration", () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />
+        />,
       );
 
       const searchInput = screen.getByPlaceholderText("Search campaigns...");

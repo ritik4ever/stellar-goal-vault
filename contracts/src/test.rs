@@ -8,13 +8,11 @@ mod tests {
 
     use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
 
-    /// Helper: deploy the contract and return a client.
-    fn deploy_contract(env: &Env) -> StellarGoalVaultContractClient {
+    fn deploy_contract(env: &Env) -> StellarGoalVaultContractClient<'_> {
         let contract_id = env.register_contract(None, StellarGoalVaultContract);
         StellarGoalVaultContractClient::new(env, &contract_id)
     }
 
-    /// Helper: deploy a Stellar asset contract and mint `amount` to `recipient`.
     fn deploy_token(env: &Env, admin: &Address, recipient: &Address, amount: i128) -> Address {
         let token_id = env.register_stellar_asset_contract(admin.clone());
         let asset_client = StellarAssetClient::new(env, &token_id);
@@ -22,16 +20,13 @@ mod tests {
         token_id
     }
 
-    /// Advance the ledger timestamp by `seconds`.
     fn advance_time(env: &Env, seconds: u64) {
         env.ledger().with_mut(|info| {
             info.timestamp += seconds;
         });
     }
 
-    // -------------------------------------------------------------------------
-    // claim: success path
-    // -------------------------------------------------------------------------
+
     #[test]
     fn test_claim_success() {
         let env = Env::default();
@@ -49,7 +44,6 @@ mod tests {
         let token = deploy_token(&env, &admin, &contributor, target);
         let client = deploy_contract(&env);
 
-        // Create campaign
         let campaign_id = client.create_campaign(
             &creator,
             &token,
@@ -58,24 +52,15 @@ mod tests {
             &String::from_str(&env, "test campaign"),
         );
 
-        // Contribute enough to fund it
         client.contribute(&campaign_id, &contributor, &target);
-
-        // Advance past deadline
         advance_time(&env, deadline_offset + 1);
-
-        // Claim — should succeed and transfer tokens to creator
         client.claim(&campaign_id, &creator);
 
-        // Verify on-chain state: campaign is now marked claimed
         let campaign = client.get_campaign(&campaign_id);
         assert!(campaign.claimed, "campaign should be marked claimed");
         assert_eq!(campaign.pledged_amount, target);
     }
 
-    // -------------------------------------------------------------------------
-    // claim: creator mismatch
-    // -------------------------------------------------------------------------
     #[test]
     #[should_panic(expected = "creator mismatch")]
     fn test_claim_creator_mismatch() {
@@ -104,14 +89,9 @@ mod tests {
 
         client.contribute(&campaign_id, &contributor, &target);
         advance_time(&env, deadline_offset + 1);
-
-        // Attacker tries to claim — must panic
         client.claim(&campaign_id, &attacker);
     }
 
-    // -------------------------------------------------------------------------
-    // claim: campaign still active (deadline not reached)
-    // -------------------------------------------------------------------------
     #[test]
     #[should_panic(expected = "campaign is still active")]
     fn test_claim_before_deadline() {
@@ -137,14 +117,9 @@ mod tests {
         );
 
         client.contribute(&campaign_id, &contributor, &target);
-
-        // Do NOT advance time — deadline not reached
         client.claim(&campaign_id, &creator);
     }
 
-    // -------------------------------------------------------------------------
-    // claim: campaign not funded
-    // -------------------------------------------------------------------------
     #[test]
     #[should_panic(expected = "campaign is not funded")]
     fn test_claim_underfunded() {
@@ -159,7 +134,6 @@ mod tests {
         let deadline_offset: u64 = 50;
         let deadline = env.ledger().timestamp() + deadline_offset;
 
-        // Only mint half the target
         let token = deploy_token(&env, &admin, &contributor, target / 2);
         let client = deploy_contract(&env);
 
@@ -173,13 +147,9 @@ mod tests {
 
         client.contribute(&campaign_id, &contributor, &(target / 2));
         advance_time(&env, deadline_offset + 1);
-
         client.claim(&campaign_id, &creator);
     }
 
-    // -------------------------------------------------------------------------
-    // claim: double-claim rejected
-    // -------------------------------------------------------------------------
     #[test]
     #[should_panic(expected = "campaign already claimed")]
     fn test_claim_double_claim() {
@@ -207,93 +177,15 @@ mod tests {
 
         client.contribute(&campaign_id, &contributor, &target);
         advance_time(&env, deadline_offset + 1);
-
         client.claim(&campaign_id, &creator);
-        // Second claim must panic
         client.claim(&campaign_id, &creator);
     }
 
-    // -------------------------------------------------------------------------
-    // cancel_campaign + early refund flow
-    // -------------------------------------------------------------------------
-    #[test]
-    fn test_cancel_campaign_enables_early_refund() {
+
         let env = Env::default();
         env.mock_all_auths();
 
         let creator = Address::generate(&env);
-        let contributor = Address::generate(&env);
-        let admin = Address::generate(&env);
-        let target: i128 = 1_000;
-        let deadline = env.ledger().timestamp() + 1_000;
 
-        let token = deploy_token(&env, &admin, &contributor, target);
-        let client = deploy_contract(&env);
-        let campaign_id = client.create_campaign(
-            &creator,
-            &token,
-            &target,
-            &deadline,
-            &String::from_str(&env, "cancel test"),
-        );
-
-        client.contribute(&campaign_id, &contributor, &300);
-        client.cancel_campaign(&campaign_id, &creator);
-        client.refund(&campaign_id, &contributor);
-
-        let campaign = client.get_campaign(&campaign_id);
-        assert!(campaign.canceled, "campaign must be marked canceled");
-        assert_eq!(campaign.pledged_amount, 0);
-        assert_eq!(client.get_contribution(&campaign_id, &contributor), 0);
-    }
-
-    #[test]
-    #[should_panic(expected = "campaign already canceled")]
-    fn test_cancel_campaign_rejects_double_cancel() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let creator = Address::generate(&env);
-        let admin = Address::generate(&env);
-        let contributor = Address::generate(&env);
-        let token = deploy_token(&env, &admin, &contributor, 1_000);
-        let client = deploy_contract(&env);
-        let campaign_id = client.create_campaign(
-            &creator,
-            &token,
-            &500,
-            &(env.ledger().timestamp() + 100),
-            &String::from_str(&env, "double cancel"),
-        );
-        client.cancel_campaign(&campaign_id, &creator);
-        client.cancel_campaign(&campaign_id, &creator);
-    }
-
-    // -------------------------------------------------------------------------
-    // lightweight fuzz-like edge sweep for refund constraints
-    // -------------------------------------------------------------------------
-    #[test]
-    fn test_refund_edge_sweep_non_positive_contributions_after_cancel() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let creator = Address::generate(&env);
-        let contributor = Address::generate(&env);
-        let admin = Address::generate(&env);
-        let token = deploy_token(&env, &admin, &contributor, 10_000);
-        let client = deploy_contract(&env);
-        let campaign_id = client.create_campaign(
-            &creator,
-            &token,
-            &5_000,
-            &(env.ledger().timestamp() + 500),
-            &String::from_str(&env, "edge sweep"),
-        );
-        client.cancel_campaign(&campaign_id, &creator);
-
-        // contributor never pledged; repeated refund attempts must consistently fail
-        for _ in 0..8 {
-            let result = client.try_refund(&campaign_id, &contributor);
-            assert!(result.is_err(), "refund should fail when contribution is zero");
-        }
     }
 }

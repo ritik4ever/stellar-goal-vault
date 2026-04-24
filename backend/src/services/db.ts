@@ -119,6 +119,8 @@ function migrate(database: SQLiteDatabase): void {
     database.exec(`ALTER TABLE pledges ADD COLUMN transaction_hash TEXT`);
   }
 
+  database.exec(`ALTER TABLE campaigns ADD COLUMN deleted_at INTEGER;`);
+  
   database.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pledges_transaction_hash
     ON pledges(transaction_hash)

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
+import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
@@ -12,6 +13,7 @@ import {
   getCampaign,
   getCampaignHistory,
   listCampaigns,
+  softDeleteCampaign,
   listOpenIssues,
   reconcilePledge,
   refundCampaign,
@@ -108,6 +110,43 @@ function App() {
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+
+  const toggleShortcuts = useCallback(() => {
+    setIsShortcutsOpen((prev) => !prev);
+  }, []);
+
+  const closeShortcuts = useCallback(() => {
+    setIsShortcutsOpen(false);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts if user is typing in an input/textarea
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+
+      if (e.key === "?") {
+        toggleShortcuts();
+      } else if (e.key === "Escape") {
+        closeShortcuts();
+      } else if (e.key === "c") {
+        document.querySelector<HTMLInputElement>('input[name="title"]')?.focus();
+      } else if (e.key === "w") {
+        handleConnectWallet();
+      } else if (e.key === "s") {
+        document.querySelector<HTMLInputElement>('.search-input-field')?.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleShortcuts, closeShortcuts]);
 
   const { toasts, addToast, dismiss } = useToast();
 
@@ -375,22 +414,46 @@ function App() {
     }
   }
 
-  async function handleRefund(campaignId: string, contributor: string) {
-    try {
-      const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
-      await refundCampaign(campaignId, contributor, sorobanReceipt);
-      await refreshCampaigns(campaignId);
-      await refreshSelectedData(campaignId);
-      addToast("Contributor refunded successfully.", "success");
-    } catch (error) {
-      addToast(getErrorMessage(error), "error");
-    }
+
   }
 
-  function handleSelect(campaignId: string) {
-    setInvalidUrlCampaignId(null);
-    setSelectedCampaignId(campaignId);
+  if (!confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
+    return;
   }
+
+  setActionError(null);
+  setActionMessage("Soft deleting...");
+
+  try {
+    await softDeleteCampaign(campaignId);
+    await refreshCampaigns();
+    setActionMessage("Campaign soft deleted.");
+  } catch (error) {
+    setActionError(toApiError(error));
+    setActionMessage(null);
+  }
+}
+
+async function handleRefund(campaignId: string, contributor: string) {
+  setActionError(null);
+  setActionMessage("Preparing Soroban refund transaction...");
+
+  try {
+    const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
+    await refundCampaign(campaignId, contributor, sorobanReceipt);
+    await refreshCampaigns(campaignId);
+    await refreshSelectedData(campaignId);
+    setActionMessage("Contributor refunded successfully.");
+  } catch (error) {
+    setActionError(toApiError(error));
+    setActionMessage(null);
+  }
+}
+
+function handleSelect(campaignId: string) {
+  setInvalidUrlCampaignId(null);
+  setSelectedCampaignId(campaignId);
+}
 
   return (
     <div className="app-shell">
@@ -445,6 +508,7 @@ function App() {
           onConnectWallet={handleConnectWallet}
           onPledge={handlePledge}
           onClaim={handleClaim}
+          onSoftDelete={handleSoftDelete}
           onRefund={handleRefund}
         />
       </section>
@@ -464,7 +528,7 @@ function App() {
         <IssueBacklog issues={issues} isLoading={isIssuesLoading} />
       </section>
 
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
+n
     </div>
   );
 }
