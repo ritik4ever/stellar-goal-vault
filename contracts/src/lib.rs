@@ -16,6 +16,7 @@ pub struct Campaign {
     pub pledged_amount: i128,
     pub deadline: u64,
     pub claimed: bool,
+    pub canceled: bool,
     pub metadata: String,
 }
 
@@ -62,6 +63,13 @@ pub struct CampaignRefunded {
     pub amount: i128,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignCanceled {
+    pub campaign_id: u64,
+    pub creator: Address,
+}
+
 #[contract]
 pub struct StellarGoalVaultContract;
 
@@ -103,6 +111,7 @@ impl StellarGoalVaultContract {
             pledged_amount: 0,
             deadline,
             claimed: false,
+            canceled: false,
             metadata: metadata.clone(),
         };
 
@@ -138,6 +147,9 @@ impl StellarGoalVaultContract {
         let mut campaign = read_campaign(&env, campaign_id);
         if campaign.claimed {
             panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign canceled");
         }
         if env.ledger().timestamp() >= campaign.deadline {
             panic!("campaign deadline reached");
@@ -181,6 +193,9 @@ impl StellarGoalVaultContract {
         if campaign.claimed {
             panic!("campaign already claimed");
         }
+        if campaign.canceled {
+            panic!("campaign canceled");
+        }
         if env.ledger().timestamp() < campaign.deadline {
             panic!("campaign is still active");
         }
@@ -215,10 +230,10 @@ impl StellarGoalVaultContract {
         if campaign.claimed {
             panic!("campaign already claimed");
         }
-        if env.ledger().timestamp() < campaign.deadline {
+        if !campaign.canceled && env.ledger().timestamp() < campaign.deadline {
             panic!("campaign is still active");
         }
-        if campaign.pledged_amount >= campaign.target_amount {
+        if !campaign.canceled && campaign.pledged_amount >= campaign.target_amount {
             panic!("funded campaigns cannot be refunded");
         }
 
@@ -248,47 +263,7 @@ impl StellarGoalVaultContract {
         );
     }
 
-    pub fn batch_refund(env: Env, campaign_id: u64, contributors: Vec<Address>) {
-        let mut campaign = read_campaign(&env, campaign_id);
 
-        if campaign.claimed {
-            panic!("campaign already claimed");
-        }
-        if env.ledger().timestamp() < campaign.deadline {
-            panic!("campaign is still active");
-        }
-        if campaign.pledged_amount >= campaign.target_amount {
-            panic!("funded campaigns cannot be refunded");
-        }
-
-        let token_client = TokenClient::new(&env, &campaign.token);
-        let contract_address = env.current_contract_address();
-
-        for contributor in contributors.iter() {
-            let key = DataKey::Contribution(campaign_id, contributor.clone());
-            let contribution: i128 = env.storage().persistent().get(&key).unwrap_or(0);
-
-            if contribution <= 0 {
-                continue;
-            }
-
-            campaign.pledged_amount -= contribution;
-            env.storage().persistent().set(&key, &0_i128);
-            token_client.transfer(&contract_address, &contributor, &contribution);
-
-            env.events().publish(
-                (symbol_short!("Goal"), symbol_short!("Refund")),
-                CampaignRefunded {
-                    campaign_id,
-                    contributor: contributor.clone(),
-                    amount: contribution,
-                },
-            );
-        }
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::Campaign(campaign_id), &campaign);
     }
 
     pub fn get_campaign(env: Env, campaign_id: u64) -> Campaign {

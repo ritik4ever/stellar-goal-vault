@@ -7,7 +7,6 @@ import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { IssueBacklog } from "./components/IssueBacklog";
 import { ToastContainer } from "./components/ToastContainer";
 import {
-  addPledge,
   claimCampaign,
   createCampaign,
   getAppConfig,
@@ -346,26 +345,27 @@ function App() {
     setPendingPledgeCampaignId(campaignId);
 
     try {
-      if (appConfig?.walletIntegrationReady && appConfig.contractId && appConfig.sorobanRpcUrl) {
-        const transactionResult = await submitFreighterPledge({
-          campaignId,
-          contributor: connectedWallet,
-          amount,
-          config: appConfig,
-        });
-
-        await reconcilePledge(campaignId, {
-          contributor: connectedWallet,
-          amount,
-          transactionHash: transactionResult.transactionHash,
-          confirmedAt: transactionResult.confirmedAt,
-        });
-
-        addToast("Pledge confirmed on-chain and reconciled.", "success");
-      } else {
-        await addPledge(campaignId, { contributor: connectedWallet, amount });
-        addToast("Pledge recorded in the local goal vault.", "success");
+      if (!appConfig?.walletIntegrationReady || !appConfig.contractId || !appConfig.sorobanRpcUrl) {
+        throw new Error(
+          "Pledge flow requires Freighter signing and Soroban contract configuration.",
+        );
       }
+
+      const transactionResult = await submitFreighterPledge({
+        campaignId,
+        contributor: connectedWallet,
+        amount,
+        config: appConfig,
+      });
+
+      await reconcilePledge(campaignId, {
+        contributor: connectedWallet,
+        amount,
+        transactionHash: transactionResult.transactionHash,
+        confirmedAt: transactionResult.confirmedAt,
+      });
+
+      addToast("Pledge confirmed on-chain and reconciled.", "success");
 
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);

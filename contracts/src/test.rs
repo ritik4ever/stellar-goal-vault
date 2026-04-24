@@ -187,20 +187,5 @@ mod tests {
 
         let creator = Address::generate(&env);
 
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let creator = Address::generate(&env);
-        let contributor = Address::generate(&env);
-        let admin = Address::generate(&env);
-
-
-
-        let campaign_id = client.create_campaign(
-            &creator,
-            &token,
-            &target,
-            &deadline,
-
     }
 }
