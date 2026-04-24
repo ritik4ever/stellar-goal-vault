@@ -22,7 +22,7 @@ import { getCampaignHistory } from "./services/eventHistory";
 import { startEventIndexer } from "./services/eventIndexer";
 import { fetchOpenIssues } from "./services/openIssues";
 import { ensureSorobanRefundConfig, verifyRefundTransaction } from "./services/sorobanRpc";
-import { AppError, ApiErrorResponse } from "./types/errors";
+import { AppError, ApiErrorResponse, RequestWithId, CampaignListItem } from "./types/errors";
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
@@ -58,8 +58,9 @@ app.use(
 
 app.use(express.json());
 
-app.use((req: RequestWithId, res: Response, next: express.NextFunction) => {
-  req.requestId = randomUUID();
+app.use((req: Request, res: Response, next: express.NextFunction) => {
+  const requestWithId = req as RequestWithId;
+  requestWithId.requestId = randomUUID();
   const startedAt = process.hrtime.bigint();
 
   res.on("finish", () => {
@@ -67,7 +68,7 @@ app.use((req: RequestWithId, res: Response, next: express.NextFunction) => {
 
     logRequest(
       {
-        requestId: req.requestId,
+        requestId: requestWithId.requestId,
         method: req.method,
         path: req.originalUrl || req.path,
         status: res.statusCode,

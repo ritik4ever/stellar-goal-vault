@@ -3,6 +3,7 @@ import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
+import { CreatorAnalytics } from "./components/CreatorAnalytics";
 import { IssueBacklog } from "./components/IssueBacklog";
 import {
   addPledge,
@@ -443,6 +444,19 @@ function App() {
           <strong>{metrics.pledged}</strong>
         </article>
       </section>
+
+      {selectedCampaign && (
+        <section
+          className="animate-fade-in"
+          style={{ animationDelay: "0.1s" }}
+        >
+          <CreatorAnalytics
+            creatorAddress={selectedCampaign.creator}
+            campaigns={campaigns}
+            isLoading={isCampaignsLoading || initialLoad}
+          />
+        </section>
+      )}
 
       <section
         className="layout-grid animate-fade-in"

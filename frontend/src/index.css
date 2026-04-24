@@ -958,3 +958,47 @@ tbody tr:hover td {
     box-shadow: 0 6px 18px rgba(99, 102, 241, 0.08);
   }
 }
+
+/* Creator Analytics Styles */
+.creator-metrics-container {
+  margin-bottom: 60px;
+}
+
+.creator-metrics-title {
+  margin: 0 0 24px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.creator-address {
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 0.9rem;
+  background: rgba(99, 102, 241, 0.1);
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--primary);
+  border: 1px solid var(--border-glass);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 767px) {
+  .creator-metrics-container {
+    margin-bottom: 40px;
+  }
+
+  .creator-metrics-title {
+    font-size: 1.1rem;
+    flex-wrap: wrap;
+  }
+
+  .creator-address {
+    font-size: 0.8rem;
+    max-width: 100%;
+  }
+}
