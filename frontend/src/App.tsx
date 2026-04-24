@@ -5,6 +5,7 @@ import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { IssueBacklog } from "./components/IssueBacklog";
 import { ToastContainer } from "./components/ToastContainer";
+import { WalletWidget } from "./components/WalletWidget";
 import {
   addPledge,
   claimCampaign,
@@ -18,11 +19,11 @@ import {
   refundCampaign,
 } from "./services/api";
 import {
-  connectFreighterWallet,
   submitFreighterClaim,
   submitFreighterPledge,
 } from "./services/freighter";
 import { submitRefundTransaction } from "./services/soroban";
+import { useFreighter } from "./hooks/useFreighter";
 import { useToast } from "./hooks/useToast";
 import {
   ApiError,
@@ -107,8 +108,9 @@ function App() {
     null,
   );
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
-  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
-  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+  const freighter = useFreighter();
+  const connectedWallet = freighter.publicKey;
+  const isConnectingWallet = freighter.status === "checking";
 
   const { toasts, addToast, dismiss } = useToast();
 
@@ -283,18 +285,10 @@ function App() {
   }
 
   async function handleConnectWallet() {
-    setIsConnectingWallet(true);
-
-    try {
-      const wallet = await connectFreighterWallet(
-        appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE,
-      );
-      setConnectedWallet(wallet.publicKey);
-      addToast(`Wallet connected: ${wallet.publicKey.slice(0, 16)}...`, "success");
-    } catch (error) {
-      addToast(getErrorMessage(error), "error");
-    } finally {
-      setIsConnectingWallet(false);
+    const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
+    const key = await freighter.connect(networkPassphrase);
+    if (key) {
+      addToast(`Wallet connected: ${key.slice(0, 16)}...`, "success");
     }
   }
 
@@ -394,14 +388,22 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="hero">
-        <p className="eyebrow">Soroban crowdfunding MVP</p>
-        <h1>Stellar Goal Vault</h1>
-        <p className="hero-copy">
-          Create funding goals, collect pledges, and reconcile claim and refund flows
-          against the backend contract integration.
-        </p>
-      </header>
+      <div className="hero-row">
+        <header className="hero">
+          <p className="eyebrow">Soroban crowdfunding MVP</p>
+          <h1>Stellar Goal Vault</h1>
+          <p className="hero-copy">
+            Create funding goals, collect pledges, and reconcile claim and refund flows
+            against the backend contract integration.
+          </p>
+        </header>
+        <WalletWidget
+          status={freighter.status}
+          publicKey={freighter.publicKey}
+          error={freighter.error}
+          onConnect={() => { void handleConnectWallet(); }}
+        />
+      </div>
 
       <section className="metric-grid animate-fade-in">
         <article className="metric-card">
