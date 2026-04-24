@@ -45,7 +45,7 @@ export function SearchInput({
         placeholder={placeholder}
         disabled={disabled}
         aria-label={ariaLabel}
-        className="search-input"
+        className="search-input search-input-field"
       />
       {value && (
         <button
