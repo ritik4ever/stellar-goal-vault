@@ -3,7 +3,12 @@ import "dotenv/config";
 import express, { Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { z } from "zod";
+import path from "path";
+import { fileURLToPath } from "url";
 import { config, walletIntegrationReady } from "./config";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import {
   addPledge,
   calculateProgress,
@@ -485,7 +490,28 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
   res.status(statusCode).json(response);
 });
 
+function printStartupBanner(): void {
+  const isTest = process.env.NODE_ENV === "test";
+  if (isTest) {
+    return;
+  }
+
+  const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "..", "data", "campaigns.db");
+  const nodeEnv = process.env.NODE_ENV || "development";
+
+  console.log("");
+  console.log("╔════════════════════════════════════════════════════════════╗");
+  console.log("║         Stellar Goal Vault Backend - Starting Up          ║");
+  console.log("╠════════════════════════════════════════════════════════════╣");
+  console.log(`║  Port:           ${config.port.toString().padEnd(42)}║`);
+  console.log(`║  Environment:    ${nodeEnv.padEnd(42)}║`);
+  console.log(`║  Database Path:  ${dbPath.padEnd(42)}║`);
+  console.log("╚════════════════════════════════════════════════════════════╝");
+  console.log("");
+}
+
 function startServer() {
+  printStartupBanner();
   initCampaignStore();
   startEventIndexer();
   app.listen(config.port, () => {
