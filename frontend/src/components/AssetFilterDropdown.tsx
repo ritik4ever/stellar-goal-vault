@@ -17,17 +17,8 @@ export function AssetFilterDropdown({
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       aria-label="Filter by asset"
-      style={{
-        padding: "8px 12px",
-        border: "1px solid #cbd5e1",
-        borderRadius: "12px",
-        background: "#ffffff",
-        font: "inherit",
-        fontSize: "0.9rem",
-        color: "#14213d",
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-      }}
+      className="control-select"
+      style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1 }}
     >
       <option value="">All Assets</option>
       {options.map((code) => (

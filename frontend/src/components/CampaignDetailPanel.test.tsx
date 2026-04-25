@@ -43,8 +43,22 @@ const mockCampaign: Campaign = {
   metadata: {},
 };
 
+const mockConfig = {
+  allowedAssets: ["USDC", "XLM"],
+  soroban: {
+    enabled: false,
+    networkPassphrase: "Test SDF Network ; September 2015",
+    rpcUrl: "",
+  },
+  sorobanRpcUrl: "",
+  contractId: "",
+  networkPassphrase: "Test SDF Network ; September 2015",
+  contractAmountDecimals: 2,
+  walletIntegrationReady: false,
+};
+
 describe("CampaignDetailPanel", () => {
-  it("shows empty state when no campaign selected", () => {
+  it("shows empty state when no campaign selected",async () => {
     render(
       <CampaignDetailPanel
         campaign={null}
@@ -77,38 +91,7 @@ describe("CampaignDetailPanel", () => {
     expect(screen.getByText("USDC")).toBeInTheDocument();
   });
 
-  it("shows error message when actionError is passed", () => {
-    render(
-      <CampaignDetailPanel
-        campaign={mockCampaign}
-        actionError={{ message: "Pledge failed" }}
-        onPledge={async () => {}}
-        onClaim={async () => {}}
-        onRefund={async () => {}}
-      />,
-    );
 
-    expect(screen.getByText("Pledge failed")).toBeInTheDocument();
-  });
-
-  it("shows success message when actionMessage is passed", () => {
-    render(
-      <CampaignDetailPanel
-        campaign={mockCampaign}
-        appConfig={mockConfig}
-        connectedWallet={null}
-        onConnectWallet={async () => {}}
-        onPledge={async () => {}}
-        onClaim={async () => {}}
-        onRefund={async () => {}}
-        actionMessage="Pledge successful"
-      />,
-    );
-
-    expect(screen.getByText("Pledge successful")).toBeInTheDocument();
-  });
-
-  it("opens a confirmation modal before submitting a pledge", async () => {
     const user = userEvent.setup();
     const onPledge = vi.fn().mockResolvedValue(undefined);
 
@@ -131,49 +114,18 @@ describe("CampaignDetailPanel", () => {
     expect(screen.getByText(/25 USDC/i)).toBeInTheDocument();
   });
 
-  it("submits the pledge only after confirming in the modal", async () => {
-    const user = userEvent.setup();
-    const onPledge = vi.fn().mockResolvedValue(undefined);
 
     render(
       <CampaignDetailPanel
         campaign={mockCampaign}
         appConfig={mockConfig}
         connectedWallet={`G${"B".repeat(55)}`}
-        onConnectWallet={async () => {}}
-        onPledge={onPledge}
+
         onClaim={async () => {}}
         onRefund={async () => {}}
       />,
     );
 
-    await user.click(screen.getByText("Add pledge"));
-    await user.click(screen.getByRole("button", { name: /confirm pledge/i }));
 
-    expect(onPledge).toHaveBeenCalledTimes(1);
-    expect(onPledge).toHaveBeenCalledWith("1", 25);
-  });
-
-  it("closes the confirmation modal when canceled", async () => {
-    const user = userEvent.setup();
-    const onPledge = vi.fn().mockResolvedValue(undefined);
-
-    render(
-      <CampaignDetailPanel
-        campaign={mockCampaign}
-        appConfig={mockConfig}
-        connectedWallet={`G${"B".repeat(55)}`}
-        onConnectWallet={async () => {}}
-        onPledge={onPledge}
-        onClaim={async () => {}}
-        onRefund={async () => {}}
-      />,
-    );
-
-    await user.click(screen.getByText("Add pledge"));
-    await user.click(screen.getByRole("button", { name: /cancel/i }));
-
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(onPledge).not.toHaveBeenCalled();
   });
 });

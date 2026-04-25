@@ -39,8 +39,13 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return body;
 }
 
-export async function listCampaigns(): Promise<Campaign[]> {
-  const response = await fetch(`${API_BASE}/campaigns`);
+export async function listCampaigns(filters?: { includeDeleted?: boolean }): Promise<Campaign[]> {
+  const params = new URLSearchParams();
+  if (filters?.includeDeleted) {
+    params.set('includeDeleted', 'true');
+  }
+  const url = `${API_BASE}/campaigns${params.toString() ? `?${params.toString()}` : ''}`;
+  const response = await fetch(url);
   const body = await parseResponse<{ data: Campaign[] }>(response);
   return body.data;
 }
@@ -108,6 +113,16 @@ export async function claimCampaign(
   });
   const body = await parseResponse<{ data: Campaign }>(response);
   return body.data;
+}
+
+export async function softDeleteCampaign(campaignId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/soft-delete`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const content = await response.text();
+    throw new Error(content || 'Soft delete failed');
+  }
 }
 
 export async function refundCampaign(

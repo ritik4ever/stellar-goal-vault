@@ -215,3 +215,12 @@ That issue is already represented in:
 - Index on-chain events into SQLite
 - Add filters, sorting, and campaign pages
 - Add contract tests and backend integration tests
+
+## New feature: Dark mode toggle
+
+The frontend now includes a theme toggle in the header with icon controls for light/dark mode.
+
+- Toggle between light and dark themes directly in the UI
+- Persist selected theme in `localStorage` using `stellar-goal-vault-theme`
+- Respect system `prefers-color-scheme` on first load when no saved theme exists
+- Apply dark/light color variants across core UI surfaces (cards, tables, forms, buttons, and controls)

@@ -102,10 +102,76 @@ export const refundPayloadSchema = z.object({
   soroban: sorobanRefundMetadataSchema,
 });
 
-export const paginationSchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(10),
-});
+function singleCampaignListQueryParam(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string" && typeof raw !== "number") {
+    return undefined;
+  }
+  const s = String(raw).trim();
+  return s === "" ? undefined : s;
+}
+
+/**
+ * Parses optional `page` and `limit` for GET /api/campaigns.
+ * Omitting both means no pagination (caller lists the full filtered set).
+ * Supplying only one is invalid (400).
+ */
+export function parseCampaignListPaginationQuery(query: {
+  page?: unknown;
+  limit?: unknown;
+}): { ok: true; page?: number; limit?: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const pageStr = singleCampaignListQueryParam(query.page);
+  const limitStr = singleCampaignListQueryParam(query.limit);
+
+  if (pageStr === undefined && limitStr === undefined) {
+    return { ok: true };
+  }
+  if (pageStr === undefined || limitStr === undefined) {
+    return {
+      ok: false,
+      issues: [
+        {
+          code: "custom",
+          message: "Pagination requires both page and limit query parameters.",
+          path: pageStr === undefined ? ["page"] : ["limit"],
+        },
+      ],
+    };
+  }
+
+  const pageNum = Number(pageStr);
+  const limitNum = Number(limitStr);
+  const issues: z.core.$ZodIssue[] = [];
+
+  if (!Number.isFinite(pageNum) || !Number.isInteger(pageNum) || pageNum < 1) {
+    issues.push({
+      code: "custom",
+      message: "page must be a positive integer.",
+      path: ["page"],
+    });
+  }
+  if (
+    !Number.isFinite(limitNum) ||
+    !Number.isInteger(limitNum) ||
+    limitNum < 1 ||
+    limitNum > 100
+  ) {
+    issues.push({
+      code: "custom",
+      message: "limit must be an integer from 1 to 100.",
+      path: ["limit"],
+    });
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return { ok: true, page: pageNum, limit: limitNum };
+}
 
 
 export type ValidationIssue = {

@@ -32,6 +32,8 @@ export interface Campaign {
   deadline: number;
   createdAt: number;
   claimedAt?: number;
+  deletedAt?: number;
+  isDeleted?: boolean;
   progress: CampaignProgress;
   pledges?: Pledge[];
   metadata?: {

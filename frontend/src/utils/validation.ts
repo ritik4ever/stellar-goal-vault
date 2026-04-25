@@ -121,14 +121,14 @@ export function validateDeadlineHours(value: string | number): string | null {
     return "Deadline is required";
   }
 
-  const hours = typeof value === "string" ? parseInt(value, 10) : value;
+  const hours = typeof value === "string" ? parseFloat(value) : value;
 
   if (isNaN(hours)) {
-    return "Deadline must be a whole number";
+    return "Deadline must be a valid number";
   }
 
   if (hours < MIN_DEADLINE_HOURS) {
-    return `Deadline must be at least ${MIN_DEADLINE_HOURS} hour`;
+    return `Deadline must be at least ${MIN_DEADLINE_HOURS} hours`;
   }
 
   if (hours > 8760) {

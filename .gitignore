@@ -9,3 +9,4 @@ frontend/.vite/
 contracts/target/
 contracts/.stellar/
 backend/data/
+CLAUDE.md

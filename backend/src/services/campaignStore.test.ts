@@ -15,11 +15,13 @@ type DbModule = typeof import("./db");
 type EventHistoryModule = typeof import("./eventHistory");
 
 let createCampaign: CampaignStoreModule["createCampaign"];
+
 let initCampaignStore: CampaignStoreModule["initCampaignStore"];
 let listCampaigns: CampaignStoreModule["listCampaigns"];
 let reconcileOnChainPledge: CampaignStoreModule["reconcileOnChainPledge"];
 let getCampaign: CampaignStoreModule["getCampaign"];
 let getPledges: CampaignStoreModule["getPledges"];
+let getGlobalStats: CampaignStoreModule["getGlobalStats"];
 let getDb: DbModule["getDb"];
 let getCampaignHistory: EventHistoryModule["getCampaignHistory"];
 
@@ -32,11 +34,13 @@ beforeAll(async () => {
 
   ({
     createCampaign,
+
     initCampaignStore,
     listCampaigns,
     reconcileOnChainPledge,
     getCampaign,
     getPledges,
+    getGlobalStats,
   } = await import("./campaignStore"));
   ({ getDb } = await import("./db"));
   ({ getCampaignHistory } = await import("./eventHistory"));
@@ -158,3 +162,4 @@ describe("on-chain pledge reconciliation", () => {
     ).toHaveLength(1);
   });
 });
+

@@ -187,8 +187,8 @@ export function CreateCampaignForm({
           <span>Deadline in hours</span>
           <input
             type="number"
-            min="1"
-            step="1"
+            min="0.0001"
+            step="0.0001"
             value={values.deadlineHours}
             onChange={(event) => update("deadlineHours", event.target.value)}
             className={validationErrors.deadlineHours ? "input-error" : ""}
