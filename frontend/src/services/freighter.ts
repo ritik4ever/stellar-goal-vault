@@ -375,3 +375,25 @@ export async function submitFreighterPledge(params: {
 
   return waitForTransaction(server, sendResult.hash);
 }
+
+export function watchFreighterAccount(
+  onChange: (address: string) => void,
+): () => void {
+  let lastAddress = "";
+  const id = window.setInterval(async () => {
+    try {
+      const address = await requestAccess();
+      if (address !== lastAddress) {
+        lastAddress = address;
+        onChange(address);
+      }
+    } catch {
+      // extension unavailable or locked — treat as disconnected
+      if (lastAddress !== "") {
+        lastAddress = "";
+        onChange("");
+      }
+    }
+  }, 2000);
+  return () => window.clearInterval(id);
+}
