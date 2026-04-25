@@ -7,6 +7,7 @@ import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { IssueBacklog } from "./components/IssueBacklog";
 import { TransactionPreviewModal, TransactionPreviewData } from "./components/TransactionPreviewModal";
 import { ToastContainer } from "./components/ToastContainer";
+import { WalletWidget } from "./components/WalletWidget";
 import {
   claimCampaign,
   createCampaign,
@@ -20,11 +21,11 @@ import {
   refundCampaign,
 } from "./services/api";
 import {
-  connectFreighterWallet,
   submitFreighterClaim,
   submitFreighterPledge,
 } from "./services/freighter";
 import { submitRefundTransaction } from "./services/soroban";
+import { useFreighter } from "./hooks/useFreighter";
 import { useToast } from "./hooks/useToast";
 import {
   ApiError,
@@ -120,12 +121,7 @@ function App() {
     null,
   );
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
-  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
-  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
-  const [transactionPreview, setTransactionPreview] = useState<{
-    data: TransactionPreviewData;
-    resolve: (approved: boolean) => void;
-  } | null>(null);
+
 
 
   const handleTransactionPreview = (data: TransactionPreviewData): Promise<boolean> => {
@@ -305,18 +301,10 @@ function App() {
   }
 
   async function handleConnectWallet() {
-    setIsConnectingWallet(true);
-
-    try {
-      const wallet = await connectFreighterWallet(
-        appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE,
-      );
-      setConnectedWallet(wallet.publicKey);
-      addToast(`Wallet connected: ${wallet.publicKey.slice(0, 16)}...`, "success");
-    } catch (error) {
-      addToast(getErrorMessage(error), "error");
-    } finally {
-      setIsConnectingWallet(false);
+    const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
+    const key = await freighter.connect(networkPassphrase);
+    if (key) {
+      addToast(`Wallet connected: ${key.slice(0, 16)}...`, "success");
     }
   }
 
@@ -449,25 +437,7 @@ function handleSelect(campaignId: string) {
 
   return (
     <div className="app-shell">
-      <header className="hero">
-        <div className="hero-topline">
-          <p className="eyebrow">Soroban crowdfunding MVP</p>
-          <button
-            type="button"
-            className="btn-ghost theme-toggle"
-            onClick={handleThemeToggle}
-            aria-label={`Switch to ${themeMode === "dark" ? "light" : "dark"} mode`}
-            title={`Switch to ${themeMode === "dark" ? "light" : "dark"} mode`}
-          >
-            {themeMode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
-        <h1>Stellar Goal Vault</h1>
-        <p className="hero-copy">
-          Create funding goals, collect pledges, and reconcile claim and refund flows
-          against the backend contract integration.
-        </p>
-      </header>
+
 
       <section className="metric-grid animate-fade-in">
         <article className="metric-card">
