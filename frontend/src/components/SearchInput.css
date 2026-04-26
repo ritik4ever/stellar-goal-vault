@@ -1,0 +1,82 @@
+/* SearchInput Component Styles */
+
+.search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: 400px;
+}
+
+.search-input-icon {
+  position: absolute;
+  left: 16px;
+  color: var(--text-dim);
+  pointer-events: none;
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.search-input {
+  width: 100%;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  padding: 12px 16px 12px 48px;
+  font-size: 0.95rem;
+  color: var(--text-main);
+  transition: all 0.2s ease;
+}
+
+.search-input::placeholder {
+  color: var(--text-dim);
+}
+
+.search-input:hover {
+  border-color: var(--border-glass-bright);
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.search-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.search-clear-button {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.search-clear-button:hover {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--text-main);
+}
+
+.search-clear-button:active {
+  background: rgba(99, 102, 241, 0.2);
+}
+
+/* Responsive: Make search input full width on mobile */
+@media (max-width: 640px) {
+  .search-input-wrapper {
+    max-width: 100%;
+  }
+}

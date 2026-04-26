@@ -1,7 +1,9 @@
 import axios from "axios";
 import { getDb } from "./db";
-import { recordEvent } from "./eventHistory";
+import { recordEvent, BlockchainMetadata } from "./eventHistory";
 import dotenv from "dotenv";
+import { config } from "../config";
+import { logError, logInfo } from "../logger";
 
 dotenv.config();
 
@@ -39,28 +41,39 @@ async function fetchSorobanEvents() {
     }
     return [];
   } catch (err) {
-    console.error("[Indexer] Error fetching Soroban events:", err);
+    logError(err, { event: "soroban_event_fetch_error" }, config.logLevel);
     return [];
   }
 }
 
 
 function isDuplicateEvent(db: any, event: any): boolean {
-  // Use event id/hash/ledger+index for idempotency
+  // Use transaction hash for better deduplication if available
+  if (event.txHash) {
+    const row = db.prepare(
+      `SELECT 1 FROM campaign_events WHERE json_extract(blockchain_metadata, '$.txHash') = ? LIMIT 1`
+    ).get(event.txHash);
+    if (row) return true;
+  }
+  
+  // Fallback to ledger + event index for idempotency
   if (!event.ledger || event.event_index === undefined) return false;
   const row = db.prepare(
-    `SELECT 1 FROM campaign_events WHERE metadata LIKE ? LIMIT 1`
-  ).get(`%"ledger":${event.ledger}%"event_index":${event.event_index}%`);
+    `SELECT 1 FROM campaign_events WHERE 
+     json_extract(blockchain_metadata, '$.ledgerNumber') = ? AND 
+     json_extract(blockchain_metadata, '$.eventIndex') = ? LIMIT 1`
+  ).get(event.ledger, event.event_index);
   return !!row;
 }
 
 
 function parseSorobanEvent(event: any) {
-  // Example event: { ledger, event_index, type, contract_id, ...data }
+  // Example event: { ledger, event_index, type, contract_id, txHash, ledgerCloseTime, ...data }
   // Map to local event schema
   if (!event || !event.type || !event.contract_id) return null;
   // Only process contract events
   if (event.type !== "contract" || event.contract_id !== CONTRACT_ID) return null;
+  
   // Parse event topic and data
   const topic = event.topic && Array.isArray(event.topic) ? event.topic.map((t: any) => t.toString()).join(":") : "";
   let eventType: any = undefined;
@@ -69,11 +82,13 @@ function parseSorobanEvent(event: any) {
   else if (topic.includes("Goal:Claim")) eventType = "claimed";
   else if (topic.includes("Goal:Refund")) eventType = "refunded";
   if (!eventType) return null;
+  
   // Extract campaignId, actor, amount, etc. from event.value or event.data
   let campaignId = "";
   let actor = undefined;
   let amount = undefined;
   let metadata = { ...event };
+  
   try {
     if (event.value) {
       if (event.value.campaign_id !== undefined) campaignId = String(event.value.campaign_id);
@@ -83,7 +98,26 @@ function parseSorobanEvent(event: any) {
       metadata = { ...event, ...event.value };
     }
   } catch {}
-  return { campaignId, eventType, timestamp: event.timestamp || Date.now() / 1000, actor, amount, metadata };
+
+  // Create blockchain metadata
+  const blockchainMetadata: BlockchainMetadata = {
+    txHash: event.txHash,
+    ledgerNumber: event.ledger,
+    ledgerCloseTime: event.ledgerCloseTime,
+    eventIndex: event.event_index,
+    contractId: event.contract_id,
+    source: 'soroban'
+  };
+  
+  return { 
+    campaignId, 
+    eventType, 
+    timestamp: event.timestamp || Date.now() / 1000, 
+    actor, 
+    amount, 
+    metadata,
+    blockchainMetadata
+  };
 }
 
 async function indexSorobanEvents() {
@@ -100,17 +134,35 @@ async function indexSorobanEvents() {
         Math.floor(parsed.timestamp),
         parsed.actor,
         parsed.amount,
-        parsed.metadata
+        parsed.metadata,
+        parsed.blockchainMetadata
       );
       lastIngestedTimestamp = Math.max(lastIngestedTimestamp, Math.floor(parsed.timestamp));
-      console.log(`[Indexer] Ingested event:`, parsed);
+      logInfo(
+        "soroban_event_ingested",
+        {
+          message: `Indexed ${parsed.eventType} event for campaign ${parsed.campaignId}`,
+          campaignId: parsed.campaignId,
+          eventType: parsed.eventType,
+          actor: parsed.actor,
+          amount: parsed.amount,
+        },
+        config.logLevel,
+      );
     }
   } catch (err) {
-    console.error("[Indexer] Error indexing events:", err);
+    logError(err, { event: "soroban_event_index_error" }, config.logLevel);
   }
 }
 
 export function startEventIndexer() {
   setInterval(indexSorobanEvents, POLL_INTERVAL);
-  console.log(`[Indexer] Soroban event indexer started. Polling every ${POLL_INTERVAL / 1000}s.`);
+  logInfo(
+    "soroban_event_indexer_started",
+    {
+      message: `Soroban event indexer started. Polling every ${POLL_INTERVAL / 1000}s.`,
+      pollIntervalSeconds: POLL_INTERVAL / 1000,
+    },
+    config.logLevel,
+  );
 }

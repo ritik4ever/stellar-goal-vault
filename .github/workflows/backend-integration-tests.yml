@@ -1,0 +1,82 @@
+name: Backend Integration Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-integration-tests.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    name: Integration Tests
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+      fail-fast: false
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: 'backend/package-lock.json'
+      
+      - name: Install dependencies
+        run: |
+          cd backend
+          npm ci
+      
+      - name: Run integration tests
+        run: |
+          cd backend
+          npm test
+        env:
+          NODE_ENV: test
+          DB_PATH: /tmp/stellar-goal-vault-test.db
+      
+      - name: Generate coverage report
+        run: |
+          cd backend
+          npm test -- --coverage
+        if: always()
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/coverage/coverage-final.json
+          flags: backend
+          name: backend-coverage
+        if: always()
+      
+      - name: Clean up test databases
+        run: |
+          rm -f /tmp/stellar-goal-vault-*.db
+        if: always()
+  
+  test-results:
+    runs-on: ubuntu-latest
+    name: Test Results Summary
+    needs: integration-tests
+    if: always()
+    
+    steps:
+      - name: Test Status
+        run: |
+          if [ "${{ needs.integration-tests.result }}" == "success" ]; then
+            echo "✅ All integration tests passed"
+            exit 0
+          else
+            echo "❌ Integration tests failed"
+            exit 1
+          fi

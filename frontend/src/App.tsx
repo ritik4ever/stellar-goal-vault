@@ -1,85 +1,161 @@
-import { useEffect, useMemo, useState } from "react";
+
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
+import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
+import { CreatorAnalytics } from "./components/CreatorAnalytics";
 import { IssueBacklog } from "./components/IssueBacklog";
+import { TransactionPreviewModal, TransactionPreviewData } from "./components/TransactionPreviewModal";
+import { ToastContainer } from "./components/ToastContainer";
+import { WalletWidget } from "./components/WalletWidget";
 import {
-  addPledge,
   claimCampaign,
   createCampaign,
+  getAppConfig,
   getCampaign,
   getCampaignHistory,
   listCampaigns,
+  softDeleteCampaign,
   listOpenIssues,
+  reconcilePledge,
   refundCampaign,
 } from "./services/api";
-import { Campaign, CampaignEvent, OpenIssue } from "./types/campaign";
+import {
+  submitFreighterClaim,
+  submitFreighterPledge,
+} from "./services/freighter";
+import { submitRefundTransaction } from "./services/soroban";
+import { useFreighter } from "./hooks/useFreighter";
+import { useToast } from "./hooks/useToast";
+import {
+  ApiError,
+  AppConfig,
+  Campaign,
+  CampaignEvent,
+  OpenIssue,
+} from "./types/campaign";
+
+const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
+const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
+type ThemeMode = "light" | "dark";
 
 function round(value: number): number {
   return Number(value.toFixed(2));
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+function getCampaignIdFromUrl(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("campaign");
 }
 
-function toOptimisticPledgedCampaign(campaign: Campaign, amount: number): Campaign {
-  const nowInSeconds = Math.floor(Date.now() / 1000);
-  const nextPledgedAmount = round(campaign.pledgedAmount + amount);
-  const deadlineReached = nowInSeconds >= campaign.deadline;
-  const status =
-    campaign.claimedAt !== undefined
-      ? "claimed"
-      : nextPledgedAmount >= campaign.targetAmount
-        ? "funded"
-        : deadlineReached
-          ? "failed"
-          : "open";
+function setCampaignIdInUrl(campaignId: string | null): void {
+  const url = new URL(window.location.href);
+  if (campaignId) {
+    url.searchParams.set("campaign", campaignId);
+  } else {
+    url.searchParams.delete("campaign");
+  }
+  window.history.replaceState(null, "", url.toString());
+}
 
-  return {
-    ...campaign,
-    pledgedAmount: nextPledgedAmount,
-    progress: {
-      ...campaign.progress,
-      status,
-      percentFunded: round((nextPledgedAmount / campaign.targetAmount) * 100),
-      remainingAmount: round(Math.max(0, campaign.targetAmount - nextPledgedAmount)),
-      pledgeCount: campaign.progress.pledgeCount + 1,
-      canPledge: campaign.claimedAt === undefined && !deadlineReached,
-      canClaim:
-        campaign.claimedAt === undefined &&
-        deadlineReached &&
-        nextPledgedAmount >= campaign.targetAmount,
-      canRefund:
-        campaign.claimedAt === undefined &&
-        deadlineReached &&
-        nextPledgedAmount < campaign.targetAmount,
-    },
-  };
+function getErrorMessage(error: unknown): string {
+  if (error && typeof error === "object") {
+    const maybeError = error as Error;
+    return maybeError.message || "Something went wrong.";
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return "Something went wrong.";
+}
+
+function toApiError(error: unknown): ApiError {
+  if (error && typeof error === "object") {
+    const maybeError = error as Error & {
+      code?: string;
+      details?: Array<{ field: string; message: string }>;
+      requestId?: string;
+    };
+
+    return {
+      message: maybeError.message || "Something went wrong.",
+      code: maybeError.code,
+      details: maybeError.details,
+      requestId: maybeError.requestId,
+    };
+  }
+
+  if (typeof error === "string") {
+    return { message: error };
+  }
+
+  return { message: "Something went wrong." };
+}
+
+function getInitialThemeMode(): ThemeMode {
+  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (storedTheme === "light" || storedTheme === "dark") {
+    return storedTheme;
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
-  const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(null);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(() =>
+    getCampaignIdFromUrl(),
+  );
+  const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(
+    null,
+  );
+  const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
+  const [isIssuesLoading, setIsIssuesLoading] = useState(false);
+  const [isSelectedLoading, setIsSelectedLoading] = useState(false);
+  const [initialLoad, setInitialLoad] = useState(true);
+  const [createError, setCreateError] = useState<ApiError | null>(null);
+  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(
+    null,
+  );
+  const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
+
+
+
+  const handleTransactionPreview = (data: TransactionPreviewData): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setTransactionPreview({ data, resolve });
+    });
+  };
+
+  useEffect(() => {
+    setCampaignIdInUrl(selectedCampaignId);
+  }, [selectedCampaignId]);
 
   async function refreshCampaigns(nextSelectedId?: string | null) {
-    const data = await listCampaigns();
-    setCampaigns(data);
+    setIsCampaignsLoading(true);
+    try {
+      const data = await listCampaigns();
+      setCampaigns(data);
 
-    const candidateId =
-      nextSelectedId ?? selectedCampaignId ?? (data.length > 0 ? data[0].id : null);
-    const exists = data.some((campaign) => campaign.id === candidateId);
-    setSelectedCampaignId(exists ? candidateId : data[0]?.id ?? null);
+      const requestedId = nextSelectedId ?? selectedCampaignId;
+      const nextId = requestedId ?? data[0]?.id ?? null;
+      const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
+      const resolvedId = exists ? nextId : data[0]?.id ?? null;
+
+      setInvalidUrlCampaignId(requestedId && !exists ? requestedId : null);
+      setSelectedCampaignId(resolvedId);
+
+      if (!resolvedId) {
+        setSelectedCampaignDetails(null);
+        setHistory([]);
+      }
+    } finally {
+      setIsCampaignsLoading(false);
+    }
   }
 
   async function refreshHistory(campaignId: string | null) {
@@ -97,188 +173,274 @@ function App() {
       setSelectedCampaignDetails(null);
       return;
     }
-    const campaign = await getCampaign(campaignId);
-    setSelectedCampaignDetails(campaign);
+
+    setIsSelectedLoading(true);
+    try {
+      const campaign = await getCampaign(campaignId);
+      setSelectedCampaignDetails(campaign);
+    } finally {
+      setIsSelectedLoading(false);
+    }
+  }
+
+  async function refreshIssues() {
+    setIsIssuesLoading(true);
+    try {
+      const data = await listOpenIssues();
+      setIssues(data);
+    } finally {
+      setIsIssuesLoading(false);
+    }
+  }
+
+  async function refreshSelectedData(campaignId: string | null) {
+    await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
   }
 
   useEffect(() => {
+    let cancelled = false;
+
     async function bootstrap() {
-      const [campaignData, issueData] = await Promise.all([
-        listCampaigns(),
+      const requestedCampaignId = getCampaignIdFromUrl();
+      setInitialLoad(true);
+
+      const [configResult, issuesResult, campaignsResult] = await Promise.allSettled([
+        getAppConfig(),
         listOpenIssues(),
+        listCampaigns(),
       ]);
 
-      setCampaigns(campaignData);
-      setIssues(issueData);
-      setSelectedCampaignId(campaignData[0]?.id ?? null);
+      if (cancelled) {
+        return;
+      }
+
+      if (configResult.status === "fulfilled") {
+        setAppConfig(configResult.value);
+      } else {
+        addToast(getErrorMessage(configResult.reason), "error");
+      }
+
+      if (issuesResult.status === "fulfilled") {
+        setIssues(issuesResult.value);
+      }
+
+      if (campaignsResult.status === "fulfilled") {
+        const data = campaignsResult.value;
+        setCampaigns(data);
+
+        const nextId = requestedCampaignId ?? data[0]?.id ?? null;
+        const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
+        const resolvedId = exists ? nextId : data[0]?.id ?? null;
+
+        setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
+        setSelectedCampaignId(resolvedId);
+      } else {
+        addToast(getErrorMessage(campaignsResult.reason), "error");
+      }
+
+      setInitialLoad(false);
     }
 
     void bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    setSelectedCampaignDetails(null);
-    void Promise.all([refreshHistory(selectedCampaignId), refreshSelectedCampaign(selectedCampaignId)]);
+    void refreshSelectedData(selectedCampaignId).catch((error) => {
+      addToast(getErrorMessage(error), "error");
+    });
   }, [selectedCampaignId]);
 
   const selectedCampaign = useMemo(() => {
-    const baseCampaign =
+    const summaryCampaign =
       campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
-    if (!baseCampaign) {
-      return null;
+
+    if (!summaryCampaign) {
+      return selectedCampaignDetails;
     }
-    if (selectedCampaignDetails?.id !== baseCampaign.id) {
-      return baseCampaign;
+
+    if (!selectedCampaignDetails || selectedCampaignDetails.id !== summaryCampaign.id) {
+      return summaryCampaign;
     }
+
     return {
-      ...baseCampaign,
+      ...summaryCampaign,
       pledges: selectedCampaignDetails.pledges,
+      metadata: selectedCampaignDetails.metadata ?? summaryCampaign.metadata,
     };
   }, [campaigns, selectedCampaignDetails, selectedCampaignId]);
 
   const metrics = useMemo(() => {
     const open = campaigns.filter((campaign) => campaign.progress.status === "open").length;
     const funded = campaigns.filter((campaign) => campaign.progress.status === "funded").length;
+    const claimed = campaigns.filter((campaign) => campaign.progress.status === "claimed").length;
     const pledged = campaigns.reduce((sum, campaign) => sum + campaign.pledgedAmount, 0);
 
     return {
       total: campaigns.length,
       open,
       funded,
-      pledged: Number(pledged.toFixed(2)),
+      claimed,
+      pledged: round(pledged),
     };
   }, [campaigns]);
 
   async function handleCreate(payload: Parameters<typeof createCampaign>[0]) {
     setCreateError(null);
-    setActionError(null);
-    setActionMessage(null);
 
     try {
       const campaign = await createCampaign(payload);
       await refreshCampaigns(campaign.id);
-      await Promise.all([refreshHistory(campaign.id), refreshSelectedCampaign(campaign.id)]);
-      setActionMessage(`Campaign #${campaign.id} is live and ready for pledges.`);
+      await refreshSelectedData(campaign.id);
+      addToast(`Campaign #${campaign.id} is live and ready for pledges.`, "success");
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : "Failed to create campaign.");
+      setCreateError(toApiError(error));
     }
   }
 
-  async function handlePledge(campaignId: string, contributor: string, amount: number) {
-    setActionError(null);
-    setActionMessage(null);
-
-    const previousCampaigns = campaigns;
-    const previousHistory = history;
-    const previousSelectedDetails = selectedCampaignDetails;
-    const optimisticTimestamp = Math.floor(Date.now() / 1000);
-    const optimisticEvent: CampaignEvent = {
-      id: -Date.now(),
-      campaignId,
-      eventType: "pledged",
-      timestamp: optimisticTimestamp,
-      actor: contributor,
-      amount,
-      metadata: { pending: true },
-    };
-
-    setCampaigns((currentCampaigns) =>
-      currentCampaigns.map((campaign) =>
-        campaign.id === campaignId ? toOptimisticPledgedCampaign(campaign, amount) : campaign,
-      ),
-    );
-    setSelectedCampaignDetails((currentDetails) => {
-      if (!currentDetails || currentDetails.id !== campaignId) {
-        return currentDetails;
-      }
-      const optimisticPledge = {
-        id: -Date.now(),
-        campaignId,
-        contributor,
-        amount,
-        createdAt: optimisticTimestamp,
-      };
-      return {
-        ...toOptimisticPledgedCampaign(currentDetails, amount),
-        pledges: [optimisticPledge, ...(currentDetails.pledges ?? [])],
-      };
-    });
-    setPendingPledgeCampaignId(campaignId);
-    if (selectedCampaignId === campaignId) {
-      setHistory((currentHistory) => [optimisticEvent, ...currentHistory]);
+  async function handleConnectWallet() {
+    const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
+    const key = await freighter.connect(networkPassphrase);
+    if (key) {
+      addToast(`Wallet connected: ${key.slice(0, 16)}...`, "success");
     }
-    setActionMessage("Submitting pledge...");
+  }
 
-    const pendingStartedAt = Date.now();
-    const minimumPendingMs = 800;
+  async function handlePledge(campaignId: string, amount: number) {
+    if (!connectedWallet) {
+      addToast("Connect Freighter before submitting a pledge.", "error");
+      return;
+    }
+
+    setPendingPledgeCampaignId(campaignId);
 
     try {
-      await addPledge(campaignId, { contributor, amount });
-      const elapsedMs = Date.now() - pendingStartedAt;
-      if (elapsedMs < minimumPendingMs) {
-        await delay(minimumPendingMs - elapsedMs);
+
       }
+
+      const transactionResult = await submitFreighterPledge({
+        campaignId,
+        contributor: connectedWallet,
+        amount,
+        config: appConfig,
+      });
+
+      await reconcilePledge(campaignId, {
+        contributor: connectedWallet,
+        amount,
+        transactionHash: transactionResult.transactionHash,
+        confirmedAt: transactionResult.confirmedAt,
+      });
+
+      addToast("Pledge confirmed on-chain and reconciled.", "success");
+
       await refreshCampaigns(campaignId);
-      await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
-      setPendingPledgeCampaignId(null);
-      setActionMessage("Pledge recorded in the local goal vault.");
+      await refreshSelectedData(campaignId);
     } catch (error) {
-      const elapsedMs = Date.now() - pendingStartedAt;
-      if (elapsedMs < minimumPendingMs) {
-        await delay(minimumPendingMs - elapsedMs);
+      if (error && typeof error === "object" && (error as any).code === "USER_CANCELLED") {
+        return;
       }
-      setCampaigns(previousCampaigns);
-      setSelectedCampaignDetails(previousSelectedDetails);
-      await refreshSelectedCampaign(campaignId);
-      if (selectedCampaignId === campaignId) {
-        setHistory(previousHistory);
-      }
+      addToast(getErrorMessage(error), "error");
+    } finally {
       setPendingPledgeCampaignId(null);
-      setActionError(error instanceof Error ? error.message : "Failed to add pledge.");
-      setActionMessage(null);
     }
   }
 
   async function handleClaim(campaign: Campaign) {
-    setActionError(null);
-    setActionMessage(null);
+    if (!appConfig?.walletIntegrationReady) {
+      addToast("Wallet signing is not configured on the backend yet.", "error");
+      return;
+    }
+
+    if (!connectedWallet) {
+      addToast("Connect Freighter before claiming campaign funds.", "error");
+      return;
+    }
+
+    if (connectedWallet !== campaign.creator) {
+      addToast("Only the campaign creator can claim funds.", "error");
+      return;
+    }
 
     try {
-      await claimCampaign(campaign.id, campaign.creator);
+      const transactionResult = await submitFreighterClaim({
+        campaignId: campaign.id,
+        creator: connectedWallet,
+        config: appConfig,
+        onPreview: handleTransactionPreview,
+      });
+
+      await claimCampaign(
+        campaign.id,
+        connectedWallet,
+        transactionResult.transactionHash,
+        transactionResult.confirmedAt,
+      );
+
       await refreshCampaigns(campaign.id);
-      await Promise.all([refreshHistory(campaign.id), refreshSelectedCampaign(campaign.id)]);
-      setActionMessage("Campaign claimed successfully.");
+      await refreshSelectedData(campaign.id);
+      addToast("Campaign claimed successfully.", "success");
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to claim campaign.");
+      if (error && typeof error === "object" && (error as any).code === "USER_CANCELLED") {
+        return;
+      }
+      addToast(getErrorMessage(error), "error");
     }
   }
 
-  async function handleRefund(campaignId: string, contributor: string) {
-    setActionError(null);
-    setActionMessage(null);
 
-    try {
-      await refundCampaign(campaignId, contributor);
-      await refreshCampaigns(campaignId);
-      await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
-      setActionMessage("Refund recorded for the selected contributor.");
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to refund contributor.");
-    }
+  }
+
+  if (!confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
+    return;
+  }
+
+  setActionError(null);
+  setActionMessage("Soft deleting...");
+
+  try {
+    await softDeleteCampaign(campaignId);
+    await refreshCampaigns();
+    setActionMessage("Campaign soft deleted.");
+  } catch (error) {
+    setActionError(toApiError(error));
+    setActionMessage(null);
+  }
+}
+
+async function handleRefund(campaignId: string, contributor: string) {
+  setActionError(null);
+  setActionMessage("Preparing Soroban refund transaction...");
+
+  try {
+    const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
+    await refundCampaign(campaignId, contributor, sorobanReceipt);
+    await refreshCampaigns(campaignId);
+    await refreshSelectedData(campaignId);
+    setActionMessage("Contributor refunded successfully.");
+  } catch (error) {
+    setActionError(toApiError(error));
+    setActionMessage(null);
+  }
+}
+
+function handleSelect(campaignId: string) {
+  setInvalidUrlCampaignId(null);
+  setSelectedCampaignId(campaignId);
+}
+
+  function handleThemeToggle() {
+    setThemeMode((current) => (current === "dark" ? "light" : "dark"));
   }
 
   return (
     <div className="app-shell">
-      <header className="hero">
-        <p className="eyebrow">Soroban crowdfunding MVP</p>
-        <h1>Stellar Goal Vault</h1>
-        <p className="hero-copy">
-          Create funding goals, collect pledges, and model claim or refund flows before
-          wiring the full Soroban transaction path.
-        </p>
-      </header>
 
-      <section className="metric-grid">
+
+      <section className="metric-grid animate-fade-in">
         <article className="metric-card">
           <span>Total campaigns</span>
           <strong>{metrics.total}</strong>
@@ -292,34 +454,68 @@ function App() {
           <strong>{metrics.funded}</strong>
         </article>
         <article className="metric-card">
+          <span>Claimed campaigns</span>
+          <strong>{metrics.claimed}</strong>
+        </article>
+        <article className="metric-card">
           <span>Total pledged</span>
           <strong>{metrics.pledged}</strong>
         </article>
       </section>
 
-      <section className="layout-grid">
-        <CreateCampaignForm onCreate={handleCreate} apiError={createError} />
+      {selectedCampaign && (
+        <section
+          className="animate-fade-in"
+          style={{ animationDelay: "0.1s" }}
+        >
+          <CreatorAnalytics
+            creatorAddress={selectedCampaign.creator}
+            campaigns={campaigns}
+            isLoading={isCampaignsLoading || initialLoad}
+          />
+        </section>
+      )}
+
+      <section
+        className="layout-grid animate-fade-in"
+        style={{ animationDelay: "0.2s" }}
+      >
+        <CreateCampaignForm
+          onCreate={handleCreate}
+          apiError={createError}
+          allowedAssets={appConfig?.allowedAssets ?? []}
+        />
         <CampaignDetailPanel
           campaign={selectedCampaign}
-          actionError={actionError}
-          actionMessage={actionMessage}
+          appConfig={appConfig}
+          connectedWallet={connectedWallet}
+          isConnectingWallet={isConnectingWallet}
           isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+          isLoading={isSelectedLoading || initialLoad}
+          onConnectWallet={handleConnectWallet}
           onPledge={handlePledge}
           onClaim={handleClaim}
+          onSoftDelete={handleSoftDelete}
           onRefund={handleRefund}
         />
       </section>
 
-      <CampaignsTable
-        campaigns={campaigns}
-        selectedCampaignId={selectedCampaignId}
-        onSelect={setSelectedCampaignId}
-      />
-
       <section className="secondary-grid">
-        <CampaignTimeline history={history} />
-        <IssueBacklog issues={issues} />
+        <CampaignsTable
+          campaigns={campaigns}
+          selectedCampaignId={selectedCampaignId}
+          onSelect={handleSelect}
+          isLoading={isCampaignsLoading || initialLoad}
+          invalidUrlCampaignId={invalidUrlCampaignId}
+        />
+        <CampaignTimeline history={history} isLoading={isSelectedLoading || initialLoad} />
       </section>
+
+      <section className="section-margin">
+        <IssueBacklog issues={issues} isLoading={isIssuesLoading} />
+      </section>
+
+
     </div>
   );
 }

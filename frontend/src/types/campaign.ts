@@ -18,6 +18,7 @@ export interface Pledge {
   amount: number;
   createdAt: number;
   refundedAt?: number;
+  transactionHash?: string;
 }
 
 export interface Campaign {
@@ -31,12 +32,23 @@ export interface Campaign {
   deadline: number;
   createdAt: number;
   claimedAt?: number;
+  deletedAt?: number;
+  isDeleted?: boolean;
   progress: CampaignProgress;
   pledges?: Pledge[];
   metadata?: {
     imageUrl?: string;
     externalLink?: string;
   };
+}
+
+export interface BlockchainMetadata {
+  txHash?: string;
+  ledgerNumber?: number;
+  ledgerCloseTime?: number;
+  eventIndex?: number;
+  contractId?: string;
+  source?: "local" | "soroban";
 }
 
 export interface CampaignEvent {
@@ -46,7 +58,29 @@ export interface CampaignEvent {
   timestamp: number;
   actor?: string;
   amount?: number;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> & {
+    pending?: boolean;
+    txHash?: string;
+    onChain?: boolean;
+    reconciled?: boolean;
+  };
+  blockchainMetadata?: BlockchainMetadata;
+}
+
+export interface SorobanRefundMetadata {
+  txHash: string;
+  contractId: string;
+  networkPassphrase: string;
+  rpcUrl: string;
+  walletAddress: string;
+  ledger?: number;
+  createdAt?: number;
+  latestLedger?: number;
+}
+
+export interface RefundReconciliationPayload {
+  contributor: string;
+  soroban: SorobanRefundMetadata;
 }
 
 export interface CreateCampaignPayload {
@@ -67,6 +101,37 @@ export interface CreatePledgePayload {
   amount: number;
 }
 
+export interface ReconcilePledgePayload extends CreatePledgePayload {
+  transactionHash: string;
+  confirmedAt?: number;
+}
+
+export interface AppConfig {
+  allowedAssets: string[];
+  soroban: {
+    enabled: boolean;
+    contractId?: string;
+    networkPassphrase: string;
+    rpcUrl: string;
+  };
+  sorobanRpcUrl: string;
+  contractId: string;
+  networkPassphrase: string;
+  contractAmountDecimals: number;
+  walletIntegrationReady: boolean;
+}
+
+export interface WalletConnection {
+  publicKey: string;
+  networkPassphrase?: string;
+  sorobanRpcUrl?: string;
+}
+
+export interface PledgeTransactionResult {
+  transactionHash: string;
+  confirmedAt: number;
+}
+
 export interface OpenIssue {
   id: string;
   title: string;
@@ -74,4 +139,11 @@ export interface OpenIssue {
   summary: string;
   complexity: "Trivial" | "Medium" | "High";
   points: 100 | 150 | 200;
+}
+
+export interface ApiError {
+  message: string;
+  code?: string;
+  details?: Array<{ field: string; message: string }>;
+  requestId?: string;
 }

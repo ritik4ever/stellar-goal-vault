@@ -8,7 +8,7 @@ It includes:
 - A Soroban contract scaffold for on-chain campaign creation, pledges, claims, and refunds
 - A seeded contribution backlog you can turn into GitHub issues after publishing
 
-## What the project does
+## What the project does?
 
 Creators open a campaign with a target amount and deadline.
 
@@ -24,11 +24,13 @@ Frontend (`frontend`, port `3000`)
 - React + Vite dashboard
 - Campaign board, detail panel, timeline, and contribution backlog
 - Uses `/api` proxy for backend calls
+- Freighter-backed pledge flow that simulates, signs, submits, and then reconciles local state
 
 Backend (`backend`, port `3001`)
 - Express REST API
 - SQLite persistence for campaigns, pledges, and event history
 - Real-time campaign status derived from current timestamps and stored pledges
+- Exposes contract/network config to the frontend and reconciles confirmed pledge hashes
 
 Contract (`contracts`)
 - Soroban Rust scaffold
@@ -60,9 +62,30 @@ Base URL:
 
 ### `GET /api/health`
 - Service health check
+- Response:
+
+```json
+{
+  "service": "stellar-goal-vault-backend",
+  "status": "ok",
+  "timestamp": "2026-03-27T21:30:00.000Z",
+  "uptimeSeconds": 12.345,
+  "database": {
+    "status": "up",
+    "reachable": true
+  }
+}
+```
+
+- `status` is `ok` when the API and database probe succeed, otherwise `degraded`
+- `database.status` is `up` or `down` based on a lightweight SQLite reachability check
 
 ### `GET /api/campaigns`
 - Returns all campaigns with computed progress
+- Query parameters:
+  - `q` (optional): Search query to filter campaigns by title, creator, or campaign ID (case-insensitive)
+  - `asset` (optional): Filter campaigns by asset code (e.g., USDC, XLM)
+  - `status` (optional): Filter campaigns by status (open, funded, claimed, failed)
 
 ### `GET /api/campaigns/:id`
 - Returns one campaign with pledges and event history
@@ -77,6 +100,7 @@ Request body:
 - `assetCode`
 - `targetAmount`
 - `deadline`
+- `maxPerContributor` (optional): Maximum total pledge amount a single contributor can contribute to this campaign. If not set, no per-contributor limit applies. Can also be set globally via `DEFAULT_MAX_PER_CONTRIBUTOR` env variable.
 
 ### `POST /api/campaigns/:id/pledges`
 - Add a pledge to a live campaign
@@ -84,6 +108,15 @@ Request body:
 Request body:
 - `contributor`
 - `amount`
+
+### `POST /api/campaigns/:id/pledges/reconcile`
+- Record a confirmed on-chain pledge locally after the Soroban transaction succeeds
+
+Request body:
+- `contributor`
+- `amount`
+- `transactionHash`
+- `confirmedAt` (optional)
 
 ### `POST /api/campaigns/:id/claim`
 - Claim a funded campaign after deadline
@@ -128,6 +161,51 @@ Build:
 npm run build
 ```
 
+## API load testing
+
+The backend includes a configurable load test script built with `autocannon` to simulate concurrent campaign reads and pledge writes.
+
+1. Start the backend locally:
+
+```bash
+npm run dev:backend
+```
+
+2. In a second terminal, run the load test:
+
+```bash
+cd backend
+npm run load:test -- --base-url http://127.0.0.1:3001 --connections 20 --duration 20
+```
+
+The script seeds synthetic campaigns first, then runs a mixed workload across:
+- `GET /api/campaigns`
+- `GET /api/campaigns/:id`
+- `POST /api/campaigns/:id/pledges`
+
+The console output includes:
+- Latency percentiles (`p50`, `p90`, `p97.5`, `p99`, `max`)
+- Error rate, timeout count, and non-2xx responses
+- Average requests per second and throughput
+
+Useful flags:
+- `--connections <number>`: concurrent connections
+- `--duration <seconds>`: test duration
+- `--campaigns <number>`: number of seed campaigns created before the run
+- `--read-weight <number>`: relative share of campaign read requests
+- `--pledge-weight <number>`: relative share of pledge requests
+- `--pledge-amount <number>`: amount sent in each pledge request
+- `--target-amount <number>`: target amount assigned to each seed campaign
+- `--asset-code <code>`: asset code used while seeding campaigns
+- `--deadline-hours <hours>`: how far into the future seeded campaign deadlines are set
+
+Example validation run:
+
+```bash
+cd backend
+npm run load:test -- --base-url http://127.0.0.1:3001 --duration 5 --connections 5 --campaigns 4 --read-weight 3 --pledge-weight 2
+```
+
 ## Deploy contract
 
 Set a funded Stellar testnet secret key and run:
@@ -147,6 +225,10 @@ The script will:
 Backend:
 - `PORT` defaults to `3001`
 - `DB_PATH` defaults to `backend/data/campaigns.db`
+- `SOROBAN_RPC_URL` defaults to Stellar testnet RPC
+- `CONTRACT_ID` is required for Freighter pledge signing
+- `NETWORK_PASSPHRASE` defaults to Stellar testnet
+- `CONTRACT_AMOUNT_DECIMALS` defaults to `2` and controls display-to-contract unit scaling
 
 Frontend:
 - `VITE_API_URL` defaults to `/api`
@@ -173,8 +255,7 @@ Please see the [Contributing Guide](./CONTRIBUTING.md) for setup and contributio
 
 ## Known limitations
 
-- Pledges are stored through the backend MVP path, not signed in-wallet yet
-- Soroban contract is scaffolded but not yet integrated into end-to-end UI actions
+- Campaign creation is still local-first, so pledges will only simulate successfully for campaign IDs that also exist in the configured contract
 - No authentication or rate limiting on write endpoints
 - No background indexer for on-chain event sync yet
 
@@ -184,3 +265,12 @@ Please see the [Contributing Guide](./CONTRIBUTING.md) for setup and contributio
 - Index on-chain events into SQLite
 - Add filters, sorting, and campaign pages
 - Add contract tests and backend integration tests
+
+## New feature: Dark mode toggle
+
+The frontend now includes a theme toggle in the header with icon controls for light/dark mode.
+
+- Toggle between light and dark themes directly in the UI
+- Persist selected theme in `localStorage` using `stellar-goal-vault-theme`
+- Respect system `prefers-color-scheme` on first load when no saved theme exists
+- Apply dark/light color variants across core UI surfaces (cards, tables, forms, buttons, and controls)
