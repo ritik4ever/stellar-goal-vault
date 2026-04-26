@@ -33,6 +33,10 @@ export function initDb(): void {
   }
 
   db = new Database(dbPath);
+  
+  // Enable Write-Ahead Logging (WAL) mode.
+  // This is the chosen journal mode to prevent unnecessary lock contention,
+  // allowing reads and writes to occur concurrently without blocking each other.
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
