@@ -18,6 +18,7 @@ let createCampaign: CampaignStoreModule["createCampaign"];
 
 let initCampaignStore: CampaignStoreModule["initCampaignStore"];
 let listCampaigns: CampaignStoreModule["listCampaigns"];
+let listCampaignPledges: CampaignStoreModule["listCampaignPledges"];
 let reconcileOnChainPledge: CampaignStoreModule["reconcileOnChainPledge"];
 let updateCampaign: CampaignStoreModule["updateCampaign"];
 let getCampaign: CampaignStoreModule["getCampaign"];
@@ -40,10 +41,12 @@ beforeAll(async () => {
 
     initCampaignStore,
     listCampaigns,
+    listCampaignPledges,
     reconcileOnChainPledge,
     updateCampaign,
     getCampaign,
     getPledges,
+    addPledge,
 
   } = await import("./campaignStore"));
   ({ getDb } = await import("./db"));
@@ -167,3 +170,47 @@ describe("on-chain pledge reconciliation", () => {
   });
 });
 
+describe("campaign pledge pagination", () => {
+  it("returns pledges in reverse chronological order with pagination metadata inputs", () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: "Paginated pledge campaign",
+      description: "A campaign used to verify paginated pledge retrieval order and slicing.",
+      assetCode: "USDC",
+      targetAmount: 500,
+      deadline: futureDeadline,
+    });
+
+    const db = getDb();
+    const createdAtBase = futureDeadline - 1000;
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 50 });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR2, amount: 75 });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 100 });
+
+    const insertedPledges = getPledges(campaign.id).sort((a, b) => a.id - b.id);
+    db.prepare(`UPDATE pledges SET created_at = ? WHERE id = ?`).run(
+      createdAtBase + 10,
+      insertedPledges[0].id,
+    );
+    db.prepare(`UPDATE pledges SET created_at = ? WHERE id = ?`).run(
+      createdAtBase + 20,
+      insertedPledges[1].id,
+    );
+    db.prepare(`UPDATE pledges SET created_at = ? WHERE id = ?`).run(
+      createdAtBase + 30,
+      insertedPledges[2].id,
+    );
+
+    const page1 = listCampaignPledges(campaign.id, { page: 1, limit: 2 });
+    expect(page1.totalCount).toBe(3);
+    expect(page1.pledges).toHaveLength(2);
+    expect(page1.pledges.map((pledge) => pledge.amount)).toEqual([100, 75]);
+
+    const page2 = listCampaignPledges(campaign.id, { page: 2, limit: 2 });
+    expect(page2.totalCount).toBe(3);
+    expect(page2.pledges).toHaveLength(1);
+    expect(page2.pledges[0].amount).toBe(50);
+  });
+});

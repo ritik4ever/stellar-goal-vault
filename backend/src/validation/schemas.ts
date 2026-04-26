@@ -110,6 +110,136 @@ export const refundPayloadSchema = z.object({
   soroban: sorobanRefundMetadataSchema,
 });
 
+function singleCampaignListQueryParam(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string" && typeof raw !== "number") {
+    return undefined;
+  }
+  const s = String(raw).trim();
+  return s === "" ? undefined : s;
+}
+
+function parsePositiveIntegerQueryParam(
+  value: unknown,
+  field: "page" | "limit",
+  max?: number,
+): { ok: true; value?: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const raw = singleCampaignListQueryParam(value);
+  if (raw === undefined) {
+    return { ok: true };
+  }
+
+  const parsed = Number(raw);
+  const issues: z.core.$ZodIssue[] = [];
+
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1) {
+    issues.push({
+      code: "custom",
+      message: `${field} must be a positive integer.`,
+      path: [field],
+    });
+  } else if (max !== undefined && parsed > max) {
+    issues.push({
+      code: "custom",
+      message: `${field} must be an integer from 1 to ${max}.`,
+      path: [field],
+    });
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return { ok: true, value: parsed };
+}
+
+/**
+ * Parses optional `page` and `limit` for GET /api/campaigns.
+ * Omitting both means no pagination (caller lists the full filtered set).
+ * Supplying only one is invalid (400).
+ */
+export function parseCampaignListPaginationQuery(query: {
+  page?: unknown;
+  limit?: unknown;
+}): { ok: true; page?: number; limit?: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const pageStr = singleCampaignListQueryParam(query.page);
+  const limitStr = singleCampaignListQueryParam(query.limit);
+
+  if (pageStr === undefined && limitStr === undefined) {
+    return { ok: true };
+  }
+  if (pageStr === undefined || limitStr === undefined) {
+    return {
+      ok: false,
+      issues: [
+        {
+          code: "custom",
+          message: "Pagination requires both page and limit query parameters.",
+          path: pageStr === undefined ? ["page"] : ["limit"],
+        },
+      ],
+    };
+  }
+
+  const pageNum = Number(pageStr);
+  const limitNum = Number(limitStr);
+  const issues: z.core.$ZodIssue[] = [];
+
+  if (!Number.isFinite(pageNum) || !Number.isInteger(pageNum) || pageNum < 1) {
+    issues.push({
+      code: "custom",
+      message: "page must be a positive integer.",
+      path: ["page"],
+    });
+  }
+  if (
+    !Number.isFinite(limitNum) ||
+    !Number.isInteger(limitNum) ||
+    limitNum < 1 ||
+    limitNum > 100
+  ) {
+    issues.push({
+      code: "custom",
+      message: "limit must be an integer from 1 to 100.",
+      path: ["limit"],
+    });
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return { ok: true, page: pageNum, limit: limitNum };
+}
+
+export function parsePledgeListPaginationQuery(query: {
+  page?: unknown;
+  limit?: unknown;
+}): { ok: true; page: number; limit: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const parsedPage = parsePositiveIntegerQueryParam(query.page, "page");
+  const parsedLimit = parsePositiveIntegerQueryParam(query.limit, "limit", 100);
+  const issues: z.core.$ZodIssue[] = [];
+
+  if (!parsedPage.ok) {
+    issues.push(...parsedPage.issues);
+  }
+  if (!parsedLimit.ok) {
+    issues.push(...parsedLimit.issues);
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return {
+    ok: true,
+    page: parsedPage.ok ? (parsedPage.value ?? 1) : 1,
+    limit: parsedLimit.ok ? (parsedLimit.value ?? 10) : 10,
+  };
+}
 
 
 export type ValidationIssue = {

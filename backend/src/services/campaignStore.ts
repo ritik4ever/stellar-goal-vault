@@ -251,6 +251,16 @@ export interface ListCampaignsResult {
   totalCount: number;
 }
 
+export interface ListCampaignPledgesOptions {
+  page: number;
+  limit: number;
+}
+
+export interface ListCampaignPledgesResult {
+  pledges: PledgeRecord[];
+  totalCount: number;
+}
+
 export interface GlobalStats {
   totalCampaigns: number;
   campaignCountByStatus: Record<CampaignStatus, number>;
@@ -355,7 +365,36 @@ export function getPledges(campaignId: string): PledgeRecord[] {
   return rows.map(rowToPledge);
 }
 
-export function getCampaignWithProgress(campaignId: string) {
+export function listCampaignPledges(
+  campaignId: string,
+  options: ListCampaignPledgesOptions,
+): ListCampaignPledgesResult {
+  const db = getDb();
+  const offset = (options.page - 1) * options.limit;
+
+  const totalCount = (
+    db
+      .prepare(`SELECT COUNT(*) AS total FROM pledges WHERE campaign_id = ?`)
+      .get(campaignId) as { total: number }
+  ).total;
+
+  const rows = db
+    .prepare(
+      `SELECT *
+       FROM pledges
+       WHERE campaign_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(campaignId, options.limit, offset) as PledgeRow[];
+
+  return {
+    pledges: rows.map(rowToPledge),
+    totalCount,
+  };
+}
+
+export function getCampaignWithProgress(campaignId: string, pledgePreviewLimit = 5) {
   const campaign = getCampaign(campaignId);
   if (!campaign) {
     return undefined;
@@ -364,7 +403,7 @@ export function getCampaignWithProgress(campaignId: string) {
   return {
     ...campaign,
     progress: calculateProgress(campaign),
-    pledges: getPledges(campaignId),
+    pledges: getPledges(campaignId).slice(0, pledgePreviewLimit),
     history: getCampaignHistory(campaignId),
   };
 }

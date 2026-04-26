@@ -21,6 +21,7 @@ import {
   getCampaignWithProgress,
   getGlobalStats,
   initCampaignStore,
+  listCampaignPledges,
   listCampaigns,
   type ListCampaignsOptions,
   softDeleteCampaign,
@@ -33,13 +34,14 @@ import { getCampaignHistory } from "./services/eventHistory";
 import { startEventIndexer } from "./services/eventIndexer";
 import { fetchOpenIssues } from "./services/openIssues";
 import { ensureSorobanRefundConfig, verifyRefundTransaction } from "./services/sorobanRpc";
-import { AppError, ApiErrorResponse, RequestWithId, CampaignListItem } from "./types/errors";
+import { AppError, ApiErrorResponse } from "./types/errors";
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
   createCampaignPayloadSchema,
   createPledgePayloadSchema,
   parseCampaignListPaginationQuery,
+  parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
   updateCampaignPayloadSchema,
@@ -47,17 +49,12 @@ import {
   zodIssuesToValidationIssues,
 } from "./validation/schemas";
 import { logError, logInfo, logRequest } from "./logger";
-
-type RequestWithId = Request & { requestId?: string };
-
-
 export const app = express();
 
 interface RequestWithId extends Request {
   requestId?: string;
 }
 
-import { CampaignRecord, CampaignProgress } from "./services/campaignStore";
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
 const CAMPAIGN_STATUSES: CampaignStatus[] = ["open", "funded", "claimed", "failed"];
@@ -65,6 +62,7 @@ const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 120;
 const WRITE_RATE_LIMIT_MAX_REQUESTS = 40;
+const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 
 
 app.use(
@@ -83,7 +81,35 @@ app.use(
 
 app.use(express.json());
 
+const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
+function applyRateLimit(maxRequests: number) {
+  return (req: Request, res: Response, next: express.NextFunction) => {
+    const key = `${req.ip}:${req.path}:${maxRequests}`;
+    const now = Date.now();
+    const current = rateLimitBuckets.get(key);
+
+    if (!current || now >= current.resetAt) {
+      rateLimitBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+      return next();
+    }
+
+    if (current.count >= maxRequests) {
+      const retryAfterSec = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader("Retry-After", String(retryAfterSec));
+      throw new AppError("Rate limit exceeded. Please retry shortly.", 429, "RATE_LIMITED");
+    }
+
+    current.count += 1;
+    rateLimitBuckets.set(key, current);
+    return next();
+  };
+}
+
+app.use(applyRateLimit(RATE_LIMIT_MAX_REQUESTS));
+
+app.use((req: RequestWithId, res: Response, next: express.NextFunction) => {
+  req.requestId = randomUUID();
   const startedAt = process.hrtime.bigint();
 
   res.on("finish", () => {
@@ -91,7 +117,7 @@ app.use(express.json());
 
     logRequest(
       {
-        requestId: requestWithId.requestId,
+        requestId: req.requestId,
         method: req.method,
         path: req.originalUrl || req.path,
         status: res.statusCode,
@@ -274,12 +300,51 @@ app.get("/api/campaigns/:id", (req: Request, res: Response) => {
     sendValidationError(parsedId.issues);
   }
 
-  const campaign = getCampaignWithProgress(parsedId.value);
+  const campaign = getCampaignWithProgress(
+    parsedId.value,
+    CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT,
+  );
   if (!campaign) {
     throw new AppError("Campaign not found.", 404, "NOT_FOUND");
   }
 
   res.json({ data: campaign });
+});
+
+app.get("/api/campaigns/:id/pledges", (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  const paginationResult = parsePledgeListPaginationQuery({
+    page: req.query.page,
+    limit: req.query.limit,
+  });
+  if (!paginationResult.ok) {
+    sendValidationError(paginationResult.issues);
+  }
+
+  const campaign = getCampaign(parsedId.value);
+  if (!campaign) {
+    throw new AppError("Campaign not found.", 404, "NOT_FOUND");
+  }
+
+  const { pledges, totalCount } = listCampaignPledges(parsedId.value, {
+    page: paginationResult.page,
+    limit: paginationResult.limit,
+  });
+  const totalPages = Math.max(1, Math.ceil(totalCount / paginationResult.limit));
+
+  res.json({
+    data: pledges,
+    pagination: {
+      total: totalCount,
+      page: paginationResult.page,
+      limit: paginationResult.limit,
+      totalPages,
+    },
+  });
 });
 
 app.post("/api/campaigns", (req: Request, res: Response) => {
@@ -303,7 +368,7 @@ app.post("/api/campaigns", (req: Request, res: Response) => {
   res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
 });
 
-
+app.post("/api/campaigns/:id/pledges", applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS), (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
     sendValidationError(parsedId.issues);
