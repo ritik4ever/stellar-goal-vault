@@ -22,10 +22,9 @@ describe("CreateCampaignForm Validation", () => {
 
       const creatorInput = screen.getByPlaceholderText(/G\.\.\. creator public key/i);
       await user.type(creatorInput, "invalid");
-      await user.type(creatorInput, "{Backspace}"); // Trigger validation
 
       expect(
-        screen.getByText(/Invalid Stellar account format/i),
+        screen.getByText(/Stellar account must be exactly 56 characters/i),
       ).toBeInTheDocument();
     });
 
