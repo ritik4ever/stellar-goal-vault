@@ -1,4 +1,4 @@
-
+import { useEffect, useMemo, useState } from "react";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
 import { FundedConfetti } from "./components/FundedConfetti";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
@@ -147,7 +147,10 @@ function App() {
     null,
   );
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
-
+  const [transactionPreview, setTransactionPreview] = useState<TransactionPreviewState | null>(
+    null,
+  );
+  const [confettiBurst, setConfettiBurst] = useState<ConfettiBurst | null>(null);
 
   const handleTransactionPreview = (data: TransactionPreviewData): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -357,7 +360,24 @@ function App() {
     }
   }
 
+  function handleDisconnectWallet() {
+    freighter.disconnect();
+    addToast("Wallet disconnected.", "success");
+  }
 
+  useEffect(() => {
+    if (!connectedWallet) return;
+    const stop = watchFreighterAccount((address) => {
+      if (address && address !== connectedWallet) {
+        addToast(`Switched to ${address.slice(0, 16)}...`, "success");
+      } else if (!address) {
+        addToast("Wallet disconnected.", "success");
+      }
+    });
+    return stop;
+  }, [connectedWallet, addToast]);
+
+  async function handlePledge(campaignId: string, amount: number, assetCode: string) {
     if (!connectedWallet) {
       addToast("Connect Freighter before submitting a pledge.", "error");
       return;
@@ -368,13 +388,20 @@ function App() {
       return;
     }
 
+    const previousCampaign =
+      campaigns.find((campaign) => campaign.id === campaignId) ??
+      (selectedCampaign?.id === campaignId ? selectedCampaign : null);
+
+    setPendingPledgeCampaignId(campaignId);
 
     try {
       const transactionResult = await submitFreighterPledge({
         campaignId,
         contributor: connectedWallet,
         amount,
-
+        assetCode,
+        config: appConfig,
+        onPreview: handleTransactionPreview,
       });
 
       await reconcilePledge(campaignId, {
@@ -451,13 +478,36 @@ function App() {
   }
 
   async function handleSoftDelete(campaignId: string) {
+    if (!window.confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage("Soft deleting...");
+
+    try {
+      await softDeleteCampaign(campaignId);
+      await refreshCampaigns();
+      setActionMessage("Campaign soft deleted.");
+    } catch (error) {
+      setActionError(toApiError(error));
+      setActionMessage(null);
+    }
+  }
+
+  async function handleRefund(campaignId: string, contributor: string) {
+    setActionError(null);
+    setActionMessage("Preparing Soroban refund transaction...");
 
     try {
       const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
       await refundCampaign(campaignId, contributor, sorobanReceipt);
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
-
+      setActionMessage("Contributor refunded successfully.");
+    } catch (error) {
+      setActionError(toApiError(error));
+      setActionMessage(null);
     }
   }
 
@@ -471,7 +521,45 @@ function App() {
   }
 
   return (
+    <div className="app-shell">
+      {confettiBurst ? (
+        <FundedConfetti
+          key={confettiBurst.id}
+          campaignTitle={confettiBurst.campaignTitle}
+          onComplete={() => setConfettiBurst(null)}
+        />
+      ) : null}
 
+      <section className="hero animate-fade-in">
+        <div className="hero-topline">
+          <div>
+            <div className="eyebrow">Stellar Goal Vault</div>
+            <h1>Campaign control center</h1>
+          </div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <WalletWidget
+              status={freighter.status}
+              publicKey={freighter.publicKey}
+              error={freighter.error}
+              onConnect={() => {
+                void handleConnectWallet();
+              }}
+            />
+            <button className="btn-ghost" type="button" onClick={handleThemeToggle}>
+              {themeMode === "dark" ? "Light mode" : "Dark mode"}
+            </button>
+            <button className="btn-ghost" type="button" onClick={() => setIsShortcutsOpen(true)}>
+              Shortcuts
+            </button>
+          </div>
+        </div>
+        <p className="hero-copy">
+          Create campaigns, manage pledges, and track funding milestones as they
+          move through the Stellar goal vault lifecycle.
+        </p>
+        {actionError ? <p className="form-error">{actionError.message}</p> : null}
+        {actionMessage ? <p className="form-success">{actionMessage}</p> : null}
+      </section>
 
       <section className="metric-grid animate-fade-in">
         <article className="metric-card">
@@ -551,27 +639,24 @@ function App() {
 
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
 
+      {transactionPreview ? (
+        <TransactionPreviewModal
+          preview={transactionPreview.data}
+          onConfirm={() => {
+            transactionPreview.resolve(true);
+            setTransactionPreview(null);
+          }}
           onCancel={() => {
             transactionPreview.resolve(false);
             setTransactionPreview(null);
           }}
         />
+      ) : null}
 
-      {import.meta.env.DEV && (
-        <footer style={{ padding: "1rem", textAlign: "center", borderTop: "1px solid var(--border-color)", marginTop: "2rem" }}>
-          <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-            🛠 Development Mode:{" "}
-            <a
-              href="https://laboratory.stellar.org/#account-creator?network=test"
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: "var(--color-primary)", textDecoration: "underline" }}
-            >
-              Get Testnet XLM (Friendbot)
-            </a>
-          </p>
-        </footer>
-      )}
+      <KeyboardShortcutsOverlay
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
+      />
     </div>
   );
 }

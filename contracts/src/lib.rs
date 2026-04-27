@@ -8,6 +8,7 @@ use soroban_sdk::{
 };
 
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const MIN_CONTRIBUTION: i128 = 100;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -180,14 +181,24 @@ impl StellarGoalVaultContract {
         // Update campaign pledged amount (valuation)
         campaign.pledged_amount += amount;
 
+        // Only increment contributor_count on first-time pledge
+        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+        let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+        if current_contribution == 0 {
+            campaign.contributor_count += 1;
+        }
 
+        // Write updated campaign back to storage
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+        let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
         env.storage()
             .persistent()
             .set(&balance_key, &(current_balance + amount));
 
-        // Update per-contributor per-token contribution
-        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-        let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
         env.storage()
             .persistent()
             .set(&contribution_key, &(current_contribution + amount));

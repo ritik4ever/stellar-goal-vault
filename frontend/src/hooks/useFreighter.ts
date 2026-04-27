@@ -8,6 +8,7 @@ export interface UseFreighterResult {
   status: FreighterStatus;
   publicKey: string | null;
   connect: (networkPassphrase: string) => Promise<string | null>;
+  disconnect: () => void;
   error: string | null;
 }
 
@@ -40,5 +41,10 @@ export function useFreighter(): UseFreighterResult {
     }
   }, []);
 
-  return { status, publicKey, connect, error };
+  const disconnect = useCallback(() => {
+    setPublicKey(null);
+    setStatus("available");
+  }, []);
+
+  return { status, publicKey, connect, disconnect, error };
 }

@@ -1,4 +1,11 @@
 
+#[cfg(test)]
+mod tests {
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger},
+        token::StellarAssetClient,
+        Address, Env, String,
+    };
 
     use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
 
@@ -40,13 +47,13 @@
 
         let campaign_id = client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &target,
             &deadline,
             &String::from_str(&env, "test campaign"),
         );
 
-        client.contribute(&campaign_id, &contributor, &target);
+        client.contribute(&campaign_id, &contributor, &token, &target);
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &creator);
 
@@ -75,13 +82,13 @@
 
         let campaign_id = client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &target,
             &deadline,
             &String::from_str(&env, "mismatch test"),
         );
 
-        client.contribute(&campaign_id, &contributor, &target);
+        client.contribute(&campaign_id, &contributor, &token, &target);
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &attacker);
     }
@@ -104,13 +111,13 @@
 
         let campaign_id = client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &target,
             &deadline,
             &String::from_str(&env, "early claim test"),
         );
 
-        client.contribute(&campaign_id, &contributor, &target);
+        client.contribute(&campaign_id, &contributor, &token, &target);
         client.claim(&campaign_id, &creator);
     }
 
@@ -133,13 +140,13 @@
 
         let campaign_id = client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &target,
             &deadline,
             &String::from_str(&env, "underfunded test"),
         );
 
-        client.contribute(&campaign_id, &contributor, &(target / 2));
+        client.contribute(&campaign_id, &contributor, &token, &(target / 2));
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &creator);
     }
@@ -163,13 +170,13 @@
 
         let campaign_id = client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &target,
             &deadline,
             &String::from_str(&env, "double claim test"),
         );
 
-        client.contribute(&campaign_id, &contributor, &target);
+        client.contribute(&campaign_id, &contributor, &token, &target);
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &creator);
         client.claim(&campaign_id, &creator);
@@ -193,7 +200,7 @@
 
         client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &100_i128,
             &deadline,
             &meta("c1"),
@@ -203,14 +210,14 @@
 
         client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &200_i128,
             &deadline,
             &meta("c2"),
         );
         client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &300_i128,
             &deadline,
             &meta("c3"),
@@ -228,7 +235,7 @@
 
         let campaign_id = client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &500_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "count zero test"),
@@ -251,13 +258,13 @@
 
         let campaign_id = client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "single contributor test"),
         );
 
-        client.contribute(&campaign_id, &contributor, &500);
+        client.contribute(&campaign_id, &contributor, &token, &500);
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
     }
 
@@ -283,19 +290,19 @@
 
         let campaign_id = client.create_campaign(
             &creator,
-            &token_id,
+            &soroban_sdk::vec![&env, token_id.clone()],
             &600_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "multi contributor test"),
         );
 
-        client.contribute(&campaign_id, &contributor1, &200);
+        client.contribute(&campaign_id, &contributor1, &token_id, &200);
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
 
-        client.contribute(&campaign_id, &contributor2, &200);
+        client.contribute(&campaign_id, &contributor2, &token_id, &200);
         assert_eq!(client.get_contributor_count(&campaign_id), 2);
 
-        client.contribute(&campaign_id, &contributor3, &200);
+        client.contribute(&campaign_id, &contributor3, &token_id, &200);
         assert_eq!(client.get_contributor_count(&campaign_id), 3);
     }
 
@@ -313,18 +320,18 @@
 
         let campaign_id = client.create_campaign(
             &creator,
-            &token,
+            &soroban_sdk::vec![&env, token.clone()],
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "repeat pledge test"),
         );
 
         // Same contributor pledges twice — count must stay at 1
-        client.contribute(&campaign_id, &contributor, &400);
+        client.contribute(&campaign_id, &contributor, &token, &400);
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
 
-        client.contribute(&campaign_id, &contributor, &300);
+        client.contribute(&campaign_id, &contributor, &token, &300);
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
     }
 }
-main
+}
