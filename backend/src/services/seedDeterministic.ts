@@ -64,7 +64,7 @@ export function seedDeterministicState(): void {
 
   const insertCampaign = db.prepare(
     `INSERT INTO campaigns (
-      id, creator, title, description, asset_code, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
+      id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
   );
 
@@ -74,7 +74,7 @@ export function seedDeterministicState(): void {
       campaign.creator,
       campaign.title,
       campaign.description,
-      campaign.assetCode,
+      JSON.stringify([campaign.assetCode]),
       campaign.targetAmount,
       campaign.pledgedAmount,
       campaign.deadline,
@@ -84,14 +84,14 @@ export function seedDeterministicState(): void {
   }
 
   db.prepare(
-    `INSERT INTO pledges (campaign_id, contributor, amount, created_at, refunded_at, transaction_hash)
-     VALUES (?, ?, ?, ?, NULL, NULL)`,
-  ).run("1", `G${"D".repeat(55)}`, 100, FIXED_NOW - 250);
+    `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
+     VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
+  ).run("1", `G${"D".repeat(55)}`, 100, "USDC", FIXED_NOW - 250);
 
   db.prepare(
-    `INSERT INTO pledges (campaign_id, contributor, amount, created_at, refunded_at, transaction_hash)
-     VALUES (?, ?, ?, ?, NULL, NULL)`,
-  ).run("2", `G${"E".repeat(55)}`, 250, FIXED_NOW - 150);
+    `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
+     VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
+  ).run("2", `G${"E".repeat(55)}`, 250, "XLM", FIXED_NOW - 150);
 }
 
 if (require.main === module) {

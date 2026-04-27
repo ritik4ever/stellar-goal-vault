@@ -12,7 +12,7 @@ const INITIAL_VALUES = {
   creator: "",
   title: "",
   description: "",
-  assetCode: "USDC",
+  acceptedTokens: ["USDC"],
   targetAmount: "250",
   deadlineHours: "72",
   imageUrl: "",
@@ -27,30 +27,39 @@ export function CreateCampaignForm({
   const assetOptions = allowedAssets.length > 0 ? allowedAssets : ["USDC"];
   const [values, setValues] = useState({
     ...INITIAL_VALUES,
-    assetCode: assetOptions[0] ?? INITIAL_VALUES.assetCode,
+    acceptedTokens: assetOptions.slice(0, 1),
   });
   const [validationErrors, setValidationErrors] = useState<FormErrors>(
-    validateForm(INITIAL_VALUES),
+    validateForm({ ...INITIAL_VALUES, acceptedTokens: assetOptions.slice(0, 1) }),
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     setValues((current) => {
-      if (assetOptions.includes(current.assetCode)) {
+      const validTokens = current.acceptedTokens.filter((token) => assetOptions.includes(token));
+      if (validTokens.length === current.acceptedTokens.length && validTokens.length > 0) {
         return current;
       }
 
       return {
         ...current,
-        assetCode: assetOptions[0] ?? INITIAL_VALUES.assetCode,
+        acceptedTokens: validTokens.length > 0 ? validTokens : assetOptions.slice(0, 1),
       };
     });
   }, [assetOptions]);
 
-  function update(field: keyof typeof INITIAL_VALUES, value: string) {
+  function update(field: keyof typeof INITIAL_VALUES, value: any) {
     const nextValues = { ...values, [field]: value };
     setValues(nextValues);
     setValidationErrors(validateForm(nextValues));
+  }
+
+  function toggleToken(token: string) {
+    const nextTokens = values.acceptedTokens.includes(token)
+      ? values.acceptedTokens.filter((t) => t !== token)
+      : [...values.acceptedTokens, token];
+    
+    update("acceptedTokens", nextTokens);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -70,7 +79,7 @@ export function CreateCampaignForm({
         creator: values.creator.trim(),
         title: values.title.trim(),
         description: values.description.trim(),
-        assetCode: values.assetCode.trim().toUpperCase(),
+        acceptedTokens: values.acceptedTokens.map(t => t.trim().toUpperCase()),
         targetAmount: Number(values.targetAmount),
         deadline,
         metadata: {
@@ -81,7 +90,7 @@ export function CreateCampaignForm({
 
       const resetValues = {
         ...INITIAL_VALUES,
-        assetCode: assetOptions[0] ?? INITIAL_VALUES.assetCode,
+        acceptedTokens: assetOptions.slice(0, 1),
       };
       setValues(resetValues);
       setValidationErrors(validateForm(resetValues));
@@ -150,38 +159,40 @@ export function CreateCampaignForm({
           ) : null}
         </label>
 
-        <div className="row">
-          <label className="field-group">
-            <span>Asset code</span>
-            <select
-              value={values.assetCode}
-              onChange={(event) => update("assetCode", event.target.value)}
-              required
-            >
-              {assetOptions.map((asset) => (
-                <option key={asset} value={asset}>
-                  {asset}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field-group">
-            <span>Target amount</span>
-            <input
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={values.targetAmount}
-              onChange={(event) => update("targetAmount", event.target.value)}
-              className={validationErrors.targetAmount ? "input-error" : ""}
-              required
-            />
-            {validationErrors.targetAmount ? (
-              <span className="field-error">{validationErrors.targetAmount}</span>
-            ) : null}
-          </label>
+        <div className="field-group">
+          <span>Accepted tokens</span>
+          <div className="token-checkboxes">
+            {assetOptions.map((asset) => (
+              <label key={asset} className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={values.acceptedTokens.includes(asset)}
+                  onChange={() => toggleToken(asset)}
+                />
+                {asset}
+              </label>
+            ))}
+          </div>
+          {validationErrors.acceptedTokens ? (
+            <span className="field-error">{validationErrors.acceptedTokens}</span>
+          ) : null}
         </div>
+
+        <label className="field-group">
+          <span>Target amount (cumulative sum of units)</span>
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={values.targetAmount}
+            onChange={(event) => update("targetAmount", event.target.value)}
+            className={validationErrors.targetAmount ? "input-error" : ""}
+            required
+          />
+          {validationErrors.targetAmount ? (
+            <span className="field-error">{validationErrors.targetAmount}</span>
+          ) : null}
+        </label>
 
         <label className="field-group">
           <span>Deadline in hours</span>

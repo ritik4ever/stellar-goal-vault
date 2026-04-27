@@ -53,3 +53,24 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+  contract-build:
+    name: Contract Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build contract
+        working-directory: contracts
+        run: cargo build --target wasm32-unknown-unknown --release
+        
+      - name: Run contract tests
+        working-directory: contracts
+        run: cargo test

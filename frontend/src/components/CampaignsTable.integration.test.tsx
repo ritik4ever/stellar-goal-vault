@@ -23,6 +23,8 @@ describe("CampaignsTable Search Integration", () => {
         canClaim: false,
         canRefund: false,
       },
+      acceptedTokens: ["USDC"],
+      createdAt: Math.floor(Date.now() / 1000),
     },
     {
       id: "camp-002",
@@ -41,6 +43,8 @@ describe("CampaignsTable Search Integration", () => {
         canClaim: false,
         canRefund: false,
       },
+      acceptedTokens: ["USDC"],
+      createdAt: Math.floor(Date.now() / 1000),
     },
     {
       id: "camp-003",
@@ -59,6 +63,8 @@ describe("CampaignsTable Search Integration", () => {
         canClaim: true,
         canRefund: false,
       },
+      acceptedTokens: ["USDC"],
+      createdAt: Math.floor(Date.now() / 1000),
     },
   ];
 

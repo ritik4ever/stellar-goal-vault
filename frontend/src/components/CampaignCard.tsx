@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from "react";
 import { Campaign } from "../types/campaign";
 import { CopyButton } from "./CopyButton";
 import { AddressAvatar } from "./AddressAvatar";
@@ -13,6 +14,16 @@ export function CampaignCard({
   selectedCampaignId,
   onSelect,
 }: CampaignCardProps) {
+  const prevPercentRef = useRef<number | null>(null);
+  const [animate, setAnimate] = useState(false);
+
+  useEffect(() => {
+    if (prevPercentRef.current !== null && prevPercentRef.current !== campaign.progress.percentFunded) {
+      setAnimate(true);
+    }
+    prevPercentRef.current = campaign.progress.percentFunded;
+  }, [campaign.progress.percentFunded]);
+
   const formatTimestamp = (unixSeconds: number) =>
     new Date(unixSeconds * 1000).toLocaleString();
 
@@ -43,10 +54,11 @@ export function CampaignCard({
         <div className="campaign-progress">
           <div className="progress-copy">
             {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-            {campaign.assetCode}
+            {campaign.acceptedTokens?.length > 1 ? "Tokens" : campaign.assetCode}
           </div>
           <div className="progress-bar" aria-hidden>
             <div
+              className={animate ? "progress-bar-fill" : undefined}
               style={{
                 width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
               }}

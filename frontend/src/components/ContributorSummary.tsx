@@ -1,8 +1,11 @@
 import { useMemo } from "react";
 import { Users } from "lucide-react";
 import { CopyButton } from "./CopyButton";
+import { AddressAvatar } from "./AddressAvatar";
+import { EmptyState } from "./EmptyState";
 import { Pledge } from "../types/campaign";
-
+import { EmptyState } from "./EmptyState";
+import { AddressAvatar } from "./AddressAvatar";
 
 function round2(value: number): number {
   return Number(value.toFixed(2));

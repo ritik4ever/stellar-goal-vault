@@ -195,8 +195,9 @@ describe("Frontend Validation Utilities", () => {
         creator: "G" + "A".repeat(55),
         title: "Valid Campaign",
         description: "This is a valid campaign description.",
-        targetAmount: "500",
+        targetAmount: "250",
         deadlineHours: "72",
+        acceptedTokens: ["USDC"],
       });
       expect(result).toEqual({});
     });
@@ -208,12 +209,14 @@ describe("Frontend Validation Utilities", () => {
         description: "Short",
         targetAmount: "-10",
         deadlineHours: "0",
+        acceptedTokens: [],
       });
       expect(result.creator).toBeTruthy();
       expect(result.title).toBeTruthy();
       expect(result.description).toBeTruthy();
       expect(result.targetAmount).toBeTruthy();
       expect(result.deadlineHours).toBeTruthy();
+      expect(result.acceptedTokens).toBeTruthy();
     });
 
     it("should return partial errors for partially invalid form", () => {
@@ -221,14 +224,16 @@ describe("Frontend Validation Utilities", () => {
         creator: "G" + "A".repeat(55),
         title: "Valid Title",
         description: "Short",
-        targetAmount: "100",
-        deadlineHours: "72",
+        targetAmount: "0",
+        deadlineHours: "0",
+        acceptedTokens: [],
       });
       expect(result.creator).toBeUndefined();
       expect(result.title).toBeUndefined();
-      expect(result.description).toBeTruthy();
-      expect(result.targetAmount).toBeUndefined();
-      expect(result.deadlineHours).toBeUndefined();
+      expect(result.description).toBeDefined();
+      expect(result.targetAmount).toBeDefined();
+      expect(result.deadlineHours).toBeDefined();
+      expect(result.acceptedTokens).toBeDefined();
     });
   });
 

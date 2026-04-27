@@ -20,6 +20,7 @@ export interface FormErrors {
   creator?: string;
   title?: string;
   description?: string;
+  acceptedTokens?: string;
   targetAmount?: string;
   deadlineHours?: string;
 }
@@ -146,6 +147,7 @@ export function validateForm(formData: {
   creator: string;
   title: string;
   description: string;
+  acceptedTokens: string[];
   targetAmount: string;
   deadlineHours: string;
 }): FormErrors {
@@ -164,6 +166,10 @@ export function validateForm(formData: {
   const descriptionError = validateDescription(formData.description);
   if (descriptionError) {
     errors.description = descriptionError;
+  }
+
+  if (!formData.acceptedTokens || formData.acceptedTokens.length === 0) {
+    errors.acceptedTokens = "At least one accepted token is required";
   }
 
   const amountError = validateTargetAmount(formData.targetAmount);

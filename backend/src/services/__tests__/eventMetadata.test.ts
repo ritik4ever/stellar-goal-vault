@@ -29,7 +29,7 @@ describe("Event Metadata Support", () => {
     getDb()
       .prepare(
         `INSERT INTO campaigns (
-          id, creator, title, description, asset_code, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
+          id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
@@ -37,7 +37,7 @@ describe("Event Metadata Support", () => {
         `G${"A".repeat(55)}`,
         `Campaign ${campaignId}`,
         "Synthetic campaign record for event metadata tests.",
-        "USDC",
+        JSON.stringify(["USDC"]),
         100,
         0,
         Math.floor(Date.now() / 1000) + 3600,

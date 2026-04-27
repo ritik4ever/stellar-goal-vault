@@ -363,6 +363,37 @@ select {
   font-size: 0.85rem;
 }
 
+.funded-confetti-overlay {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1200;
+}
+
+.funded-confetti-piece {
+  position: absolute;
+  top: -10vh;
+  border-radius: 999px;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: funded-confetti-fall 1.4s ease-out forwards;
+}
+
+@keyframes funded-confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -18vh, 0) rotate(0deg);
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--confetti-drift, 0px), 105vh, 0) rotate(540deg);
+  }
+}
+
 .control-select {
   padding: 8px 12px;
   border: 1px solid var(--border-glass);
@@ -1203,6 +1234,10 @@ tbody tr:hover td {
   background: linear-gradient(90deg, var(--primary), #22c55e);
 }
 
+.progress-bar-fill {
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .badge,
 .chip,
 .chip-emphasis {
@@ -1501,5 +1536,49 @@ tbody tr:hover td {
   .campaign-card-selected {
     border-color: var(--border-glass-bright);
     box-shadow: 0 6px 18px rgba(99, 102, 241, 0.08);
+  }
+}
+
+/* Creator Analytics Styles */
+.creator-metrics-container {
+  margin-bottom: 60px;
+}
+
+.creator-metrics-title {
+  margin: 0 0 24px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.creator-address {
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 0.9rem;
+  background: rgba(99, 102, 241, 0.1);
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--primary);
+  border: 1px solid var(--border-glass);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 767px) {
+  .creator-metrics-container {
+    margin-bottom: 40px;
+  }
+
+  .creator-metrics-title {
+    font-size: 1.1rem;
+    flex-wrap: wrap;
+  }
+
+  .creator-address {
+    font-size: 0.8rem;
+    max-width: 100%;
   }
 }

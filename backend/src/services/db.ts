@@ -33,6 +33,10 @@ export function initDb(): void {
   }
 
   db = new Database(dbPath);
+  
+  // Enable Write-Ahead Logging (WAL) mode.
+  // This is the chosen journal mode to prevent unnecessary lock contention,
+  // allowing reads and writes to occur concurrently without blocking each other.
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
@@ -73,13 +77,13 @@ function migrate(database: SQLiteDatabase): void {
       creator               TEXT NOT NULL,
       title                 TEXT NOT NULL,
       description           TEXT NOT NULL,
-      asset_code            TEXT NOT NULL,
+      accepted_tokens_json  TEXT NOT NULL,
       target_amount         REAL NOT NULL,
       pledged_amount        REAL NOT NULL DEFAULT 0,
       deadline              INTEGER NOT NULL,
       created_at            INTEGER NOT NULL,
       claimed_at            INTEGER,
-      metadata_json          TEXT,
+      metadata_json         TEXT,
       max_per_contributor   INTEGER
     );
 
@@ -88,6 +92,7 @@ function migrate(database: SQLiteDatabase): void {
       campaign_id       TEXT NOT NULL,
       contributor      TEXT NOT NULL,
       amount           REAL NOT NULL,
+      asset_code       TEXT NOT NULL,
       created_at       INTEGER NOT NULL,
       refunded_at      INTEGER,
       transaction_hash TEXT,
@@ -120,7 +125,27 @@ function migrate(database: SQLiteDatabase): void {
     database.exec(`ALTER TABLE pledges ADD COLUMN transaction_hash TEXT`);
   }
 
-  database.exec(`ALTER TABLE campaigns ADD COLUMN deleted_at INTEGER;`);
+  const hasAssetCode = pledgeColumns.some((column) => column.name === "asset_code");
+  if (!hasAssetCode) {
+    database.exec(`ALTER TABLE pledges ADD COLUMN asset_code TEXT NOT NULL DEFAULT 'XLM'`);
+  }
+
+  // Add deleted_at column if not exists
+  const campaignColumns = database
+    .prepare(`PRAGMA table_info(campaigns)`)
+    .all() as Array<{ name: string }>;
+  if (!campaignColumns.some((column) => column.name === "deleted_at")) {
+    database.exec(`ALTER TABLE campaigns ADD COLUMN deleted_at INTEGER`);
+  }
+
+  // Migrate asset_code to accepted_tokens_json if needed
+  if (campaignColumns.some((column) => column.name === "asset_code") &&
+      !campaignColumns.some((column) => column.name === "accepted_tokens_json")) {
+    database.exec(`ALTER TABLE campaigns ADD COLUMN accepted_tokens_json TEXT NOT NULL DEFAULT '[]'`);
+    // Migrate existing asset_code to accepted_tokens_json
+    database.exec(`UPDATE campaigns SET accepted_tokens_json = json_array(asset_code)`);
+    // Optionally drop asset_code column (SQLite doesn't support DROP COLUMN directly)
+  }
   
   database.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pledges_transaction_hash
@@ -133,10 +158,6 @@ function migrate(database: SQLiteDatabase): void {
   } catch {
     // Column already exists, ignore error.
   }
-
-  const campaignColumns = database
-    .prepare(`PRAGMA table_info(campaigns)`)
-    .all() as Array<{ name: string }>;
 
   const hasMaxPerContributor = campaignColumns.some(
     (column) => column.name === "max_per_contributor",

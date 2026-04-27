@@ -6,7 +6,7 @@ interface ToastContainerProps {
   onDismiss: (id: string) => void;
 }
 
-const VARIANT_ICONS: Record<ToastVariant, React.ElementType> = {
+const VARIANT_ICONS: Record<ToastVariant, typeof CheckCircle2> = {
   success: CheckCircle2,
   error: XCircle,
   info: Info,

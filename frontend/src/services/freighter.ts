@@ -168,6 +168,7 @@ export async function submitFreighterClaim(params: {
   onPreview?: (preview: {
     operation: string;
     amount?: number;
+    assetCode?: string;
     contract: string;
     xdr: string;
   }) => Promise<boolean>;
@@ -285,15 +286,17 @@ export async function submitFreighterPledge(params: {
   campaignId: string;
   contributor: string;
   amount: number;
+  assetCode: string;
   config: AppConfig;
   onPreview?: (preview: {
     operation: string;
     amount?: number;
+    assetCode?: string;
     contract: string;
     xdr: string;
   }) => Promise<boolean>;
 }): Promise<PledgeTransactionResult> {
-  const { campaignId, contributor, amount, config } = params;
+  const { campaignId, contributor, amount, config, assetCode } = params;
 
   if (!config.contractId || !config.sorobanRpcUrl) {
     throw buildError(
@@ -304,6 +307,12 @@ export async function submitFreighterPledge(params: {
 
   const server = getRpcServer(config.sorobanRpcUrl);
   const amountUnits = amountToContractUnits(amount, config.contractAmountDecimals);
+  const tokenAddress = config.assetAddresses[assetCode.toUpperCase()];
+
+  if (!tokenAddress) {
+    throw buildError("ASSET_NOT_CONFIGURED", `Soroban contract address for ${assetCode} is not configured.`);
+  }
+
   const sourceAccount = await server.getAccount(contributor).catch((error) => {
     throw buildError(
       "SOURCE_ACCOUNT_LOAD_FAILED",
@@ -315,6 +324,7 @@ export async function submitFreighterPledge(params: {
     "contribute",
     nativeToScVal(BigInt(campaignId), { type: "u64" }),
     Address.fromString(contributor).toScVal(),
+    Address.fromString(tokenAddress).toScVal(),
     nativeToScVal(amountUnits, { type: "i128" }),
   );
 
@@ -358,6 +368,7 @@ export async function submitFreighterPledge(params: {
     const isApproved = await params.onPreview({
       operation: "contribute",
       amount: params.amount,
+      assetCode: params.assetCode,
       contract: config.contractId,
       xdr: preparedTransaction.toXDR(),
     });
@@ -409,4 +420,26 @@ export async function submitFreighterPledge(params: {
   }
 
   return waitForTransaction(server, sendResult.hash);
+}
+
+export function watchFreighterAccount(
+  onChange: (address: string) => void,
+): () => void {
+  let lastAddress = "";
+  const id = window.setInterval(async () => {
+    try {
+      const address = await requestAccess();
+      if (address !== lastAddress) {
+        lastAddress = address;
+        onChange(address);
+      }
+    } catch {
+      // extension unavailable or locked — treat as disconnected
+      if (lastAddress !== "") {
+        lastAddress = "";
+        onChange("");
+      }
+    }
+  }, 2000);
+  return () => window.clearInterval(id);
 }

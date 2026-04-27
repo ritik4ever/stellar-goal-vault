@@ -16,6 +16,7 @@ export interface Pledge {
   campaignId: string;
   contributor: string;
   amount: number;
+  assetCode: string;
   createdAt: number;
   refundedAt?: number;
   transactionHash?: string;
@@ -26,7 +27,8 @@ export interface Campaign {
   creator: string;
   title: string;
   description: string;
-  assetCode: string;
+  acceptedTokens: string[];
+  assetCode: string; // Backward compatibility
   targetAmount: number;
   pledgedAmount: number;
   deadline: number;
@@ -87,7 +89,7 @@ export interface CreateCampaignPayload {
   creator: string;
   title: string;
   description: string;
-  assetCode: string;
+  acceptedTokens: string[];
   targetAmount: number;
   deadline: number;
   metadata?: {
@@ -99,6 +101,7 @@ export interface CreateCampaignPayload {
 export interface CreatePledgePayload {
   contributor: string;
   amount: number;
+  assetCode: string;
 }
 
 export interface ReconcilePledgePayload extends CreatePledgePayload {
@@ -119,6 +122,7 @@ export interface AppConfig {
   networkPassphrase: string;
   contractAmountDecimals: number;
   walletIntegrationReady: boolean;
+  assetAddresses: Record<string, string>;
 }
 
 export interface WalletConnection {

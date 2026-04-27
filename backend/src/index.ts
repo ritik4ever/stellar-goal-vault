@@ -3,7 +3,12 @@ import "dotenv/config";
 import express, { Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { z } from "zod";
+import path from "path";
+import { fileURLToPath } from "url";
 import { config, walletIntegrationReady } from "./config";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import {
   addPledge,
   calculateProgress,
@@ -16,6 +21,7 @@ import {
   getCampaignWithProgress,
   getGlobalStats,
   initCampaignStore,
+  listCampaignPledges,
   listCampaigns,
   type ListCampaignsOptions,
   softDeleteCampaign,
@@ -35,6 +41,7 @@ import {
   createCampaignPayloadSchema,
   createPledgePayloadSchema,
   parseCampaignListPaginationQuery,
+  parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
   updateCampaignPayloadSchema,
@@ -42,17 +49,12 @@ import {
   zodIssuesToValidationIssues,
 } from "./validation/schemas";
 import { logError, logInfo, logRequest } from "./logger";
-
-type RequestWithId = Request & { requestId?: string };
-
-
 export const app = express();
 
 interface RequestWithId extends Request {
   requestId?: string;
 }
 
-import { CampaignRecord, CampaignProgress } from "./services/campaignStore";
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
 const CAMPAIGN_STATUSES: CampaignStatus[] = ["open", "funded", "claimed", "failed"];
@@ -60,6 +62,7 @@ const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 120;
 const WRITE_RATE_LIMIT_MAX_REQUESTS = 40;
+const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 
 
 app.use(
@@ -297,12 +300,51 @@ app.get("/api/campaigns/:id", (req: Request, res: Response) => {
     sendValidationError(parsedId.issues);
   }
 
-  const campaign = getCampaignWithProgress(parsedId.value);
+  const campaign = getCampaignWithProgress(
+    parsedId.value,
+    CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT,
+  );
   if (!campaign) {
     throw new AppError("Campaign not found.", 404, "NOT_FOUND");
   }
 
   res.json({ data: campaign });
+});
+
+app.get("/api/campaigns/:id/pledges", (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  const paginationResult = parsePledgeListPaginationQuery({
+    page: req.query.page,
+    limit: req.query.limit,
+  });
+  if (!paginationResult.ok) {
+    sendValidationError(paginationResult.issues);
+  }
+
+  const campaign = getCampaign(parsedId.value);
+  if (!campaign) {
+    throw new AppError("Campaign not found.", 404, "NOT_FOUND");
+  }
+
+  const { pledges, totalCount } = listCampaignPledges(parsedId.value, {
+    page: paginationResult.page,
+    limit: paginationResult.limit,
+  });
+  const totalPages = Math.max(1, Math.ceil(totalCount / paginationResult.limit));
+
+  res.json({
+    data: pledges,
+    pagination: {
+      total: totalCount,
+      page: paginationResult.page,
+      limit: paginationResult.limit,
+      totalPages,
+    },
+  });
 });
 
 app.post("/api/campaigns", (req: Request, res: Response) => {
@@ -449,6 +491,7 @@ app.get("/api/config", (_req: Request, res: Response) => {
       networkPassphrase: config.sorobanNetworkPassphrase,
       contractAmountDecimals: CONTRACT_AMOUNT_DECIMALS,
       walletIntegrationReady,
+      assetAddresses: config.assetAddresses,
     },
   });
 });
@@ -503,7 +546,28 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
   res.status(statusCode).json(response);
 });
 
+function printStartupBanner(): void {
+  const isTest = process.env.NODE_ENV === "test";
+  if (isTest) {
+    return;
+  }
+
+  const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "..", "data", "campaigns.db");
+  const nodeEnv = process.env.NODE_ENV || "development";
+
+  console.log("");
+  console.log("╔════════════════════════════════════════════════════════════╗");
+  console.log("║         Stellar Goal Vault Backend - Starting Up          ║");
+  console.log("╠════════════════════════════════════════════════════════════╣");
+  console.log(`║  Port:           ${config.port.toString().padEnd(42)}║`);
+  console.log(`║  Environment:    ${nodeEnv.padEnd(42)}║`);
+  console.log(`║  Database Path:  ${dbPath.padEnd(42)}║`);
+  console.log("╚════════════════════════════════════════════════════════════╝");
+  console.log("");
+}
+
 function startServer() {
+  printStartupBanner();
   initCampaignStore();
   startEventIndexer();
   app.listen(config.port, () => {
