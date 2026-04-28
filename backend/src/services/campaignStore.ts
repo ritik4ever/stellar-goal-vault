@@ -197,6 +197,23 @@ function getContributorPledgedTotal(campaignId: string, contributor: string): nu
   return row.total;
 }
 
+function checkContributorLimit(campaign: CampaignRecord, contributor: string, amount: number): void {
+  if (campaign.maxPerContributor === undefined) {
+    return;
+  }
+
+  const currentTotal = getContributorPledgedTotal(campaign.id, contributor);
+  const projectedTotal = round(currentTotal + amount);
+
+  if (projectedTotal > campaign.maxPerContributor) {
+    throw toServiceError(
+      `Contributor pledge limit exceeded. Maximum allowed per contributor is ${campaign.maxPerContributor}.`,
+      400,
+      "CONTRIBUTOR_LIMIT_EXCEEDED",
+    );
+  }
+}
+
 export function initCampaignStore(): void {
   initDb();
 }
@@ -423,9 +440,6 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
   );
 
   return campaign;
-}
-
-
 }
 
 export function addPledge(campaignId: string, input: PledgeInput): CampaignRecord {

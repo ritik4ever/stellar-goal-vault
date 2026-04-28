@@ -21,38 +21,26 @@ import {
   softDeleteCampaign,
   reconcileOnChainPledge,
   refundContributor,
-  updateCampaign,
 } from "./services/campaignStore";
 import { checkDbHealth } from "./services/db";
 import { getCampaignHistory } from "./services/eventHistory";
 import { startEventIndexer } from "./services/eventIndexer";
 import { fetchOpenIssues } from "./services/openIssues";
 import { ensureSorobanRefundConfig, verifyRefundTransaction } from "./services/sorobanRpc";
-import { AppError, ApiErrorResponse, RequestWithId, CampaignListItem } from "./types/errors";
+import { AppError, ApiErrorResponse, RequestWithId } from "./types/errors";
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
   createCampaignPayloadSchema,
   createPledgePayloadSchema,
-  parseCampaignListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
-  updateCampaignPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
 } from "./validation/schemas";
 import { logError, logInfo, logRequest } from "./logger";
 
-type RequestWithId = Request & { requestId?: string };
-
-
 export const app = express();
-
-interface RequestWithId extends Request {
-  requestId?: string;
-}
-
-import { CampaignRecord, CampaignProgress } from "./services/campaignStore";
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
 const CAMPAIGN_STATUSES: CampaignStatus[] = ["open", "funded", "claimed", "failed"];
@@ -60,6 +48,32 @@ const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 120;
 const WRITE_RATE_LIMIT_MAX_REQUESTS = 40;
+
+const requestTimestamps = new Map<string, number[]>();
+
+function applyRateLimit(maxRequests: number) {
+  return (req: Request, res: Response, next: express.NextFunction) => {
+    const key = req.ip || req.headers["x-forwarded-for"]?.toString() || "unknown";
+    const now = Date.now();
+    const timestamps = requestTimestamps.get(key) ?? [];
+    const windowed = timestamps.filter((timestamp) => now - timestamp <= RATE_LIMIT_WINDOW_MS);
+
+    if (windowed.length >= maxRequests) {
+      return res.status(429).json({
+        success: false,
+        error: {
+          code: "RATE_LIMIT_EXCEEDED",
+          message: "Too many requests. Please try again later.",
+          requestId: (req as RequestWithId).requestId,
+        },
+      });
+    }
+
+    windowed.push(now);
+    requestTimestamps.set(key, windowed);
+    next();
+  };
+}
 
 
 app.use(
@@ -78,7 +92,9 @@ app.use(
 
 app.use(express.json());
 
-
+app.use((req: Request, res: Response, next: express.NextFunction) => {
+  const requestWithId = req as RequestWithId;
+  requestWithId.requestId = randomUUID();
   const startedAt = process.hrtime.bigint();
 
   res.on("finish", () => {
@@ -130,6 +146,46 @@ function parseCampaignId(
   }
 
   return { ok: true, value: parsed.data };
+}
+
+function parseCampaignListPaginationQuery(
+  query: { page?: unknown; limit?: unknown },
+): { ok: true; page?: number; limit?: number } | { ok: false; issues: z.ZodIssue[] } {
+  const issues: z.ZodIssue[] = [];
+  let page: number | undefined;
+  let limit: number | undefined;
+
+  if (query.page !== undefined) {
+    const pageValue = Number(query.page);
+    if (!Number.isInteger(pageValue) || pageValue < 1) {
+      issues.push({
+        code: "custom",
+        message: "page must be an integer greater than or equal to 1.",
+        path: ["page"],
+      });
+    } else {
+      page = pageValue;
+    }
+  }
+
+  if (query.limit !== undefined) {
+    const limitValue = Number(query.limit);
+    if (!Number.isInteger(limitValue) || limitValue < 1) {
+      issues.push({
+        code: "custom",
+        message: "limit must be an integer greater than or equal to 1.",
+        path: ["limit"],
+      });
+    } else {
+      limit = limitValue;
+    }
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return { ok: true, page, limit };
 }
 
 export function normalizeQueryValue(value: unknown): string | undefined {
@@ -298,7 +354,7 @@ app.post("/api/campaigns", (req: Request, res: Response) => {
   res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
 });
 
-
+app.post("/api/campaigns/:id/pledges", applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS), (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
     sendValidationError(parsedId.issues);

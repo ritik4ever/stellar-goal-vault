@@ -1,4 +1,5 @@
 
+import { useEffect, useMemo, useState } from "react";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
@@ -122,6 +123,20 @@ function App() {
     null,
   );
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialThemeMode());
+  const [transactionPreview, setTransactionPreview] = useState<
+    | {
+        data: TransactionPreviewData;
+        resolve: (approved: boolean) => void;
+      }
+    | null
+  >(null);
+  const [actionError, setActionError] = useState<ApiError | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const { addToast } = useToast();
+  const freighter = useFreighter();
+  const connectedWallet = freighter.publicKey;
+  const isConnectingWallet = freighter.status === "checking";
 
 
 
@@ -315,17 +330,20 @@ function App() {
       return;
     }
 
+    const currentConfig = appConfig;
+    if (!currentConfig || !currentConfig.contractId || !currentConfig.sorobanRpcUrl) {
+      addToast("Wallet signing is not configured yet. Please wait for backend setup.", "error");
+      return;
+    }
+
     setPendingPledgeCampaignId(campaignId);
 
     try {
-
-      }
-
       const transactionResult = await submitFreighterPledge({
         campaignId,
         contributor: connectedWallet,
         amount,
-        config: appConfig,
+        config: currentConfig,
       });
 
       await reconcilePledge(campaignId, {
@@ -350,7 +368,8 @@ function App() {
   }
 
   async function handleClaim(campaign: Campaign) {
-    if (!appConfig?.walletIntegrationReady) {
+    const currentConfig = appConfig;
+    if (!currentConfig?.walletIntegrationReady) {
       addToast("Wallet signing is not configured on the backend yet.", "error");
       return;
     }
@@ -369,7 +388,7 @@ function App() {
       const transactionResult = await submitFreighterClaim({
         campaignId: campaign.id,
         creator: connectedWallet,
-        config: appConfig,
+        config: currentConfig,
         onPreview: handleTransactionPreview,
       });
 
@@ -391,25 +410,23 @@ function App() {
     }
   }
 
+  async function handleSoftDelete(campaignId: string) {
+    if (!confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
+      return;
+    }
 
+    setActionError(null);
+    setActionMessage("Soft deleting...");
+
+    try {
+      await softDeleteCampaign(campaignId);
+      await refreshCampaigns();
+      setActionMessage("Campaign soft deleted.");
+    } catch (error) {
+      setActionError(toApiError(error));
+      setActionMessage(null);
+    }
   }
-
-  if (!confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
-    return;
-  }
-
-  setActionError(null);
-  setActionMessage("Soft deleting...");
-
-  try {
-    await softDeleteCampaign(campaignId);
-    await refreshCampaigns();
-    setActionMessage("Campaign soft deleted.");
-  } catch (error) {
-    setActionError(toApiError(error));
-    setActionMessage(null);
-  }
-}
 
 async function handleRefund(campaignId: string, contributor: string) {
   setActionError(null);
@@ -497,6 +514,7 @@ function handleSelect(campaignId: string) {
           onClaim={handleClaim}
           onSoftDelete={handleSoftDelete}
           onRefund={handleRefund}
+          history={history}
         />
       </section>
 

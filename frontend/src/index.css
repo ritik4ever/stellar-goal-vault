@@ -1203,6 +1203,74 @@ tbody tr:hover td {
   background: linear-gradient(90deg, var(--primary), #22c55e);
 }
 
+.funding-progress-card .funding-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.funding-progress-card .funding-summary article {
+  background: var(--bg-panel-soft);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+
+.funding-progress-card .funding-summary article span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.funding-progress-card .funding-history-list {
+  display: grid;
+  gap: 18px;
+}
+
+.funding-progress-card .funding-history-step {
+  display: grid;
+  gap: 10px;
+}
+
+.funding-progress-card .funding-history-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--text-main);
+}
+
+.funding-progress-card .funding-history-bar {
+  position: relative;
+  width: 100%;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--border-glass);
+  overflow: hidden;
+}
+
+.funding-progress-card .funding-history-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  transition: width 200ms ease;
+}
+
+.funding-progress-card .funding-history-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.93rem;
+}
+
+@media (max-width: 780px) {
+  .funding-progress-card .funding-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
 .badge,
 .chip,
 .chip-emphasis {

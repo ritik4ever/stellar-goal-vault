@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { Users } from "lucide-react";
 import { CopyButton } from "./CopyButton";
+import { EmptyState } from "./EmptyState";
+import { AddressAvatar } from "./AddressAvatar";
 import { Pledge } from "../types/campaign";
 
 
