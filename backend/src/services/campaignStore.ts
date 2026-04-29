@@ -303,12 +303,8 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
 
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
-    whereClauses.push(`(
-      LOWER(id) LIKE ? OR
-      LOWER(title) LIKE ? OR
-      LOWER(creator) LIKE ?
-    )`);
-    params.push(searchTerm, searchTerm, searchTerm);
+    whereClauses.push(`LOWER(title) LIKE ?`);
+    params.push(searchTerm);
   }
 
   if (options?.assetCode) {

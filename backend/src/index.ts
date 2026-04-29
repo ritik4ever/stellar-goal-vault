@@ -196,6 +196,7 @@ export function parseCampaignListFilters(query: {
   asset?: unknown;
   status?: unknown;
   q?: unknown;
+  search?: unknown;
   includeDeleted?: unknown;
 }): {
   asset?: string;
@@ -206,7 +207,7 @@ export function parseCampaignListFilters(query: {
   return {
     asset: normalizeAssetFilter(query.asset),
     status: normalizeStatusFilter(query.status),
-    searchQuery: normalizeQueryValue(query.q),
+    searchQuery: normalizeQueryValue(query.search) || normalizeQueryValue(query.q),
     includeDeleted: query.includeDeleted === 'true',
   };
 }
@@ -248,12 +249,13 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
     sendValidationError(paginationResult.issues);
   }
 
-  const filters = parseCampaignListFilters({
-    asset: req.query.asset,
-    status: req.query.status,
-    q: req.query.q,
-    includeDeleted: req.query.includeDeleted,
-  });
+    const filters = parseCampaignListFilters({
+      asset: req.query.asset,
+      status: req.query.status,
+      q: req.query.q,
+      search: req.query.search,
+      includeDeleted: req.query.includeDeleted,
+    });
 
   const listOptions: ListCampaignsOptions = {
     searchQuery: filters.searchQuery,

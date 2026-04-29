@@ -31,7 +31,8 @@ async function parseResponse<T>(response: Response): Promise<T> {
       (
         error as Error & { details?: Array<{ field: string; message: string }> }
       ).details = body.error.details;
-      (error as Error & { requestId?: string }).requestId = body.error.requestId;
+      (error as Error & { requestId?: string }).requestId =
+        body.error.requestId;
     }
     throw error;
   }
@@ -39,14 +40,31 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return body;
 }
 
-export async function listCampaigns(filters?: { includeDeleted?: boolean }): Promise<Campaign[]> {
+export async function listCampaigns(filters?: {
+  includeDeleted?: boolean;
+  search?: string;
+  asset?: string;
+  status?: string;
+}): Promise<Campaign[]> {
   const params = new URLSearchParams();
   if (filters?.includeDeleted) {
-    params.set('includeDeleted', 'true');
+    params.set("includeDeleted", "true");
   }
-  const url = `${API_BASE}/campaigns${params.toString() ? `?${params.toString()}` : ''}`;
+  if (filters?.search?.trim()) {
+    params.set("search", filters.search.trim());
+  }
+  if (filters?.asset) {
+    params.set("asset", filters.asset);
+  }
+  if (filters?.status) {
+    params.set("status", filters.status);
+  }
+  const url = `${API_BASE}/campaigns${params.toString() ? `?${params.toString()}` : ""}`;
   const response = await fetch(url);
-  const body = await parseResponse<{ data: Campaign[] }>(response);
+  const body = await parseResponse<{
+    data: Campaign[];
+    pagination?: { total: number };
+  }>(response);
   return body.data;
 }
 
@@ -62,7 +80,9 @@ export async function getAppConfig(): Promise<AppConfig> {
   return body.data;
 }
 
-export async function createCampaign(payload: CreateCampaignPayload): Promise<Campaign> {
+export async function createCampaign(
+  payload: CreateCampaignPayload,
+): Promise<Campaign> {
   const response = await fetch(`${API_BASE}/campaigns`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -89,11 +109,14 @@ export async function reconcilePledge(
   campaignId: string,
   payload: ReconcilePledgePayload,
 ): Promise<{ campaign: Campaign; transactionHash: string }> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/pledges/reconcile`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const response = await fetch(
+    `${API_BASE}/campaigns/${campaignId}/pledges/reconcile`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
   const body = await parseResponse<{
     data: { campaign: Campaign; transactionHash: string };
   }>(response);
@@ -116,12 +139,15 @@ export async function claimCampaign(
 }
 
 export async function softDeleteCampaign(campaignId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/soft-delete`, {
-    method: "POST",
-  });
+  const response = await fetch(
+    `${API_BASE}/campaigns/${campaignId}/soft-delete`,
+    {
+      method: "POST",
+    },
+  );
   if (!response.ok) {
     const content = await response.text();
-    throw new Error(content || 'Soft delete failed');
+    throw new Error(content || "Soft delete failed");
   }
 }
 
@@ -139,7 +165,9 @@ export async function refundCampaign(
   return body.data;
 }
 
-export async function getCampaignHistory(campaignId: string): Promise<CampaignEvent[]> {
+export async function getCampaignHistory(
+  campaignId: string,
+): Promise<CampaignEvent[]> {
   const response = await fetch(`${API_BASE}/campaigns/${campaignId}/history`);
   const body = await parseResponse<{ data: CampaignEvent[] }>(response);
   return body.data;

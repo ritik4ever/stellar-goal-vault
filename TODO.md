@@ -1,55 +1,53 @@
-# Soft Delete Support for Campaigns - Implementation TODO
+# Backend Search (?search=) Parameter - Implementation TODO
 
 ## Approved Plan Summary
 
-Add soft-delete flag (`deleted_at INTEGER`) to campaigns table. Exclude deleted from default lists. New API for soft-delete. Query param `includeDeleted=true` for maintainers. Preserve history/pledges.
+Add `?search=` query param to GET /api/campaigns filtering titles case-insensitively via SQL LIKE. Map to existing `searchQuery` logic (keep ?q= compat). Restrict to title only. Frontend: integrate server search, remove client-side filtering.
 
 ## Implementation Steps (Complete in order)
 
-### 1. Backend Database Schema Update (db.ts)
+### 1. Create TODO.md and Backend Schema Prep
 
-- Add `deleted_at INTEGER,` to campaigns table in migrate().
-- [x] Edit backend/src/services/db.ts
-- [x] Ran migration
+- [x] Created TODO.md with steps
 
-### 2. Backend Types & campaignStore.ts Updates
+### 2. Backend: Update parseCampaignListFilters in index.ts
 
-- Add `deletedAt?: number` to CampaignRecord, CampaignRow.
-- Update listCampaigns(options): Add `includeDeleted?: boolean` param, WHERE `deleted_at IS NULL OR includeDeleted`.
-- Add `softDeleteCampaign(campaignId: string)`: UPDATE SET deleted_at = now() WHERE id=? AND deleted_at IS NULL.
-- Update rowToCampaign() mapper.
-- [x] Edit backend/src/services/campaignStore.ts
-
-### 3. Backend API Routes (index.ts)
-
-- parseCampaignListFilters(): Add `includeDeleted: req.query.includeDeleted === 'true'`.
-- GET /api/campaigns: Pass includeDeleted to listCampaigns.
-- Add POST /api/campaigns/:id/soft-delete: Auth? Call softDeleteCampaign.
+- Add `search?: unknown` param to parseCampaignListFilters, prefer searchQuery = normalizeQueryValue(query.search) || query.q
+- Pass search: req.query.search in /api/campaigns call
 - [x] Edit backend/src/index.ts
 
-### 4. Frontend Types
+### 3. Backend: Restrict campaignStore.ts SQL to title only
 
-- Add `isDeleted?: boolean` and `deletedAt?: number` to Campaign interface.
-- [x] Edit frontend/src/types/campaign.ts
+- In listCampaigns if(searchQuery): whereClauses.push(`LOWER(title) LIKE ?`); params.push(searchTerm);
+- [x] Edit backend/src/services/campaignStore.ts
 
-### 5. Frontend API Client
-- listCampaigns(filters?: {includeDeleted?: boolean}): Pass param.
-- Add softDeleteCampaign(campaignId): POST /campaigns/${id}/soft-delete.
+### 4. Frontend: Update api.ts listCampaigns
+
+- Accept `filters?: { search?: string; asset?: string; status?: string; includeDeleted?: boolean }`
+- Add params.set('search', filters.search?.trim()); + asset/status
 - [x] Edit frontend/src/services/api.ts
 
-### 6. Frontend UI Updates
+### 5. Frontend: Integrate SearchInput → CampaignsTable server fetch
 
-- CampaignsTable.tsx: Add includeDeleted checkbox (admin), refresh on toggle.
-- CampaignDetailPanel.tsx / CampaignsTable: Add soft-delete button (for creator/maintainer).
-- Handle response: Refresh campaigns list.
-- [x] Edit frontend/src/App.tsx (handler + import)
-- [x] Edit frontend/src/components/CampaignDetailPanel.tsx
+- Add onSearchChange prop to table, useEffect(debouncedSearchQuery => onSearchChange)
+- App.tsx: onSearchChange={(query) => refreshCampaigns(query)}, update refreshCampaigns(searchQuery:string='')
+- Remove debouncedSearchQuery from filteredCampaigns useMemo deps, pass '' to applyFilters
+- Update bootstrap listCampaigns({search:''})
+- [x] Edit frontend/src/components/CampaignsTable.tsx
+- [x] Edit frontend/src/App.tsx
+
+### 6. Frontend: Clean up utils
+
+- Remove searchCampaigns call from applyFilters, comment server-side search
+- [ ] Edit frontend/src/components/campaignsTableUtils.ts
 
 ### 7. Testing & Follow-up
 
-- [ ] Manual test: Create → soft-delete → list excludes → ?includeDeleted=true shows → history intact.
-- [ ] Backend restart/migration: node backend/src/services/db initDb().
-- [ ] Update tests if needed.
+- Backend: Restart, test `curl http://localhost:3001/api/campaigns?search=title`
+- Frontend: `npm run dev`, test search input → server filter, case-insens, empty=all
+- Verify progress fields unchanged
+- E2E test if exists
+- [ ] Update TODO.md on complete
 - [ ] attempt_completion
 
 ## Progress

@@ -27,6 +27,7 @@ interface CampaignsTableProps {
   campaigns: Campaign[];
   selectedCampaignId: string | null;
   onSelect: (campaignId: string) => void;
+  onSearchChange?: (query: string) => void;
   isLoading?: boolean;
   invalidUrlCampaignId?: string | null;
 }
@@ -66,6 +67,10 @@ export function CampaignsTable({
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
+  useEffect(() => {
+    onSearchChange?.(debouncedSearchQuery);
+  }, [debouncedSearchQuery, onSearchChange]);
+
   const isEmpty = campaigns.length === 0;
 
   const assetOptions = useMemo(
@@ -95,10 +100,10 @@ export function CampaignsTable({
       campaigns,
       assetCode,
       statusFilter,
-      debouncedSearchQuery,
+      "", // server-side search, no client search
     );
     return sortCampaigns(filtered, sortBy);
-  }, [campaigns, assetCode, statusFilter, debouncedSearchQuery, sortBy]);
+  }, [campaigns, assetCode, statusFilter, sortBy]);
 
   if (isLoading && isEmpty) {
     return (
@@ -210,7 +215,9 @@ export function CampaignsTable({
                   <th>Funding</th>
                   <th>Status</th>
                   <th>Deadline</th>
-                  <th><span className="sr-only">Actions</span></th>
+                  <th>
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -223,7 +230,13 @@ export function CampaignsTable({
                       </div>
                     </td>
                     <td className="mono">
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
                         <AddressAvatar address={campaign.creator} size={28} />
                         <span>{campaign.creator.slice(0, 12)}...</span>
                       </div>

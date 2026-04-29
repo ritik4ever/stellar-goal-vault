@@ -189,10 +189,10 @@ function App() {
     };
   }, [transactionPreview]);
 
-  async function refreshCampaigns(nextSelectedId?: string | null): Promise<Campaign[]> {
+  async function refreshCampaigns(searchQuery: string = '', nextSelectedId?: string | null): Promise<Campaign[]> {
     setIsCampaignsLoading(true);
     try {
-      const data = await listCampaigns();
+      const data = await listCampaigns({ search: searchQuery });
       setCampaigns(data);
 
       const requestedId = nextSelectedId ?? selectedCampaignId;
@@ -253,7 +253,7 @@ function App() {
       const [configResult, issuesResult, campaignsResult] = await Promise.allSettled([
         getAppConfig(),
         listOpenIssues(),
-        listCampaigns(),
+        listCampaigns({ search: '' }),
       ]);
 
       if (cancelled) {
@@ -627,9 +627,13 @@ function App() {
           campaigns={campaigns}
           selectedCampaignId={selectedCampaignId}
           onSelect={handleSelect}
+          onSearchChange={(query) => {
+            void refreshCampaigns(query);
+          }}
           isLoading={isCampaignsLoading || initialLoad}
           invalidUrlCampaignId={invalidUrlCampaignId}
         />
+
         <CampaignTimeline history={history} isLoading={isSelectedLoading || initialLoad} />
       </section>
 

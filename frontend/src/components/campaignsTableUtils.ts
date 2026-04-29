@@ -63,16 +63,12 @@ export function applyFilters(
   status: string,
   searchQuery: string = "",
 ): Campaign[] {
-  // Apply filters in sequence
-  let filtered = searchCampaigns(campaigns, searchQuery);
-
-  filtered = filtered.filter((c) => {
+  // Client-side filters (asset/status only, search is server-side)
+  return campaigns.filter((c) => {
     const matchesAsset = assetCode === "" || c.assetCode === assetCode;
     const matchesStatus = status === "" || c.progress.status === status;
     return matchesAsset && matchesStatus;
   });
-
-  return filtered;
 }
 
 /**
