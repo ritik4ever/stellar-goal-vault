@@ -1,13 +1,14 @@
-
 #[cfg(test)]
 mod tests {
     use soroban_sdk::{
-        testutils::{Address as _, Ledger},
+        testutils::{ Address as _, Ledger },
         token::StellarAssetClient,
-        Address, Env, String,
+        Address,
+        Env,
+        String,
     };
 
-    use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
+    use crate::{ StellarGoalVaultContract, StellarGoalVaultContractClient };
 
     fn deploy_contract(env: &Env) -> StellarGoalVaultContractClient<'_> {
         let contract_id = env.register_contract(None, StellarGoalVaultContract);
@@ -26,7 +27,6 @@ mod tests {
             info.timestamp += seconds;
         });
     }
-
 
     #[test]
     fn test_claim_success() {
@@ -50,7 +50,7 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &target,
             &deadline,
-            &String::from_str(&env, "test campaign"),
+            &String::from_str(&env, "test campaign")
         );
 
         client.contribute(&campaign_id, &contributor, &token, &target);
@@ -85,7 +85,7 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &target,
             &deadline,
-            &String::from_str(&env, "mismatch test"),
+            &String::from_str(&env, "mismatch test")
         );
 
         client.contribute(&campaign_id, &contributor, &token, &target);
@@ -114,7 +114,7 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &target,
             &deadline,
-            &String::from_str(&env, "early claim test"),
+            &String::from_str(&env, "early claim test")
         );
 
         client.contribute(&campaign_id, &contributor, &token, &target);
@@ -143,7 +143,7 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &target,
             &deadline,
-            &String::from_str(&env, "underfunded test"),
+            &String::from_str(&env, "underfunded test")
         );
 
         client.contribute(&campaign_id, &contributor, &token, &(target / 2));
@@ -173,7 +173,7 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &target,
             &deadline,
-            &String::from_str(&env, "double claim test"),
+            &String::from_str(&env, "double claim test")
         );
 
         client.contribute(&campaign_id, &contributor, &token, &target);
@@ -203,7 +203,7 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &100_i128,
             &deadline,
-            &meta("c1"),
+            &meta("c1")
         );
         assert_eq!(client.get_campaign_count(), 1);
         assert_eq!(client.get_next_campaign_id(), 1);
@@ -213,15 +213,19 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &200_i128,
             &deadline,
-            &meta("c2"),
+            &meta("c2")
         );
         client.create_campaign(
             &creator,
             &soroban_sdk::vec![&env, token.clone()],
             &300_i128,
             &deadline,
-            &meta("c3"),
+            &meta("c3")
         );
+
+        assert_eq!(client.get_campaign_count(), 3);
+        assert_eq!(client.get_next_campaign_id(), 3);
+    }
 
     #[test]
     fn test_contributor_count_zero_on_new_campaign() {
@@ -238,7 +242,7 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &500_i128,
             &(env.ledger().timestamp() + 1_000),
-            &String::from_str(&env, "count zero test"),
+            &String::from_str(&env, "count zero test")
         );
 
         assert_eq!(client.get_contributor_count(&campaign_id), 0);
@@ -261,7 +265,7 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
-            &String::from_str(&env, "single contributor test"),
+            &String::from_str(&env, "single contributor test")
         );
 
         client.contribute(&campaign_id, &contributor, &token, &500);
@@ -293,7 +297,7 @@ mod tests {
             &soroban_sdk::vec![&env, token_id.clone()],
             &600_i128,
             &(env.ledger().timestamp() + 1_000),
-            &String::from_str(&env, "multi contributor test"),
+            &String::from_str(&env, "multi contributor test")
         );
 
         client.contribute(&campaign_id, &contributor1, &token_id, &200);
@@ -323,7 +327,7 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
-            &String::from_str(&env, "repeat pledge test"),
+            &String::from_str(&env, "repeat pledge test")
         );
 
         // Same contributor pledges twice — count must stay at 1
@@ -333,5 +337,116 @@ mod tests {
         client.contribute(&campaign_id, &contributor, &token, &300);
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
     }
-}
+
+    #[test]
+    fn test_admin_initialization() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        // Initialize contract with admin
+        client.initialize(&admin);
+
+        // Verify admin is set correctly
+        assert_eq!(client.get_admin(), admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract already initialized")]
+    fn test_admin_double_initialization() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        // Initialize contract with admin
+        client.initialize(&admin);
+
+        // Try to initialize again - should panic
+        client.initialize(&admin2);
+    }
+
+    #[test]
+    fn test_admin_transfer() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        // Initialize contract with admin
+        client.initialize(&admin);
+
+        // Transfer admin to new admin
+        client.transfer_admin(&new_admin);
+
+        // Verify admin was transferred
+        assert_eq!(client.get_admin(), new_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "new admin must be different from current admin")]
+    fn test_admin_transfer_to_same_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        // Initialize contract with admin
+        client.initialize(&admin);
+
+        // Try to transfer to same address - should panic
+        client.transfer_admin(&admin);
+    }
+
+    #[test]
+    fn test_admin_only_function_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        // Initialize contract with admin
+        client.initialize(&admin);
+
+        // Call admin-only function as admin - should succeed
+        let stats = client.get_contract_stats(&admin);
+        assert_eq!(stats, (0, 0)); // No campaigns created yet
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
+    fn test_admin_only_function_rejection() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        // Initialize contract with admin
+        client.initialize(&admin);
+
+        // Try to call admin-only function as non-admin - should panic
+        client.get_contract_stats(&non_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "admin not set")]
+    fn test_get_admin_before_initialization() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let client = deploy_contract(&env);
+
+        // Try to get admin before initialization - should panic
+        client.get_admin();
+    }
 }
