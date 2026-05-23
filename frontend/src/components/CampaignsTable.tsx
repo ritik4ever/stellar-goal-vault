@@ -1,5 +1,5 @@
 import { LayoutGrid } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDebounce } from "../hooks/useDebounce";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
@@ -60,6 +60,7 @@ export function CampaignsTable({
   onSelect,
   isLoading = false,
   invalidUrlCampaignId = null,
+  onSearchChange,
 }: CampaignsTableProps) {
   const [assetCode, setAssetCode] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("");
@@ -75,7 +76,7 @@ export function CampaignsTable({
 
   const assetOptions = useMemo(
     () => getDistinctAssetCodes(campaigns),
-    [campaigns],
+    [campaigns]
   );
   const statusCounts = useMemo(() => {
     const counts: Record<CampaignStatus, number> = {
@@ -100,7 +101,7 @@ export function CampaignsTable({
       campaigns,
       assetCode,
       statusFilter,
-      "", // server-side search, no client search
+      "" // server-side search, no client search
     );
     return sortCampaigns(filtered, sortBy);
   }, [campaigns, assetCode, statusFilter, sortBy]);
@@ -176,7 +177,9 @@ export function CampaignsTable({
                 <button
                   key={filter.label}
                   type="button"
-                  className={`status-filter-tab ${isActive ? "status-filter-tab-active" : ""}`}
+                  className={`status-filter-tab ${
+                    isActive ? "status-filter-tab-active" : ""
+                  }`}
                   onClick={() => setStatusFilter(filter.value)}
                   aria-pressed={isActive}
                   disabled={isLoading}
@@ -249,7 +252,10 @@ export function CampaignsTable({
                       <div className="progress-bar" aria-hidden>
                         <div
                           style={{
-                            width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                            width: `${Math.min(
+                              campaign.progress.percentFunded,
+                              100
+                            )}%`,
                           }}
                         />
                       </div>
@@ -328,7 +334,10 @@ export function CampaignsTable({
                     <div className="progress-bar" aria-hidden>
                       <div
                         style={{
-                          width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                          width: `${Math.min(
+                            campaign.progress.percentFunded,
+                            100
+                          )}%`,
                         }}
                       />
                     </div>

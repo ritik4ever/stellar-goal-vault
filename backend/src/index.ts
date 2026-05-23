@@ -4,11 +4,8 @@ import express, { Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import path from "path";
-import { fileURLToPath } from "url";
 import { config, walletIntegrationReady } from "./config";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 import {
   addPledge,
   calculateProgress,
@@ -25,16 +22,17 @@ import {
   listCampaignPledges,
   listCampaigns,
   type ListCampaignsOptions,
-  softDeleteCampaign,
   reconcileOnChainPledge,
   refundContributor,
-  updateCampaign,
 } from "./services/campaignStore";
 import { checkDbHealth } from "./services/db";
 import { getCampaignHistory } from "./services/eventHistory";
 import { startEventIndexer } from "./services/eventIndexer";
 import { fetchOpenIssues } from "./services/openIssues";
-import { ensureSorobanRefundConfig, verifyRefundTransaction } from "./services/sorobanRpc";
+import {
+  ensureSorobanRefundConfig,
+  verifyRefundTransaction,
+} from "./services/sorobanRpc";
 import { AppError, ApiErrorResponse } from "./types/errors";
 import {
   campaignIdSchema,
@@ -45,7 +43,6 @@ import {
   parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
-  updateCampaignPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
 } from "./validation/schemas";
@@ -58,26 +55,36 @@ interface RequestWithId extends Request {
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
-const CAMPAIGN_STATUSES: CampaignStatus[] = ["open", "funded", "claimed", "failed"];
-const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 2);
+const CAMPAIGN_STATUSES: CampaignStatus[] = [
+  "open",
+  "funded",
+  "claimed",
+  "failed",
+];
+const CONTRACT_AMOUNT_DECIMALS = Number(
+  process.env.CONTRACT_AMOUNT_DECIMALS ?? 2
+);
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 120;
 const WRITE_RATE_LIMIT_MAX_REQUESTS = 40;
 const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 
-
 app.use(
   cors({
     origin: (origin, callback) => {
       const isDev = process.env.NODE_ENV !== "production";
-      if (!origin || config.corsAllowedOrigins.includes(origin) || (isDev && config.corsAllowedOrigins.length === 0)) {
+      if (
+        !origin ||
+        config.corsAllowedOrigins.includes(origin) ||
+        (isDev && config.corsAllowedOrigins.length === 0)
+      ) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
-  }),
+  })
 );
 
 app.use(express.json());
@@ -91,14 +98,24 @@ function applyRateLimit(maxRequests: number) {
     const current = rateLimitBuckets.get(key);
 
     if (!current || now >= current.resetAt) {
-      rateLimitBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+      rateLimitBuckets.set(key, {
+        count: 1,
+        resetAt: now + RATE_LIMIT_WINDOW_MS,
+      });
       return next();
     }
 
     if (current.count >= maxRequests) {
-      const retryAfterSec = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      const retryAfterSec = Math.max(
+        1,
+        Math.ceil((current.resetAt - now) / 1000)
+      );
       res.setHeader("Retry-After", String(retryAfterSec));
-      throw new AppError("Rate limit exceeded. Please retry shortly.", 429, "RATE_LIMITED");
+      throw new AppError(
+        "Rate limit exceeded. Please retry shortly.",
+        429,
+        "RATE_LIMITED"
+      );
     }
 
     current.count += 1;
@@ -124,7 +141,7 @@ app.use((req: RequestWithId, res: Response, next: express.NextFunction) => {
         status: res.statusCode,
         durationMs,
       },
-      config.logLevel,
+      config.logLevel
     );
   });
 
@@ -136,12 +153,12 @@ function sendValidationError(issues: z.ZodIssue[]): never {
     zodIssuesToErrorMessage(issues),
     400,
     "VALIDATION_ERROR",
-    zodIssuesToValidationIssues(issues),
+    zodIssuesToValidationIssues(issues)
   );
 }
 
 function parseCampaignId(
-  campaignIdRaw: unknown,
+  campaignIdRaw: unknown
 ): { ok: true; value: string } | { ok: false; issues: z.ZodIssue[] } {
   if (typeof campaignIdRaw !== "string") {
     return {
@@ -182,7 +199,9 @@ export function normalizeAssetFilter(assetRaw: unknown): string | undefined {
   return config.allowedAssets.includes(asset) ? asset : undefined;
 }
 
-export function normalizeStatusFilter(statusRaw: unknown): CampaignStatus | undefined {
+export function normalizeStatusFilter(
+  statusRaw: unknown
+): CampaignStatus | undefined {
   const status = normalizeQueryValue(statusRaw)?.toLowerCase();
   if (!status) {
     return undefined;
@@ -208,8 +227,9 @@ export function parseCampaignListFilters(query: {
   return {
     asset: normalizeAssetFilter(query.asset),
     status: normalizeStatusFilter(query.status),
-    searchQuery: normalizeQueryValue(query.search) || normalizeQueryValue(query.q),
-    includeDeleted: query.includeDeleted === 'true',
+    searchQuery:
+      normalizeQueryValue(query.search) || normalizeQueryValue(query.q),
+    includeDeleted: query.includeDeleted === "true",
   };
 }
 
@@ -218,11 +238,13 @@ export function filterCampaignList(
   filters: {
     asset?: string;
     status?: CampaignStatus;
-  },
+  }
 ): CampaignListItem[] {
   return campaigns.filter((campaign) => {
-    const matchesAsset = !filters.asset || campaign.assetCode.toUpperCase() === filters.asset;
-    const matchesStatus = !filters.status || campaign.progress.status === filters.status;
+    const matchesAsset =
+      !filters.asset || campaign.assetCode.toUpperCase() === filters.asset;
+    const matchesStatus =
+      !filters.status || campaign.progress.status === filters.status;
 
     return matchesAsset && matchesStatus;
   });
@@ -250,13 +272,13 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
     sendValidationError(paginationResult.issues);
   }
 
-    const filters = parseCampaignListFilters({
-      asset: req.query.asset,
-      status: req.query.status,
-      q: req.query.q,
-      search: req.query.search,
-      includeDeleted: req.query.includeDeleted,
-    });
+  const filters = parseCampaignListFilters({
+    asset: req.query.asset,
+    status: req.query.status,
+    q: req.query.q,
+    search: req.query.search,
+    includeDeleted: req.query.includeDeleted,
+  });
 
   const listOptions: ListCampaignsOptions = {
     searchQuery: filters.searchQuery,
@@ -276,7 +298,7 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
       ...campaign,
       progress: calculateProgress(campaign),
     })),
-    filters,
+    filters
   );
 
   const page = paginationResult.page ?? 1;
@@ -305,7 +327,7 @@ app.get("/api/campaigns/:id", (req: Request, res: Response) => {
 
   const campaign = getCampaignWithProgress(
     parsedId.value,
-    CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT,
+    CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT
   );
   if (!campaign) {
     throw new AppError("Campaign not found.", 404, "NOT_FOUND");
@@ -337,7 +359,10 @@ app.get("/api/campaigns/:id/pledges", (req: Request, res: Response) => {
     page: paginationResult.page,
     limit: paginationResult.limit,
   });
-  const totalPages = Math.max(1, Math.ceil(totalCount / paginationResult.limit));
+  const totalPages = Math.max(
+    1,
+    Math.ceil(totalCount / paginationResult.limit)
+  );
 
   res.json({
     data: pledges,
@@ -358,107 +383,141 @@ app.post("/api/campaigns", (req: Request, res: Response) => {
   }
 
   if (parsedBody.data.deadline <= Math.floor(Date.now() / 1000)) {
-    throw new AppError("deadline must be in the future.", 400, "INVALID_DEADLINE");
+    throw new AppError(
+      "deadline must be in the future.",
+      400,
+      "INVALID_DEADLINE"
+    );
   }
 
   const campaignInput = {
     ...parsedBody.data,
     maxPerContributor:
-      parsedBody.data.maxPerContributor ?? (config.defaultMaxPerContributor > 0 ? config.defaultMaxPerContributor : undefined),
+      parsedBody.data.maxPerContributor ??
+      (config.defaultMaxPerContributor > 0
+        ? config.defaultMaxPerContributor
+        : undefined),
   };
 
   const campaign = createCampaign(campaignInput);
-  res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+  res
+    .status(201)
+    .json({ data: { ...campaign, progress: calculateProgress(campaign) } });
 });
 
-app.post("/api/campaigns/:id/pledges", applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS), (req: Request, res: Response) => {
-  const parsedId = parseCampaignId(req.params.id);
-  if (!parsedId.ok) {
-    sendValidationError(parsedId.issues);
-  }
-
-  const parsedBody = createPledgePayloadSchema.safeParse(req.body);
-  if (!parsedBody.success) {
-    sendValidationError(parsedBody.error.issues);
-  }
-
-  const campaign = addPledge(parsedId.value, parsedBody.data);
-  res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
-});
-
-app.post("/api/campaigns/:id/pledges/reconcile", applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS), (req: Request, res: Response) => {
-  const parsedId = parseCampaignId(req.params.id);
-  if (!parsedId.ok) {
-    sendValidationError(parsedId.issues);
-  }
-
-  const parsedBody = reconcilePledgePayloadSchema.safeParse(req.body);
-  if (!parsedBody.success) {
-    sendValidationError(parsedBody.error.issues);
-  }
-
-  const campaign = reconcileOnChainPledge(parsedId.value, parsedBody.data);
-  res.status(201).json({
-    data: {
-      campaign: { ...campaign, progress: calculateProgress(campaign) },
-      transactionHash: parsedBody.data.transactionHash,
-    },
-  });
-});
-
-app.post("/api/campaigns/:id/claim", applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS), (req: Request, res: Response) => {
-  const parsedId = parseCampaignId(req.params.id);
-  if (!parsedId.ok) {
-    sendValidationError(parsedId.issues);
-  }
-
-  const parsedBody = claimCampaignPayloadSchema.safeParse(req.body);
-  if (!parsedBody.success) {
-    sendValidationError(parsedBody.error.issues);
-  }
-
-  const campaign = claimCampaign(parsedId.value, {
-    creator: parsedBody.data.creator,
-    transactionHash: parsedBody.data.transactionHash,
-    confirmedAt: parsedBody.data.confirmedAt,
-  });
-  res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
-});
-
-app.post("/api/campaigns/:id/refund", applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS), async (req: Request, res: Response, next: express.NextFunction) => {
-  try {
+app.post(
+  "/api/campaigns/:id/pledges",
+  applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
     }
 
-    const parsedBody = refundPayloadSchema.safeParse(req.body);
+    const parsedBody = createPledgePayloadSchema.safeParse(req.body);
     if (!parsedBody.success) {
       sendValidationError(parsedBody.error.issues);
     }
 
-    ensureSorobanRefundConfig();
-    const verified = await verifyRefundTransaction(parsedBody.data.soroban.txHash);
-    const result = refundContributor(parsedId.value, parsedBody.data.contributor, {
-      ...parsedBody.data.soroban,
-      txHash: verified.txHash,
-      ledger: verified.ledger ?? parsedBody.data.soroban.ledger,
-      createdAt: verified.createdAt ?? parsedBody.data.soroban.createdAt,
-      latestLedger: verified.latestLedger ?? parsedBody.data.soroban.latestLedger,
-      source: "soroban-contract",
-    });
+    const campaign = addPledge(parsedId.value, parsedBody.data);
+    res
+      .status(201)
+      .json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+  }
+);
 
-    res.json({
+app.post(
+  "/api/campaigns/:id/pledges/reconcile",
+  applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  (req: Request, res: Response) => {
+    const parsedId = parseCampaignId(req.params.id);
+    if (!parsedId.ok) {
+      sendValidationError(parsedId.issues);
+    }
+
+    const parsedBody = reconcilePledgePayloadSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+      sendValidationError(parsedBody.error.issues);
+    }
+
+    const campaign = reconcileOnChainPledge(parsedId.value, parsedBody.data);
+    res.status(201).json({
       data: {
-        ...result.campaign,
-        progress: calculateProgress(result.campaign),
-        refundedAmount: result.refundedAmount,
+        campaign: { ...campaign, progress: calculateProgress(campaign) },
+        transactionHash: parsedBody.data.transactionHash,
       },
     });
-  } catch (error) {
-    next(error);
   }
-});
+);
+
+app.post(
+  "/api/campaigns/:id/claim",
+  applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  (req: Request, res: Response) => {
+    const parsedId = parseCampaignId(req.params.id);
+    if (!parsedId.ok) {
+      sendValidationError(parsedId.issues);
+    }
+
+    const parsedBody = claimCampaignPayloadSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+      sendValidationError(parsedBody.error.issues);
+    }
+
+    const campaign = claimCampaign(parsedId.value, {
+      creator: parsedBody.data.creator,
+      transactionHash: parsedBody.data.transactionHash,
+      confirmedAt: parsedBody.data.confirmedAt,
+    });
+    res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+  }
+);
+
+app.post(
+  "/api/campaigns/:id/refund",
+  applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  async (req: Request, res: Response, next: express.NextFunction) => {
+    try {
+      const parsedId = parseCampaignId(req.params.id);
+      if (!parsedId.ok) {
+        sendValidationError(parsedId.issues);
+      }
+
+      const parsedBody = refundPayloadSchema.safeParse(req.body);
+      if (!parsedBody.success) {
+        sendValidationError(parsedBody.error.issues);
+      }
+
+      ensureSorobanRefundConfig();
+      const verified = await verifyRefundTransaction(
+        parsedBody.data.soroban.txHash
+      );
+      const result = refundContributor(
+        parsedId.value,
+        parsedBody.data.contributor,
+        {
+          ...parsedBody.data.soroban,
+          txHash: verified.txHash,
+          ledger: verified.ledger ?? parsedBody.data.soroban.ledger,
+          createdAt: verified.createdAt ?? parsedBody.data.soroban.createdAt,
+          latestLedger:
+            verified.latestLedger ?? parsedBody.data.soroban.latestLedger,
+          source: "soroban-contract",
+        }
+      );
+
+      res.json({
+        data: {
+          ...result.campaign,
+          progress: calculateProgress(result.campaign),
+          refundedAmount: result.refundedAmount,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 app.get("/api/campaigns/:id/contributors", (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
@@ -519,50 +578,54 @@ app.get("/api/stats", (_req: Request, res: Response) => {
   res.json({ data: stats });
 });
 
-app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => {
-  if (err.message === "Not allowed by CORS") {
-    return res.status(403).json({
+app.use(
+  (err: any, req: Request, res: Response, _next: express.NextFunction) => {
+    if (err.message === "Not allowed by CORS") {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "FORBIDDEN",
+          message: "CORS policy violation",
+          requestId: (req as any).requestId,
+        },
+      });
+    }
+
+    const statusCode =
+      err instanceof AppError ? err.statusCode : err.statusCode ?? 500;
+    const code =
+      err instanceof AppError ? err.code : err.code ?? "INTERNAL_SERVER_ERROR";
+    const response: ApiErrorResponse = {
       success: false,
       error: {
-        code: "FORBIDDEN",
-        message: "CORS policy violation",
-        requestId: (req as any).requestId,
+        code,
+        message: err.message || "An unexpected error occurred",
+        requestId: (req as RequestWithId).requestId,
       },
-    });
+    };
+
+    if (err instanceof AppError && err.details) {
+      response.error.details = err.details;
+    } else if (err.details) {
+      response.error.details = err.details;
+    }
+
+    logError(
+      err,
+      {
+        event: "request_error",
+        requestId: (req as RequestWithId).requestId,
+        method: req.method,
+        path: req.originalUrl || req.path,
+        status: statusCode,
+        code,
+      },
+      config.logLevel
+    );
+
+    res.status(statusCode).json(response);
   }
-
-  const statusCode = err instanceof AppError ? err.statusCode : (err.statusCode ?? 500);
-  const code = err instanceof AppError ? err.code : (err.code ?? "INTERNAL_SERVER_ERROR");
-  const response: ApiErrorResponse = {
-    success: false,
-    error: {
-      code,
-      message: err.message || "An unexpected error occurred",
-      requestId: (req as RequestWithId).requestId,
-    },
-  };
-
-  if (err instanceof AppError && err.details) {
-    response.error.details = err.details;
-  } else if (err.details) {
-    response.error.details = err.details;
-  }
-
-  logError(
-    err,
-    {
-      event: "request_error",
-      requestId: (req as RequestWithId).requestId,
-      method: req.method,
-      path: req.originalUrl || req.path,
-      status: statusCode,
-      code,
-    },
-    config.logLevel,
-  );
-
-  res.status(statusCode).json(response);
-});
+);
 
 function printStartupBanner(): void {
   const isTest = process.env.NODE_ENV === "test";
@@ -570,7 +633,9 @@ function printStartupBanner(): void {
     return;
   }
 
-  const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "..", "data", "campaigns.db");
+  const dbPath =
+    process.env.DB_PATH ||
+    path.join(__dirname, "..", "..", "data", "campaigns.db");
   const nodeEnv = process.env.NODE_ENV || "development";
 
   console.log("");
@@ -595,7 +660,7 @@ function startServer() {
         message: `Stellar Goal Vault API listening on http://localhost:${config.port}`,
         port: config.port,
       },
-      config.logLevel,
+      config.logLevel
     );
   });
 }
