@@ -18,6 +18,7 @@ interface CampaignDetailPanelProps {
   onClaim?: (campaign: Campaign) => Promise<void>;
   onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
+  onClose?: () => void;
 }
 
 function networkName(config: AppConfig | null | undefined): string {
@@ -49,6 +50,7 @@ export function CampaignDetailPanel({
   onClaim = async () => {},
   onSoftDelete = async () => {},
   onRefund = async () => {},
+  onClose,
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState("25");
   const [refundContributor, setRefundContributor] = useState("");
@@ -58,6 +60,33 @@ export function CampaignDetailPanel({
     setPledgeAmount("25");
     setRefundContributor(connectedWallet ?? "");
   }, [campaign?.id, connectedWallet]);
+
+  useEffect(() => {
+    if (!campaign) return;
+
+    const prevFocused = document.activeElement as HTMLElement | null;
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        try {
+          onClose?.();
+        } finally {
+          setTimeout(() => {
+            try {
+              prevFocused?.focus();
+            } catch (e) {
+              // ignore
+            }
+          }, 0);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => {
+      window.removeEventListener("keydown", handleKeydown);
+    };
+  }, [campaign?.id, onClose]);
 
   const walletReady = Boolean(
     appConfig?.walletIntegrationReady ?? appConfig?.soroban?.enabled,

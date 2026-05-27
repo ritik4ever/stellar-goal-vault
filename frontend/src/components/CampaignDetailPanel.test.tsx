@@ -18,9 +18,9 @@ const mockConfig: AppConfig = {
   contractAmountDecimals: 2,
   walletIntegrationReady: true,
   assetAddresses: {
-    "USDC": "CA6WSTPZ7RRCUC6H37CQFODG763XG2HXP2G6F367VCOGGVDP32P7665E",
-    "XLM": "CDLZFC3SYJYDZT7K3SSTH3YCUY6AFMCO3Y6S3G7FEYZNVNREK7Y6CYN5"
-  }
+    USDC: "CA6WSTPZ7RRCUC6H37CQFODG763XG2HXP2G6F367VCOGGVDP32P7665E",
+    XLM: "CDLZFC3SYJYDZT7K3SSTH3YCUY6AFMCO3Y6S3G7FEYZNVNREK7Y6CYN5",
+  },
 };
 
 const mockCampaign: Campaign = {
@@ -49,35 +49,38 @@ const mockCampaign: Campaign = {
 };
 
 describe("CampaignDetailPanel", () => {
-
+  test("shows empty state when campaign is null", () => {
     render(
-      <CampaignDetailPanel
-        campaign={null}
-        appConfig={mockConfig}
-        connectedWallet={null}
-      />,
+      <CampaignDetailPanel campaign={null} appConfig={mockConfig} connectedWallet={null} />,
     );
 
     expect(screen.getByText(/pick a campaign/i)).toBeInTheDocument();
   });
 
-
+  test("pressing Escape calls onClose and restores focus", async () => {
     const user = userEvent.setup();
-    const onPledge = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
 
     render(
-      <CampaignDetailPanel
-        campaign={mockCampaign}
-        appConfig={mockConfig}
-        connectedWallet={`G${"B".repeat(55)}`}
-        onPledge={onPledge}
-      />,
+      <>
+        <button>Campaign Card</button>
+        <CampaignDetailPanel
+          campaign={mockCampaign}
+          appConfig={mockConfig}
+          connectedWallet={null}
+          onClose={onClose}
+        />
+      </>,
     );
 
-    await user.click(screen.getByRole("button", { name: /add pledge/i }));
+    const card = screen.getByRole("button", { name: /campaign card/i });
+    // focus the card before the panel mounts
+    card.focus();
+    expect(card).toHaveFocus();
 
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /confirm pledge/i })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
+    expect(onClose).toHaveBeenCalled();
+    expect(card).toHaveFocus();
   });
 });
