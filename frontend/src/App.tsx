@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
@@ -589,11 +590,13 @@ function App() {
           className="animate-fade-in"
           style={{ animationDelay: "0.1s" }}
         >
-          <CreatorAnalytics
-            creatorAddress={selectedCampaign.creator}
-            campaigns={campaigns}
-            isLoading={isCampaignsLoading || initialLoad}
-          />
+          <ErrorBoundary componentName="CreatorAnalytics">
+            <CreatorAnalytics
+              creatorAddress={selectedCampaign.creator}
+              campaigns={campaigns}
+              isLoading={isCampaignsLoading || initialLoad}
+            />
+          </ErrorBoundary>
         </section>
       )}
 
@@ -606,33 +609,37 @@ function App() {
           apiError={createError}
           allowedAssets={appConfig?.allowedAssets ?? []}
         />
-        <CampaignDetailPanel
-          campaign={selectedCampaign}
-          appConfig={appConfig}
-          connectedWallet={connectedWallet}
-          isConnectingWallet={isConnectingWallet}
-          isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
-          isLoading={isSelectedLoading || initialLoad}
-          onConnectWallet={handleConnectWallet}
-          onDisconnectWallet={handleDisconnectWallet}
-          onPledge={handlePledge}
-          onClaim={handleClaim}
-          onSoftDelete={handleSoftDelete}
-          onRefund={handleRefund}
-        />
+        <ErrorBoundary componentName="CampaignDetailPanel">
+          <CampaignDetailPanel
+            campaign={selectedCampaign}
+            appConfig={appConfig}
+            connectedWallet={connectedWallet}
+            isConnectingWallet={isConnectingWallet}
+            isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+            isLoading={isSelectedLoading || initialLoad}
+            onConnectWallet={handleConnectWallet}
+            onDisconnectWallet={handleDisconnectWallet}
+            onPledge={handlePledge}
+            onClaim={handleClaim}
+            onSoftDelete={handleSoftDelete}
+            onRefund={handleRefund}
+          />
+        </ErrorBoundary>
       </section>
 
       <section className="secondary-grid">
-        <CampaignsTable
-          campaigns={campaigns}
-          selectedCampaignId={selectedCampaignId}
-          onSelect={handleSelect}
-          onSearchChange={(query) => {
-            void refreshCampaigns(query);
-          }}
-          isLoading={isCampaignsLoading || initialLoad}
-          invalidUrlCampaignId={invalidUrlCampaignId}
-        />
+        <ErrorBoundary componentName="CampaignsTable">
+          <CampaignsTable
+            campaigns={campaigns}
+            selectedCampaignId={selectedCampaignId}
+            onSelect={handleSelect}
+            onSearchChange={(query) => {
+              void refreshCampaigns(query);
+            }}
+            isLoading={isCampaignsLoading || initialLoad}
+            invalidUrlCampaignId={invalidUrlCampaignId}
+          />
+        </ErrorBoundary>
 
         <CampaignTimeline history={history} isLoading={isSelectedLoading || initialLoad} />
       </section>

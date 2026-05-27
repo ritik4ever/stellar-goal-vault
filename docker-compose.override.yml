@@ -1,0 +1,30 @@
+# Local development override — auto-merged with docker-compose.yml by Docker Compose.
+# Mounts source directories for hot-reload and uses dev commands.
+# Usage: docker compose up   (override is applied automatically)
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: development
+    volumes:
+      - ./backend/src:/app/src
+    command: npm run dev
+    environment:
+      - NODE_ENV=development
+    restart: "no"
+
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    volumes:
+      - ./frontend/src:/app/src
+    command: npm run dev -- --host
+    ports:
+      - "3000:3000"
+      - "24678:24678"
+    environment:
+      - VITE_API_URL=http://backend:3001/api
+    restart: "no"

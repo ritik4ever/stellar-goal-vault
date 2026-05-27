@@ -1,6 +1,7 @@
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
+import { validateEnv } from "./validateEnv";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import path from "path";
@@ -585,6 +586,7 @@ function printStartupBanner(): void {
 }
 
 function startServer() {
+  validateEnv();
   printStartupBanner();
   initCampaignStore();
   startEventIndexer();
