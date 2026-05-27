@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "description": "Backend API for Stellar Goal Vault",
   "main": "dist/index.js",
-
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
   "dependencies": {
     "axios": "^1.15.2",
     "better-sqlite3": "^12.6.2",

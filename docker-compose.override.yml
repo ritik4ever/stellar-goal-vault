@@ -26,5 +26,13 @@ services:
       - "3000:3000"
       - "24678:24678"
     environment:
-      - VITE_API_URL=http://backend:3001/api
+      - VITE_PROXY_TARGET=http://backend:3001
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
     restart: "no"

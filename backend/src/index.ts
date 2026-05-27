@@ -5,11 +5,7 @@ import { validateEnv } from "./validateEnv";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import path from "path";
-import { fileURLToPath } from "url";
 import { config, walletIntegrationReady } from "./config";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 import {
   addPledge,
   calculateProgress,
@@ -29,7 +25,6 @@ import {
   softDeleteCampaign,
   reconcileOnChainPledge,
   refundContributor,
-  updateCampaign,
 } from "./services/campaignStore";
 import { checkDbHealth } from "./services/db";
 import { getCampaignHistory } from "./services/eventHistory";
@@ -46,7 +41,6 @@ import {
   parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
-  updateCampaignPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
 } from "./validation/schemas";
@@ -571,7 +565,7 @@ function printStartupBanner(): void {
     return;
   }
 
-  const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "..", "data", "campaigns.db");
+  const dbPath = process.env.DB_PATH || path.resolve(process.cwd(), "data", "campaigns.db");
   const nodeEnv = process.env.NODE_ENV || "development";
 
   console.log("");
