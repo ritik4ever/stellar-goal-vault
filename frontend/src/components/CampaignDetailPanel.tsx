@@ -68,16 +68,29 @@ export function CampaignDetailPanel({
 
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        try {
-          onClose?.();
-        } finally {
-          setTimeout(() => {
-            try {
-              prevFocused?.focus();
-            } catch (e) {
-              // ignore
-            }
-          }, 0);
+        // Only restore focus if we actually invoked onClose.
+        if (onClose) {
+          try {
+            const result = onClose();
+            Promise.resolve(result).finally(() => {
+              setTimeout(() => {
+                try {
+                  prevFocused?.focus();
+                } catch (e) {
+                  // ignore
+                }
+              }, 0);
+            });
+          } catch (e) {
+            // If onClose throws synchronously, still attempt to restore focus.
+            setTimeout(() => {
+              try {
+                prevFocused?.focus();
+              } catch (err) {
+                // ignore
+              }
+            }, 0);
+          }
         }
       }
     };
