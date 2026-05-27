@@ -67,13 +67,28 @@ function getCampaignIdFromUrl(): string | null {
 }
 
 function setCampaignIdInUrl(campaignId: string | null): void {
-  const url = new URL(window.location.href);
+  if (typeof window === "undefined" || !window.location?.href) {
+    return;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(window.location.href);
+  } catch {
+    return;
+  }
+
   if (campaignId) {
     url.searchParams.set("campaign", campaignId);
   } else {
-    url.searchParams.delete("campaign");
+    if (url.searchParams) {
+      url.searchParams.delete("campaign");
+    }
   }
-  window.history.replaceState(null, "", url.toString());
+
+  if (window.history?.replaceState) {
+    window.history.replaceState(null, "", url.toString());
+  }
 }
 
 function getErrorMessage(error: unknown): string {
@@ -531,6 +546,11 @@ function App() {
       ) : null}
 
       <section className="hero animate-fade-in">
+        {freighter.networkMismatch ? (
+          <div className="banner banner--warning">
+            {freighter.networkMismatch.message}
+          </div>
+        ) : null}
         <div className="hero-topline">
           <div>
             <div className="eyebrow">Stellar Goal Vault</div>
@@ -613,6 +633,7 @@ function App() {
           isConnectingWallet={isConnectingWallet}
           isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
           isLoading={isSelectedLoading || initialLoad}
+          networkMismatch={freighter.networkMismatch}
           onConnectWallet={handleConnectWallet}
           onDisconnectWallet={handleDisconnectWallet}
           onPledge={handlePledge}

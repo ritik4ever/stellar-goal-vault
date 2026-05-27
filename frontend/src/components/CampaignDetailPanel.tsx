@@ -19,6 +19,7 @@ interface CampaignDetailPanelProps {
   onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
   onClose?: () => void;
+  networkMismatch?: { expected: string; actual: string; message: string } | null;
 }
 
 function networkName(config: AppConfig | null | undefined): string {
@@ -51,6 +52,7 @@ export function CampaignDetailPanel({
   onSoftDelete = async () => {},
   onRefund = async () => {},
   onClose,
+  networkMismatch = null,
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState("25");
   const [refundContributor, setRefundContributor] = useState("");
@@ -287,7 +289,8 @@ export function CampaignDetailPanel({
               isSubmitting ||
               isPledgePending ||
               !activeCampaign.progress.canPledge ||
-              !connectedWallet
+              !connectedWallet ||
+              Boolean(networkMismatch)
             }
           >
             {isPledgePending ? "Submitting..." : "Add pledge"}
@@ -301,7 +304,8 @@ export function CampaignDetailPanel({
               !activeCampaign.progress.canClaim ||
               !connectedWallet ||
               connectedWallet !== activeCampaign.creator ||
-              !walletReady
+              !walletReady ||
+              Boolean(networkMismatch)
             }
             onClick={() => {
               void handleClaim();
