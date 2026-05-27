@@ -341,8 +341,10 @@ export function listCampaigns(
 
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
-    whereClauses.push(`LOWER(title) LIKE ?`);
-    params.push(searchTerm);
+    whereClauses.push(
+      `(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(creator) LIKE ? OR CAST(id AS TEXT) LIKE ?)`,
+    );
+    params.push(searchTerm, searchTerm, searchTerm, searchTerm);
   }
 
   if (options?.assetCode) {
