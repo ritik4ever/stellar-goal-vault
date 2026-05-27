@@ -34,6 +34,7 @@ export function createLogLine(
   });
 }
 
+/* eslint-disable no-console */
 function getConsoleMethod(level: LogLevel): (message?: unknown, ...optionalParams: unknown[]) => void {
   switch (level) {
     case "debug":
@@ -47,6 +48,7 @@ function getConsoleMethod(level: LogLevel): (message?: unknown, ...optionalParam
       return console.info;
   }
 }
+/* eslint-enable no-console */
 
 export function logLine(
   level: LogLevel,

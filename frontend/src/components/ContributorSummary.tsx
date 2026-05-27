@@ -4,6 +4,7 @@ import { CopyButton } from "./CopyButton";
 import { AddressAvatar } from "./AddressAvatar";
 import { EmptyState } from "./EmptyState";
 import { Pledge } from "../types/campaign";
+import { buildContributorCsv, downloadCsv } from "../utils/exportCsv";
 
 function round2(value: number): number {
   return Number(value.toFixed(2));
@@ -21,11 +22,13 @@ interface AggregatedContributor {
 interface ContributorSummaryProps {
   pledges?: Pledge[];
   assetCode: string;
+  campaignId?: string;
   isLoading?: boolean;
 }
 export function ContributorSummary({
   pledges,
   assetCode,
+  campaignId,
   isLoading,
 }: ContributorSummaryProps) {
   if (isLoading || pledges === undefined) {
@@ -135,6 +138,17 @@ export function ContributorSummary({
     };
   }, [pledges]);
 
+  function handleExportCsv() {
+    const summaries = rows.map((row) => ({
+      contributor: row.contributor,
+      totalPledged: row.activeTotal + row.refundedTotal,
+      refundedAmount: row.refundedTotal,
+      isFullyRefunded: row.activePledgeCount === 0 && row.refundedPledgeCount > 0,
+    }));
+    const filename = `contributors-${campaignId ?? 'export'}.csv`;
+    downloadCsv(filename, buildContributorCsv(summaries));
+  }
+
   if (!pledges?.length) {
     return (
       <section className="contributor-summary" aria-label="Contributor summary">
@@ -155,6 +169,14 @@ export function ContributorSummary({
     <section className="contributor-summary" aria-label="Contributor summary">
       <div className="contributor-summary-heading">
         <h3 className="contributor-summary-title">Contributor summary</h3>
+        <button
+          type="button"
+          className="btn-ghost small"
+          onClick={handleExportCsv}
+          aria-label="Export contributors as CSV"
+        >
+          Export CSV
+        </button>
       </div>
 
       <div className="contributor-summary-stats">
