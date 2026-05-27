@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
@@ -32,6 +33,7 @@ import {
 } from "./services/freighter";
 import { submitRefundTransaction } from "./services/soroban";
 import { useFreighter } from "./hooks/useFreighter";
+import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useToast } from "./hooks/useToast";
 import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
 import {
@@ -44,6 +46,8 @@ import {
 
 const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
+const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
+const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
 
 type ThemeMode = "light" | "dark";
 
@@ -124,12 +128,7 @@ function toApiError(error: unknown): ApiError {
   return { message: "Something went wrong." };
 }
 
-function getInitialThemeMode(): ThemeMode {
-  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-  if (storedTheme === "light" || storedTheme === "dark") {
-    return storedTheme;
-  }
-
+function getSystemTheme(): ThemeMode {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
@@ -154,7 +153,9 @@ function App() {
   const [initialLoad, setInitialLoad] = useState(true);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => getInitialThemeMode());
+  const [themeMode, setThemeMode] = useLocalStorage<ThemeMode>(THEME_STORAGE_KEY, getSystemTheme());
+  const [, setSortOrder] = useLocalStorage<string>(SORT_ORDER_KEY, 'default');
+  const [, setFilterState] = useLocalStorage<string[]>(FILTER_STATE_KEY, []);
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -175,7 +176,6 @@ function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", themeMode);
-    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
   }, [themeMode]);
 
   useEffect(() => {
@@ -609,11 +609,13 @@ function App() {
           className="animate-fade-in"
           style={{ animationDelay: "0.1s" }}
         >
-          <CreatorAnalytics
-            creatorAddress={selectedCampaign.creator}
-            campaigns={campaigns}
-            isLoading={isCampaignsLoading || initialLoad}
-          />
+          <ErrorBoundary componentName="CreatorAnalytics">
+            <CreatorAnalytics
+              creatorAddress={selectedCampaign.creator}
+              campaigns={campaigns}
+              isLoading={isCampaignsLoading || initialLoad}
+            />
+          </ErrorBoundary>
         </section>
       )}
 
@@ -642,19 +644,37 @@ function App() {
           onRefund={handleRefund}
           onClose={() => setSelectedCampaignId(null)}
         />
+        <ErrorBoundary componentName="CampaignDetailPanel">
+          <CampaignDetailPanel
+            campaign={selectedCampaign}
+            appConfig={appConfig}
+            connectedWallet={connectedWallet}
+            isConnectingWallet={isConnectingWallet}
+            isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+            isLoading={isSelectedLoading || initialLoad}
+            onConnectWallet={handleConnectWallet}
+            onDisconnectWallet={handleDisconnectWallet}
+            onPledge={handlePledge}
+            onClaim={handleClaim}
+            onSoftDelete={handleSoftDelete}
+            onRefund={handleRefund}
+          />
+        </ErrorBoundary>
       </section>
 
       <section className="secondary-grid">
-        <CampaignsTable
-          campaigns={campaigns}
-          selectedCampaignId={selectedCampaignId}
-          onSelect={handleSelect}
-          onSearchChange={(query) => {
-            void refreshCampaigns(query);
-          }}
-          isLoading={isCampaignsLoading || initialLoad}
-          invalidUrlCampaignId={invalidUrlCampaignId}
-        />
+        <ErrorBoundary componentName="CampaignsTable">
+          <CampaignsTable
+            campaigns={campaigns}
+            selectedCampaignId={selectedCampaignId}
+            onSelect={handleSelect}
+            onSearchChange={(query) => {
+              void refreshCampaigns(query);
+            }}
+            isLoading={isCampaignsLoading || initialLoad}
+            invalidUrlCampaignId={invalidUrlCampaignId}
+          />
+        </ErrorBoundary>
 
         <CampaignTimeline history={history} isLoading={isSelectedLoading || initialLoad} />
       </section>

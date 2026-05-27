@@ -248,6 +248,7 @@ export function CampaignDetailPanel({
       <ContributorSummary
         pledges={activeCampaign.pledges}
         assetCode={activeCampaign.assetCode}
+        campaignId={activeCampaign.id}
         isLoading={isLoading}
       />
 

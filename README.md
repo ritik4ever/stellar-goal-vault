@@ -219,6 +219,30 @@ Build:
 npm run build
 ```
 
+### Local development with Docker (hot-reload)
+
+A `docker-compose.override.yml` is included for local development. Docker Compose merges it automatically with `docker-compose.yml` when you run `docker compose up`, so no extra flags are needed.
+
+What the override does:
+
+- Mounts `./frontend/src` and `./backend/src` into each container so that file changes are reflected immediately without rebuilding the image.
+- Runs `npm run dev` for both services (Vite dev server for the frontend, `ts-node-dev` for the backend).
+- Exposes Vite's HMR WebSocket port `24678` to the host.
+
+```bash
+# Build images and start both services with hot-reload
+docker compose up --build
+
+# Or in the background
+docker compose up --build -d
+```
+
+Stop and remove containers:
+
+```bash
+docker compose down
+```
+
 ## API load testing
 
 The backend includes a configurable load test script built with `autocannon` to simulate concurrent campaign reads and pledge writes.
@@ -314,6 +338,10 @@ That issue is already represented in:
 - `backend/src/services/openIssues.ts`
 - `OPEN_SOURCE_ISSUES.md`
 - The frontend backlog panel
+
+## Security
+
+Please see [SECURITY.md](./SECURITY.md) for our responsible disclosure policy, supported versions, and reporting instructions.
 
 ## Contributing
 

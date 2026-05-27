@@ -31,6 +31,10 @@ jobs:
         working-directory: backend
         run: npm run build|| npx tsc --noEmit || echo "No build script found - typecheck passed"
 
+      - name: Lint backend
+        working-directory: backend
+        run: npm run lint
+
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest
@@ -53,6 +57,10 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
 
   contract-build:
     name: Contract Build

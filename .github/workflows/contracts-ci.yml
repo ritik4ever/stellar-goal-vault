@@ -1,0 +1,66 @@
+name: Contracts CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "contracts/**"
+      - ".github/workflows/contracts-ci.yml"
+  pull_request:
+    paths:
+      - "contracts/**"
+      - ".github/workflows/contracts-ci.yml"
+
+jobs:
+  contract-checks:
+    name: Build, Lint & Test Soroban Contract
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run clippy (deny all warnings)
+        working-directory: contracts
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run contract tests
+        working-directory: contracts
+        run: cargo test
+
+      - name: Build WASM release binary
+        working-directory: contracts
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Report WASM binary size
+        working-directory: contracts
+        run: |
+          WASM_FILE=$(find target/wasm32-unknown-unknown/release -name "*.wasm" | head -1)
+          if [ -n "$WASM_FILE" ]; then
+            SIZE_BYTES=$(wc -c < "$WASM_FILE")
+            SIZE_KB=$(echo "scale=2; $SIZE_BYTES / 1024" | bc)
+            echo "### WASM Binary Size" >> $GITHUB_STEP_SUMMARY
+            echo "| File | Size |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+            echo "| \`$WASM_FILE\` | ${SIZE_KB} KB (${SIZE_BYTES} bytes) |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No WASM file found." >> $GITHUB_STEP_SUMMARY
+          fi
