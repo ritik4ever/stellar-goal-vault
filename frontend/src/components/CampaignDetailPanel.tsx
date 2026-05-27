@@ -18,6 +18,8 @@ interface CampaignDetailPanelProps {
   onClaim?: (campaign: Campaign) => Promise<void>;
   onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
+  onClose?: () => void;
+  networkMismatch?: { expected: string; actual: string; message: string } | null;
 }
 
 function networkName(config: AppConfig | null | undefined): string {
@@ -49,6 +51,8 @@ export function CampaignDetailPanel({
   onClaim = async () => {},
   onSoftDelete = async () => {},
   onRefund = async () => {},
+  onClose,
+  networkMismatch = null,
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState("25");
   const [refundContributor, setRefundContributor] = useState("");
@@ -58,6 +62,46 @@ export function CampaignDetailPanel({
     setPledgeAmount("25");
     setRefundContributor(connectedWallet ?? "");
   }, [campaign?.id, connectedWallet]);
+
+  useEffect(() => {
+    if (!campaign) return;
+
+    const prevFocused = document.activeElement as HTMLElement | null;
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        // Only restore focus if we actually invoked onClose.
+        if (onClose) {
+          try {
+            const result = onClose();
+            Promise.resolve(result).finally(() => {
+              setTimeout(() => {
+                try {
+                  prevFocused?.focus();
+                } catch (e) {
+                  // ignore
+                }
+              }, 0);
+            });
+          } catch (e) {
+            // If onClose throws synchronously, still attempt to restore focus.
+            setTimeout(() => {
+              try {
+                prevFocused?.focus();
+              } catch (err) {
+                // ignore
+              }
+            }, 0);
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => {
+      window.removeEventListener("keydown", handleKeydown);
+    };
+  }, [campaign?.id, onClose]);
 
   const walletReady = Boolean(
     appConfig?.walletIntegrationReady ?? appConfig?.soroban?.enabled,
@@ -246,7 +290,8 @@ export function CampaignDetailPanel({
               isSubmitting ||
               isPledgePending ||
               !activeCampaign.progress.canPledge ||
-              !connectedWallet
+              !connectedWallet ||
+              Boolean(networkMismatch)
             }
           >
             {isPledgePending ? "Submitting..." : "Add pledge"}
@@ -260,7 +305,8 @@ export function CampaignDetailPanel({
               !activeCampaign.progress.canClaim ||
               !connectedWallet ||
               connectedWallet !== activeCampaign.creator ||
-              !walletReady
+              !walletReady ||
+              Boolean(networkMismatch)
             }
             onClick={() => {
               void handleClaim();
