@@ -96,6 +96,6 @@ export function seedDeterministicState(): void {
 
 if (require.main === module) {
   seedDeterministicState();
-  // Keep output terse for CI/script usage.
+  // eslint-disable-next-line no-console
   console.log("Deterministic database seed complete.");
 }

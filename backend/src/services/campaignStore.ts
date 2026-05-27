@@ -220,6 +220,10 @@ function getContributorPledgedTotal(
   return row.total;
 }
 
+/**
+ * Initializes the campaign store by setting up the underlying SQLite database.
+ * Must be called once at application startup before any store functions are used.
+ */
 export function initCampaignStore(): void {
   initDb();
 }
@@ -247,6 +251,13 @@ function checkContributorLimit(
   }
 }
 
+/**
+ * Derives the current progress and lifecycle state of a campaign.
+ *
+ * @param campaign - The campaign record to evaluate.
+ * @param at - Unix timestamp (seconds) to evaluate state against; defaults to now.
+ * @returns A {@link CampaignProgress} object with status, funding percentages, and action flags.
+ */
 export function calculateProgress(
   campaign: CampaignRecord,
   at = nowInSeconds(),
@@ -327,6 +338,12 @@ export interface GlobalStats {
 
 const MAX_CAMPAIGN_DURATION_SECONDS = 60 * 60 * 24 * 180;
 
+/**
+ * Retrieves a paginated, filtered list of campaigns from the database.
+ *
+ * @param options - Optional filters: `searchQuery`, `assetCode`, `status`, `includeDeleted`, `page`, `limit`.
+ * @returns A {@link ListCampaignsResult} with the matching campaign records and the total count.
+ */
 export function listCampaigns(
   options?: ListCampaignsOptions,
 ): ListCampaignsResult {
@@ -406,6 +423,12 @@ export function listCampaigns(
   };
 }
 
+/**
+ * Fetches a single campaign by its ID.
+ *
+ * @param campaignId - The unique campaign identifier.
+ * @returns The {@link CampaignRecord} if found, or `undefined` if it does not exist.
+ */
 export function getCampaign(campaignId: string): CampaignRecord | undefined {
   const db = getDb();
   const row = db
@@ -415,6 +438,12 @@ export function getCampaign(campaignId: string): CampaignRecord | undefined {
   return row ? rowToCampaign(row) : undefined;
 }
 
+/**
+ * Returns all pledges for a campaign, ordered by most recent first.
+ *
+ * @param campaignId - The unique campaign identifier.
+ * @returns An array of {@link PledgeRecord} objects (may be empty).
+ */
 export function getPledges(campaignId: string): PledgeRecord[] {
   const db = getDb();
   const rows = db
@@ -426,6 +455,13 @@ export function getPledges(campaignId: string): PledgeRecord[] {
   return rows.map(rowToPledge);
 }
 
+/**
+ * Returns a paginated list of pledges for a specific campaign.
+ *
+ * @param campaignId - The unique campaign identifier.
+ * @param options - Pagination options: `page` (1-based) and `limit` (records per page).
+ * @returns A {@link ListCampaignPledgesResult} with pledge records and the total count.
+ */
 export function listCampaignPledges(
   campaignId: string,
   options: ListCampaignPledgesOptions,
@@ -455,6 +491,13 @@ export function listCampaignPledges(
   };
 }
 
+/**
+ * Aggregates pledge totals per contributor for a campaign, including refunded amounts.
+ *
+ * @param campaignId - The unique campaign identifier.
+ * @returns An array of {@link ContributorSummary} objects sorted by total pledged (descending),
+ *          or an empty array if the campaign does not exist.
+ */
 export function getContributorSummary(campaignId: string): ContributorSummary[] {
   const db = getDb();
   const rows = db.prepare(`
@@ -485,6 +528,13 @@ export function getContributorSummary(campaignId: string): ContributorSummary[] 
   }));
 }
 
+/**
+ * Fetches a campaign enriched with its calculated progress, recent pledges, and event history.
+ *
+ * @param campaignId - The unique campaign identifier.
+ * @param pledgePreviewLimit - Maximum number of recent pledges to include (default: 5).
+ * @returns The enriched campaign object, or `undefined` if the campaign does not exist.
+ */
 export function getCampaignWithProgress(
   campaignId: string,
   pledgePreviewLimit = 5,
@@ -502,6 +552,14 @@ export function getCampaignWithProgress(
   };
 }
 
+/**
+ * Creates a new campaign and records a "created" lifecycle event.
+ *
+ * @param input - The campaign creation payload (see {@link CampaignInput}).
+ * @returns The newly created {@link CampaignRecord}.
+ * @throws {ServiceError} 400 `MAX_CAMPAIGN_DURATION_EXCEEDED` if the deadline is too far in the future.
+ * @throws {ServiceError} 400 `INVALID_INPUT` if no accepted tokens are provided.
+ */
 export function createCampaign(input: CampaignInput): CampaignRecord {
   const db = getDb();
   const now = nowInSeconds();
@@ -580,6 +638,18 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
   return campaign;
 }
 
+/**
+ * Records an off-chain pledge for a campaign and updates the pledged total.
+ *
+ * @param campaignId - The ID of the campaign to pledge to.
+ * @param input - The pledge payload (contributor address, amount, optional asset code).
+ * @returns The updated {@link CampaignRecord} after the pledge is applied.
+ * @throws {ServiceError} 404 `NOT_FOUND` if the campaign does not exist.
+ * @throws {ServiceError} 400 `INVALID_ASSET` if the token is not accepted by the campaign.
+ * @throws {ServiceError} 400 `INVALID_CAMPAIGN_STATE` if the campaign is no longer accepting pledges.
+ * @throws {ServiceError} 400 `MAX_PER_CONTRIBUTOR_EXCEEDED` if the contributor limit is breached.
+ * @throws {ServiceError} 400 `CAMPAIGN_FUNDING_CAP_EXCEEDED` if the pledge would exceed the target amount.
+ */
 export function addPledge(
   campaignId: string,
   input: PledgeInput,
@@ -647,6 +717,18 @@ export function addPledge(
   return getCampaign(campaignId)!;
 }
 
+/**
+ * Reconciles an on-chain Soroban pledge into the local database, deduplicating by transaction hash.
+ *
+ * @param campaignId - The ID of the campaign the pledge belongs to.
+ * @param input - The reconciled pledge payload including a mandatory `transactionHash`.
+ * @returns The updated {@link CampaignRecord} after the pledge is applied (or the existing record if already reconciled).
+ * @throws {ServiceError} 409 `TRANSACTION_HASH_CONFLICT` if the tx hash belongs to a different campaign.
+ * @throws {ServiceError} 404 `NOT_FOUND` if the campaign does not exist.
+ * @throws {ServiceError} 400 `INVALID_CAMPAIGN_STATE` if the campaign is no longer accepting pledges.
+ * @throws {ServiceError} 400 `MAX_PER_CONTRIBUTOR_EXCEEDED` if the contributor limit is breached.
+ * @throws {ServiceError} 400 `CAMPAIGN_FUNDING_CAP_EXCEEDED` if the pledge would exceed the target amount.
+ */
 export function reconcileOnChainPledge(
   campaignId: string,
   input: ReconciledPledgeInput,
@@ -735,6 +817,12 @@ export function reconcileOnChainPledge(
   return getCampaign(campaignId)!;
 }
 
+/**
+ * Returns aggregated statistics across all campaigns and pledges.
+ *
+ * @param at - Unix timestamp (seconds) used to classify campaign statuses; defaults to now.
+ * @returns A {@link GlobalStats} object with total campaigns, per-status counts, total pledged, and unique contributor count.
+ */
 export function getGlobalStats(at = nowInSeconds()): GlobalStats {
   const db = getDb();
   const row = db
@@ -840,6 +928,16 @@ function reconcileOnChainClaim(
   return getCampaign(campaignId)!;
 }
 
+/**
+ * Claims the funded balance of a campaign for its creator by reconciling an on-chain Soroban transaction.
+ *
+ * @param campaignId - The ID of the campaign to claim.
+ * @param input - Claim payload with `creator` address and on-chain `transactionHash`.
+ * @returns The updated {@link CampaignRecord} with `claimedAt` set.
+ * @throws {ServiceError} 404 `NOT_FOUND` if the campaign does not exist.
+ * @throws {ServiceError} 403 `FORBIDDEN` if the caller is not the campaign creator.
+ * @throws {ServiceError} 400 `INVALID_CAMPAIGN_STATE` if the campaign cannot be claimed yet.
+ */
 export function claimCampaign(
   campaignId: string,
   input: ReconciledClaimInput,
@@ -847,6 +945,14 @@ export function claimCampaign(
   return reconcileOnChainClaim(campaignId, input);
 }
 
+/**
+ * Soft-deletes a campaign by setting its `deleted_at` timestamp.
+ * The record remains in the database but is excluded from normal queries.
+ *
+ * @param campaignId - The unique campaign identifier.
+ * @throws {ServiceError} 404 `NOT_FOUND` if the campaign does not exist.
+ * @throws {ServiceError} 409 `ALREADY_DELETED` if the campaign has already been soft-deleted.
+ */
 export function softDeleteCampaign(campaignId: string): void {
   const db = getDb();
   const campaign = getCampaign(campaignId);
@@ -877,6 +983,16 @@ export function softDeleteCampaign(campaignId: string): void {
   }
 }
 
+/**
+ * Marks all active pledges for a contributor as refunded and decrements the campaign's pledged total.
+ *
+ * @param campaignId - The ID of the campaign containing the pledges to refund.
+ * @param contributor - The wallet address of the contributor to refund.
+ * @param reconciliation - Optional on-chain reconciliation data (tx hash, ledger info, contract ID).
+ * @returns An object with the updated {@link CampaignRecord} and the total `refundedAmount`.
+ * @throws {ServiceError} 404 `NOT_FOUND` if the campaign or any refundable pledges do not exist.
+ * @throws {ServiceError} 400 `INVALID_CAMPAIGN_STATE` if refunds are not available for this campaign.
+ */
 export function refundContributor(
   campaignId: string,
   contributor: string,

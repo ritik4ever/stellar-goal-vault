@@ -574,6 +574,7 @@ function printStartupBanner(): void {
   const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "..", "data", "campaigns.db");
   const nodeEnv = process.env.NODE_ENV || "development";
 
+  /* eslint-disable no-console */
   console.log("");
   console.log("╔════════════════════════════════════════════════════════════╗");
   console.log("║         Stellar Goal Vault Backend - Starting Up          ║");
@@ -583,6 +584,7 @@ function printStartupBanner(): void {
   console.log(`║  Database Path:  ${dbPath.padEnd(42)}║`);
   console.log("╚════════════════════════════════════════════════════════════╝");
   console.log("");
+  /* eslint-enable no-console */
 }
 
 function startServer() {
