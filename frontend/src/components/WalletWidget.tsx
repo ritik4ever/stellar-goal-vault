@@ -1,6 +1,6 @@
-import { Wallet } from "lucide-react";
-import { FreighterStatus } from "../hooks/useFreighter";
-import { CopyButton } from "./CopyButton";
+import { Wallet } from 'lucide-react';
+import { FreighterStatus } from '../hooks/useFreighter';
+import { CopyButton } from './CopyButton';
 
 interface WalletWidgetProps {
   status: FreighterStatus;
@@ -10,11 +10,11 @@ interface WalletWidgetProps {
 }
 
 export function WalletWidget({ status, publicKey, error, onConnect }: WalletWidgetProps) {
-  if (status === "checking") {
+  if (status === 'checking') {
     return <div className="wallet-widget wallet-widget--checking">Detecting wallet…</div>;
   }
 
-  if (status === "unavailable") {
+  if (status === 'unavailable') {
     return (
       <div className="wallet-widget wallet-widget--unavailable">
         <Wallet size={16} />
@@ -31,11 +31,13 @@ export function WalletWidget({ status, publicKey, error, onConnect }: WalletWidg
     );
   }
 
-  if (status === "connected" && publicKey) {
+  if (status === 'connected' && publicKey) {
     return (
       <div className="wallet-widget wallet-widget--connected">
         <span className="wallet-widget__dot" aria-hidden="true" />
-        <span className="mono">{publicKey.slice(0, 8)}…{publicKey.slice(-4)}</span>
+        <span className="mono">
+          {publicKey.slice(0, 8)}…{publicKey.slice(-4)}
+        </span>
         <CopyButton value={publicKey} ariaLabel="Copy wallet address" />
       </div>
     );

@@ -1,6 +1,6 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState } from 'react';
 
-export type ToastVariant = "success" | "error" | "info";
+export type ToastVariant = 'success' | 'error' | 'info';
 
 export interface Toast {
   id: string;
@@ -24,7 +24,7 @@ export function useToast() {
   }, []);
 
   const addToast = useCallback(
-    (message: string, variant: ToastVariant = "info") => {
+    (message: string, variant: ToastVariant = 'info') => {
       const id = crypto.randomUUID();
       setToasts((prev) => [...prev, { id, message, variant }]);
       const timer = setTimeout(() => dismiss(id), AUTO_DISMISS_MS);

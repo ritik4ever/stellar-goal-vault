@@ -1,4 +1,4 @@
-import { Request } from "express";
+import { Request } from 'express';
 
 export interface RequestLog {
   timestamp: string;
@@ -22,36 +22,36 @@ function formatDuration(durationMs: number): string {
   return `${durationMs.toFixed(2)}ms`;
 }
 
-function toStatusLevel(statusCode: number): "info" | "warn" | "error" {
+function toStatusLevel(statusCode: number): 'info' | 'warn' | 'error' {
   if (statusCode >= 500) {
-    return "error";
+    return 'error';
   }
   if (statusCode >= 400) {
-    return "warn";
+    return 'warn';
   }
-  return "info";
+  return 'info';
 }
 
 function getRequestPath(req: Request): string {
   const url = req.originalUrl ?? req.url ?? req.path;
   if (!url) {
-    return "/";
+    return '/';
   }
 
-  const [pathOnly] = url.split("?");
-  return pathOnly || "/";
+  const [pathOnly] = url.split('?');
+  return pathOnly || '/';
 }
 
 function getRemoteIp(req: Request): string {
-  const forwardedForHeader = req.headers["x-forwarded-for"];
-  if (typeof forwardedForHeader === "string") {
-    const [firstIp] = forwardedForHeader.split(",");
+  const forwardedForHeader = req.headers['x-forwarded-for'];
+  if (typeof forwardedForHeader === 'string') {
+    const [firstIp] = forwardedForHeader.split(',');
     if (firstIp) {
       return firstIp.trim();
     }
   }
 
-  return req.socket.remoteAddress ?? "unknown";
+  return req.socket.remoteAddress ?? 'unknown';
 }
 
 export function createRequestLog(
@@ -67,7 +67,7 @@ export function createRequestLog(
     durationMs: Number(durationMs.toFixed(2)),
     duration: formatDuration(durationMs),
     requestId: req.requestId,
-    userAgent: req.get("user-agent"),
+    userAgent: req.get('user-agent'),
     remoteIp: getRemoteIp(req),
   };
 }
@@ -75,7 +75,7 @@ export function createRequestLog(
 export function logRequest(log: RequestLog): void {
   const level = toStatusLevel(log.statusCode);
 
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.NODE_ENV === 'production') {
     // eslint-disable-next-line no-console
     console.log(
       JSON.stringify({
@@ -86,8 +86,8 @@ export function logRequest(log: RequestLog): void {
     return;
   }
 
-  const requestIdSuffix = log.requestId ? ` requestId=${log.requestId}` : "";
-  const remoteIpSuffix = log.remoteIp ? ` ip=${log.remoteIp}` : "";
+  const requestIdSuffix = log.requestId ? ` requestId=${log.requestId}` : '';
+  const remoteIpSuffix = log.remoteIp ? ` ip=${log.remoteIp}` : '';
 
   // eslint-disable-next-line no-console
   console.log(

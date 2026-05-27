@@ -1,35 +1,35 @@
-import fs from "fs";
-import path from "path";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import fs from 'fs';
+import path from 'path';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-const TEST_DB_PATH = path.join("/tmp", `stellar-goal-vault-campaign-filters-${process.pid}.db`);
+const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-campaign-filters-${process.pid}.db`);
 
 process.env.DB_PATH = TEST_DB_PATH;
-process.env.CONTRACT_ID = "";
+process.env.CONTRACT_ID = '';
 
-type IndexModule = typeof import("./index");
-type CampaignStoreModule = typeof import("./services/campaignStore");
-type DbModule = typeof import("./services/db");
+type IndexModule = typeof import('./index');
+type CampaignStoreModule = typeof import('./services/campaignStore');
+type DbModule = typeof import('./services/db');
 
-let listCampaigns: CampaignStoreModule["listCampaigns"];
-let parseCampaignListFilters: IndexModule["parseCampaignListFilters"];
-let createCampaign: CampaignStoreModule["createCampaign"];
-let addPledge: CampaignStoreModule["addPledge"];
-let calculateProgress: CampaignStoreModule["calculateProgress"];
-let initCampaignStore: CampaignStoreModule["initCampaignStore"];
-let getDb: DbModule["getDb"];
+let listCampaigns: CampaignStoreModule['listCampaigns'];
+let parseCampaignListFilters: IndexModule['parseCampaignListFilters'];
+let createCampaign: CampaignStoreModule['createCampaign'];
+let addPledge: CampaignStoreModule['addPledge'];
+let calculateProgress: CampaignStoreModule['calculateProgress'];
+let initCampaignStore: CampaignStoreModule['initCampaignStore'];
+let getDb: DbModule['getDb'];
 
-const CREATOR = `G${"A".repeat(55)}`;
-const CONTRIBUTOR = `G${"B".repeat(55)}`;
+const CREATOR = `G${'A'.repeat(55)}`;
+const CONTRIBUTOR = `G${'B'.repeat(55)}`;
 
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
-  ({ parseCampaignListFilters } = await import("./index"));
-  ({ getDb } = await import("./services/db"));
-  ({ initCampaignStore, listCampaigns, createCampaign, addPledge, calculateProgress } = await import("./services/campaignStore"));
+  ({ parseCampaignListFilters } = await import('./index'));
+  ({ getDb } = await import('./services/db'));
+  ({ initCampaignStore, listCampaigns, createCampaign, addPledge, calculateProgress } =
+    await import('./services/campaignStore'));
   initCampaignStore();
 }, 20000);
-
 
 beforeEach(() => {
   const db = getDb();
@@ -43,18 +43,18 @@ function createCampaignFixtures() {
 
   const openUsdc = createCampaign({
     creator: CREATOR,
-    title: "Open USDC Campaign",
-    description: "Open USDC campaign for checking unfiltered and asset-filtered results.",
-    assetCode: "USDC",
+    title: 'Open USDC Campaign',
+    description: 'Open USDC campaign for checking unfiltered and asset-filtered results.',
+    assetCode: 'USDC',
     targetAmount: 150,
     deadline: now + 3600,
   });
 
   const fundedUsdcCampaign = createCampaign({
     creator: CREATOR,
-    title: "Funded USDC Campaign",
-    description: "Funded USDC campaign that should match combined asset and status filters.",
-    assetCode: "usdc",
+    title: 'Funded USDC Campaign',
+    description: 'Funded USDC campaign that should match combined asset and status filters.',
+    assetCode: 'usdc',
     targetAmount: 100,
     deadline: now + 7200,
   });
@@ -62,9 +62,9 @@ function createCampaignFixtures() {
 
   const fundedXlmCampaign = createCampaign({
     creator: CREATOR,
-    title: "Funded XLM Campaign",
-    description: "Funded XLM campaign that should be excluded when asset is filtered to USDC.",
-    assetCode: "XLM",
+    title: 'Funded XLM Campaign',
+    description: 'Funded XLM campaign that should be excluded when asset is filtered to USDC.',
+    assetCode: 'XLM',
     targetAmount: 75,
     deadline: now + 7200,
   });
@@ -72,18 +72,18 @@ function createCampaignFixtures() {
 
   const failedUsdc = createCampaign({
     creator: CREATOR,
-    title: "Failed USDC Campaign",
-    description: "Failed USDC campaign with a past deadline to exercise status-based filtering.",
-    assetCode: "USDC",
+    title: 'Failed USDC Campaign',
+    description: 'Failed USDC campaign with a past deadline to exercise status-based filtering.',
+    assetCode: 'USDC',
     targetAmount: 200,
     deadline: now - 60,
   });
 
   const claimedUsdcCampaign = createCampaign({
     creator: CREATOR,
-    title: "Claimed USDC Campaign",
-    description: "Claimed USDC campaign to ensure other statuses are still returned correctly.",
-    assetCode: "USDC",
+    title: 'Claimed USDC Campaign',
+    description: 'Claimed USDC campaign to ensure other statuses are still returned correctly.',
+    assetCode: 'USDC',
     targetAmount: 50,
     deadline: now + 7200,
   });
@@ -113,16 +113,16 @@ function buildCampaignList() {
   return { fixtures, campaigns };
 }
 
-describe("campaign list filters and pagination", () => {
-  it("filters campaigns by asset code case-insensitively via SQL", () => {
+describe('campaign list filters and pagination', () => {
+  it('filters campaigns by asset code case-insensitively via SQL', () => {
     const { fixtures } = buildCampaignList();
 
-    const filters = parseCampaignListFilters({ asset: "usdc" });
-    const { campaigns: filtered } = listCampaigns({ 
-      ...filters, 
-      assetCode: filters.asset, 
-      page: 1, 
-      limit: 10 
+    const filters = parseCampaignListFilters({ asset: 'usdc' });
+    const { campaigns: filtered } = listCampaigns({
+      ...filters,
+      assetCode: filters.asset,
+      page: 1,
+      limit: 10,
     });
 
     expect(filtered).toHaveLength(4);
@@ -134,10 +134,10 @@ describe("campaign list filters and pagination", () => {
         fixtures.claimedUsdc.id,
       ].sort(),
     );
-    expect(filtered.every((campaign) => campaign.assetCode === "USDC")).toBe(true);
+    expect(filtered.every((campaign) => campaign.assetCode === 'USDC')).toBe(true);
   });
 
-  it("handles pagination correctly", () => {
+  it('handles pagination correctly', () => {
     buildCampaignList(); // creates 5 campaigns
 
     const page1 = listCampaigns({ page: 1, limit: 2 });
@@ -153,32 +153,27 @@ describe("campaign list filters and pagination", () => {
     expect(page3.totalCount).toBe(5);
 
     // Verify disjoint sets
-    const ids1 = page1.campaigns.map(c => c.id);
-    const ids2 = page2.campaigns.map(c => c.id);
-    const ids3 = page3.campaigns.map(c => c.id);
-    
-    expect(ids1.some(id => ids2.includes(id))).toBe(false);
-    expect(ids2.some(id => ids3.includes(id))).toBe(false);
+    const ids1 = page1.campaigns.map((c) => c.id);
+    const ids2 = page2.campaigns.map((c) => c.id);
+    const ids3 = page3.campaigns.map((c) => c.id);
+
+    expect(ids1.some((id) => ids2.includes(id))).toBe(false);
+    expect(ids2.some((id) => ids3.includes(id))).toBe(false);
   });
 
-  it("combines status and asset filtering correctly via SQL", () => {
+  it('combines status and asset filtering correctly via SQL', () => {
     const { fixtures } = buildCampaignList();
 
-    const filters = parseCampaignListFilters({ asset: "UsDc", status: "FuNdEd" });
+    const filters = parseCampaignListFilters({ asset: 'UsDc', status: 'FuNdEd' });
     const { campaigns: filtered } = listCampaigns({
       ...filters,
       assetCode: filters.asset,
       page: 1,
-      limit: 10
+      limit: 10,
     });
 
     expect(filtered).toHaveLength(1);
     expect(filtered[0].id).toBe(fixtures.fundedUsdc.id);
-    expect(filtered[0].assetCode).toBe("USDC");
+    expect(filtered[0].assetCode).toBe('USDC');
   });
 });
-
-
-
-
-

@@ -1,6 +1,6 @@
-import { getDb } from "./db";
+import { getDb } from './db';
 
-export type CampaignEventType = "created" | "pledged" | "claimed" | "refunded" | "updated";
+export type CampaignEventType = 'created' | 'pledged' | 'claimed' | 'refunded' | 'updated';
 
 export interface BlockchainMetadata {
   txHash?: string;
@@ -42,7 +42,9 @@ function rowToEvent(row: EventRow): CampaignEvent {
     actor: row.actor ?? undefined,
     amount: row.amount ?? undefined,
     metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined,
-    blockchainMetadata: row.blockchain_metadata ? (JSON.parse(row.blockchain_metadata) as BlockchainMetadata) : undefined,
+    blockchainMetadata: row.blockchain_metadata
+      ? (JSON.parse(row.blockchain_metadata) as BlockchainMetadata)
+      : undefined,
   };
 }
 
@@ -90,9 +92,7 @@ export function recordEvent(
 export function getCampaignHistory(campaignId: string): CampaignEvent[] {
   const db = getDb();
   const rows = db
-    .prepare(
-      `SELECT * FROM campaign_events WHERE campaign_id = ? ORDER BY timestamp ASC, id ASC`,
-    )
+    .prepare(`SELECT * FROM campaign_events WHERE campaign_id = ? ORDER BY timestamp ASC, id ASC`)
     .all(campaignId) as EventRow[];
 
   return rows.map(rowToEvent);

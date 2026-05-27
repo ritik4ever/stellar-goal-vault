@@ -62,6 +62,27 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+  format-check:
+    name: Prettier Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Run prettier format check
+        run: npm run format:check
+
   contract-build:
     name: Contract Build
     runs-on: ubuntu-latest
