@@ -10,6 +10,17 @@ services:
     env_file:
       - ./backend/.env
     restart: unless-stopped
+    healthcheck:
+      # Probe the backend REST API health endpoint.
+      # interval: how often Docker polls after the container starts.
+      # timeout: how long a single probe may take before it is considered failed.
+      # retries: consecutive failures before the container is marked unhealthy.
+      # start_period: grace window after container start before failures count.
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   frontend:
     build:
@@ -20,5 +31,15 @@ services:
     environment:
       - VITE_API_URL=http://backend:3001/api
     depends_on:
-      - backend
+      # Wait until the backend passes its health check before starting frontend.
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      # Probe the frontend HTTP server root.
+      # Same timing parameters as the backend for consistency.
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

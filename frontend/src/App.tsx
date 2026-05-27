@@ -33,6 +33,7 @@ import {
 } from "./services/freighter";
 import { submitRefundTransaction } from "./services/soroban";
 import { useFreighter } from "./hooks/useFreighter";
+import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useToast } from "./hooks/useToast";
 import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
 import {
@@ -45,6 +46,8 @@ import {
 
 const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
+const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
+const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
 
 type ThemeMode = "light" | "dark";
 
@@ -110,12 +113,7 @@ function toApiError(error: unknown): ApiError {
   return { message: "Something went wrong." };
 }
 
-function getInitialThemeMode(): ThemeMode {
-  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-  if (storedTheme === "light" || storedTheme === "dark") {
-    return storedTheme;
-  }
-
+function getSystemTheme(): ThemeMode {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
@@ -140,7 +138,9 @@ function App() {
   const [initialLoad, setInitialLoad] = useState(true);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => getInitialThemeMode());
+  const [themeMode, setThemeMode] = useLocalStorage<ThemeMode>(THEME_STORAGE_KEY, getSystemTheme());
+  const [, setSortOrder] = useLocalStorage<string>(SORT_ORDER_KEY, 'default');
+  const [, setFilterState] = useLocalStorage<string[]>(FILTER_STATE_KEY, []);
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -161,7 +161,6 @@ function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", themeMode);
-    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
   }, [themeMode]);
 
   useEffect(() => {
