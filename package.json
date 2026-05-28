@@ -9,6 +9,7 @@
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
     "build": "cd backend && npm run build && cd ../frontend && npm run build",
+    "test:visual": "npx playwright test --config=playwright.visual.config.ts",
     "format": "npx prettier --write \"**/*.{ts,tsx,json}\"",
     "format:check": "npx prettier --check \"**/*.{ts,tsx,json}\"",
     "deploy:contract": "./scripts/deploy.sh"
