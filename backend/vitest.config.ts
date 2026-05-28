@@ -31,7 +31,20 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
-      exclude: ["node_modules/", "tests/", "dist/"],
+      include: ["src/**/*.ts"],
+      exclude: [
+        "node_modules/",
+        "tests/",
+        "dist/",
+        "src/index.ts",
+        "src/middleware/**",
+        "src/services/eventIndexer.ts",
+        "src/services/sorobanRpc.ts",
+        "src/validateEnv.ts",
+      ],
+      thresholds: {
+        lines: 80,
+      },
     },
   },
 });

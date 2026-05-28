@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SearchInput } from "./SearchInput";
@@ -46,7 +47,20 @@ describe("SearchInput Component", () => {
   describe("User Interactions", () => {
     it("should call onChange when user types", async () => {
       const user = userEvent.setup();
-      render(<SearchInput value="" onChange={mockOnChange} />);
+      function ControlledSearchInput() {
+        const [value, setValue] = useState("");
+        return (
+          <SearchInput
+            value={value}
+            onChange={(nextValue) => {
+              mockOnChange(nextValue);
+              setValue(nextValue);
+            }}
+          />
+        );
+      }
+
+      render(<ControlledSearchInput />);
 
       const input = screen.getByPlaceholderText("Search campaigns...");
       await user.type(input, "rocket");
@@ -78,7 +92,7 @@ describe("SearchInput Component", () => {
   describe("Disabled State", () => {
     it("should disable input when disabled prop is true", () => {
       render(<SearchInput value="" onChange={mockOnChange} disabled={true} />);
-      const input = screen.getByPlaceholderText("Search campaigns..") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Search campaigns...") as HTMLInputElement;
       expect(input.disabled).toBe(true);
     });
 
@@ -88,7 +102,7 @@ describe("SearchInput Component", () => {
         <SearchInput value="" onChange={mockOnChange} disabled={false} />
       );
 
-      const input = screen.getByPlaceholderText("Search campaigns..") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Search campaigns...") as HTMLInputElement;
 
       // Enable input and type
       await user.type(input, "test");
@@ -147,7 +161,7 @@ describe("SearchInput Component", () => {
       const user = userEvent.setup();
       render(<SearchInput value="" onChange={mockOnChange} />);
 
-      const input = screen.getByPlaceholderText("Search campaigns..") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Search campaigns...") as HTMLInputElement;
 
       // Simulate paste by changing the value directly
       fireEvent.change(input, { target: { value: "pasted text" } });
@@ -159,7 +173,7 @@ describe("SearchInput Component", () => {
       const user = userEvent.setup();
       render(<SearchInput value="existing" onChange={mockOnChange} />);
 
-      const input = screen.getByPlaceholderText("Search campaigns..") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Search campaigns...") as HTMLInputElement;
       input.focus();
 
       await user.keyboard("{Control>}a{/Control}");

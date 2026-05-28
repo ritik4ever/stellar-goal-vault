@@ -327,6 +327,10 @@ Contract deployment:
 - `NETWORK_PASSPHRASE` optional
 - `RPC_URL` optional
 
+## Test coverage
+
+Backend and frontend Vitest runs enforce a minimum 80% line coverage target. Pull request CI runs both suites with `--coverage`, fails when line coverage drops below 80%, and uploads the generated HTML coverage reports as workflow artifacts.
+
 ## Open-source ready next steps
 
 The main contribution issue for this repo is:

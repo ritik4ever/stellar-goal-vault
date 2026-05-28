@@ -1,5 +1,5 @@
 import { LayoutGrid } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDebounce } from "../hooks/useDebounce";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
@@ -58,6 +58,7 @@ export function CampaignsTable({
   campaigns,
   selectedCampaignId,
   onSelect,
+  onSearchChange,
   isLoading = false,
   invalidUrlCampaignId = null,
 }: CampaignsTableProps) {
@@ -100,10 +101,10 @@ export function CampaignsTable({
       campaigns,
       assetCode,
       statusFilter,
-      "", // server-side search, no client search
+      debouncedSearchQuery,
     );
     return sortCampaigns(filtered, sortBy);
-  }, [campaigns, assetCode, statusFilter, sortBy]);
+  }, [campaigns, assetCode, statusFilter, sortBy, debouncedSearchQuery]);
 
   if (isLoading && isEmpty) {
     return (
@@ -176,9 +177,11 @@ export function CampaignsTable({
                 <button
                   key={filter.label}
                   type="button"
+                  role="tab"
                   className={`status-filter-tab ${isActive ? "status-filter-tab-active" : ""}`}
                   onClick={() => setStatusFilter(filter.value)}
-                  aria-pressed={isActive}
+                  aria-selected={isActive}
+                  tabIndex={isActive ? 0 : -1}
                   disabled={isLoading}
                 >
                   <span>{filter.label}</span>
