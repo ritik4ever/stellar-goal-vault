@@ -38,6 +38,7 @@ export const config = {
       if (code && addr) acc[code.trim().toUpperCase()] = addr.trim();
       return acc;
     }, {} as Record<string, string>),
+  redisUrl: process.env.REDIS_URL ?? "",
   defaultMaxPerContributor: parseInteger(process.env.DEFAULT_MAX_PER_CONTRIBUTOR, 0),
 };
 
