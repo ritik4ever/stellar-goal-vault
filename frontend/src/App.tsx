@@ -521,7 +521,7 @@ function App() {
   }, [setThemeMode]);
 
   const handleSearchChange = useCallback((query: string) => {
-    void refreshCampaigns(query);
+    refreshCampaigns(query).catch((err) => console.error("Search refresh failed:", err));
   }, [refreshCampaigns]);
 
   return (

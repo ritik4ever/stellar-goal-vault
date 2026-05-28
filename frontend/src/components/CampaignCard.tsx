@@ -39,11 +39,14 @@ function areEqual(prevProps: CampaignCardProps, nextProps: CampaignCardProps): b
   if (prevC.progress.canClaim !== nextC.progress.canClaim) return false;
   if (prevC.progress.canRefund !== nextC.progress.canRefund) return false;
 
-  // Compare acceptedTokens:
-  if (prevC.acceptedTokens !== nextC.acceptedTokens) {
-    if (prevC.acceptedTokens.length !== nextC.acceptedTokens.length) return false;
-    for (let i = 0; i < prevC.acceptedTokens.length; i++) {
-      if (prevC.acceptedTokens[i] !== nextC.acceptedTokens[i]) return false;
+  // Compare acceptedTokens securely:
+  const prevTokens = prevC.acceptedTokens;
+  const nextTokens = nextC.acceptedTokens;
+  if (prevTokens !== nextTokens) {
+    if (!prevTokens || !nextTokens) return false;
+    if (prevTokens.length !== nextTokens.length) return false;
+    for (let i = 0; i < prevTokens.length; i++) {
+      if (prevTokens[i] !== nextTokens[i]) return false;
     }
   }
 
