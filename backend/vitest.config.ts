@@ -30,8 +30,12 @@ export default defineConfig({
     // Coverage (optional)
     coverage: {
       provider: "v8",
+      provider: "v8",
       reporter: ["text", "json", "html"],
       exclude: ["node_modules/", "tests/", "dist/"],
+      thresholds: {
+        lines: 80,
+      },
     },
   },
 });
