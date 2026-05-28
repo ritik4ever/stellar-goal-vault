@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
@@ -153,11 +153,11 @@ function App() {
   );
   const [confettiBurst, setConfettiBurst] = useState<ConfettiBurst | null>(null);
 
-  const handleTransactionPreview = (data: TransactionPreviewData): Promise<boolean> => {
+  const handleTransactionPreview = useCallback((data: TransactionPreviewData): Promise<boolean> => {
     return new Promise((resolve) => {
       setTransactionPreview({ data, resolve });
     });
-  };
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", themeMode);
@@ -189,7 +189,7 @@ function App() {
     };
   }, [transactionPreview]);
 
-  async function refreshCampaigns(searchQuery: string = '', nextSelectedId?: string | null): Promise<Campaign[]> {
+  const refreshCampaigns = useCallback(async (searchQuery: string = '', nextSelectedId?: string | null): Promise<Campaign[]> => {
     setIsCampaignsLoading(true);
     try {
       const data = await listCampaigns({ search: searchQuery });
@@ -212,9 +212,9 @@ function App() {
     } finally {
       setIsCampaignsLoading(false);
     }
-  }
+  }, [selectedCampaignId]);
 
-  async function refreshHistory(campaignId: string | null) {
+  const refreshHistory = useCallback(async (campaignId: string | null) => {
     if (!campaignId) {
       setHistory([]);
       return;
@@ -222,9 +222,9 @@ function App() {
 
     const data = await getCampaignHistory(campaignId);
     setHistory(data);
-  }
+  }, []);
 
-  async function refreshSelectedCampaign(campaignId: string | null) {
+  const refreshSelectedCampaign = useCallback(async (campaignId: string | null) => {
     if (!campaignId) {
       setSelectedCampaignDetails(null);
       return;
@@ -237,11 +237,11 @@ function App() {
     } finally {
       setIsSelectedLoading(false);
     }
-  }
+  }, []);
 
-  async function refreshSelectedData(campaignId: string | null) {
+  const refreshSelectedData = useCallback(async (campaignId: string | null) => {
     await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
-  }
+  }, [refreshHistory, refreshSelectedCampaign]);
 
   useEffect(() => {
     let cancelled = false;
@@ -334,7 +334,7 @@ function App() {
     };
   }, [campaigns]);
 
-  async function handleCreate(payload: Parameters<typeof createCampaign>[0]) {
+  const handleCreate = useCallback(async (payload: Parameters<typeof createCampaign>[0]) => {
     setCreateError(null);
 
     try {
@@ -345,9 +345,9 @@ function App() {
     } catch (error) {
       setCreateError(toApiError(error));
     }
-  }
+  }, [refreshCampaigns, refreshSelectedData, addToast]);
 
-  async function handleConnectWallet() {
+  const handleConnectWallet = useCallback(async () => {
     const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
     setIsConnectingWallet(true);
     try {
@@ -358,12 +358,12 @@ function App() {
     } finally {
       setIsConnectingWallet(false);
     }
-  }
+  }, [appConfig, freighter, addToast]);
 
-  function handleDisconnectWallet() {
+  const handleDisconnectWallet = useCallback(() => {
     freighter.disconnect();
     addToast("Wallet disconnected.", "success");
-  }
+  }, [freighter, addToast]);
 
   useEffect(() => {
     if (!connectedWallet) return;
@@ -377,7 +377,7 @@ function App() {
     return stop;
   }, [connectedWallet, addToast]);
 
-  async function handlePledge(campaignId: string, amount: number, assetCode: string) {
+  const handlePledge = useCallback(async (campaignId: string, amount: number, assetCode: string) => {
     if (!connectedWallet) {
       addToast("Connect Freighter before submitting a pledge.", "error");
       return;
@@ -433,9 +433,9 @@ function App() {
     } finally {
       setPendingPledgeCampaignId(null);
     }
-  }
+  }, [connectedWallet, appConfig, campaigns, selectedCampaign, handleTransactionPreview, refreshCampaigns, refreshSelectedData, addToast]);
 
-  async function handleClaim(campaign: Campaign) {
+  const handleClaim = useCallback(async (campaign: Campaign) => {
     if (!appConfig?.walletIntegrationReady) {
       addToast("Wallet signing is not configured on the backend yet.", "error");
       return;
@@ -475,9 +475,9 @@ function App() {
       }
       addToast(getErrorMessage(error), "error");
     }
-  }
+  }, [appConfig, connectedWallet, handleTransactionPreview, refreshCampaigns, refreshSelectedData, addToast]);
 
-  async function handleSoftDelete(campaignId: string) {
+  const handleSoftDelete = useCallback(async (campaignId: string) => {
     if (!window.confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
       return;
     }
@@ -493,9 +493,9 @@ function App() {
       setActionError(toApiError(error));
       setActionMessage(null);
     }
-  }
+  }, [refreshCampaigns]);
 
-  async function handleRefund(campaignId: string, contributor: string) {
+  const handleRefund = useCallback(async (campaignId: string, contributor: string) => {
     setActionError(null);
     setActionMessage("Preparing Soroban refund transaction...");
 
@@ -509,16 +509,20 @@ function App() {
       setActionError(toApiError(error));
       setActionMessage(null);
     }
-  }
+  }, [refreshCampaigns, refreshSelectedData]);
 
-  function handleSelect(campaignId: string) {
+  const handleSelect = useCallback((campaignId: string) => {
     setInvalidUrlCampaignId(null);
     setSelectedCampaignId(campaignId);
-  }
+  }, []);
 
-  function handleThemeToggle() {
+  const handleThemeToggle = useCallback(() => {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
-  }
+  }, [setThemeMode]);
+
+  const handleSearchChange = useCallback((query: string) => {
+    void refreshCampaigns(query);
+  }, [refreshCampaigns]);
 
   return (
     <div className="app-shell">
@@ -632,9 +636,7 @@ function App() {
             campaigns={campaigns}
             selectedCampaignId={selectedCampaignId}
             onSelect={handleSelect}
-            onSearchChange={(query) => {
-              void refreshCampaigns(query);
-            }}
+            onSearchChange={handleSearchChange}
             isLoading={isCampaignsLoading || initialLoad}
             invalidUrlCampaignId={invalidUrlCampaignId}
           />

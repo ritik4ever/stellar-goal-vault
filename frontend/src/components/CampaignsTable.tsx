@@ -1,5 +1,5 @@
 import { LayoutGrid } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { useDebounce } from "../hooks/useDebounce";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
@@ -12,6 +12,7 @@ import {
 import { SearchInput } from "./SearchInput";
 import { SortDropdown, SortOption } from "./SortDropdown";
 import { AddressAvatar } from "./AddressAvatar";
+import { CampaignCard } from "./CampaignCard";
 
 type StatusFilterValue = "" | CampaignStatus;
 
@@ -58,9 +59,13 @@ export function CampaignsTable({
   campaigns,
   selectedCampaignId,
   onSelect,
+  onSearchChange,
   isLoading = false,
   invalidUrlCampaignId = null,
 }: CampaignsTableProps) {
+  const handleSelectCampaign = useCallback((campaignId: string) => {
+    onSelect(campaignId);
+  }, [onSelect]);
   const [assetCode, setAssetCode] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("");
   const [sortBy, setSortBy] = useState<SortOption>("newest");
@@ -293,69 +298,12 @@ export function CampaignsTable({
 
           <div className="cards-only">
             {filteredCampaigns.map((campaign) => (
-              <article
+              <CampaignCard
                 key={campaign.id}
-                className={`campaign-card ${
-                  selectedCampaignId === campaign.id
-                    ? "campaign-card-selected"
-                    : ""
-                }`}
-              >
-                <div className="campaign-card-main">
-                  <div className="campaign-card-header">
-                    <strong className="campaign-title">{campaign.title}</strong>
-                    <span className={`badge badge-${campaign.progress.status}`}>
-                      {getStatusLabel(campaign.progress.status)}
-                    </span>
-                  </div>
-                  <div
-                    className="campaign-creator mono"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      marginBottom: 12,
-                    }}
-                  >
-                    <AddressAvatar address={campaign.creator} size={24} />
-                    <span>{campaign.creator.slice(0, 16)}...</span>
-                  </div>
-                  <div className="campaign-progress">
-                    <div className="progress-copy">
-                      {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-                      {campaign.assetCode}
-                    </div>
-                    <div className="progress-bar" aria-hidden>
-                      <div
-                        style={{
-                          width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="campaign-meta">
-                    <span className="muted">
-                      {campaign.progress.hoursLeft}h left
-                    </span>
-                    <span className="muted">
-                      {formatTimestamp(campaign.deadline)}
-                    </span>
-                  </div>
-                </div>
-                <div className="campaign-card-actions">
-                  <button
-                    className={
-                      selectedCampaignId === campaign.id
-                        ? "btn-secondary"
-                        : "btn-ghost"
-                    }
-                    type="button"
-                    onClick={() => onSelect(campaign.id)}
-                  >
-                    {selectedCampaignId === campaign.id ? "Selected" : "View"}
-                  </button>
-                </div>
-              </article>
+                campaign={campaign}
+                selectedCampaignId={selectedCampaignId}
+                onSelect={handleSelectCampaign}
+              />
             ))}
           </div>
         </>
