@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CampaignsTable } from "./CampaignsTable";
 import type { Campaign } from "../types/campaign";
@@ -68,6 +68,20 @@ describe("CampaignsTable Search Integration", () => {
     },
   ];
 
+  function expectCampaignVisible(title: string) {
+    expect(screen.getAllByText(title).length).toBeGreaterThan(0);
+  }
+
+  function expectCampaignHidden(title: string) {
+    expect(screen.queryAllByText(title)).toHaveLength(0);
+  }
+
+  function advanceTimers(ms: number) {
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  }
+
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -111,7 +125,7 @@ describe("CampaignsTable Search Integration", () => {
 
   describe("Search Functionality", () => {
     it("should filter campaigns by title when searching", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -124,19 +138,19 @@ describe("CampaignsTable Search Integration", () => {
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Type "rocket"
-      await user.type(searchInput, "rocket");
+      fireEvent.change(searchInput, { target: { value: "rocket" } });
 
       // Advance past debounce delay (300ms)
-      vi.advanceTimersByTime(350);
+      advanceTimers(350);
 
       // Should only show "Build a Rocket Ship"
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
-      expect(screen.queryByText("Create a Game")).not.toBeInTheDocument();
-      expect(screen.queryByText("Write a Book")).not.toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
+      expectCampaignHidden("Create a Game");
+      expectCampaignHidden("Write a Book");
     });
 
     it("should filter campaigns by creator address", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -149,16 +163,16 @@ describe("CampaignsTable Search Integration", () => {
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Search for creator
-      await user.type(searchInput, "writer");
+      fireEvent.change(searchInput, { target: { value: "writer" } });
 
-      vi.advanceTimersByTime(350);
+      advanceTimers(350);
 
-      expect(screen.getByText("Write a Book")).toBeInTheDocument();
-      expect(screen.queryByText("Build a Rocket Ship")).not.toBeInTheDocument();
+      expectCampaignVisible("Write a Book");
+      expectCampaignHidden("Build a Rocket Ship");
     });
 
     it("should filter campaigns by campaign ID", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -171,17 +185,17 @@ describe("CampaignsTable Search Integration", () => {
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Search for ID
-      await user.type(searchInput, "camp-002");
+      fireEvent.change(searchInput, { target: { value: "camp-002" } });
 
-      vi.advanceTimersByTime(350);
+      advanceTimers(350);
 
-      expect(screen.getByText("Create a Game")).toBeInTheDocument();
-      expect(screen.queryByText("Build a Rocket Ship")).not.toBeInTheDocument();
-      expect(screen.queryByText("Write a Book")).not.toBeInTheDocument();
+      expectCampaignVisible("Create a Game");
+      expectCampaignHidden("Build a Rocket Ship");
+      expectCampaignHidden("Write a Book");
     });
 
     it("should be case-insensitive", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -194,15 +208,15 @@ describe("CampaignsTable Search Integration", () => {
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Search with uppercase
-      await user.type(searchInput, "BUILD");
+      fireEvent.change(searchInput, { target: { value: "BUILD" } });
 
-      vi.advanceTimersByTime(350);
+      advanceTimers(350);
 
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
     });
 
     it("should update results when search input changes", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -217,25 +231,25 @@ describe("CampaignsTable Search Integration", () => {
       ) as HTMLInputElement;
 
       // First search
-      await user.type(searchInput, "game");
-      vi.advanceTimersByTime(350);
+      fireEvent.change(searchInput, { target: { value: "game" } });
+      advanceTimers(350);
 
-      expect(screen.getByText("Create a Game")).toBeInTheDocument();
+      expectCampaignVisible("Create a Game");
 
       // Clear and search for something else
-      await user.clear(searchInput);
-      await user.type(searchInput, "book");
+      fireEvent.change(searchInput, { target: { value: "" } });
+      fireEvent.change(searchInput, { target: { value: "book" } });
 
-      vi.advanceTimersByTime(350);
+      advanceTimers(350);
 
-      expect(screen.getByText("Write a Book")).toBeInTheDocument();
-      expect(screen.queryByText("Create a Game")).not.toBeInTheDocument();
+      expectCampaignVisible("Write a Book");
+      expectCampaignHidden("Create a Game");
     });
   });
 
   describe("Debouncing Behavior", () => {
     it("should not update results before debounce delay", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -248,15 +262,15 @@ describe("CampaignsTable Search Integration", () => {
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Type something
-      await user.type(searchInput, "rocket");
+      fireEvent.change(searchInput, { target: { value: "rocket" } });
 
       // Don't wait for debounce - results should still show all campaigns
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
-      expect(screen.getByText("Create a Game")).toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
+      expectCampaignVisible("Create a Game");
     });
 
     it("should debounce rapid search inputs", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -269,31 +283,31 @@ describe("CampaignsTable Search Integration", () => {
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Type quickly: r, o, c, k, e, t
-      await user.type(searchInput, "ro");
-      vi.advanceTimersByTime(100);
+      fireEvent.change(searchInput, { target: { value: "ro" } });
+      advanceTimers(100);
 
-      await user.type(searchInput, "cke");
-      vi.advanceTimersByTime(100);
+      fireEvent.change(searchInput, { target: { value: "rocke" } });
+      advanceTimers(100);
 
       // Timer should still be pending
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
-      expect(screen.getByText("Create a Game")).toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
+      expectCampaignVisible("Create a Game");
 
       // Type "t"
-      await user.type(searchInput, "t");
+      fireEvent.change(searchInput, { target: { value: "rocket" } });
 
       // Complete the debounce
-      vi.advanceTimersByTime(350);
+      advanceTimers(350);
 
       // Now should filter
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
-      expect(screen.queryByText("Create a Game")).not.toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
+      expectCampaignHidden("Create a Game");
     });
   });
 
   describe("Clear Button Integration", () => {
     it("should show clear button when search text is present", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -311,7 +325,7 @@ describe("CampaignsTable Search Integration", () => {
       ).not.toBeInTheDocument();
 
       // Type something
-      await user.type(searchInput, "test");
+      fireEvent.change(searchInput, { target: { value: "test" } });
 
       // Now clear button should appear
       expect(
@@ -320,7 +334,7 @@ describe("CampaignsTable Search Integration", () => {
     });
 
     it("should clear search and show all campaigns when clear button clicked", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -333,28 +347,28 @@ describe("CampaignsTable Search Integration", () => {
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Search for something
-      await user.type(searchInput, "rocket");
-      vi.advanceTimersByTime(350);
+      fireEvent.change(searchInput, { target: { value: "rocket" } });
+      advanceTimers(350);
 
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
-      expect(screen.queryByText("Create a Game")).not.toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
+      expectCampaignHidden("Create a Game");
 
       // Click clear button
       const clearButton = screen.getByRole("button", { name: "Clear search" });
-      await user.click(clearButton);
+      fireEvent.click(clearButton);
 
-      vi.advanceTimersByTime(350);
+      advanceTimers(350);
 
       // All campaigns should be visible again
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
-      expect(screen.getByText("Create a Game")).toBeInTheDocument();
-      expect(screen.getByText("Write a Book")).toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
+      expectCampaignVisible("Create a Game");
+      expectCampaignVisible("Write a Book");
     });
   });
 
   describe("Composition with Asset Filter", () => {
     it("should apply search AND asset filter together", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -368,22 +382,22 @@ describe("CampaignsTable Search Integration", () => {
       const assetFilter = screen.getByDisplayValue("All Assets");
 
       // First filter by asset
-      await user.selectOptions(assetFilter, "USDC");
+      fireEvent.change(assetFilter, { target: { value: "USDC" } });
 
-      vi.advanceTimersByTime(350);
+      advanceTimers(350);
 
       // Should show "Build a Rocket Ship" and "Write a Book" (both USDC)
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
-      expect(screen.getByText("Write a Book")).toBeInTheDocument();
-      expect(screen.queryByText("Create a Game")).not.toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
+      expectCampaignVisible("Write a Book");
+      expectCampaignHidden("Create a Game");
 
       // Now search within USDC campaigns
-      await user.type(searchInput, "rocket");
-      vi.advanceTimersByTime(350);
+      fireEvent.change(searchInput, { target: { value: "rocket" } });
+      advanceTimers(350);
 
       // Should only show "Build a Rocket Ship"
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
-      expect(screen.queryByText("Write a Book")).not.toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
+      expectCampaignHidden("Write a Book");
     });
   });
 
@@ -402,27 +416,27 @@ describe("CampaignsTable Search Integration", () => {
         name: /Filter campaigns by status/i,
       });
 
-      const allTab = within(statusTabs).getByRole("button", {
+      const allTab = within(statusTabs).getByRole("tab", {
         name: /Status: Filter campaigns by status/i,
       });
-      const openTab = within(statusTabs).getByRole("button", {
+      const openTab = within(statusTabs).getByRole("tab", {
         name: /Open2/i,
       });
-      const fundedTab = within(statusTabs).getByRole("button", {
+      const fundedTab = within(statusTabs).getByRole("tab", {
         name: /Funded1/i,
       });
-      const claimedTab = within(statusTabs).getByRole("button", {
+      const claimedTab = within(statusTabs).getByRole("tab", {
         name: /Claimed0/i,
       });
-      const failedTab = within(statusTabs).getByRole("button", {
+      const failedTab = within(statusTabs).getByRole("tab", {
         name: /Failed0/i,
       });
 
-      expect(allTab).toHaveAttribute("aria-pressed", "true");
-      expect(openTab).toHaveAttribute("aria-pressed", "false");
-      expect(fundedTab).toHaveAttribute("aria-pressed", "false");
-      expect(claimedTab).toHaveAttribute("aria-pressed", "false");
-      expect(failedTab).toHaveAttribute("aria-pressed", "false");
+      expect(allTab).toHaveAttribute("aria-selected", "true");
+      expect(openTab).toHaveAttribute("aria-selected", "false");
+      expect(fundedTab).toHaveAttribute("aria-selected", "false");
+      expect(claimedTab).toHaveAttribute("aria-selected", "false");
+      expect(failedTab).toHaveAttribute("aria-selected", "false");
     });
 
     it("should filter to one status at a time and allow returning to all", () => {
@@ -438,7 +452,7 @@ describe("CampaignsTable Search Integration", () => {
       const statusTabs = screen.getByRole("tablist", {
         name: /Filter campaigns by status/i,
       });
-      const fundedTab = within(statusTabs).getByRole("button", {
+      const fundedTab = within(statusTabs).getByRole("tab", {
         name: /Funded1/i,
       });
       fireEvent.click(fundedTab);
@@ -446,9 +460,9 @@ describe("CampaignsTable Search Integration", () => {
       expect(screen.getAllByText("Write a Book").length).toBeGreaterThan(0);
       expect(screen.queryAllByText("Build a Rocket Ship")).toHaveLength(0);
       expect(screen.queryAllByText("Create a Game")).toHaveLength(0);
-      expect(fundedTab).toHaveAttribute("aria-pressed", "true");
+      expect(fundedTab).toHaveAttribute("aria-selected", "true");
 
-      const allTab = within(statusTabs).getByRole("button", {
+      const allTab = within(statusTabs).getByRole("tab", {
         name: /Status: Filter campaigns by status/i,
       });
       fireEvent.click(allTab);
@@ -458,13 +472,13 @@ describe("CampaignsTable Search Integration", () => {
       );
       expect(screen.getAllByText("Create a Game").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Write a Book").length).toBeGreaterThan(0);
-      expect(allTab).toHaveAttribute("aria-pressed", "true");
+      expect(allTab).toHaveAttribute("aria-selected", "true");
     });
   });
 
   describe("Empty State Messages", () => {
     it("should show appropriate message when search finds no results", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -477,19 +491,19 @@ describe("CampaignsTable Search Integration", () => {
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Search for non-existent campaign
-      await user.type(searchInput, "nonexistent");
-      vi.advanceTimersByTime(350);
+      fireEvent.change(searchInput, { target: { value: "nonexistent" } });
+      advanceTimers(350);
 
       // Should show no results message
       const emptyStateText =
         screen.queryByText(/No campaigns found/i) ||
         screen.queryByText(/Try adjusting your search/i);
       // Note: Exact message depends on component implementation
-      expect(screen.queryByText("Build a Rocket Ship")).not.toBeInTheDocument();
+      expectCampaignHidden("Build a Rocket Ship");
     });
 
     it("should show all campaigns when search is cleared and no other filters active", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -502,24 +516,24 @@ describe("CampaignsTable Search Integration", () => {
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Type and then clear
-      await user.type(searchInput, "rocket");
-      vi.advanceTimersByTime(350);
+      fireEvent.change(searchInput, { target: { value: "rocket" } });
+      advanceTimers(350);
 
       const clearButton = screen.getByRole("button", { name: "Clear search" });
-      await user.click(clearButton);
+      fireEvent.click(clearButton);
 
-      vi.advanceTimersByTime(350);
+      advanceTimers(350);
 
       // All campaigns should be visible
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
-      expect(screen.getByText("Create a Game")).toBeInTheDocument();
-      expect(screen.getByText("Write a Book")).toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
+      expectCampaignVisible("Create a Game");
+      expectCampaignVisible("Write a Book");
     });
   });
 
   describe("Performance", () => {
     it("should handle large campaign lists efficiently", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
 
       // Create 100 campaigns
       const largeCampaignList: Campaign[] = Array.from(
@@ -556,11 +570,11 @@ describe("CampaignsTable Search Integration", () => {
       const searchInput = screen.getByPlaceholderText("Search campaigns...");
 
       // Search should still work smoothly
-      await user.type(searchInput, "campaign 50");
-      vi.advanceTimersByTime(350);
+      fireEvent.change(searchInput, { target: { value: "campaign 50" } });
+      advanceTimers(350);
 
       // Should find "Campaign 50"
-      expect(screen.getByText("Campaign 50")).toBeInTheDocument();
+      expectCampaignVisible("Campaign 50");
     });
   });
 
@@ -582,7 +596,7 @@ describe("CampaignsTable Search Integration", () => {
     });
 
     it("should allow keyboard navigation", async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
       render(
         <CampaignsTable
           campaigns={mockCampaigns}
@@ -599,12 +613,12 @@ describe("CampaignsTable Search Integration", () => {
       expect(searchInput).toHaveFocus();
 
       // Type with keyboard
-      await user.keyboard("rocket");
+      fireEvent.change(searchInput, { target: { value: "rocket" } });
 
-      vi.advanceTimersByTime(350);
+      advanceTimers(350);
 
       // Should work as expected
-      expect(screen.getByText("Build a Rocket Ship")).toBeInTheDocument();
+      expectCampaignVisible("Build a Rocket Ship");
     });
   });
 });

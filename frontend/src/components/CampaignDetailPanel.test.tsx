@@ -49,7 +49,7 @@ const mockCampaign: Campaign = {
 };
 
 describe("CampaignDetailPanel", () => {
-
+  it("renders the empty selection state", () => {
     render(
       <CampaignDetailPanel
         campaign={null}
@@ -61,7 +61,7 @@ describe("CampaignDetailPanel", () => {
     expect(screen.getByText(/pick a campaign/i)).toBeInTheDocument();
   });
 
-
+  it("submits a pledge with the connected wallet amount", async () => {
     const user = userEvent.setup();
     const onPledge = vi.fn().mockResolvedValue(undefined);
 
@@ -76,8 +76,6 @@ describe("CampaignDetailPanel", () => {
 
     await user.click(screen.getByRole("button", { name: /add pledge/i }));
 
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /confirm pledge/i })).toBeInTheDocument();
-
+    expect(onPledge).toHaveBeenCalledWith("1", 25, "USDC");
   });
 });
