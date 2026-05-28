@@ -13,6 +13,7 @@ export function getDistinctAssetCodes(campaigns: Campaign[]): string[] {
  *
  * Searches across:
  * - campaign.title (partial match, case-insensitive)
+ * - campaign.description (partial match, case-insensitive)
  * - campaign.creator (case-insensitive)
  * - campaign.id (partial match, case-insensitive)
  *
@@ -36,6 +37,9 @@ export function searchCampaigns(
     // Check title (partial match)
     const titleMatches = campaign.title.toLowerCase().includes(normalizedQuery);
 
+    // Check description (partial match)
+    const descriptionMatches = campaign.description.toLowerCase().includes(normalizedQuery);
+
     // Check creator address (case-insensitive)
     const creatorMatches = campaign.creator.toLowerCase().includes(normalizedQuery);
 
@@ -43,7 +47,7 @@ export function searchCampaigns(
     const idMatches = campaign.id.toLowerCase().includes(normalizedQuery);
 
     // Match if any field matches
-    return titleMatches || creatorMatches || idMatches;
+    return titleMatches || descriptionMatches || creatorMatches || idMatches;
   });
 }
 
@@ -63,8 +67,9 @@ export function applyFilters(
   status: string,
   searchQuery: string = "",
 ): Campaign[] {
-  // Client-side filters (asset/status only, search is server-side)
-  return campaigns.filter((c) => {
+  const searchedCampaigns = searchCampaigns(campaigns, searchQuery);
+
+  return searchedCampaigns.filter((c) => {
     const matchesAsset = assetCode === "" || c.assetCode === assetCode;
     const matchesStatus = status === "" || c.progress.status === status;
     return matchesAsset && matchesStatus;

@@ -46,8 +46,6 @@ import {
 
 const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
-const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
-const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
 
 type ThemeMode = "light" | "dark";
 
@@ -133,14 +131,12 @@ function App() {
     null,
   );
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
-  const [isIssuesLoading, setIsIssuesLoading] = useState(false);
+  const [isIssuesLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [themeMode, setThemeMode] = useLocalStorage<ThemeMode>(THEME_STORAGE_KEY, getSystemTheme());
-  const [, setSortOrder] = useLocalStorage<string>(SORT_ORDER_KEY, 'default');
-  const [, setFilterState] = useLocalStorage<string[]>(FILTER_STATE_KEY, []);
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);

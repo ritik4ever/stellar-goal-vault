@@ -19,6 +19,8 @@ const INITIAL_VALUES = {
   externalLink: "",
 };
 
+type FormFieldValue<K extends keyof typeof INITIAL_VALUES> = (typeof INITIAL_VALUES)[K];
+
 export function CreateCampaignForm({
   onCreate,
   allowedAssets = [],
@@ -48,7 +50,7 @@ export function CreateCampaignForm({
     });
   }, [assetOptions]);
 
-  function update(field: keyof typeof INITIAL_VALUES, value: any) {
+  function update<K extends keyof typeof INITIAL_VALUES>(field: K, value: FormFieldValue<K>) {
     const nextValues = { ...values, [field]: value };
     setValues(nextValues);
     setValidationErrors(validateForm(nextValues));

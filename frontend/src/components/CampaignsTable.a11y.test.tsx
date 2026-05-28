@@ -33,7 +33,7 @@ describe('CampaignsTable Accessibility', () => {
 
     const { container } = render(
       <CampaignsTable 
-        // @ts-ignore - bypassing full mock type strictness for testing DOM structure
+        // @ts-expect-error - bypassing full mock type strictness for testing DOM structure
         campaigns={mockCampaigns} 
         selectedCampaignId={null} 
         onSelect={() => {}} 

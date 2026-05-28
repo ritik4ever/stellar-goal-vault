@@ -1,10 +1,25 @@
 import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SearchInput } from "./SearchInput";
 
 describe("SearchInput Component", () => {
   const mockOnChange = vi.fn();
+
+  function ControlledSearchInput({ initialValue = "" }: { initialValue?: string }) {
+    const [value, setValue] = useState(initialValue);
+
+    return (
+      <SearchInput
+        value={value}
+        onChange={(nextValue) => {
+          mockOnChange(nextValue);
+          setValue(nextValue);
+        }}
+      />
+    );
+  }
 
   beforeEach(() => {
     mockOnChange.mockClear();
@@ -32,7 +47,6 @@ describe("SearchInput Component", () => {
 
     it("should not render clear button when value is empty", () => {
       render(<SearchInput value="" onChange={mockOnChange} />);
-      const clearButton = screen.queryByAltText("Clear search");
       expect(screen.queryByRole("button", { name: "Clear search" })).not.toBeInTheDocument();
     });
 
@@ -46,7 +60,7 @@ describe("SearchInput Component", () => {
   describe("User Interactions", () => {
     it("should call onChange when user types", async () => {
       const user = userEvent.setup();
-      render(<SearchInput value="" onChange={mockOnChange} />);
+      render(<ControlledSearchInput />);
 
       const input = screen.getByPlaceholderText("Search campaigns...");
       await user.type(input, "rocket");
@@ -78,7 +92,7 @@ describe("SearchInput Component", () => {
   describe("Disabled State", () => {
     it("should disable input when disabled prop is true", () => {
       render(<SearchInput value="" onChange={mockOnChange} disabled={true} />);
-      const input = screen.getByPlaceholderText("Search campaigns..") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Search campaigns...") as HTMLInputElement;
       expect(input.disabled).toBe(true);
     });
 
@@ -88,11 +102,11 @@ describe("SearchInput Component", () => {
         <SearchInput value="" onChange={mockOnChange} disabled={false} />
       );
 
-      const input = screen.getByPlaceholderText("Search campaigns..") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Search campaigns...") as HTMLInputElement;
 
       // Enable input and type
       await user.type(input, "test");
-      const firstCallCount = mockOnChange.mock.calls.length;
+      expect(mockOnChange.mock.calls.length).toBeGreaterThan(0);
 
       // Disable input and try to type (shouldn't work)
       rerender(<SearchInput value="" onChange={mockOnChange} disabled={true} />);
@@ -133,6 +147,7 @@ describe("SearchInput Component", () => {
       // Check close icon in clear button
       const closeIcon = searchIcon?.parentElement?.querySelector("svg:last-of-type");
       // The close icon is also aria-hidden in the clear button's svg
+      expect(closeIcon).toHaveAttribute("aria-hidden", "true");
     });
 
     it("should have clear button with title attribute", () => {
@@ -143,11 +158,10 @@ describe("SearchInput Component", () => {
   });
 
   describe("Input Events", () => {
-    it("should handle paste events", async () => {
-      const user = userEvent.setup();
+    it("should handle paste events", () => {
       render(<SearchInput value="" onChange={mockOnChange} />);
 
-      const input = screen.getByPlaceholderText("Search campaigns..") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Search campaigns...") as HTMLInputElement;
 
       // Simulate paste by changing the value directly
       fireEvent.change(input, { target: { value: "pasted text" } });
@@ -157,9 +171,9 @@ describe("SearchInput Component", () => {
 
     it("should handle select all + delete", async () => {
       const user = userEvent.setup();
-      render(<SearchInput value="existing" onChange={mockOnChange} />);
+      render(<ControlledSearchInput initialValue="existing" />);
 
-      const input = screen.getByPlaceholderText("Search campaigns..") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Search campaigns...") as HTMLInputElement;
       input.focus();
 
       await user.keyboard("{Control>}a{/Control}");
@@ -190,8 +204,7 @@ describe("SearchInput Component", () => {
   });
 
   describe("Edge Cases", () => {
-    it("should handle very long search queries", async () => {
-      const user = userEvent.setup();
+    it("should handle very long search queries", () => {
       const longQuery = "a".repeat(500);
       render(<SearchInput value={longQuery} onChange={mockOnChange} />);
 
@@ -199,8 +212,7 @@ describe("SearchInput Component", () => {
       expect(input.value).toBe(longQuery);
     });
 
-    it("should handle special characters in search", async () => {
-      const user = userEvent.setup();
+    it("should handle special characters in search", () => {
       const specialQuery = "test@#$%^&*()";
       render(<SearchInput value={specialQuery} onChange={mockOnChange} />);
 
