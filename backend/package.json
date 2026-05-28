@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "Backend API for Stellar Goal Vault",
   "main": "dist/index.js",
-
   "dependencies": {
+    "@stellar/stellar-sdk": "^15.1.0",
     "axios": "^1.15.2",
     "better-sqlite3": "^12.6.2",
     "cors": "^2.8.5",
