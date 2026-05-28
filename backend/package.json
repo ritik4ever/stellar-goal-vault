@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "description": "Backend API for Stellar Goal Vault",
   "main": "dist/index.js",
-
   "dependencies": {
     "axios": "^1.15.2",
     "better-sqlite3": "^12.6.2",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
     "express": "^4.21.2",
+    "he": "^1.2.0",
     "zod": "^4.3.6"
   },
   "scripts": {
@@ -19,6 +20,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.3",
+    "@types/he": "^1.2.3",
     "@types/node": "^22.14.1",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",

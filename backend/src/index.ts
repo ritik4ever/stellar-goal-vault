@@ -1,6 +1,8 @@
+import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
+import { sanitizeOutput } from "./middleware/sanitize";
 import { validateEnv } from "./validateEnv";
 import { randomUUID } from "crypto";
 import { z } from "zod";
@@ -66,6 +68,9 @@ const RATE_LIMIT_MAX_REQUESTS = 120;
 const WRITE_RATE_LIMIT_MAX_REQUESTS = 40;
 const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 
+
+app.use(compression({ threshold: 1024 }));
+app.use(sanitizeOutput);
 
 app.use(
   cors({
