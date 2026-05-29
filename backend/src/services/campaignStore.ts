@@ -353,7 +353,7 @@ export function listCampaigns(
   const offset = (page - 1) * limit;
 
   const whereClauses: string[] = [];
-  const params: any[] = [];
+  const params: Array<unknown> = [];
 
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
@@ -590,6 +590,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     title: input.title.trim(),
     description: input.description.trim(),
     acceptedTokens,
+    assetCode: acceptedTokens[0] || "",
     targetAmount: round(input.targetAmount),
     pledgedAmount: 0,
     deadline: input.deadline,

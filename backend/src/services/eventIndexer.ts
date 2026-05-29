@@ -7,6 +7,19 @@ import { logError, logInfo } from "../logger";
 
 dotenv.config();
 
+type SorobanEvent = {
+  txHash?: string;
+  ledger?: number;
+  event_index?: number;
+  type?: string;
+  contract_id?: string;
+  value?: unknown;
+  topic?: unknown;
+  timestamp?: number;
+  ledgerCloseTime?: number;
+  [key: string]: unknown;
+};
+
 const SOROBAN_RPC_URL = process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org:443";
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 
@@ -47,7 +60,7 @@ async function fetchSorobanEvents() {
 }
 
 
-function isDuplicateEvent(db: any, event: any): boolean {
+function isDuplicateEvent(db: ReturnType<typeof getDb>, event: SorobanEvent): boolean {
   // Use transaction hash for better deduplication if available
   if (event.txHash) {
     const row = db.prepare(
@@ -67,7 +80,7 @@ function isDuplicateEvent(db: any, event: any): boolean {
 }
 
 
-function parseSorobanEvent(event: any) {
+function parseSorobanEvent(event: SorobanEvent) {
   // Example event: { ledger, event_index, type, contract_id, txHash, ledgerCloseTime, ...data }
   // Map to local event schema
   if (!event || !event.type || !event.contract_id) return null;
@@ -75,8 +88,8 @@ function parseSorobanEvent(event: any) {
   if (event.type !== "contract" || event.contract_id !== CONTRACT_ID) return null;
   
   // Parse event topic and data
-  const topic = event.topic && Array.isArray(event.topic) ? event.topic.map((t: any) => t.toString()).join(":") : "";
-  let eventType: any = undefined;
+  const topic = Array.isArray(event.topic) ? event.topic.map((t) => String(t)).join(":") : "";
+  let eventType: "created" | "pledged" | "claimed" | "refunded" | undefined;
   if (topic.includes("Goal:Create")) eventType = "created";
   else if (topic.includes("Goal:Pledge")) eventType = "pledged";
   else if (topic.includes("Goal:Claim")) eventType = "claimed";
@@ -85,19 +98,22 @@ function parseSorobanEvent(event: any) {
   
   // Extract campaignId, actor, amount, etc. from event.value or event.data
   let campaignId = "";
-  let actor = undefined;
-  let amount = undefined;
-  let metadata = { ...event };
+  let actor: string | undefined;
+  let amount: number | undefined;
+  let metadata: Record<string, unknown> = { ...event };
+  const value = event.value as Record<string, unknown> | undefined;
   
   try {
-    if (event.value) {
-      if (event.value.campaign_id !== undefined) campaignId = String(event.value.campaign_id);
-      if (event.value.creator) actor = event.value.creator;
-      if (event.value.contributor) actor = event.value.contributor;
-      if (event.value.amount !== undefined) amount = Number(event.value.amount);
-      metadata = { ...event, ...event.value };
+    if (value) {
+      if (value.campaign_id !== undefined) campaignId = String(value.campaign_id);
+      if (value.creator) actor = String(value.creator);
+      if (value.contributor) actor = String(value.contributor);
+      if (value.amount !== undefined) amount = Number(value.amount);
+      metadata = { ...event, ...value };
     }
-  } catch {}
+  } catch (err: unknown) {
+    logError(err, { event: "soroban_event_parse_error" }, config.logLevel);
+  }
 
   // Create blockchain metadata
   const blockchainMetadata: BlockchainMetadata = {

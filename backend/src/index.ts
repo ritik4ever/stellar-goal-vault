@@ -26,7 +26,6 @@ import {
   listCampaignPledges,
   listCampaigns,
   type ListCampaignsOptions,
-  softDeleteCampaign,
   reconcileOnChainPledge,
   refundContributor,
 } from "./services/campaignStore";
@@ -35,7 +34,7 @@ import { getCampaignHistory } from "./services/eventHistory";
 import { startEventIndexer } from "./services/eventIndexer";
 import { fetchOpenIssues } from "./services/openIssues";
 import { ensureSorobanRefundConfig, verifyRefundTransaction } from "./services/sorobanRpc";
-import { AppError, ApiErrorResponse } from "./types/errors";
+import { AppError, ApiErrorDetail, ApiErrorResponse } from "./types/errors";
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
@@ -509,40 +508,52 @@ app.get("/api/stats", (_req: Request, res: Response) => {
   res.json({ data: stats });
 });
 
-app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => {
-  if (err.message === "Not allowed by CORS") {
+app.use((error: unknown, req: RequestWithId, res: Response, _next: express.NextFunction) => {
+  if (error instanceof Error && error.message === "Not allowed by CORS") {
     return res.status(403).json({
       success: false,
       error: {
         code: "FORBIDDEN",
         message: "CORS policy violation",
-        requestId: (req as any).requestId,
+        requestId: req.requestId,
       },
     });
   }
 
-  const statusCode = err instanceof AppError ? err.statusCode : (err.statusCode ?? 500);
-  const code = err instanceof AppError ? err.code : (err.code ?? "INTERNAL_SERVER_ERROR");
+  const err =
+    error instanceof AppError
+      ? error
+      : error instanceof Error
+      ? error
+      : new Error("An unexpected error occurred");
+
+  const statusCode = err instanceof AppError ? err.statusCode : (err as { statusCode?: number }).statusCode ?? 500;
+  const code = err instanceof AppError ? err.code : (err as { code?: string }).code ?? "INTERNAL_SERVER_ERROR";
   const response: ApiErrorResponse = {
     success: false,
     error: {
       code,
       message: err.message || "An unexpected error occurred",
-      requestId: (req as RequestWithId).requestId,
+      requestId: req.requestId,
     },
   };
 
-  if (err instanceof AppError && err.details) {
-    response.error.details = err.details;
-  } else if (err.details) {
-    response.error.details = err.details;
+  const details =
+    err instanceof AppError
+      ? err.details
+      : error && typeof error === "object" && "details" in error && Array.isArray((error as { details?: unknown }).details)
+      ? (error as { details?: ApiErrorDetail[] }).details
+      : undefined;
+
+  if (details) {
+    response.error.details = details;
   }
 
   logError(
     err,
     {
       event: "request_error",
-      requestId: (req as RequestWithId).requestId,
+      requestId: req.requestId,
       method: req.method,
       path: req.originalUrl || req.path,
       status: statusCode,

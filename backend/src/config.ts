@@ -1,8 +1,6 @@
 import "dotenv/config";
 import { normalizeLogLevel } from "./logger";
 
-const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
-
 const parseOrigins = (originsStr: string): string[] => {
   return originsStr
     .split(",")

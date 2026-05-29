@@ -13,7 +13,11 @@
     "zod": "^4.3.6"
   },
   "scripts": {
-    "lint": "eslint 'src/**/*.ts'"
+    "build": "tsc -p tsconfig.json",
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/**/*.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

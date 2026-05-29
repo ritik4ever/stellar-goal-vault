@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import fs from "fs";
 import path from "path";
 
 type SQLiteDatabase = ReturnType<typeof Database>;
@@ -24,7 +25,6 @@ export function initDb(): void {
     return;
   }
 
-  const fs = require("fs") as typeof import("fs");
   const dbPath = resolveDbPath();
   const dir = path.dirname(dbPath);
 

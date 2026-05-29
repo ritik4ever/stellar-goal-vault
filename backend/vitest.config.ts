@@ -32,6 +32,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json", "html"],
       exclude: ["node_modules/", "tests/", "dist/"],
+      reportsDirectory: "coverage",
     },
   },
 });
