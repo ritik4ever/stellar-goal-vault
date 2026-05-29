@@ -198,6 +198,11 @@ Prerequisites:
 
 - Node.js 18+
 - npm 9+
+
+## Testing & Coverage
+
+- **Coverage target:** Both `backend` and `frontend` enforce an 80% lines coverage threshold.
+- CI will fail with a clear message if coverage drops below this threshold and uploads the HTML report as a build artifact.
 - Optional for contract work: Rust + Soroban toolchain
 
 From repo root:
