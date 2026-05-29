@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { config } from "../config";
 
+import { StrKey } from "@stellar/stellar-sdk";
+
 export const STELLAR_ACCOUNT_REGEX = /^G[A-Z2-7]{55}$/;
 export const ASSET_CODE_REGEX = /^[A-Za-z0-9]{1,12}$/;
 export const CAMPAIGN_ID_REGEX = /^[1-9]\d*$/;
@@ -17,7 +19,10 @@ export const stellarAccountIdSchema = z
   .regex(
     STELLAR_ACCOUNT_REGEX,
     "Must be a valid Stellar account ID (starts with G and is exactly 56 characters).",
-  );
+  )
+  .refine((val) => StrKey.isValidEd25519PublicKey(val), {
+    message: "Must be a valid Stellar public key (Base58Check checksum).",
+  });
 
 export const assetCodeSchema = z
   .string()
