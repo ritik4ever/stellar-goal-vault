@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
-import { MousePointer2 } from "lucide-react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { ImageOff, MousePointer2 } from "lucide-react";
 import { AppConfig, Campaign } from "../types/campaign";
 import { ContributorSummary } from "./ContributorSummary";
 import { CopyButton } from "./CopyButton";
@@ -36,6 +36,22 @@ function networkName(config: AppConfig | null | undefined): string {
   return "Configured network";
 }
 
+function useImageCdnUrl(url: string | undefined, width = 400, quality = 80): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    // If it already has query params for resize, return as-is
+    if (parsed.searchParams.has("w") || parsed.searchParams.has("width")) {
+      return url;
+    }
+    parsed.searchParams.set("w", String(width));
+    parsed.searchParams.set("q", String(quality));
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export function CampaignDetailPanel({
   campaign,
   appConfig,
@@ -53,6 +69,17 @@ export function CampaignDetailPanel({
   const [pledgeAmount, setPledgeAmount] = useState("25");
   const [refundContributor, setRefundContributor] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const prevCampaignIdRef = useRef<string | null>(null);
+
+  // Reset image error state when campaign changes
+  useEffect(() => {
+    if (campaign?.id !== prevCampaignIdRef.current) {
+      setImageError(false);
+      prevCampaignIdRef.current = campaign?.id ?? null;
+    }
+  }, [campaign?.id]);
 
   useEffect(() => {
     setPledgeAmount("25");
@@ -309,11 +336,24 @@ export function CampaignDetailPanel({
 
       {activeCampaign.metadata?.imageUrl ? (
         <div className="campaign-image-container">
-          <img
-            src={activeCampaign.metadata.imageUrl}
-            alt={activeCampaign.title}
-            className="campaign-image"
-          />
+          {imageError ? (
+            <div className="campaign-image-fallback">
+              <ImageOff size={32} />
+              <span>Image not available</span>
+            </div>
+          ) : (
+            <img
+              ref={imgRef}
+              src={useImageCdnUrl(activeCampaign.metadata.imageUrl, 400, 80)}
+              alt={activeCampaign.title}
+              className="campaign-image"
+              loading="lazy"
+              decoding="async"
+              width={400}
+              height={225}
+              onError={() => setImageError(true)}
+            />
+          )}
         </div>
       ) : null}
 
