@@ -591,6 +591,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     title: input.title.trim(),
     description: input.description.trim(),
     acceptedTokens,
+    assetCode: acceptedTokens[0] || "",
     targetAmount: round(input.targetAmount),
     pledgedAmount: 0,
     deadline: input.deadline,
