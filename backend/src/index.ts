@@ -95,7 +95,7 @@ app.use(
   }),
 );
 
-app.use(express.json());
+app.use(express.json({ limit: process.env.MAX_BODY_SIZE || '16kb' }));
 
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
