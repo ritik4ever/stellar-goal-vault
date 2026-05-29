@@ -8,7 +8,18 @@ interface CreateCampaignFormProps {
   apiError?: ApiError | null;
 }
 
-const INITIAL_VALUES = {
+type CreateCampaignFormValues = {
+  creator: string;
+  title: string;
+  description: string;
+  acceptedTokens: string[];
+  targetAmount: string;
+  deadlineHours: string;
+  imageUrl: string;
+  externalLink: string;
+};
+
+const INITIAL_VALUES: CreateCampaignFormValues = {
   creator: "",
   title: "",
   description: "",
@@ -25,7 +36,7 @@ export function CreateCampaignForm({
   apiError,
 }: CreateCampaignFormProps) {
   const assetOptions = allowedAssets.length > 0 ? allowedAssets : ["USDC"];
-  const [values, setValues] = useState({
+  const [values, setValues] = useState<CreateCampaignFormValues>({
     ...INITIAL_VALUES,
     acceptedTokens: assetOptions.slice(0, 1),
   });
@@ -48,7 +59,7 @@ export function CreateCampaignForm({
     });
   }, [assetOptions]);
 
-  function update(field: keyof typeof INITIAL_VALUES, value: any) {
+  function update(field: keyof CreateCampaignFormValues, value: string | string[]) {
     const nextValues = { ...values, [field]: value };
     setValues(nextValues);
     setValidationErrors(validateForm(nextValues));
