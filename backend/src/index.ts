@@ -29,7 +29,6 @@ import {
   softDeleteCampaign,
   reconcileOnChainPledge,
   refundContributor,
-  updateCampaign,
 } from "./services/campaignStore";
 import { checkDbHealth } from "./services/db";
 import { getCampaignHistory } from "./services/eventHistory";
@@ -46,7 +45,6 @@ import {
   parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
-  updateCampaignPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
 } from "./validation/schemas";
@@ -245,30 +243,28 @@ app.get("/api/health", (_req: Request, res: Response) => {
 app.get("/api/campaigns", (req: Request, res: Response) => {
   const paginationResult = parseCampaignListPaginationQuery({
     page: req.query.page,
-    limit: req.query.limit,
+    pageSize: req.query.pageSize,
   });
   if (!paginationResult.ok) {
     sendValidationError(paginationResult.issues);
   }
 
-    const filters = parseCampaignListFilters({
-      asset: req.query.asset,
-      status: req.query.status,
-      q: req.query.q,
-      search: req.query.search,
-      includeDeleted: req.query.includeDeleted,
-    });
+  const filters = parseCampaignListFilters({
+    asset: req.query.asset,
+    status: req.query.status,
+    q: req.query.q,
+    search: req.query.search,
+    includeDeleted: req.query.includeDeleted,
+  });
 
   const listOptions: ListCampaignsOptions = {
     searchQuery: filters.searchQuery,
     assetCode: filters.asset,
     status: filters.status,
     includeDeleted: filters.includeDeleted,
+    page: paginationResult.page,
+    limit: paginationResult.pageSize,
   };
-  if (paginationResult.page !== undefined) {
-    listOptions.page = paginationResult.page;
-    listOptions.limit = paginationResult.limit;
-  }
 
   const { campaigns, totalCount } = listCampaigns(listOptions);
 
@@ -280,21 +276,14 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
     filters,
   );
 
-  const page = paginationResult.page ?? 1;
-  const limit = paginationResult.limit ?? totalCount;
-  const totalPages =
-    paginationResult.limit === undefined || limit <= 0
-      ? 1
-      : Math.max(1, Math.ceil(totalCount / limit));
+  const hasMore = paginationResult.page * paginationResult.pageSize < totalCount;
 
   res.json({
     data,
-    pagination: {
-      total: totalCount,
-      page,
-      limit,
-      totalPages,
-    },
+    total: totalCount,
+    page: paginationResult.page,
+    pageSize: paginationResult.pageSize,
+    hasMore,
   });
 });
 

@@ -161,35 +161,18 @@ function parsePositiveIntegerQueryParam(
 }
 
 /**
- * Parses optional `page` and `limit` for GET /api/campaigns.
- * Omitting both means no pagination (caller lists the full filtered set).
- * Supplying only one is invalid (400).
+ * Parses optional `page` and `pageSize` for GET /api/campaigns.
+ * Defaults: page=1, pageSize=20. Max pageSize=100.
  */
 export function parseCampaignListPaginationQuery(query: {
   page?: unknown;
-  limit?: unknown;
-}): { ok: true; page?: number; limit?: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+  pageSize?: unknown;
+}): { ok: true; page: number; pageSize: number } | { ok: false; issues: z.core.$ZodIssue[] } {
   const pageStr = singleCampaignListQueryParam(query.page);
-  const limitStr = singleCampaignListQueryParam(query.limit);
+  const pageSizeStr = singleCampaignListQueryParam(query.pageSize);
 
-  if (pageStr === undefined && limitStr === undefined) {
-    return { ok: true };
-  }
-  if (pageStr === undefined || limitStr === undefined) {
-    return {
-      ok: false,
-      issues: [
-        {
-          code: "custom",
-          message: "Pagination requires both page and limit query parameters.",
-          path: pageStr === undefined ? ["page"] : ["limit"],
-        },
-      ],
-    };
-  }
-
-  const pageNum = Number(pageStr);
-  const limitNum = Number(limitStr);
+  const pageNum = pageStr ? Number(pageStr) : 1;
+  const pageSizeNum = pageSizeStr ? Number(pageSizeStr) : 20;
   const issues: z.core.$ZodIssue[] = [];
 
   if (!Number.isFinite(pageNum) || !Number.isInteger(pageNum) || pageNum < 1) {
@@ -200,15 +183,15 @@ export function parseCampaignListPaginationQuery(query: {
     });
   }
   if (
-    !Number.isFinite(limitNum) ||
-    !Number.isInteger(limitNum) ||
-    limitNum < 1 ||
-    limitNum > 100
+    !Number.isFinite(pageSizeNum) ||
+    !Number.isInteger(pageSizeNum) ||
+    pageSizeNum < 1 ||
+    pageSizeNum > 100
   ) {
     issues.push({
       code: "custom",
-      message: "limit must be an integer from 1 to 100.",
-      path: ["limit"],
+      message: "pageSize must be an integer from 1 to 100.",
+      path: ["pageSize"],
     });
   }
 
@@ -216,7 +199,7 @@ export function parseCampaignListPaginationQuery(query: {
     return { ok: false, issues };
   }
 
-  return { ok: true, page: pageNum, limit: limitNum };
+  return { ok: true, page: pageNum, pageSize: pageSizeNum };
 }
 
 export function parsePledgeListPaginationQuery(query: {

@@ -348,10 +348,9 @@ export function listCampaigns(
   options?: ListCampaignsOptions,
 ): ListCampaignsResult {
   const db = getDb();
-  const paginate = options?.page !== undefined && options?.limit !== undefined;
   const page = options?.page ?? 1;
-  const limit = options?.limit ?? 10;
-  const offset = paginate ? (page - 1) * limit : 0;
+  const limit = options?.limit ?? 20;
+  const offset = (page - 1) * limit;
 
   const whereClauses: string[] = [];
   const params: any[] = [];
@@ -408,14 +407,8 @@ export function listCampaigns(
     db.prepare(countQuery).get(...params) as { total: number }
   ).total;
 
-  const dataQuery = paginate
-    ? `SELECT * ${baseQuery} ORDER BY created_at DESC LIMIT ? OFFSET ?`
-    : `SELECT * ${baseQuery} ORDER BY created_at DESC`;
-  const rows = (
-    paginate
-      ? db.prepare(dataQuery).all(...params, limit, offset)
-      : db.prepare(dataQuery).all(...params)
-  ) as CampaignRow[];
+  const dataQuery = `SELECT * ${baseQuery} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+  const rows = db.prepare(dataQuery).all(...params, limit, offset) as CampaignRow[];
 
   return {
     campaigns: rows.map(rowToCampaign),

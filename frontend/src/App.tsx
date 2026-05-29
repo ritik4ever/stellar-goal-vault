@@ -25,6 +25,7 @@ import {
   reconcilePledge,
   refundCampaign,
   softDeleteCampaign,
+  CampaignListResponse,
 } from "./services/api";
 import {
   submitFreighterClaim,
@@ -123,6 +124,7 @@ function App() {
   const connectedWallet = freighter.publicKey;
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaignsPagination, setCampaignsPagination] = useState<{ total: number; page: number; pageSize: number; hasMore: boolean }>({ total: 0, page: 1, pageSize: 20, hasMore: false });
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
@@ -189,16 +191,22 @@ function App() {
     };
   }, [transactionPreview]);
 
-  async function refreshCampaigns(searchQuery: string = '', nextSelectedId?: string | null): Promise<Campaign[]> {
+  async function refreshCampaigns(searchQuery: string = '', nextSelectedId?: string | null, page: number = 1): Promise<Campaign[]> {
     setIsCampaignsLoading(true);
     try {
-      const data = await listCampaigns({ search: searchQuery });
-      setCampaigns(data);
+      const response = await listCampaigns({ search: searchQuery, page, pageSize: 20 });
+      setCampaigns(response.data);
+      setCampaignsPagination({
+        total: response.total,
+        page: response.page,
+        pageSize: response.pageSize,
+        hasMore: response.hasMore,
+      });
 
       const requestedId = nextSelectedId ?? selectedCampaignId;
-      const nextId = requestedId ?? data[0]?.id ?? null;
-      const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
-      const resolvedId = exists ? nextId : data[0]?.id ?? null;
+      const nextId = requestedId ?? response.data[0]?.id ?? null;
+      const exists = nextId ? response.data.some((campaign) => campaign.id === nextId) : false;
+      const resolvedId = exists ? nextId : response.data[0]?.id ?? null;
 
       setInvalidUrlCampaignId(requestedId && !exists ? requestedId : null);
       setSelectedCampaignId(resolvedId);
@@ -208,7 +216,7 @@ function App() {
         setHistory([]);
       }
 
-      return data;
+      return response.data;
     } finally {
       setIsCampaignsLoading(false);
     }
@@ -253,7 +261,7 @@ function App() {
       const [configResult, issuesResult, campaignsResult] = await Promise.allSettled([
         getAppConfig(),
         listOpenIssues(),
-        listCampaigns({ search: '' }),
+        listCampaigns({ search: '', page: 1, pageSize: 20 }),
       ]);
 
       if (cancelled) {
@@ -271,12 +279,18 @@ function App() {
       }
 
       if (campaignsResult.status === "fulfilled") {
-        const data = campaignsResult.value;
-        setCampaigns(data);
+        const response = campaignsResult.value;
+        setCampaigns(response.data);
+        setCampaignsPagination({
+          total: response.total,
+          page: response.page,
+          pageSize: response.pageSize,
+          hasMore: response.hasMore,
+        });
 
-        const nextId = requestedCampaignId ?? data[0]?.id ?? null;
-        const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
-        const resolvedId = exists ? nextId : data[0]?.id ?? null;
+        const nextId = requestedCampaignId ?? response.data[0]?.id ?? null;
+        const exists = nextId ? response.data.some((campaign) => campaign.id === nextId) : false;
+        const resolvedId = exists ? nextId : response.data[0]?.id ?? null;
 
         setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
         setSelectedCampaignId(resolvedId);
@@ -633,10 +647,16 @@ function App() {
             selectedCampaignId={selectedCampaignId}
             onSelect={handleSelect}
             onSearchChange={(query) => {
-              void refreshCampaigns(query);
+              void refreshCampaigns(query, undefined, 1);
+            }}
+            onPageChange={(page) => {
+              void refreshCampaigns("", undefined, page);
             }}
             isLoading={isCampaignsLoading || initialLoad}
             invalidUrlCampaignId={invalidUrlCampaignId}
+            currentPage={campaignsPagination.page}
+            hasMore={campaignsPagination.hasMore}
+            totalCampaigns={campaignsPagination.total}
           />
         </ErrorBoundary>
 

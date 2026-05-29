@@ -1,5 +1,5 @@
 import { LayoutGrid } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDebounce } from "../hooks/useDebounce";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
@@ -28,8 +28,12 @@ interface CampaignsTableProps {
   selectedCampaignId: string | null;
   onSelect: (campaignId: string) => void;
   onSearchChange?: (query: string) => void;
+  onPageChange?: (page: number) => void;
   isLoading?: boolean;
   invalidUrlCampaignId?: string | null;
+  currentPage?: number;
+  hasMore?: boolean;
+  totalCampaigns?: number;
 }
 
 function formatTimestamp(value: number | string): string {
@@ -58,8 +62,13 @@ export function CampaignsTable({
   campaigns,
   selectedCampaignId,
   onSelect,
+  onSearchChange,
+  onPageChange,
   isLoading = false,
   invalidUrlCampaignId = null,
+  currentPage = 1,
+  hasMore = false,
+  totalCampaigns = 0,
 }: CampaignsTableProps) {
   const [assetCode, setAssetCode] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("");
@@ -359,6 +368,34 @@ export function CampaignsTable({
             ))}
           </div>
         </>
+      )}
+
+      {totalCampaigns > 0 && (
+        <div className="pagination-controls" style={{ marginTop: "1rem", display: "flex", gap: "1rem", alignItems: "center", justifyContent: "space-between" }}>
+          <div className="muted" style={{ fontSize: "0.875rem" }}>
+            Showing page {currentPage} ({campaigns.length} campaigns, {totalCampaigns} total)
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              className="btn-ghost"
+              type="button"
+              onClick={() => onPageChange?.(currentPage - 1)}
+              disabled={isLoading || currentPage <= 1}
+              aria-label="Previous page"
+            >
+              ← Previous
+            </button>
+            <button
+              className="btn-ghost"
+              type="button"
+              onClick={() => onPageChange?.(currentPage + 1)}
+              disabled={isLoading || !hasMore}
+              aria-label="Next page"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
       )}
     </section>
   );

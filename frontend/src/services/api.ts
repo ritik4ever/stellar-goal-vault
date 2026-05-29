@@ -40,12 +40,22 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return body;
 }
 
+export interface CampaignListResponse {
+  data: Campaign[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}
+
 export async function listCampaigns(filters?: {
   includeDeleted?: boolean;
   search?: string;
   asset?: string;
   status?: string;
-}): Promise<Campaign[]> {
+  page?: number;
+  pageSize?: number;
+}): Promise<CampaignListResponse> {
   const params = new URLSearchParams();
   if (filters?.includeDeleted) {
     params.set("includeDeleted", "true");
@@ -59,13 +69,16 @@ export async function listCampaigns(filters?: {
   if (filters?.status) {
     params.set("status", filters.status);
   }
+  if (filters?.page !== undefined) {
+    params.set("page", String(filters.page));
+  }
+  if (filters?.pageSize !== undefined) {
+    params.set("pageSize", String(filters.pageSize));
+  }
   const url = `${API_BASE}/campaigns${params.toString() ? `?${params.toString()}` : ""}`;
   const response = await fetch(url);
-  const body = await parseResponse<{
-    data: Campaign[];
-    pagination?: { total: number };
-  }>(response);
-  return body.data;
+  const body = await parseResponse<CampaignListResponse>(response);
+  return body;
 }
 
 export async function getCampaign(campaignId: string): Promise<Campaign> {
