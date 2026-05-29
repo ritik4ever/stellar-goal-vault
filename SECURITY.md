@@ -68,3 +68,26 @@ Out of scope:
 - Validate all user input at the API boundary (Zod schemas in `backend/src/validation/`).
 - Keep dependencies up to date (`npm audit` before submitting a PR).
 - Follow the principle of least privilege for any new API endpoints.
+
+## Automated Security Analysis
+
+This project uses GitHub CodeQL for automated security analysis. The CodeQL workflow runs automatically on:
+
+- Every push to the `main` branch
+- All pull requests targeting `main`
+
+### CodeQL Configuration
+
+The security analysis workflow is defined in `.github/workflows/codeql-analysis.yml` and scans the codebase for:
+- JavaScript and TypeScript security vulnerabilities
+- Common security issues (prototype pollution, injection attacks, insecure deserialization)
+- Code quality issues that could lead to security problems
+
+### Viewing Security Alerts
+
+Security alerts from CodeQL are surfaced in the **Security** tab of the repository. Contributors should:
+- Review any security alerts that appear after their changes
+- Address high or critical severity issues before merging
+- Consider the security impact of any medium or low severity issues
+
+The workflow uses the `security-extended` and `security-and-quality` query suites to provide comprehensive coverage of potential vulnerabilities.
