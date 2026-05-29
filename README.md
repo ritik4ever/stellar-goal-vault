@@ -346,6 +346,7 @@ Please see [SECURITY.md](./SECURITY.md) for our responsible disclosure policy, s
 ## Contributing
 
 Please see the [Contributing Guide](./CONTRIBUTING.md) for setup and contribution guidelines.
+See also [CHANGELOG.md](./CHANGELOG.md) for a full history of notable changes across releases.
 
 ## Known limitations
 
