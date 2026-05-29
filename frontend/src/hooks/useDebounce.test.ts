@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 import { useDebounce } from "./useDebounce";
 
 describe("useDebounce Hook", () => {
@@ -37,9 +37,7 @@ describe("useDebounce Hook", () => {
       });
 
       // Now should be updated
-      await waitFor(() => {
-        expect(result.current).toBe("updated");
-      });
+      expect(result.current).toBe("updated");
     });
 
     it("should use default delay of 300ms when not specified", async () => {
@@ -61,10 +59,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(200);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("end");
-      });
+      expect(result.current).toBe("end");
     });
 
     it("should use custom delay when specified", async () => {
@@ -86,10 +81,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(200);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("updated");
-      });
+      expect(result.current).toBe("updated");
     });
   });
 
@@ -125,10 +117,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("fourth");
-      });
+      expect(result.current).toBe("fourth");
     });
 
     it("should reset timer on each value change", async () => {
@@ -160,10 +149,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(100);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("c");
-      });
+      expect(result.current).toBe("c");
     });
   });
 
@@ -179,10 +165,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("updated text");
-      });
+      expect(result.current).toBe("updated text");
     });
 
     it("should debounce number values", async () => {
@@ -196,10 +179,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe(100);
-      });
+      expect(result.current).toBe(100);
     });
 
     it("should debounce boolean values", async () => {
@@ -213,10 +193,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe(true);
-      });
+      expect(result.current).toBe(true);
     });
 
     it("should debounce object values", async () => {
@@ -235,10 +212,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe(obj2);
-      });
+      expect(result.current).toBe(obj2);
     });
 
     it("should debounce array values", async () => {
@@ -255,10 +229,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe(arr2);
-      });
+      expect(result.current).toBe(arr2);
     });
   });
 
@@ -274,10 +245,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBeNull();
-      });
+      expect(result.current).toBeNull();
     });
 
     it("should handle undefined values", async () => {
@@ -291,10 +259,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBeUndefined();
-      });
+      expect(result.current).toBeUndefined();
     });
 
     it("should handle empty strings", async () => {
@@ -308,10 +273,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("");
-      });
+      expect(result.current).toBe("");
     });
 
     it("should handle zero values", async () => {
@@ -325,10 +287,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe(0);
-      });
+      expect(result.current).toBe(0);
     });
   });
 
@@ -406,10 +365,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(200);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("rock");
-      });
+      expect(result.current).toBe("rock");
     });
 
     it("should perform efficient debouncing for multiple searches", async () => {
@@ -423,10 +379,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(300);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("search1");
-      });
+      expect(result.current).toBe("search1");
 
       // Second search before waiting
       rerender({ value: "search2", delay: 300 });
@@ -440,10 +393,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(150);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("search2");
-      });
+      expect(result.current).toBe("search2");
     });
   });
 
@@ -467,10 +417,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(200);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("updated");
-      });
+      expect(result.current).toBe("updated");
     });
 
     it("should handle decreasing delay", async () => {
@@ -494,10 +441,7 @@ describe("useDebounce Hook", () => {
       act(() => {
         vi.advanceTimersByTime(100);
       });
-
-      await waitFor(() => {
-        expect(result.current).toBe("final");
-      });
+      expect(result.current).toBe("final");
     });
   });
 });

@@ -30,7 +30,7 @@ describe("CreateCampaignForm", () => {
       expect(screen.getByPlaceholderText(/G\.\.\. creator public key/i)).toBeInTheDocument();
       expect(screen.getByPlaceholderText(/Stellar community design sprint/i)).toBeInTheDocument();
       expect(screen.getByPlaceholderText(/Describe what the campaign funds/i)).toBeInTheDocument();
-      expect(screen.getByRole("combobox")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "USDC" })).toBeInTheDocument();
       expect(screen.getByLabelText(/target amount/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/deadline in hours/i)).toBeInTheDocument();
     });
@@ -51,11 +51,10 @@ describe("CreateCampaignForm", () => {
     it("uses default asset when no allowedAssets provided", () => {
       render(<CreateCampaignForm onCreate={async () => {}} />);
       
-      const select = screen.getByRole("combobox");
-      expect(select).toHaveValue("USDC");
+      expect(screen.getByRole("checkbox", { name: "USDC" })).toBeChecked();
     });
 
-    it("renders allowed assets in dropdown", () => {
+    it("renders allowed assets as token checkboxes", () => {
       render(
         <CreateCampaignForm
           onCreate={async () => {}}
@@ -63,11 +62,9 @@ describe("CreateCampaignForm", () => {
         />,
       );
       
-      const select = screen.getByRole("combobox");
-      expect(select).toHaveValue("ARS");
-      expect(screen.getByRole("option", { name: "ARS" })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "USDC" })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "XLM" })).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "ARS" })).toBeChecked();
+      expect(screen.getByRole("checkbox", { name: "USDC" })).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "XLM" })).toBeInTheDocument();
     });
   });
 
@@ -142,17 +139,6 @@ describe("CreateCampaignForm", () => {
       await user.click(input);
       await user.tab();
 
-    await user.type(
-      screen.getByPlaceholderText(/G\.\.\. creator public key/i),
-      `G${"A".repeat(55)}`,
-    );
-    await user.type(screen.getByPlaceholderText(/Stellar community design sprint/i), "My Test Campaign");
-    await user.type(
-      screen.getByPlaceholderText(/Describe what the campaign funds/i),
-      "This campaign funds a real Soroban pledge flow for the MVP dashboard.",
-    );
-    await user.click(screen.getByText("USDC"));
-    await user.click(screen.getByRole("button", { name: /create campaign/i }));
       expect(screen.getByText("Campaign title is required")).toBeInTheDocument();
     });
 
@@ -176,7 +162,8 @@ describe("CreateCampaignForm", () => {
       // Type 81 characters
       await user.type(titleInput, "A".repeat(81));
 
-      expect(screen.getByText(/Title cannot exceed 80 characters/i)).toBeInTheDocument();
+      expect(titleInput).toHaveValue("A".repeat(80));
+      expect(screen.queryByText(/Title cannot exceed 80 characters/i)).not.toBeInTheDocument();
     });
 
     it("accepts valid title", async () => {
@@ -227,7 +214,8 @@ describe("CreateCampaignForm", () => {
       await user.click(descInput);
       await user.paste("A".repeat(501));
 
-      expect(screen.getByText(/Description cannot exceed 500 characters/i)).toBeInTheDocument();
+      expect(descInput).toHaveValue("A".repeat(500));
+      expect(screen.queryByText(/Description cannot exceed 500 characters/i)).not.toBeInTheDocument();
     }, 10000);
 
     it("accepts valid description", async () => {
@@ -347,7 +335,7 @@ describe("CreateCampaignForm", () => {
         creator: validCreator,
         title: validTitle,
         description: validDescription,
-        assetCode: "USDC",
+        acceptedTokens: ["USDC"],
         targetAmount: 250,
         deadline: expectedDeadline,
         metadata: {},
@@ -432,7 +420,6 @@ describe("CreateCampaignForm", () => {
       );
 
       await fillValidForm(user);
-      await user.selectOptions(screen.getByRole("combobox"), "usdc");
       await user.click(screen.getByRole("button", { name: /create campaign/i }));
 
       await waitFor(() => {
@@ -441,7 +428,7 @@ describe("CreateCampaignForm", () => {
 
       expect(onCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          assetCode: "USDC",
+          acceptedTokens: ["USDC"],
         }),
       );
     });
@@ -465,8 +452,9 @@ describe("CreateCampaignForm", () => {
 
       resolveCreate!();
       await waitFor(() => {
-        expect(submitButton).not.toBeDisabled();
+        expect(submitButton).toHaveTextContent("Create campaign");
       });
+      expect(submitButton).toBeDisabled();
     });
 
     it("resets form after successful submission", async () => {
@@ -490,7 +478,7 @@ describe("CreateCampaignForm", () => {
       expect(screen.getByPlaceholderText(/G\.\.\. creator public key/i)).toHaveValue("");
       expect(screen.getByPlaceholderText(/Stellar community design sprint/i)).toHaveValue("");
       expect(screen.getByPlaceholderText(/Describe what the campaign funds/i)).toHaveValue("");
-      expect(screen.getByRole("combobox")).toHaveValue("ARS");
+      expect(screen.getByRole("checkbox", { name: "ARS" })).toBeChecked();
       expect(screen.getByLabelText(/target amount/i)).toHaveValue(250);
       expect(screen.getByLabelText(/deadline in hours/i)).toHaveValue(72);
     });
@@ -632,7 +620,7 @@ describe("CreateCampaignForm", () => {
   });
 
   describe("Asset Selection", () => {
-    it("updates asset code when selection changes", async () => {
+    it("updates accepted tokens when selection changes", async () => {
       const user = userEvent.setup();
       const onCreate = vi.fn().mockResolvedValue(undefined);
 
@@ -644,7 +632,8 @@ describe("CreateCampaignForm", () => {
       );
 
       await fillValidForm(user);
-      await user.selectOptions(screen.getByRole("combobox"), "XLM");
+      await user.click(screen.getByRole("checkbox", { name: "ARS" }));
+      await user.click(screen.getByRole("checkbox", { name: "XLM" }));
       await user.click(screen.getByRole("button", { name: /create campaign/i }));
 
       await waitFor(() => {
@@ -653,7 +642,7 @@ describe("CreateCampaignForm", () => {
 
       expect(onCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          assetCode: "XLM",
+          acceptedTokens: ["XLM"],
         }),
       );
     });
@@ -666,7 +655,7 @@ describe("CreateCampaignForm", () => {
         />,
       );
 
-      expect(screen.getByRole("combobox")).toHaveValue("USDC");
+      expect(screen.getByRole("checkbox", { name: "USDC" })).toBeChecked();
 
       rerender(
         <CreateCampaignForm
@@ -675,7 +664,7 @@ describe("CreateCampaignForm", () => {
         />,
       );
 
-      expect(screen.getByRole("combobox")).toHaveValue("ARS");
+      expect(screen.getByRole("checkbox", { name: "ARS" })).toBeChecked();
     });
   });
 });

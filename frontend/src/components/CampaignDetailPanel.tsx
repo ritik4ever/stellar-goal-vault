@@ -47,7 +47,6 @@ export function CampaignDetailPanel({
   onDisconnectWallet = () => {},
   onPledge = async () => {},
   onClaim = async () => {},
-  onSoftDelete = async () => {},
   onRefund = async () => {},
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState("25");
