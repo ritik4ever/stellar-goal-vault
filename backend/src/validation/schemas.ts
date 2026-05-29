@@ -45,38 +45,47 @@ export const unixTimestampSchema = z.coerce
   .int("deadline must be a valid UNIX timestamp in seconds.")
   .positive("deadline must be a valid UNIX timestamp in seconds.");
 
-export const createCampaignPayloadSchema = z.object({
-  creator: stellarAccountIdSchema,
-  title: z.string().trim().min(4, "Title must be at least 4 characters.").max(80),
-  description: z
-    .string()
-    .trim()
-    .min(20, "Description must be at least 20 characters.")
-    .max(500),
-  acceptedTokens: z
-    .array(assetCodeSchema)
-    .min(1, "At least one accepted token is required."),
-  targetAmount: positiveAmountSchema,
-  deadline: unixTimestampSchema,
-  metadata: z
-    .object({
-      imageUrl: z.string().url().optional(),
-      externalLink: z.string().url().optional(),
-    })
-    .optional(),
-  maxPerContributor: optionalPositiveIntSchema,
-});
+export const createCampaignPayloadSchema = z
+  .object({
+    creator: stellarAccountIdSchema,
+    title: z.string().trim().min(4, "Title must be at least 4 characters.").max(80),
+    description: z
+      .string()
+      .trim()
+      .min(20, "Description must be at least 20 characters.")
+      .max(500),
+    acceptedTokens: z.array(assetCodeSchema).optional(),
+    assetCode: assetCodeSchema.optional(),
+    targetAmount: positiveAmountSchema,
+    deadline: unixTimestampSchema,
+    metadata: z
+      .object({
+        imageUrl: z.string().url().optional(),
+        externalLink: z.string().url().optional(),
+      })
+      .optional(),
+    maxPerContributor: optionalPositiveIntSchema,
+  })
+  .superRefine((data, ctx) => {
+    if (!data.acceptedTokens?.length && !data.assetCode) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Either acceptedTokens or assetCode must be provided.",
+        path: ["acceptedTokens"],
+      });
+    }
+  });
 
 export const createPledgePayloadSchema = z.object({
   contributor: stellarAccountIdSchema,
   amount: positiveAmountSchema,
-  assetCode: assetCodeSchema,
+  assetCode: assetCodeSchema.optional(),
 });
 
 export const reconcilePledgePayloadSchema = z.object({
   contributor: stellarAccountIdSchema,
   amount: positiveAmountSchema,
-  assetCode: assetCodeSchema,
+  assetCode: assetCodeSchema.optional(),
   transactionHash: z
     .string()
     .trim()
