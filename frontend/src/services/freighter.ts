@@ -229,11 +229,17 @@ export async function submitFreighterClaim(params: {
     );
   });
 
+  const simulationResult = simulation as rpc.Api.SimulateTransactionResponse;
+  const minResourceFee = (simulationResult as { minResourceFee?: string | number })?.minResourceFee;
+  const baseFeeStroops = parseInt(String(minResourceFee ?? 0), 10) + 100;
+
   if (params.onPreview) {
     const isApproved = await params.onPreview({
       operation: "claim",
       contract: config.contractId,
       xdr: preparedTransaction.toXDR(),
+      estimatedFeeStroops: baseFeeStroops,
+      estimatedFeeXlm: (baseFeeStroops / 10_000_000).toFixed(6),
     });
     if (!isApproved) {
       throw buildError("USER_CANCELLED", "User cancelled the transaction from the preview panel.");
@@ -364,6 +370,10 @@ export async function submitFreighterPledge(params: {
     );
   });
 
+  const contributionSimulationResult = simulation as rpc.Api.SimulateTransactionResponse;
+  const contributionMinResourceFee = (contributionSimulationResult as { minResourceFee?: string | number })?.minResourceFee;
+  const contributionFeeStroops = parseInt(String(contributionMinResourceFee ?? 0), 10) + 100;
+
   if (params.onPreview) {
     const isApproved = await params.onPreview({
       operation: "contribute",
@@ -371,6 +381,8 @@ export async function submitFreighterPledge(params: {
       assetCode: params.assetCode,
       contract: config.contractId,
       xdr: preparedTransaction.toXDR(),
+      estimatedFeeStroops: contributionFeeStroops,
+      estimatedFeeXlm: (contributionFeeStroops / 10_000_000).toFixed(6),
     });
     if (!isApproved) {
       throw buildError("USER_CANCELLED", "User cancelled the transaction from the preview panel.");

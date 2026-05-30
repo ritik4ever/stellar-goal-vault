@@ -6,6 +6,8 @@ export interface TransactionPreviewData {
   amount?: number;
   contract: string;
   xdr: string;
+  estimatedFeeStroops?: number;
+  estimatedFeeXlm?: string;
 }
 
 interface TransactionPreviewModalProps {
@@ -20,6 +22,13 @@ export function TransactionPreviewModal({
   onCancel,
 }: TransactionPreviewModalProps) {
   const [showXdr, setShowXdr] = useState(false);
+
+  function stroopsToXlm(stroops: number): string {
+    return (stroops / 10_000_000).toFixed(6);
+  }
+
+  const feeStroops = preview.estimatedFeeStroops ?? 0;
+  const feeXlm = preview.estimatedFeeXlm ?? stroopsToXlm(feeStroops);
 
   return (
     <div className="modal-overlay">
@@ -45,6 +54,10 @@ export function TransactionPreviewModal({
             <strong className="mono" style={{ wordBreak: "break-all" }}>
               {preview.contract}
             </strong>
+          </article>
+          <article className="detail-stat">
+            <span>Estimated network fee</span>
+            <strong>{feeXlm} XLM ({feeStroops} stroops)</strong>
           </article>
         </div>
 
