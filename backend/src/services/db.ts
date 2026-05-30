@@ -172,4 +172,10 @@ function migrate(database: SQLiteDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_campaign_events_ledger
     ON campaign_events(json_extract(blockchain_metadata, '$.ledgerNumber'));
   `);
+
+  // Performance indexes for deadline-based and date-based queries (#319)
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_campaigns_deadline ON campaigns(deadline);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_created_at ON campaigns(created_at);
+  `);
 }
