@@ -368,3 +368,9 @@ The frontend now includes a theme toggle in the header with icon controls for li
 - Persist selected theme in `localStorage` using `stellar-goal-vault-theme`
 - Respect system `prefers-color-scheme` on first load when no saved theme exists
 - Apply dark/light color variants across core UI surfaces (cards, tables, forms, buttons, and controls)
+
+## Quick API
+
+```bash
+curl https://api.example.com/campaigns
+```
