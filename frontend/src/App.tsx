@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
+import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
-import { CreatorAnalytics } from "./components/CreatorAnalytics";
 import { IssueBacklog } from "./components/IssueBacklog";
 import {
   TransactionPreviewModal,
@@ -14,6 +12,27 @@ import {
 } from "./components/TransactionPreviewModal";
 import { ToastContainer } from "./components/ToastContainer";
 import { WalletWidget } from "./components/WalletWidget";
+
+// Lazy-loaded heavy components — split on route-level boundaries
+const LazyCampaignDetailPanel = lazy(() =>
+  import("./components/CampaignDetailPanel").then((m) => ({ default: m.CampaignDetailPanel }))
+);
+const LazyCreatorAnalytics = lazy(() =>
+  import("./components/CreatorAnalytics").then((m) => ({ default: m.CreatorAnalytics }))
+);
+
+/** Minimal fallback shown while lazy chunks load */
+function SuspenseFallback({ componentName }: { componentName: string }) {
+  return (
+    <div
+      className="skeleton-lazy"
+      style={{ padding: "2rem", textAlign: "center", opacity: 0.6 }}
+      aria-label={`Loading ${componentName}...`}
+    >
+      Loading {componentName}…
+    </div>
+  );
+}
 import {
   claimCampaign,
   createCampaign,
@@ -590,11 +609,13 @@ function App() {
           style={{ animationDelay: "0.1s" }}
         >
           <ErrorBoundary componentName="CreatorAnalytics">
-            <CreatorAnalytics
-              creatorAddress={selectedCampaign.creator}
-              campaigns={campaigns}
-              isLoading={isCampaignsLoading || initialLoad}
-            />
+            <Suspense fallback={<SuspenseFallback componentName="CreatorAnalytics" />}>
+              <LazyCreatorAnalytics
+                creatorAddress={selectedCampaign.creator}
+                campaigns={campaigns}
+                isLoading={isCampaignsLoading || initialLoad}
+              />
+            </Suspense>
           </ErrorBoundary>
         </section>
       )}
@@ -609,20 +630,22 @@ function App() {
           allowedAssets={appConfig?.allowedAssets ?? []}
         />
         <ErrorBoundary componentName="CampaignDetailPanel">
-          <CampaignDetailPanel
-            campaign={selectedCampaign}
-            appConfig={appConfig}
-            connectedWallet={connectedWallet}
-            isConnectingWallet={isConnectingWallet}
-            isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
-            isLoading={isSelectedLoading || initialLoad}
-            onConnectWallet={handleConnectWallet}
-            onDisconnectWallet={handleDisconnectWallet}
-            onPledge={handlePledge}
-            onClaim={handleClaim}
-            onSoftDelete={handleSoftDelete}
-            onRefund={handleRefund}
-          />
+          <Suspense fallback={<SuspenseFallback componentName="CampaignDetailPanel" />}>
+            <LazyCampaignDetailPanel
+              campaign={selectedCampaign}
+              appConfig={appConfig}
+              connectedWallet={connectedWallet}
+              isConnectingWallet={isConnectingWallet}
+              isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+              isLoading={isSelectedLoading || initialLoad}
+              onConnectWallet={handleConnectWallet}
+              onDisconnectWallet={handleDisconnectWallet}
+              onPledge={handlePledge}
+              onClaim={handleClaim}
+              onSoftDelete={handleSoftDelete}
+              onRefund={handleRefund}
+            />
+          </Suspense>
         </ErrorBoundary>
       </section>
 
