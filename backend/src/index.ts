@@ -6,6 +6,9 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import path from "path";
 import { config, walletIntegrationReady } from "./config";
+import { apiKeyAuthMiddleware } from "./middleware/apiKeyAuth";
+import { cacheMiddleware } from "./middleware/cacheMiddleware";
+import { initRedisCache } from "./services/cache";
 
 import {
   addPledge,
@@ -90,6 +93,16 @@ app.use(
 );
 
 app.use(express.json());
+
+// Add API key authentication middleware (production only)
+if (process.env.NODE_ENV === "production") {
+  app.use(apiKeyAuthMiddleware);
+}
+
+// Add cache middleware for GET requests (production only, 5 minute TTL)
+if (process.env.NODE_ENV === "production") {
+  app.use(cacheMiddleware(300));
+}
 
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
@@ -689,6 +702,17 @@ function startServer() {
   printStartupBanner();
   initCampaignStore();
   startEventIndexer();
+
+  // Initialize Redis cache in production
+  if (process.env.NODE_ENV === "production") {
+    initRedisCache().catch((error) => {
+      logError("Failed to initialize Redis cache", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Continue without cache if initialization fails
+    });
+  }
+
   app.listen(config.port, () => {
     logInfo(
       "server_started",
