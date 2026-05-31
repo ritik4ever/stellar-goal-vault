@@ -70,7 +70,7 @@ describe("Campaign Lifecycle API", () => {
       creator: CREATOR,
       title: "Test API Campaign",
       description: "Testing claim lifecycle",
-      assetCode: "USDC",
+      acceptedTokens: ["USDC"],
       targetAmount: 100,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
@@ -82,6 +82,7 @@ describe("Campaign Lifecycle API", () => {
     const pledgeRes = await post(`/api/campaigns/${campaignId}/pledges`, {
       contributor: CONTRIBUTOR,
       amount: 100,
+      assetCode: "USDC",
     });
     expect(pledgeRes.status).toBe(201);
     expect(pledgeRes.data.data.progress.status).toBe("funded");
@@ -116,7 +117,7 @@ describe("Campaign Lifecycle API", () => {
       creator: CREATOR,
       title: "Test Refund Campaign",
       description: "Testing refund lifecycle",
-      assetCode: "XLM",
+      acceptedTokens: ["XLM"],
       targetAmount: 100,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
@@ -127,6 +128,7 @@ describe("Campaign Lifecycle API", () => {
     const pledgeRes = await post(`/api/campaigns/${campaignId}/pledges`, {
       contributor: CONTRIBUTOR,
       amount: 50,
+      assetCode: "XLM",
     });
     expect(pledgeRes.status).toBe(201);
 
