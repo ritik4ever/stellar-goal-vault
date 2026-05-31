@@ -180,6 +180,9 @@ function App() {
           transactionPreview.resolve(false);
           setTransactionPreview(null);
         }
+        if (selectedCampaignId) {
+          setSelectedCampaignId(null);
+        }
       }
     };
 
@@ -187,7 +190,7 @@ function App() {
     return () => {
       window.removeEventListener("keydown", handleKeydown);
     };
-  }, [transactionPreview]);
+  }, [transactionPreview, selectedCampaignId]);
 
   async function refreshCampaigns(searchQuery: string = '', nextSelectedId?: string | null): Promise<Campaign[]> {
     setIsCampaignsLoading(true);
