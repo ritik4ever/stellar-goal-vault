@@ -306,6 +306,14 @@ export interface GlobalStats {
   totalContributors: number;
 }
 
+export interface LeaderboardEntry {
+  rank: number;
+  contributor: string;
+  totalPledged: number;
+  campaignCount: number;
+  averagePledgeAmount: number;
+}
+
 const MAX_CAMPAIGN_DURATION_SECONDS = 60 * 60 * 24 * 180;
 
 /**
@@ -458,7 +466,9 @@ export function listCampaignPledges(
  * @returns An array of {@link ContributorSummary} objects sorted by total pledged (descending),
  *          or an empty array if the campaign does not exist.
  */
-export function getContributorSummary(campaignId: string): ContributorSummary[] {
+export function getContributorSummary(
+  campaignId: string,
+): ContributorSummary[] {
   const db = getDb();
   const rows = db
     .prepare(
@@ -548,6 +558,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     title: input.title.trim(),
     description: input.description.trim(),
     acceptedTokens,
+    assetCode: acceptedTokens[0] || "",
     targetAmount: round(input.targetAmount),
     pledgedAmount: 0,
     deadline: input.deadline,
@@ -664,6 +675,30 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     },
     { source: 'local' } as BlockchainMetadata,
   );
+
+  // Check if contributor has reached their limit and record event
+  if (
+    campaign.maxPerContributor !== undefined &&
+    campaign.maxPerContributor > 0
+  ) {
+    const newContributorTotal = round(
+      getContributorPledgedTotal(campaignId, input.contributor),
+    );
+    if (newContributorTotal >= campaign.maxPerContributor) {
+      recordEvent(
+        campaignId,
+        "pledge_limit_reached",
+        createdAt,
+        input.contributor,
+        newContributorTotal,
+        {
+          maxPerContributor: campaign.maxPerContributor,
+          assetCode,
+        },
+        { source: "local" } as BlockchainMetadata,
+      );
+    }
+  }
 
   return getCampaign(campaignId)!;
 }
@@ -977,4 +1012,41 @@ export function refundContributor(
     campaign: getCampaign(campaignId)!,
     refundedAmount,
   };
+}
+
+/**
+ * Retrieves the top contributors globally, ranked by total pledged amount.
+ *
+ * @param limit - Maximum number of top contributors to return (default: 10).
+ * @returns An array of {@link LeaderboardEntry} objects sorted by total pledged amount (descending).
+ */
+export function getTopContributors(limit: number = 10): LeaderboardEntry[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT 
+         contributor,
+         COALESCE(SUM(amount), 0) AS total_pledged,
+         COUNT(DISTINCT campaign_id) AS campaign_count,
+         COALESCE(AVG(amount), 0) AS avg_pledge
+       FROM pledges
+       WHERE refunded_at IS NULL
+       GROUP BY contributor
+       ORDER BY total_pledged DESC
+       LIMIT ?`,
+    )
+    .all(limit) as Array<{
+    contributor: string;
+    total_pledged: number;
+    campaign_count: number;
+    avg_pledge: number;
+  }>;
+
+  return rows.map((row, index) => ({
+    rank: index + 1,
+    contributor: row.contributor,
+    totalPledged: round(row.total_pledged),
+    campaignCount: row.campaign_count,
+    averagePledgeAmount: round(row.avg_pledge),
+  }));
 }

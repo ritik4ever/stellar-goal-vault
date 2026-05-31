@@ -1,27 +1,30 @@
 # Pull Request
 
-## 🗒️ Description
-A clear and concise description of the changes you've made.
+## What Changed
 
-## 🔗 Related Issue
-- Closes #[issue-number]
-- Fixes #[issue-number]
+A clear and concise description of what this PR changes and why.
 
-## ✅ Checklist
-- [ ] My code follows the existing style and patterns of the project.
-- [ ] I have added/updated tests for my changes.
-- [ ] All tests pass locally (`npm run test`).
-- [ ] If changing the UI, I have added screenshots/videos to this PR.
-- [ ] My PR has a descriptive title.
+## Related Issues
 
-## 📸 Screenshots (if applicable)
-Add any visual changes here to help reviewers.
+- Closes #
+- Fixes #
 
-## 🛠️ Testing Steps
-How can the reviewer verify your changes?
+## Testing Done
+
+Describe the tests you ran and how to reproduce them.
+
 1. 
 2. 
 3. 
 
----
-Thank you for your contribution! 🚀
+## Checklist
+
+- [ ] Code follows the existing style and patterns of the project
+- [ ] Tests added or updated to cover the change
+- [ ] All tests pass locally (`npm test` / `cargo test`)
+- [ ] UI changes include screenshots or a screen recording
+- [ ] PR title is descriptive and references the issue number
+
+## Screenshots (if applicable)
+
+Add screenshots or recordings for visual changes.
