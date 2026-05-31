@@ -18,6 +18,12 @@ interface RpcTransactionResponse {
   createdAt?: number;
 }
 
+/**
+ * Guards that the Soroban refund configuration is present before making RPC calls.
+ *
+ * @throws {AppError} 503 `SOROBAN_REFUND_NOT_CONFIGURED` if `contractId` is missing from config.
+ * @throws {AppError} 503 `SOROBAN_RPC_NOT_CONFIGURED` if `sorobanRpcUrl` is missing from config.
+ */
 export function ensureSorobanRefundConfig(): void {
   if (!config.contractId) {
     throw new AppError(
@@ -36,6 +42,17 @@ export function ensureSorobanRefundConfig(): void {
   }
 }
 
+/**
+ * Queries the Soroban RPC node to confirm a refund transaction succeeded on-chain.
+ *
+ * @param txHash - The Soroban transaction hash to verify.
+ * @returns A {@link VerifiedSorobanTransaction} object when the transaction is confirmed as `SUCCESS`.
+ * @throws {AppError} 503 when Soroban config is missing (delegated to {@link ensureSorobanRefundConfig}).
+ * @throws {AppError} 409 `SOROBAN_TX_PENDING` when the transaction is not yet confirmed (`NOT_FOUND`).
+ * @throws {AppError} 400 `SOROBAN_TX_FAILED` when the transaction was rejected on-chain (`FAILED`).
+ * @throws {AppError} 502 `SOROBAN_RPC_INVALID_RESPONSE` when the RPC returns an empty result body.
+ * @throws {AppError} 502 `SOROBAN_RPC_UNAVAILABLE` when the RPC endpoint is unreachable.
+ */
 export async function verifyRefundTransaction(txHash: string): Promise<VerifiedSorobanTransaction> {
   ensureSorobanRefundConfig();
 

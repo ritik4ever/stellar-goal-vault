@@ -9,7 +9,9 @@
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
     "build": "cd backend && npm run build && cd ../frontend && npm run build",
-    "deploy:contract": "./scripts/deploy.sh"
+    "deploy:contract": "./scripts/deploy.sh",
+    "test:e2e": "npm run test:e2e:seed && playwright test",
+    "test:e2e:seed": "cd backend && npx ts-node src/services/seedDeterministic.ts"
   },
   "license": "MIT",
   "dependencies": {

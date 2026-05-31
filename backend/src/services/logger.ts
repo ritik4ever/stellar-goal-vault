@@ -76,6 +76,7 @@ export function logRequest(log: RequestLog): void {
   const level = toStatusLevel(log.statusCode);
 
   if (process.env.NODE_ENV === "production") {
+    // eslint-disable-next-line no-console
     console.log(
       JSON.stringify({
         level,
@@ -88,6 +89,7 @@ export function logRequest(log: RequestLog): void {
   const requestIdSuffix = log.requestId ? ` requestId=${log.requestId}` : "";
   const remoteIpSuffix = log.remoteIp ? ` ip=${log.remoteIp}` : "";
 
+  // eslint-disable-next-line no-console
   console.log(
     `[${log.timestamp}] ${log.method} ${log.path} status=${log.statusCode} duration=${log.duration}${requestIdSuffix}${remoteIpSuffix}`,
   );

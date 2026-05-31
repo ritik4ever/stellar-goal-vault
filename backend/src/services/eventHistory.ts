@@ -1,6 +1,12 @@
 import { getDb } from "./db";
 
-export type CampaignEventType = "created" | "pledged" | "claimed" | "refunded" | "updated";
+export type CampaignEventType =
+  | "created"
+  | "pledged"
+  | "claimed"
+  | "refunded"
+  | "updated"
+  | "pledge_limit_reached";
 
 export interface BlockchainMetadata {
   txHash?: string;
@@ -8,7 +14,7 @@ export interface BlockchainMetadata {
   ledgerCloseTime?: number;
   eventIndex?: number;
   contractId?: string;
-  source?: 'local' | 'soroban';
+  source?: "local" | "soroban";
 }
 
 export interface CampaignEvent {
@@ -41,11 +47,26 @@ function rowToEvent(row: EventRow): CampaignEvent {
     timestamp: row.timestamp,
     actor: row.actor ?? undefined,
     amount: row.amount ?? undefined,
-    metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined,
-    blockchainMetadata: row.blockchain_metadata ? (JSON.parse(row.blockchain_metadata) as BlockchainMetadata) : undefined,
+    metadata: row.metadata
+      ? (JSON.parse(row.metadata) as Record<string, unknown>)
+      : undefined,
+    blockchainMetadata: row.blockchain_metadata
+      ? (JSON.parse(row.blockchain_metadata) as BlockchainMetadata)
+      : undefined,
   };
 }
 
+/**
+ * Persists a campaign lifecycle event to the database.
+ *
+ * @param campaignId - The ID of the campaign this event belongs to.
+ * @param eventType - The type of event (e.g. "created", "pledged", "claimed", "refunded").
+ * @param timestamp - Unix timestamp (seconds) when the event occurred.
+ * @param actor - Optional wallet address of the user who triggered the event.
+ * @param amount - Optional token amount associated with the event.
+ * @param metadata - Optional arbitrary key-value data about the event.
+ * @param blockchainMetadata - Optional on-chain context (tx hash, ledger info, source).
+ */
 export function recordEvent(
   campaignId: string,
   eventType: CampaignEventType,
@@ -66,10 +87,18 @@ export function recordEvent(
     actor: actor ?? null,
     amount: amount ?? null,
     metadata: metadata ? JSON.stringify(metadata) : null,
-    blockchainMetadata: blockchainMetadata ? JSON.stringify(blockchainMetadata) : null,
+    blockchainMetadata: blockchainMetadata
+      ? JSON.stringify(blockchainMetadata)
+      : null,
   });
 }
 
+/**
+ * Returns all events for a given campaign in chronological order.
+ *
+ * @param campaignId - The ID of the campaign whose history to fetch.
+ * @returns An array of {@link CampaignEvent} objects sorted by timestamp ascending.
+ */
 export function getCampaignHistory(campaignId: string): CampaignEvent[] {
   const db = getDb();
   const rows = db
@@ -81,6 +110,12 @@ export function getCampaignHistory(campaignId: string): CampaignEvent[] {
   return rows.map(rowToEvent);
 }
 
+/**
+ * Looks up a single event by its on-chain transaction hash.
+ *
+ * @param txHash - The Soroban transaction hash to search for.
+ * @returns The matching {@link CampaignEvent}, or `undefined` if not found.
+ */
 export function getEventByTxHash(txHash: string): CampaignEvent | undefined {
   const db = getDb();
   const row = db
@@ -92,6 +127,12 @@ export function getEventByTxHash(txHash: string): CampaignEvent | undefined {
   return row ? rowToEvent(row) : undefined;
 }
 
+/**
+ * Returns all events that were confirmed in a specific ledger.
+ *
+ * @param ledgerNumber - The ledger sequence number to filter by.
+ * @returns An array of {@link CampaignEvent} objects ordered by their event index within the ledger.
+ */
 export function getEventsByLedger(ledgerNumber: number): CampaignEvent[] {
   const db = getDb();
   const rows = db
@@ -103,7 +144,15 @@ export function getEventsByLedger(ledgerNumber: number): CampaignEvent[] {
   return rows.map(rowToEvent);
 }
 
-export function getEventsBySource(source: 'local' | 'soroban'): CampaignEvent[] {
+/**
+ * Returns all events originating from a given source (local backend or Soroban chain).
+ *
+ * @param source - `"local"` for off-chain events, `"soroban"` for on-chain events.
+ * @returns An array of {@link CampaignEvent} objects in chronological order.
+ */
+export function getEventsBySource(
+  source: "local" | "soroban",
+): CampaignEvent[] {
   const db = getDb();
   const rows = db
     .prepare(
