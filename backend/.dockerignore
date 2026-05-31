@@ -1,0 +1,7 @@
+node_modules
+npm-debug.log
+dist
+coverage
+tests
+*.tsbuildinfo
+build_output*.txt

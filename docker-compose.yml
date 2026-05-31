@@ -4,6 +4,7 @@ services:
   backend:
     build:
       context: ./backend
+      target: production
     container_name: stellar-goal-vault-backend
     ports:
       - "3001:3001"
@@ -16,7 +17,13 @@ services:
       # timeout: how long a single probe may take before it is considered failed.
       # retries: consecutive failures before the container is marked unhealthy.
       # start_period: grace window after container start before failures count.
-      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3001/api/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -25,11 +32,10 @@ services:
   frontend:
     build:
       context: ./frontend
+      target: production
     container_name: stellar-goal-vault-frontend
     ports:
-      - "3000:3000"
-    environment:
-      - VITE_API_URL=http://backend:3001/api
+      - "3000:80"
     depends_on:
       # Wait until the backend passes its health check before starting frontend.
       backend:
@@ -38,7 +44,7 @@ services:
     healthcheck:
       # Probe the frontend HTTP server root.
       # Same timing parameters as the backend for consistency.
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3

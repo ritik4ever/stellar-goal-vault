@@ -366,8 +366,10 @@ export function listCampaigns(
 
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
-    whereClauses.push(`LOWER(title) LIKE ?`);
-    params.push(searchTerm);
+    whereClauses.push(
+      `(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(creator) LIKE ? OR CAST(id AS TEXT) LIKE ?)`,
+    );
+    params.push(searchTerm, searchTerm, searchTerm, searchTerm);
   }
 
   if (options?.assetCode) {
@@ -604,6 +606,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     creator: input.creator,
     title: input.title.trim(),
     description: input.description.trim(),
+    assetCode: acceptedTokens[0],
     acceptedTokens,
     assetCode: acceptedTokens[0] || "",
     targetAmount: round(input.targetAmount),
