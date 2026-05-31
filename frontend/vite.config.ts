@@ -1,22 +1,21 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
-const isAnalyze = process.env.ANALYZE === "true";
-const apiProxyTarget = process.env.VITE_PROXY_TARGET ?? "http://localhost:3001";
+const isAnalyze = process.env.ANALYZE === 'true';
 
 export default defineConfig(async () => {
   const plugins = [react()];
 
   if (isAnalyze) {
-    const { visualizer } = await import("rollup-plugin-visualizer");
+    const { visualizer } = await import('rollup-plugin-visualizer');
     plugins.push(
       visualizer({
         open: true,
-        filename: "dist/bundle-analysis.html",
+        filename: 'dist/bundle-analysis.html',
         gzipSize: true,
         brotliSize: true,
-        template: "treemap",
-      }),
+        template: 'treemap',
+      }) as any
     );
   }
 
@@ -26,9 +25,9 @@ export default defineConfig(async () => {
       rollupOptions: {
         output: {
           manualChunks: {
-            "vendor-react": ["react", "react-dom"],
-            "vendor-stellar": ["@stellar/stellar-sdk"],
-            "vendor-charts": ["recharts"],
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-stellar': ['@stellar/stellar-sdk'],
+            'vendor-charts': ['recharts'],
           },
         },
       },
@@ -36,13 +35,13 @@ export default defineConfig(async () => {
     server: {
       port: 3000,
       proxy: {
-        "/api": apiProxyTarget,
+        '/api': 'http://localhost:3001',
       },
     },
     test: {
-      environment: "jsdom",
+      environment: 'jsdom',
       globals: true,
-      setupFiles: "./src/test-setup.ts",
+      setupFiles: './src/test-setup.ts',
     },
   };
 });
