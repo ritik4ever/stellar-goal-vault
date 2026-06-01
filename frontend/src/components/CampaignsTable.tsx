@@ -12,6 +12,8 @@ import {
 import { SearchInput } from "./SearchInput";
 import { SortDropdown, SortOption } from "./SortDropdown";
 import { AddressAvatar } from "./AddressAvatar";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 
 type StatusFilterValue = "" | CampaignStatus;
 
@@ -105,6 +107,14 @@ export function CampaignsTable({
     );
     return sortCampaigns(filtered, sortBy);
   }, [campaigns, assetCode, statusFilter, sortBy]);
+
+  const isMobile = useMediaQuery("(max-width: 767px)");
+
+  const virtualizer = useWindowVirtualizer({
+    count: filteredCampaigns.length,
+    estimateSize: () => (isMobile ? 180 : 72),
+    overscan: 5,
+  });
 
   if (isLoading && isEmpty) {
     return (
@@ -207,71 +217,168 @@ export function CampaignsTable({
         />
       ) : (
         <>
-          <div className="table-wrap table-only">
-            <table>
-              <thead>
-                <tr>
-                  <th>Campaign</th>
-                  <th>Creator</th>
-                  <th>Funding</th>
-                  <th>Status</th>
-                  <th>Deadline</th>
-                  <th>
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredCampaigns.map((campaign) => (
-                  <tr key={campaign.id}>
-                    <td>
-                      <div className="stacked">
-                        <strong>{campaign.title}</strong>
-                        <span className="muted">#{campaign.id}</span>
+          {!isMobile && (
+            <div className="table-wrap table-only">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Campaign</th>
+                    <th>Creator</th>
+                    <th>Funding</th>
+                    <th>Status</th>
+                    <th>Deadline</th>
+                    <th>
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {virtualizer.getVirtualItems().length > 0 && (
+                    <tr style={{ height: virtualizer.getVirtualItems()[0].start }} />
+                  )}
+                  {virtualizer.getVirtualItems().map((virtualRow) => {
+                    const campaign = filteredCampaigns[virtualRow.index];
+                    return (
+                      <tr key={campaign.id} ref={virtualizer.measureElement} data-index={virtualRow.index}>
+                        <td>
+                          <div className="stacked">
+                            <strong>{campaign.title}</strong>
+                            <span className="muted">#{campaign.id}</span>
+                          </div>
+                        </td>
+                        <td className="mono">
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
+                            }}
+                          >
+                            <AddressAvatar address={campaign.creator} size={28} />
+                            <span>{campaign.creator.slice(0, 12)}...</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="progress-copy">
+                            {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
+                            {campaign.assetCode}
+                          </div>
+                          <div className="progress-bar" aria-hidden>
+                            <div
+                              style={{
+                                width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                              }}
+                            />
+                          </div>
+                          <span className="muted">
+                            {campaign.progress.percentFunded}% funded
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            className={`badge badge-${campaign.progress.status}`}
+                          >
+                            {getStatusLabel(campaign.progress.status)}
+                          </span>
+                        </td>
+                        <td className="stacked">
+                          <span>{formatTimestamp(campaign.deadline)}</span>
+                          <span className="muted">
+                            {campaign.progress.hoursLeft}h left
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            className={
+                              selectedCampaignId === campaign.id
+                                ? "btn-secondary"
+                                : "btn-ghost"
+                            }
+                            type="button"
+                            onClick={() => onSelect(campaign.id)}
+                          >
+                            {selectedCampaignId === campaign.id
+                              ? "Selected"
+                              : "View"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {virtualizer.getVirtualItems().length > 0 && (
+                    <tr
+                      style={{
+                        height:
+                          virtualizer.getTotalSize() -
+                          virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1].end,
+                      }}
+                    />
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {isMobile && (
+            <div className="cards-only">
+              {virtualizer.getVirtualItems().length > 0 && (
+                <div style={{ height: virtualizer.getVirtualItems()[0].start }} />
+              )}
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const campaign = filteredCampaigns[virtualRow.index];
+                return (
+                  <article
+                    key={campaign.id}
+                    ref={virtualizer.measureElement}
+                    data-index={virtualRow.index}
+                    className={`campaign-card ${
+                      selectedCampaignId === campaign.id
+                        ? "campaign-card-selected"
+                        : ""
+                    }`}
+                  >
+                    <div className="campaign-card-main">
+                      <div className="campaign-card-header">
+                        <strong className="campaign-title">{campaign.title}</strong>
+                        <span className={`badge badge-${campaign.progress.status}`}>
+                          {getStatusLabel(campaign.progress.status)}
+                        </span>
                       </div>
-                    </td>
-                    <td className="mono">
                       <div
+                        className="campaign-creator mono"
                         style={{
                           display: "flex",
                           alignItems: "center",
                           gap: 10,
+                          marginBottom: 12,
                         }}
                       >
-                        <AddressAvatar address={campaign.creator} size={28} />
-                        <span>{campaign.creator.slice(0, 12)}...</span>
+                        <AddressAvatar address={campaign.creator} size={24} />
+                        <span>{campaign.creator.slice(0, 16)}...</span>
                       </div>
-                    </td>
-                    <td>
-                      <div className="progress-copy">
-                        {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-                        {campaign.assetCode}
+                      <div className="campaign-progress">
+                        <div className="progress-copy">
+                          {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
+                          {campaign.assetCode}
+                        </div>
+                        <div className="progress-bar" aria-hidden>
+                          <div
+                            style={{
+                              width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                            }}
+                          />
+                        </div>
                       </div>
-                      <div className="progress-bar" aria-hidden>
-                        <div
-                          style={{
-                            width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
-                          }}
-                        />
+                      <div className="campaign-meta">
+                        <span className="muted">
+                          {campaign.progress.hoursLeft}h left
+                        </span>
+                        <span className="muted">
+                          {formatTimestamp(campaign.deadline)}
+                        </span>
                       </div>
-                      <span className="muted">
-                        {campaign.progress.percentFunded}% funded
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`badge badge-${campaign.progress.status}`}
-                      >
-                        {getStatusLabel(campaign.progress.status)}
-                      </span>
-                    </td>
-                    <td className="stacked">
-                      <span>{formatTimestamp(campaign.deadline)}</span>
-                      <span className="muted">
-                        {campaign.progress.hoursLeft}h left
-                      </span>
-                    </td>
-                    <td>
+                    </div>
+                    <div className="campaign-card-actions">
                       <button
                         className={
                           selectedCampaignId === campaign.id
@@ -281,84 +388,23 @@ export function CampaignsTable({
                         type="button"
                         onClick={() => onSelect(campaign.id)}
                       >
-                        {selectedCampaignId === campaign.id
-                          ? "Selected"
-                          : "View"}
+                        {selectedCampaignId === campaign.id ? "Selected" : "View"}
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="cards-only">
-            {filteredCampaigns.map((campaign) => (
-              <article
-                key={campaign.id}
-                className={`campaign-card ${
-                  selectedCampaignId === campaign.id
-                    ? "campaign-card-selected"
-                    : ""
-                }`}
-              >
-                <div className="campaign-card-main">
-                  <div className="campaign-card-header">
-                    <strong className="campaign-title">{campaign.title}</strong>
-                    <span className={`badge badge-${campaign.progress.status}`}>
-                      {getStatusLabel(campaign.progress.status)}
-                    </span>
-                  </div>
-                  <div
-                    className="campaign-creator mono"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      marginBottom: 12,
-                    }}
-                  >
-                    <AddressAvatar address={campaign.creator} size={24} />
-                    <span>{campaign.creator.slice(0, 16)}...</span>
-                  </div>
-                  <div className="campaign-progress">
-                    <div className="progress-copy">
-                      {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-                      {campaign.assetCode}
                     </div>
-                    <div className="progress-bar" aria-hidden>
-                      <div
-                        style={{
-                          width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="campaign-meta">
-                    <span className="muted">
-                      {campaign.progress.hoursLeft}h left
-                    </span>
-                    <span className="muted">
-                      {formatTimestamp(campaign.deadline)}
-                    </span>
-                  </div>
-                </div>
-                <div className="campaign-card-actions">
-                  <button
-                    className={
-                      selectedCampaignId === campaign.id
-                        ? "btn-secondary"
-                        : "btn-ghost"
-                    }
-                    type="button"
-                    onClick={() => onSelect(campaign.id)}
-                  >
-                    {selectedCampaignId === campaign.id ? "Selected" : "View"}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
+                  </article>
+                );
+              })}
+              {virtualizer.getVirtualItems().length > 0 && (
+                <div
+                  style={{
+                    height:
+                      virtualizer.getTotalSize() -
+                      virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1].end,
+                  }}
+                />
+              )}
+            </div>
+          )}
         </>
       )}
     </section>

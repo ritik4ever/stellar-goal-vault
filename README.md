@@ -47,6 +47,7 @@ Architecture decision records
 - Key architecture choices are documented in `adr/`.
 - See `adr/0001-sqlite-off-chain-mvp.md` for the SQLite off-chain MVP decision.
 - See `adr/0002-react-express-mvp.md` for the React + Express + Soroban MVP architecture decision.
+- See `adr/0003-freighter-wallet-integration.md` for the Freighter wallet signing approach.
 
 ## Core campaign model
 
@@ -338,6 +339,10 @@ That issue is already represented in:
 - `backend/src/services/openIssues.ts`
 - `OPEN_SOURCE_ISSUES.md`
 - The frontend backlog panel
+
+## Frequently Asked Questions
+
+See the [FAQ.md](./FAQ.md) for answers to common questions about testnet funding, Freighter setup, contract deployment, database reset, pledge failures, and more.
 
 ## Security
 

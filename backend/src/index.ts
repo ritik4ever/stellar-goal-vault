@@ -1,3 +1,4 @@
+import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
@@ -5,11 +6,11 @@ import { validateEnv } from "./validateEnv";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import path from "path";
-import { fileURLToPath } from "url";
 import { config, walletIntegrationReady } from "./config";
+import { apiKeyAuthMiddleware } from "./middleware/apiKeyAuth";
+import { cacheMiddleware } from "./middleware/cacheMiddleware";
+import { initRedisCache } from "./services/cache";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 import {
   addPledge,
   calculateProgress,
@@ -27,10 +28,8 @@ import {
   listCampaignPledges,
   listCampaigns,
   type ListCampaignsOptions,
-  softDeleteCampaign,
   reconcileOnChainPledge,
   refundContributor,
-  updateCampaign,
 } from "./services/campaignStore";
 import { checkDbHealth } from "./services/db";
 import { getCampaignHistory } from "./services/eventHistory";
@@ -50,7 +49,6 @@ import {
   parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
-  updateCampaignPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
 } from "./validation/schemas";
@@ -95,7 +93,20 @@ app.use(
   }),
 );
 
-app.use(express.json());
+app.use(compression({ threshold: 1024 }));
+
+const bodySizeLimit = process.env.MAX_BODY_SIZE || "16kb";
+app.use(express.json({ limit: bodySizeLimit }));
+
+// Add API key authentication middleware (production only)
+if (process.env.NODE_ENV === "production") {
+  app.use(apiKeyAuthMiddleware);
+}
+
+// Add cache middleware for GET requests (production only, 5 minute TTL)
+if (process.env.NODE_ENV === "production") {
+  app.use(cacheMiddleware(300));
+}
 
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
@@ -299,12 +310,12 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
     listOptions.limit = paginationResult.limit;
   }
 
-  const { campaigns, totalCount } = listCampaigns(listOptions);
+  const { campaigns, totalCount, pledgeCounts } = listCampaigns(listOptions);
 
   const data = filterCampaignList(
     campaigns.map((campaign) => ({
       ...campaign,
-      progress: calculateProgress(campaign),
+      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
     })),
     filters,
   );
@@ -617,6 +628,17 @@ app.get("/api/leaderboard", (req: Request, res: Response) => {
 
 app.use(
   (err: any, req: Request, res: Response, _next: express.NextFunction) => {
+    if (err.type === "entity.too.large") {
+      return res.status(413).json({
+        success: false,
+        error: {
+          code: "PAYLOAD_TOO_LARGE",
+          message: "Request payload size exceeds the maximum allowed limit",
+          requestId: (req as any).requestId,
+        },
+      });
+    }
+
     if (err.message === "Not allowed by CORS") {
       return res.status(403).json({
         success: false,
@@ -695,6 +717,17 @@ function startServer() {
   printStartupBanner();
   initCampaignStore();
   startEventIndexer();
+
+  // Initialize Redis cache in production
+  if (process.env.NODE_ENV === "production") {
+    initRedisCache().catch((error) => {
+      logError("Failed to initialize Redis cache", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Continue without cache if initialization fails
+    });
+  }
+
   app.listen(config.port, () => {
     logInfo(
       "server_started",

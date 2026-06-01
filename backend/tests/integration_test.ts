@@ -695,6 +695,24 @@ describe("Campaign API - Health & Stability", () => {
     expect(res.data.database.reachable).toBe(true);
   });
 
+  it("should reject payloads larger than the configured limit (413 Payload Too Large)", async () => {
+    // Generate a ~20KB payload
+    const largeDescription = "A".repeat(20 * 1024);
+    
+    const res = await apiClient.post("/api/campaigns", {
+      creator: CREATOR_1,
+      title: "Oversized Campaign",
+      description: largeDescription,
+      assetCode: "USDC",
+      targetAmount: 1000,
+      deadline: nowInSeconds() + 86400,
+    });
+
+    expect(res.status).toBe(413);
+    expect(res.data.success).toBe(false);
+    expect(res.data.error.code).toBe("PAYLOAD_TOO_LARGE");
+  });
+
   it("should handle concurrent requests without data corruption", async () => {
     // Create campaigns concurrently
     const promises = [];
