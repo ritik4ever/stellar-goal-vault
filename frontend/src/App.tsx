@@ -1,13 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
-import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
-import { CreatorAnalytics } from "./components/CreatorAnalytics";
 import { IssueBacklog } from "./components/IssueBacklog";
+
+const CampaignDetailPanel = lazy(() =>
+  import("./components/CampaignDetailPanel").then((mod) => ({
+    default: mod.CampaignDetailPanel,
+  })),
+);
+const CreatorAnalytics = lazy(() =>
+  import("./components/CreatorAnalytics").then((mod) => ({
+    default: mod.CreatorAnalytics,
+  })),
+);
 import {
   TransactionPreviewModal,
   TransactionPreviewData,
@@ -60,6 +69,25 @@ type ConfettiBurst = {
   id: number;
   campaignTitle: string;
 };
+
+function useOnlineStatus(): boolean {
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  return isOnline;
+}
 
 function round(value: number): number {
   return Number(value.toFixed(2));
@@ -121,6 +149,7 @@ function App() {
   const freighter = useFreighter();
   const { toasts, addToast, dismiss } = useToast();
   const connectedWallet = freighter.publicKey;
+  const isOnline = useOnlineStatus();
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [issues, setIssues] = useState<OpenIssue[]>([]);
@@ -522,6 +551,20 @@ function App() {
 
   return (
     <div className="app-shell">
+      {!isOnline && (
+        <div
+          className="form-error"
+          style={{
+            margin: '0 0 1rem 0',
+            padding: '0.75rem',
+            textAlign: 'center',
+            borderRadius: '4px',
+          }}
+        >
+          You are offline. Using cached data. Connection will be restored automatically.
+        </div>
+      )}
+
       {confettiBurst ? (
         <FundedConfetti
           key={confettiBurst.id}
@@ -590,11 +633,20 @@ function App() {
           style={{ animationDelay: "0.1s" }}
         >
           <ErrorBoundary componentName="CreatorAnalytics">
-            <CreatorAnalytics
-              creatorAddress={selectedCampaign.creator}
-              campaigns={campaigns}
-              isLoading={isCampaignsLoading || initialLoad}
-            />
+            <Suspense
+              fallback={
+                <div
+                  className="skeleton-placeholder"
+                  style={{ height: "200px", borderRadius: "8px" }}
+                />
+              }
+            >
+              <CreatorAnalytics
+                creatorAddress={selectedCampaign.creator}
+                campaigns={campaigns}
+                isLoading={isCampaignsLoading || initialLoad}
+              />
+            </Suspense>
           </ErrorBoundary>
         </section>
       )}
@@ -609,20 +661,29 @@ function App() {
           allowedAssets={appConfig?.allowedAssets ?? []}
         />
         <ErrorBoundary componentName="CampaignDetailPanel">
-          <CampaignDetailPanel
-            campaign={selectedCampaign}
-            appConfig={appConfig}
-            connectedWallet={connectedWallet}
-            isConnectingWallet={isConnectingWallet}
-            isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
-            isLoading={isSelectedLoading || initialLoad}
-            onConnectWallet={handleConnectWallet}
-            onDisconnectWallet={handleDisconnectWallet}
-            onPledge={handlePledge}
-            onClaim={handleClaim}
-            onSoftDelete={handleSoftDelete}
-            onRefund={handleRefund}
-          />
+          <Suspense
+            fallback={
+              <div
+                className="skeleton-placeholder"
+                style={{ height: "400px", borderRadius: "8px" }}
+              />
+            }
+          >
+            <CampaignDetailPanel
+              campaign={selectedCampaign}
+              appConfig={appConfig}
+              connectedWallet={connectedWallet}
+              isConnectingWallet={isConnectingWallet}
+              isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+              isLoading={isSelectedLoading || initialLoad}
+              onConnectWallet={handleConnectWallet}
+              onDisconnectWallet={handleDisconnectWallet}
+              onPledge={handlePledge}
+              onClaim={handleClaim}
+              onSoftDelete={handleSoftDelete}
+              onRefund={handleRefund}
+            />
+          </Suspense>
         </ErrorBoundary>
       </section>
 
