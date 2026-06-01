@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import { Campaign } from "../types/campaign";
 import { CopyButton } from "./CopyButton";
 import { AddressAvatar } from "./AddressAvatar";
@@ -9,7 +9,51 @@ interface CampaignCardProps {
   onSelect: (campaignId: string) => void;
 }
 
-export function CampaignCard({
+function areEqual(prevProps: CampaignCardProps, nextProps: CampaignCardProps): boolean {
+  // Check if the card's specific selection status changed:
+  const prevIsSelected = prevProps.selectedCampaignId === prevProps.campaign.id;
+  const nextIsSelected = nextProps.selectedCampaignId === nextProps.campaign.id;
+  if (prevIsSelected !== nextIsSelected) return false;
+
+  // Check if selection callback function reference changed:
+  if (prevProps.onSelect !== nextProps.onSelect) return false;
+
+  // Check critical campaign fields (identity & mutable states):
+  const prevC = prevProps.campaign;
+  const nextC = nextProps.campaign;
+
+  if (prevC.id !== nextC.id) return false;
+  if (prevC.title !== nextC.title) return false;
+  if (prevC.creator !== nextC.creator) return false;
+  if (prevC.pledgedAmount !== nextC.pledgedAmount) return false;
+  if (prevC.targetAmount !== nextC.targetAmount) return false;
+  if (prevC.assetCode !== nextC.assetCode) return false;
+  if (prevC.deadline !== nextC.deadline) return false;
+
+  // Progress sub-fields:
+  if (prevC.progress.pledgeCount !== nextC.progress.pledgeCount) return false;
+  if (prevC.progress.percentFunded !== nextC.progress.percentFunded) return false;
+  if (prevC.progress.status !== nextC.progress.status) return false;
+  if (prevC.progress.hoursLeft !== nextC.progress.hoursLeft) return false;
+  if (prevC.progress.canPledge !== nextC.progress.canPledge) return false;
+  if (prevC.progress.canClaim !== nextC.progress.canClaim) return false;
+  if (prevC.progress.canRefund !== nextC.progress.canRefund) return false;
+
+  // Compare acceptedTokens securely:
+  const prevTokens = prevC.acceptedTokens;
+  const nextTokens = nextC.acceptedTokens;
+  if (prevTokens !== nextTokens) {
+    if (!prevTokens || !nextTokens) return false;
+    if (prevTokens.length !== nextTokens.length) return false;
+    for (let i = 0; i < prevTokens.length; i++) {
+      if (prevTokens[i] !== nextTokens[i]) return false;
+    }
+  }
+
+  return true;
+}
+
+export function CampaignCardInner({
   campaign,
   selectedCampaignId,
   onSelect,
@@ -89,5 +133,7 @@ export function CampaignCard({
     </article>
   );
 }
+
+export const CampaignCard = memo(CampaignCardInner, areEqual);
 
 export default CampaignCard;

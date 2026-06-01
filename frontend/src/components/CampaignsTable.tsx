@@ -1,5 +1,5 @@
 import { LayoutGrid } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { useDebounce } from "../hooks/useDebounce";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
@@ -12,6 +12,7 @@ import {
 import { SearchInput } from "./SearchInput";
 import { SortDropdown, SortOption } from "./SortDropdown";
 import { AddressAvatar } from "./AddressAvatar";
+import { CampaignCard } from "./CampaignCard";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 
@@ -60,9 +61,13 @@ export function CampaignsTable({
   campaigns,
   selectedCampaignId,
   onSelect,
+  onSearchChange,
   isLoading = false,
   invalidUrlCampaignId = null,
 }: CampaignsTableProps) {
+  const handleSelectCampaign = useCallback((campaignId: string) => {
+    onSelect(campaignId);
+  }, [onSelect]);
   const [assetCode, setAssetCode] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("");
   const [sortBy, setSortBy] = useState<SortOption>("newest");
@@ -389,6 +394,25 @@ export function CampaignsTable({
                       >
                         {selectedCampaignId === campaign.id ? "Selected" : "View"}
                       </button>
+<<<<<<< main
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="cards-only">
+            {filteredCampaigns.map((campaign) => (
+              <CampaignCard
+                key={campaign.id}
+                campaign={campaign}
+                selectedCampaignId={selectedCampaignId}
+                onSelect={handleSelectCampaign}
+              />
+            ))}
+          </div>
+=======
                     </div>
                   </article>
                 );
@@ -404,6 +428,7 @@ export function CampaignsTable({
               )}
             </div>
           )}
+>>>>>>> main
         </>
       )}
     </section>
