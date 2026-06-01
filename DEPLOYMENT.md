@@ -111,6 +111,11 @@ Data not persisting
 - Environment variables must be configured correctly
 - SQLite is suitable for development but not production
 
+## Related Documentation
+- [Runbook — Common Operational Tasks](./RUNBOOK.md) — step-by-step procedures for resetting the database, rotating API keys, redeploying contracts, rolling back the backend, and clearing the event cache.
+- [Architecture Diagrams](./ARCHITECTURE_DIAGRAMS.md)
+- [Contributing Guide](./CONTRIBUTING.md)
+
 
 
 
