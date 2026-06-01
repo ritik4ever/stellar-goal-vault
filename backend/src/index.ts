@@ -2,6 +2,7 @@ import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
+import { createServer, Server } from "http";
 import { validateEnv } from "./validateEnv";
 import { randomUUID } from "crypto";
 import { z } from "zod";
@@ -712,6 +713,13 @@ function printStartupBanner(): void {
   /* eslint-enable no-console */
 }
 
+export function configureHttpServer(server: Server): Server {
+  server.keepAliveTimeout = config.keepAliveTimeoutMs;
+  server.headersTimeout = config.headersTimeoutMs;
+
+  return server;
+}
+
 function startServer() {
   validateEnv();
   printStartupBanner();
@@ -721,19 +729,27 @@ function startServer() {
   // Initialize Redis cache in production
   if (process.env.NODE_ENV === "production") {
     initRedisCache().catch((error) => {
-      logError("Failed to initialize Redis cache", {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logError(
+        "Failed to initialize Redis cache",
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+        config.logLevel,
+      );
       // Continue without cache if initialization fails
     });
   }
 
-  app.listen(config.port, () => {
+  const server = configureHttpServer(createServer(app));
+
+  server.listen(config.port, () => {
     logInfo(
       "server_started",
       {
         message: `Stellar Goal Vault API listening on http://localhost:${config.port}`,
         port: config.port,
+        keepAliveTimeoutMs: server.keepAliveTimeout,
+        headersTimeoutMs: server.headersTimeout,
       },
       config.logLevel,
     );
