@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { config } from "../config";
+import { isValidStellarPublicKey } from "./stellarAddress";
 
 export const STELLAR_ACCOUNT_REGEX = /^G[A-Z2-7]{55}$/;
 export const ASSET_CODE_REGEX = /^[A-Za-z0-9]{1,12}$/;
@@ -17,7 +18,10 @@ export const stellarAccountIdSchema = z
   .regex(
     STELLAR_ACCOUNT_REGEX,
     "Must be a valid Stellar account ID (starts with G and is exactly 56 characters).",
-  );
+  )
+  .refine(isValidStellarPublicKey, {
+    message: "creator must be a valid Stellar public key",
+  });
 
 export const assetCodeSchema = z
   .string()
