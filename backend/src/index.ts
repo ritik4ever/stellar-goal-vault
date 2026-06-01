@@ -78,16 +78,26 @@ const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 app.use(
   cors({
     origin: (origin, callback) => {
-      const isDev = process.env.NODE_ENV !== "production";
-      if (
-        !origin ||
-        config.corsAllowedOrigins.includes(origin) ||
-        (isDev && config.corsAllowedOrigins.length === 0)
-      ) {
+      // Allow requests with no origin (e.g., mobile apps, curl)
+      if (!origin) {
         callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
+        return;
       }
+
+      // Check if wildcard is configured
+      if (config.corsAllowedOrigins.includes("*")) {
+        callback(null, true);
+        return;
+      }
+
+      // Check if origin is in allowed list
+      if (config.corsAllowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      // Reject unrecognized origins
+      callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
   }),
@@ -721,9 +731,13 @@ function startServer() {
   // Initialize Redis cache in production
   if (process.env.NODE_ENV === "production") {
     initRedisCache().catch((error) => {
-      logError("Failed to initialize Redis cache", {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logError(
+        error,
+        {
+          event: "redis_cache_init_failed",
+        },
+        config.logLevel,
+      );
       // Continue without cache if initialization fails
     });
   }
