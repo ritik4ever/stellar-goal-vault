@@ -1,3 +1,4 @@
+import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
@@ -91,6 +92,8 @@ app.use(
     credentials: true,
   }),
 );
+
+app.use(compression({ threshold: 1024 }));
 
 const bodySizeLimit = process.env.MAX_BODY_SIZE || "16kb";
 app.use(express.json({ limit: bodySizeLimit }));
@@ -307,12 +310,12 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
     listOptions.limit = paginationResult.limit;
   }
 
-  const { campaigns, totalCount } = listCampaigns(listOptions);
+  const { campaigns, totalCount, pledgeCounts } = listCampaigns(listOptions);
 
   const data = filterCampaignList(
     campaigns.map((campaign) => ({
       ...campaign,
-      progress: calculateProgress(campaign),
+      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
     })),
     filters,
   );
