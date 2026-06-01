@@ -17,9 +17,13 @@
     "dev": "ts-node-dev --respawn src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc",
-    "lint": "eslint 'src/**/*.ts'"
+    "lint": "eslint 'src/**/*.ts'",
+    "mutation": "stryker run stryker.config.mjs",
+    "mutation:ci": "stryker run stryker.config.mjs --reporters json,clear-text"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^8.7.1",
+    "@stryker-mutator/vitest-runner": "^8.7.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/compression": "^1.7.5",
     "@types/cors": "^2.8.17",
