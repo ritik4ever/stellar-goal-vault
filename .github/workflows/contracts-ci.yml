@@ -38,6 +38,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Cargo dependencies
+        working-directory: contracts
+        run: cargo audit 2>&1 | tee /tmp/cargo-audit.txt; exit ${PIPESTATUS[0]}
+
+      - name: Upload cargo audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-audit-report
+          path: /tmp/cargo-audit.txt
+
       - name: Run clippy (deny all warnings)
         working-directory: contracts
         run: cargo clippy --all-targets --all-features -- -D warnings

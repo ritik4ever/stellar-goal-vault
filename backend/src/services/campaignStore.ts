@@ -256,11 +256,13 @@ function checkContributorLimit(
  *
  * @param campaign - The campaign record to evaluate.
  * @param at - Unix timestamp (seconds) to evaluate state against; defaults to now.
+ * @param pledgeCountOverride - Optional pledge count to use instead of querying database.
  * @returns A {@link CampaignProgress} object with status, funding percentages, and action flags.
  */
 export function calculateProgress(
   campaign: CampaignRecord,
   at = nowInSeconds(),
+  pledgeCountOverride?: number,
 ): CampaignProgress {
   const deadlineReached = at >= campaign.deadline;
   const canClaim =
@@ -290,7 +292,7 @@ export function calculateProgress(
     remainingAmount: round(
       Math.max(0, campaign.targetAmount - campaign.pledgedAmount),
     ),
-    pledgeCount: getActivePledgeCount(campaign.id),
+    pledgeCount: pledgeCountOverride !== undefined ? pledgeCountOverride : getActivePledgeCount(campaign.id),
     hoursLeft: round(Math.max(0, campaign.deadline - at) / 3600),
     canPledge,
     canClaim,
@@ -310,6 +312,7 @@ export interface ListCampaignsOptions {
 export interface ListCampaignsResult {
   campaigns: CampaignRecord[];
   totalCount: number;
+  pledgeCounts: Record<string, number>;
 }
 
 export interface ListCampaignPledgesOptions {
@@ -334,6 +337,14 @@ export interface GlobalStats {
   campaignCountByStatus: Record<CampaignStatus, number>;
   totalPledgedAmount: number;
   totalContributors: number;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  contributor: string;
+  totalPledged: number;
+  campaignCount: number;
+  averagePledgeAmount: number;
 }
 
 const MAX_CAMPAIGN_DURATION_SECONDS = 60 * 60 * 24 * 180;
@@ -368,7 +379,7 @@ export function listCampaigns(
   }
 
   if (options?.assetCode) {
-    whereClauses.push(`accepted_tokens_json LIKE ?`);
+    whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);
   }
 
@@ -376,39 +387,38 @@ export function listCampaigns(
     const now = Math.floor(Date.now() / 1000);
     switch (options.status) {
       case "claimed":
-        whereClauses.push(`claimed_at IS NOT NULL`);
+        whereClauses.push(`campaigns.claimed_at IS NOT NULL`);
         break;
       case "funded":
         whereClauses.push(
-          `claimed_at IS NULL AND pledged_amount >= target_amount`,
+          `campaigns.claimed_at IS NULL AND campaigns.pledged_amount >= campaigns.target_amount`,
         );
         break;
       case "failed":
         whereClauses.push(
-          `claimed_at IS NULL AND pledged_amount < target_amount AND deadline <= ?`,
+          `campaigns.claimed_at IS NULL AND campaigns.pledged_amount < campaigns.target_amount AND campaigns.deadline <= ?`,
         );
         params.push(now);
         break;
       case "open":
         whereClauses.push(
-          `claimed_at IS NULL AND pledged_amount < target_amount AND deadline > ?`,
+          `campaigns.claimed_at IS NULL AND campaigns.pledged_amount < campaigns.target_amount AND campaigns.deadline > ?`,
         );
         params.push(now);
         break;
     }
   }
 
-  let baseQuery = `FROM campaigns`;
-
+  let whereClause = '';
   if (!options?.includeDeleted) {
-    whereClauses.push(`deleted_at IS NULL`);
+    whereClauses.push(`campaigns.deleted_at IS NULL`);
   }
 
   if (whereClauses.length > 0) {
-    baseQuery += ` WHERE ` + whereClauses.join(" AND ");
+    whereClause = ` WHERE ` + whereClauses.join(" AND ");
   }
 
-  const countQuery = `SELECT COUNT(*) as total ${baseQuery}`;
+  const countQuery = `SELECT COUNT(*) as total FROM campaigns${whereClause}`;
   const totalCount = (
     db.prepare(countQuery).get(...params) as { total: number }
   ).total;
@@ -417,8 +427,9 @@ export function listCampaigns(
   const rows = db.prepare(dataQuery).all(...params, limit, offset) as CampaignRow[];
 
   return {
-    campaigns: rows.map(rowToCampaign),
+    campaigns,
     totalCount,
+    pledgeCounts,
   };
 }
 
@@ -497,9 +508,13 @@ export function listCampaignPledges(
  * @returns An array of {@link ContributorSummary} objects sorted by total pledged (descending),
  *          or an empty array if the campaign does not exist.
  */
-export function getContributorSummary(campaignId: string): ContributorSummary[] {
+export function getContributorSummary(
+  campaignId: string,
+): ContributorSummary[] {
   const db = getDb();
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT 
       contributor,
       COALESCE(SUM(CASE WHEN refunded_at IS NULL THEN amount ELSE 0 END), 0) as totalPledged,
@@ -508,7 +523,9 @@ export function getContributorSummary(campaignId: string): ContributorSummary[] 
     WHERE campaign_id = ?
     GROUP BY contributor 
     ORDER BY totalPledged DESC
-  `).all(campaignId) as Array<{
+  `,
+    )
+    .all(campaignId) as Array<{
     contributor: string;
     totalPledged: number;
     refundedAmount: number;
@@ -519,11 +536,11 @@ export function getContributorSummary(campaignId: string): ContributorSummary[] 
     return [];
   }
 
-  return rows.map(row => ({
+  return rows.map((row) => ({
     contributor: row.contributor,
     totalPledged: Number(row.totalPledged),
     refundedAmount: Number(row.refundedAmount),
-    isFullyRefunded: row.refundedAmount > 0 && row.totalPledged === 0
+    isFullyRefunded: row.refundedAmount > 0 && row.totalPledged === 0,
   }));
 }
 
@@ -713,6 +730,30 @@ export function addPledge(
     },
     { source: "local" } as BlockchainMetadata,
   );
+
+  // Check if contributor has reached their limit and record event
+  if (
+    campaign.maxPerContributor !== undefined &&
+    campaign.maxPerContributor > 0
+  ) {
+    const newContributorTotal = round(
+      getContributorPledgedTotal(campaignId, input.contributor),
+    );
+    if (newContributorTotal >= campaign.maxPerContributor) {
+      recordEvent(
+        campaignId,
+        "pledge_limit_reached",
+        createdAt,
+        input.contributor,
+        newContributorTotal,
+        {
+          maxPerContributor: campaign.maxPerContributor,
+          assetCode,
+        },
+        { source: "local" } as BlockchainMetadata,
+      );
+    }
+  }
 
   return getCampaign(campaignId)!;
 }
@@ -1061,4 +1102,41 @@ export function refundContributor(
     campaign: getCampaign(campaignId)!,
     refundedAmount,
   };
+}
+
+/**
+ * Retrieves the top contributors globally, ranked by total pledged amount.
+ *
+ * @param limit - Maximum number of top contributors to return (default: 10).
+ * @returns An array of {@link LeaderboardEntry} objects sorted by total pledged amount (descending).
+ */
+export function getTopContributors(limit: number = 10): LeaderboardEntry[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT 
+         contributor,
+         COALESCE(SUM(amount), 0) AS total_pledged,
+         COUNT(DISTINCT campaign_id) AS campaign_count,
+         COALESCE(AVG(amount), 0) AS avg_pledge
+       FROM pledges
+       WHERE refunded_at IS NULL
+       GROUP BY contributor
+       ORDER BY total_pledged DESC
+       LIMIT ?`,
+    )
+    .all(limit) as Array<{
+    contributor: string;
+    total_pledged: number;
+    campaign_count: number;
+    avg_pledge: number;
+  }>;
+
+  return rows.map((row, index) => ({
+    rank: index + 1,
+    contributor: row.contributor,
+    totalPledged: round(row.total_pledged),
+    campaignCount: row.campaign_count,
+    averagePledgeAmount: round(row.avg_pledge),
+  }));
 }
