@@ -369,8 +369,9 @@ export function listCampaigns(
 
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
-    whereClauses.push(`LOWER(campaigns.title) LIKE ?`);
-    params.push(searchTerm);
+    const exactTerm = options.searchQuery.trim();
+    whereClauses.push(`(LOWER(campaigns.title) LIKE ? OR LOWER(campaigns.creator) LIKE ? OR campaigns.id = ?)`);
+    params.push(searchTerm, searchTerm, exactTerm);
   }
 
   if (options?.assetCode) {

@@ -2,6 +2,8 @@ import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
+import { body } from "express-validator";
+import * as entities from "entities";
 import { validateEnv } from "./validateEnv";
 import { randomUUID } from "crypto";
 import { z } from "zod";
@@ -394,7 +396,11 @@ app.get("/api/campaigns/:id/pledges", (req: Request, res: Response) => {
   });
 });
 
-app.post("/api/campaigns", (req: Request, res: Response) => {
+app.post(
+  "/api/campaigns",
+  body("title").customSanitizer(val => typeof val === "string" ? entities.encodeHTML(val) : val),
+  body("description").customSanitizer(val => typeof val === "string" ? entities.encodeHTML(val) : val),
+  (req: Request, res: Response) => {
   const parsedBody = createCampaignPayloadSchema.safeParse(req.body);
   if (!parsedBody.success) {
     sendValidationError(parsedBody.error.issues);
@@ -721,9 +727,9 @@ function startServer() {
   // Initialize Redis cache in production
   if (process.env.NODE_ENV === "production") {
     initRedisCache().catch((error) => {
-      logError("Failed to initialize Redis cache", {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logError(error, {
+        event: "redis_cache_init_failed",
+      }, config.logLevel);
       // Continue without cache if initialization fails
     });
   }

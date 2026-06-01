@@ -9,7 +9,9 @@
     "compression": "^1.7.4",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
+    "entities": "^8.0.0",
     "express": "^4.21.2",
+    "express-validator": "^7.3.2",
     "redis": "^4.6.13",
     "zod": "^4.3.6"
   },
