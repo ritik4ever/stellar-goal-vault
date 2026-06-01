@@ -339,6 +339,10 @@ That issue is already represented in:
 - `OPEN_SOURCE_ISSUES.md`
 - The frontend backlog panel
 
+## Frequently Asked Questions
+
+See the [FAQ.md](./FAQ.md) for answers to common questions about testnet funding, Freighter setup, contract deployment, database reset, pledge failures, and more.
+
 ## Security
 
 Please see [SECURITY.md](./SECURITY.md) for our responsible disclosure policy, supported versions, and reporting instructions.
