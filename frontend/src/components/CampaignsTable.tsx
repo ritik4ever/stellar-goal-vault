@@ -105,12 +105,7 @@ export function CampaignsTable({
   }, [campaigns]);
 
   const filteredCampaigns = useMemo(() => {
-    const filtered = applyFilters(
-      campaigns,
-      assetCode,
-      statusFilter,
-      "", // server-side search, no client search
-    );
+    const filtered = applyFilters(campaigns, assetCode, statusFilter);
     return sortCampaigns(filtered, sortBy);
   }, [campaigns, assetCode, statusFilter, sortBy]);
 

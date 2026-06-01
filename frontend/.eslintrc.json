@@ -2,7 +2,7 @@
   "root": true,
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
-    "project": ["./tsconfig.json", "./tsconfig.test.json"],
+    "project": "./tsconfig.json",
     "ecmaVersion": 2022,
     "sourceType": "module"
   },
@@ -17,6 +17,9 @@
   "overrides": [
     {
       "files": ["**/*.test.ts", "**/*.test.tsx", "src/test-setup.ts"],
+      "parserOptions": {
+        "project": "./tsconfig.test.json"
+      },
       "rules": {
         "no-console": "off"
       }

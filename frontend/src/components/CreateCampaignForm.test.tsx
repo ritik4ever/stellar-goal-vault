@@ -30,7 +30,7 @@ describe("CreateCampaignForm", () => {
       expect(screen.getByPlaceholderText(/G\.\.\. creator public key/i)).toBeInTheDocument();
       expect(screen.getByPlaceholderText(/Stellar community design sprint/i)).toBeInTheDocument();
       expect(screen.getByPlaceholderText(/Describe what the campaign funds/i)).toBeInTheDocument();
-      expect(screen.getByRole("combobox")).toBeInTheDocument();
+      expect(screen.getByLabelText("USDC")).toBeInTheDocument();
       expect(screen.getByLabelText(/target amount/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/deadline in hours/i)).toBeInTheDocument();
     });
@@ -51,8 +51,8 @@ describe("CreateCampaignForm", () => {
     it("uses default asset when no allowedAssets provided", () => {
       render(<CreateCampaignForm onCreate={async () => {}} />);
       
-      const select = screen.getByRole("combobox");
-      expect(select).toHaveValue("USDC");
+      const usdcCheckbox = screen.getByLabelText("USDC");
+      expect(usdcCheckbox).toBeChecked();
     });
 
     it("renders allowed assets in dropdown", () => {
@@ -63,11 +63,10 @@ describe("CreateCampaignForm", () => {
         />,
       );
       
-      const select = screen.getByRole("combobox");
-      expect(select).toHaveValue("ARS");
-      expect(screen.getByRole("option", { name: "ARS" })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "USDC" })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "XLM" })).toBeInTheDocument();
+      const arsCheckbox = screen.getByLabelText("ARS");
+      expect(arsCheckbox).toBeChecked();
+      expect(screen.getByLabelText("USDC")).toBeInTheDocument();
+      expect(screen.getByLabelText("XLM")).toBeInTheDocument();
     });
   });
 
@@ -138,22 +137,24 @@ describe("CreateCampaignForm", () => {
       const user = userEvent.setup();
       render(<CreateCampaignForm onCreate={async () => {}} />);
 
-      const input = screen.getByPlaceholderText(/Stellar community design sprint/i);
-      await user.click(input);
-      await user.tab();
+      await user.type(
+        screen.getByPlaceholderText(/G\.\.\. creator public key/i),
+        validCreator,
+      );
+      await user.type(
+        screen.getByPlaceholderText(/Describe what the campaign funds/i),
+        validDescription,
+      );
+      await user.click(screen.getByRole("button", { name: /create campaign/i }));
 
-    await user.type(
-      screen.getByPlaceholderText(/G\.\.\. creator public key/i),
-      `G${"A".repeat(55)}`,
-    );
-    await user.type(screen.getByPlaceholderText(/Stellar community design sprint/i), "My Test Campaign");
-    await user.type(
-      screen.getByPlaceholderText(/Describe what the campaign funds/i),
-      "This campaign funds a real Soroban pledge flow for the MVP dashboard.",
-    );
-    await user.click(screen.getByText("USDC"));
-    await user.click(screen.getByRole("button", { name: /create campaign/i }));
       expect(screen.getByText("Campaign title is required")).toBeInTheDocument();
+    });
+
+    it("enforces a maximum title length", () => {
+      render(<CreateCampaignForm onCreate={async () => {}} />);
+
+      const titleInput = screen.getByPlaceholderText(/Stellar community design sprint/i);
+      expect(titleInput).toHaveAttribute("maxLength", "80");
     });
 
     it("shows error for title too short", async () => {
@@ -166,17 +167,6 @@ describe("CreateCampaignForm", () => {
       );
 
       expect(screen.getByText("Title must be at least 4 characters")).toBeInTheDocument();
-    });
-
-    it("shows error for title too long", async () => {
-      const user = userEvent.setup();
-      render(<CreateCampaignForm onCreate={async () => {}} />);
-
-      const titleInput = screen.getByPlaceholderText(/Stellar community design sprint/i);
-      // Type 81 characters
-      await user.type(titleInput, "A".repeat(81));
-
-      expect(screen.getByText(/Title cannot exceed 80 characters/i)).toBeInTheDocument();
     });
 
     it("accepts valid title", async () => {
@@ -218,17 +208,12 @@ describe("CreateCampaignForm", () => {
       expect(screen.getByText("Description must be at least 20 characters")).toBeInTheDocument();
     });
 
-    it("shows error for description too long", async () => {
-      const user = userEvent.setup();
+    it("enforces a maximum description length", () => {
       render(<CreateCampaignForm onCreate={async () => {}} />);
 
       const descInput = screen.getByPlaceholderText(/Describe what the campaign funds/i);
-      // Type 501 characters - this may be slow, so use paste instead
-      await user.click(descInput);
-      await user.paste("A".repeat(501));
-
-      expect(screen.getByText(/Description cannot exceed 500 characters/i)).toBeInTheDocument();
-    }, 10000);
+      expect(descInput).toHaveAttribute("maxLength", "500");
+    });
 
     it("accepts valid description", async () => {
       const user = userEvent.setup();
@@ -347,7 +332,7 @@ describe("CreateCampaignForm", () => {
         creator: validCreator,
         title: validTitle,
         description: validDescription,
-        assetCode: "USDC",
+        acceptedTokens: ["USDC"],
         targetAmount: 250,
         deadline: expectedDeadline,
         metadata: {},
@@ -432,7 +417,6 @@ describe("CreateCampaignForm", () => {
       );
 
       await fillValidForm(user);
-      await user.selectOptions(screen.getByRole("combobox"), "usdc");
       await user.click(screen.getByRole("button", { name: /create campaign/i }));
 
       await waitFor(() => {
@@ -441,7 +425,7 @@ describe("CreateCampaignForm", () => {
 
       expect(onCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          assetCode: "USDC",
+          acceptedTokens: ["USDC"],
         }),
       );
     });
@@ -460,12 +444,14 @@ describe("CreateCampaignForm", () => {
       
       await user.click(submitButton);
 
-      expect(submitButton).toBeDisabled();
-      expect(submitButton).toHaveTextContent("Creating...");
+      await waitFor(() => {
+        expect(submitButton).toBeDisabled();
+        expect(submitButton).toHaveTextContent("Creating...");
+      });
 
       resolveCreate!();
       await waitFor(() => {
-        expect(submitButton).not.toBeDisabled();
+        expect(submitButton).toHaveTextContent("Create campaign");
       });
     });
 
@@ -490,7 +476,7 @@ describe("CreateCampaignForm", () => {
       expect(screen.getByPlaceholderText(/G\.\.\. creator public key/i)).toHaveValue("");
       expect(screen.getByPlaceholderText(/Stellar community design sprint/i)).toHaveValue("");
       expect(screen.getByPlaceholderText(/Describe what the campaign funds/i)).toHaveValue("");
-      expect(screen.getByRole("combobox")).toHaveValue("ARS");
+      expect(screen.getByLabelText("ARS")).toBeChecked();
       expect(screen.getByLabelText(/target amount/i)).toHaveValue(250);
       expect(screen.getByLabelText(/deadline in hours/i)).toHaveValue(72);
     });
@@ -644,7 +630,8 @@ describe("CreateCampaignForm", () => {
       );
 
       await fillValidForm(user);
-      await user.selectOptions(screen.getByRole("combobox"), "XLM");
+      await user.click(screen.getByLabelText("ARS"));
+      await user.click(screen.getByLabelText("XLM"));
       await user.click(screen.getByRole("button", { name: /create campaign/i }));
 
       await waitFor(() => {
@@ -653,7 +640,7 @@ describe("CreateCampaignForm", () => {
 
       expect(onCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          assetCode: "XLM",
+          acceptedTokens: ["XLM"],
         }),
       );
     });
@@ -666,7 +653,7 @@ describe("CreateCampaignForm", () => {
         />,
       );
 
-      expect(screen.getByRole("combobox")).toHaveValue("USDC");
+      expect(screen.getByLabelText("USDC")).toBeChecked();
 
       rerender(
         <CreateCampaignForm
@@ -675,7 +662,7 @@ describe("CreateCampaignForm", () => {
         />,
       );
 
-      expect(screen.getByRole("combobox")).toHaveValue("ARS");
+      expect(screen.getByLabelText("ARS")).toBeChecked();
     });
   });
 });
