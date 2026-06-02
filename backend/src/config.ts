@@ -28,21 +28,25 @@ export const config = {
     .filter(Boolean),
 
   sorobanNetworkPassphrase:
-    process.env.SOROBAN_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015',
+    process.env.SOROBAN_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015",
   assetAddresses: (
     process.env.ASSET_ADDRESSES ??
-    'XLM:CDLZFC3SYJYDZT7K3SSTH3YCUY6AFMCO3Y6S3G7FEYZNVNREK7Y6CYN5,USDC:CA6WSTPZ7RRCUC6H37CQFODG763XG2HXP2G6F367VCOGGVDP32P7665E'
+    "XLM:CDLZFC3SYJYDZT7K3SSTH3YCUY6AFMCO3Y6S3G7FEYZNVNREK7Y6CYN5,USDC:CA6WSTPZ7RRCUC6H37CQFODG763XG2HXP2G6F367VCOGGVDP32P7665E"
   )
-    .split(',')
-    .reduce(
-      (acc, pair) => {
-        const [code, addr] = pair.split(':');
-        if (code && addr) acc[code.trim().toUpperCase()] = addr.trim();
-        return acc;
-      },
-      {} as Record<string, string>,
-    ),
-  defaultMaxPerContributor: parseInteger(process.env.DEFAULT_MAX_PER_CONTRIBUTOR, 0),
+    .split(",")
+    .reduce((acc, pair) => {
+      const [code, addr] = pair.split(":");
+      if (code && addr) acc[code.trim().toUpperCase()] = addr.trim();
+      return acc;
+    }, {} as Record<string, string>),
+  defaultMaxPerContributor: parseInteger(
+    process.env.DEFAULT_MAX_PER_CONTRIBUTOR,
+    0,
+  ),
+  keepAliveTimeoutMs: parseInteger(process.env.KEEP_ALIVE_TIMEOUT_MS, 65_000),
+  headersTimeoutMs: parseInteger(process.env.HEADERS_TIMEOUT_MS, 66_000),
 };
 
-export const walletIntegrationReady = Boolean(config.contractId && config.sorobanRpcUrl);
+export const walletIntegrationReady = Boolean(
+  config.contractId && config.sorobanRpcUrl,
+);

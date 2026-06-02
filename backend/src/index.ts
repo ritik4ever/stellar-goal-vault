@@ -1,12 +1,16 @@
-import cors from 'cors';
-import 'dotenv/config';
-import express, { Request, Response } from 'express';
-import { validateEnv } from './validateEnv';
-import { randomUUID } from 'crypto';
-import { z } from 'zod';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { config, walletIntegrationReady } from './config';
+import compression from "compression";
+import cors from "cors";
+import "dotenv/config";
+import express, { Request, Response } from "express";
+import { createServer, Server } from "http";
+import { validateEnv } from "./validateEnv";
+import { randomUUID } from "crypto";
+import { z } from "zod";
+import path from "path";
+import { config, walletIntegrationReady } from "./config";
+import { apiKeyAuthMiddleware } from "./middleware/apiKeyAuth";
+import { cacheMiddleware } from "./middleware/cacheMiddleware";
+import { initRedisCache } from "./services/cache";
 
 import {
   addPledge,
@@ -654,6 +658,13 @@ function printStartupBanner(): void {
   /* eslint-enable no-console */
 }
 
+export function configureHttpServer(server: Server): Server {
+  server.keepAliveTimeout = config.keepAliveTimeoutMs;
+  server.headersTimeout = config.headersTimeoutMs;
+
+  return server;
+}
+
 function startServer() {
   validateEnv();
   printStartupBanner();
@@ -664,9 +675,7 @@ function startServer() {
   if (process.env.NODE_ENV === "production") {
     initRedisCache().catch((error) => {
       logError(
-        error,
-        {
-          event: "redis_cache_init_failed",
+
         },
         config.logLevel,
       );
@@ -674,12 +683,16 @@ function startServer() {
     });
   }
 
-  app.listen(config.port, () => {
+  const server = configureHttpServer(createServer(app));
+
+  server.listen(config.port, () => {
     logInfo(
       'server_started',
       {
         message: `Stellar Goal Vault API listening on http://localhost:${config.port}`,
         port: config.port,
+        keepAliveTimeoutMs: server.keepAliveTimeout,
+        headersTimeoutMs: server.headersTimeout,
       },
       config.logLevel,
     );
