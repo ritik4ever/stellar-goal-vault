@@ -8,8 +8,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { config, walletIntegrationReady } from './config';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 import {
   addPledge,
   calculateProgress,
@@ -22,11 +20,11 @@ import {
   getCampaignWithProgress,
   getContributorSummary,
   getGlobalStats,
+  getTopContributors,
   initCampaignStore,
   listCampaignPledges,
   listCampaigns,
   type ListCampaignsOptions,
-  softDeleteCampaign,
   reconcileOnChainPledge,
   refundContributor,
   updateCampaign,
@@ -46,7 +44,6 @@ import {
   parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
-  updateCampaignPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
 } from './validation/schemas';
@@ -84,7 +81,20 @@ app.use(
   }),
 );
 
-app.use(express.json());
+app.use(compression({ threshold: 1024 }));
+
+const bodySizeLimit = process.env.MAX_BODY_SIZE || "16kb";
+app.use(express.json({ limit: bodySizeLimit }));
+
+// Add API key authentication middleware (production only)
+if (process.env.NODE_ENV === "production") {
+  app.use(apiKeyAuthMiddleware);
+}
+
+// Add cache middleware for GET requests (production only, 5 minute TTL)
+if (process.env.NODE_ENV === "production") {
+  app.use(cacheMiddleware(300));
+}
 
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
@@ -95,7 +105,10 @@ function applyRateLimit(maxRequests: number) {
     const current = rateLimitBuckets.get(key);
 
     if (!current || now >= current.resetAt) {
-      rateLimitBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+      rateLimitBuckets.set(key, {
+        count: 1,
+        resetAt: now + RATE_LIMIT_WINDOW_MS,
+      });
       return next();
     }
 
@@ -186,7 +199,9 @@ export function normalizeAssetFilter(assetRaw: unknown): string | undefined {
   return config.allowedAssets.includes(asset) ? asset : undefined;
 }
 
-export function normalizeStatusFilter(statusRaw: unknown): CampaignStatus | undefined {
+export function normalizeStatusFilter(
+  statusRaw: unknown,
+): CampaignStatus | undefined {
   const status = normalizeQueryValue(statusRaw)?.toLowerCase();
   if (!status) {
     return undefined;
@@ -212,8 +227,9 @@ export function parseCampaignListFilters(query: {
   return {
     asset: normalizeAssetFilter(query.asset),
     status: normalizeStatusFilter(query.status),
-    searchQuery: normalizeQueryValue(query.search) || normalizeQueryValue(query.q),
-    includeDeleted: query.includeDeleted === 'true',
+    searchQuery:
+      normalizeQueryValue(query.search) || normalizeQueryValue(query.q),
+    includeDeleted: query.includeDeleted === "true",
   };
 }
 
@@ -225,8 +241,10 @@ export function filterCampaignList(
   },
 ): CampaignListItem[] {
   return campaigns.filter((campaign) => {
-    const matchesAsset = !filters.asset || campaign.assetCode.toUpperCase() === filters.asset;
-    const matchesStatus = !filters.status || campaign.progress.status === filters.status;
+    const matchesAsset =
+      !filters.asset || campaign.assetCode.toUpperCase() === filters.asset;
+    const matchesStatus =
+      !filters.status || campaign.progress.status === filters.status;
 
     return matchesAsset && matchesStatus;
   });
@@ -273,12 +291,12 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
     listOptions.limit = paginationResult.limit;
   }
 
-  const { campaigns, totalCount } = listCampaigns(listOptions);
+  const { campaigns, totalCount, pledgeCounts } = listCampaigns(listOptions);
 
   const data = filterCampaignList(
     campaigns.map((campaign) => ({
       ...campaign,
-      progress: calculateProgress(campaign),
+      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
     })),
     filters,
   );
@@ -338,7 +356,10 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
     page: paginationResult.page,
     limit: paginationResult.limit,
   });
-  const totalPages = Math.max(1, Math.ceil(totalCount / paginationResult.limit));
+  const totalPages = Math.max(
+    1,
+    Math.ceil(totalCount / paginationResult.limit),
+  );
 
   res.json({
     data: pledges,
@@ -370,7 +391,9 @@ app.post('/api/campaigns', (req: Request, res: Response) => {
   };
 
   const campaign = createCampaign(campaignInput);
-  res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+  res
+    .status(201)
+    .json({ data: { ...campaign, progress: calculateProgress(campaign) } });
 });
 
 app.post(
@@ -548,6 +571,7 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
       },
     });
   }
+});
 
   const statusCode = err instanceof AppError ? err.statusCode : (err.statusCode ?? 500);
   const code = err instanceof AppError ? err.code : (err.code ?? 'INTERNAL_SERVER_ERROR');
@@ -560,11 +584,16 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     },
   };
 
-  if (err instanceof AppError && err.details) {
-    response.error.details = err.details;
-  } else if (err.details) {
-    response.error.details = err.details;
-  }
+    if (err.message === "Not allowed by CORS") {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "FORBIDDEN",
+          message: "CORS policy violation",
+          requestId: (req as any).requestId,
+        },
+      });
+    }
 
   logError(
     err,
@@ -579,8 +608,28 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     config.logLevel,
   );
 
-  res.status(statusCode).json(response);
-});
+    if (err instanceof AppError && err.details) {
+      response.error.details = err.details;
+    } else if (err.details) {
+      response.error.details = err.details;
+    }
+
+    logError(
+      err,
+      {
+        event: "request_error",
+        requestId: (req as RequestWithId).requestId,
+        method: req.method,
+        path: req.originalUrl || req.path,
+        status: statusCode,
+        code,
+      },
+      config.logLevel,
+    );
+
+    res.status(statusCode).json(response);
+  },
+);
 
 function printStartupBanner(): void {
   const isTest = process.env.NODE_ENV === 'test';
@@ -609,6 +658,17 @@ function startServer() {
   printStartupBanner();
   initCampaignStore();
   startEventIndexer();
+
+  // Initialize Redis cache in production
+  if (process.env.NODE_ENV === "production") {
+    initRedisCache().catch((error) => {
+      logError("Failed to initialize Redis cache", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Continue without cache if initialization fails
+    });
+  }
+
   app.listen(config.port, () => {
     logInfo(
       'server_started',

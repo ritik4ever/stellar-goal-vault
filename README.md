@@ -47,6 +47,7 @@ Architecture decision records
 - Key architecture choices are documented in `adr/`.
 - See `adr/0001-sqlite-off-chain-mvp.md` for the SQLite off-chain MVP decision.
 - See `adr/0002-react-express-mvp.md` for the React + Express + Soroban MVP architecture decision.
+- See `adr/0003-freighter-wallet-integration.md` for the Freighter wallet signing approach.
 
 ## Core campaign model
 
@@ -66,6 +67,57 @@ Campaign states:
 - `funded` when pledged amount is at least the target and funds have not been claimed
 - `claimed` when the creator has claimed a funded vault
 - `failed` when deadline has passed without reaching the target
+
+## Mutation testing
+
+Mutation testing is used to verify that the test suite is effective at catching real bugs, not just achieving line coverage.
+
+The backend uses [Stryker Mutator](https://stryker-mutator.io/) targeting the two most critical service files:
+
+- `backend/src/services/campaignStore.ts`
+- `backend/src/services/eventHistory.ts`
+
+### Running mutation tests
+
+```bash
+cd backend
+npm run mutation
+```
+
+This will:
+
+1. Introduce small code mutations (e.g. flipped comparisons, removed conditions, changed operators) into the source files
+2. Run the Vitest test suite against each mutant
+3. Report the **mutation score** — the percentage of mutants killed by failing tests
+
+An HTML report is generated at `backend/reports/mutation/mutation.html` and a JSON report at `backend/reports/mutation/mutation.json`.
+
+### Thresholds
+
+| Level | Score |
+|-------|-------|
+| High  | ≥ 80% |
+| Low   | ≥ 70% |
+| Break | < 65% (CI fails) |
+
+### CI usage
+
+```bash
+cd backend
+npm run mutation:ci
+```
+
+Outputs a compact text summary suitable for CI logs without generating the HTML report.
+
+### Mutation-killing tests
+
+Tests that specifically target surviving mutants live in:
+
+```
+backend/src/services/__tests__/mutation.test.ts
+```
+
+These tests exercise boundary conditions missed by standard coverage — exact equality on deadlines, arithmetic accumulation, boolean flag transitions, and null-coalescing paths.
 
 ## API reference
 
@@ -339,6 +391,10 @@ That issue is already represented in:
 - `OPEN_SOURCE_ISSUES.md`
 - The frontend backlog panel
 
+## Frequently Asked Questions
+
+See the [FAQ.md](./FAQ.md) for answers to common questions about testnet funding, Freighter setup, contract deployment, database reset, pledge failures, and more.
+
 ## Security
 
 Please see [SECURITY.md](./SECURITY.md) for our responsible disclosure policy, supported versions, and reporting instructions.
@@ -346,6 +402,7 @@ Please see [SECURITY.md](./SECURITY.md) for our responsible disclosure policy, s
 ## Contributing
 
 Please see the [Contributing Guide](./CONTRIBUTING.md) for setup and contribution guidelines.
+See also [CHANGELOG.md](./CHANGELOG.md) for a full history of notable changes across releases.
 
 ## Known limitations
 

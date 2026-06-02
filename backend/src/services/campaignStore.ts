@@ -233,6 +233,7 @@ function checkContributorLimit(
  *
  * @param campaign - The campaign record to evaluate.
  * @param at - Unix timestamp (seconds) to evaluate state against; defaults to now.
+ * @param pledgeCountOverride - Optional pledge count to use instead of querying database.
  * @returns A {@link CampaignProgress} object with status, funding percentages, and action flags.
  */
 export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds()): CampaignProgress {
@@ -280,6 +281,7 @@ export interface ListCampaignsOptions {
 export interface ListCampaignsResult {
   campaigns: CampaignRecord[];
   totalCount: number;
+  pledgeCounts: Record<string, number>;
 }
 
 export interface ListCampaignPledgesOptions {
@@ -306,6 +308,14 @@ export interface GlobalStats {
   totalContributors: number;
 }
 
+export interface LeaderboardEntry {
+  rank: number;
+  contributor: string;
+  totalPledged: number;
+  campaignCount: number;
+  averagePledgeAmount: number;
+}
+
 const MAX_CAMPAIGN_DURATION_SECONDS = 60 * 60 * 24 * 180;
 
 /**
@@ -326,12 +336,12 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
 
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
-    whereClauses.push(`LOWER(title) LIKE ?`);
+    whereClauses.push(`LOWER(campaigns.title) LIKE ?`);
     params.push(searchTerm);
   }
 
   if (options?.assetCode) {
-    whereClauses.push(`accepted_tokens_json LIKE ?`);
+    whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);
   }
 
@@ -346,7 +356,7 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
         break;
       case 'failed':
         whereClauses.push(
-          `claimed_at IS NULL AND pledged_amount < target_amount AND deadline <= ?`,
+          `campaigns.claimed_at IS NULL AND campaigns.pledged_amount < campaigns.target_amount AND campaigns.deadline <= ?`,
         );
         params.push(now);
         break;
@@ -357,10 +367,9 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
     }
   }
 
-  let baseQuery = `FROM campaigns`;
-
+  let whereClause = '';
   if (!options?.includeDeleted) {
-    whereClauses.push(`deleted_at IS NULL`);
+    whereClauses.push(`campaigns.deleted_at IS NULL`);
   }
 
   if (whereClauses.length > 0) {
@@ -371,17 +380,31 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const totalCount = (db.prepare(countQuery).get(...params) as { total: number }).total;
 
   const dataQuery = paginate
-    ? `SELECT * ${baseQuery} ORDER BY created_at DESC LIMIT ? OFFSET ?`
-    : `SELECT * ${baseQuery} ORDER BY created_at DESC`;
+    ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC LIMIT ? OFFSET ?`
+    : `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC`;
+
+  const countParams = params.slice();
+  if (paginate) {
+    countParams.push(limit, offset);
+  }
+
   const rows = (
     paginate
-      ? db.prepare(dataQuery).all(...params, limit, offset)
-      : db.prepare(dataQuery).all(...params)
-  ) as CampaignRow[];
+      ? db.prepare(dataQuery).all(...countParams) as Array<CampaignRow & { pledge_count: number }>
+      : db.prepare(dataQuery).all(...params) as Array<CampaignRow & { pledge_count: number }>
+  );
+
+  const pledgeCounts: Record<string, number> = {};
+  const campaigns = rows.map((row) => {
+    pledgeCounts[row.id] = row.pledge_count;
+    const { pledge_count, ...campaignRow } = row;
+    return rowToCampaign(campaignRow as CampaignRow);
+  });
 
   return {
-    campaigns: rows.map(rowToCampaign),
+    campaigns,
     totalCount,
+    pledgeCounts,
   };
 }
 
@@ -458,7 +481,9 @@ export function listCampaignPledges(
  * @returns An array of {@link ContributorSummary} objects sorted by total pledged (descending),
  *          or an empty array if the campaign does not exist.
  */
-export function getContributorSummary(campaignId: string): ContributorSummary[] {
+export function getContributorSummary(
+  campaignId: string,
+): ContributorSummary[] {
   const db = getDb();
   const rows = db
     .prepare(
@@ -548,6 +573,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     title: input.title.trim(),
     description: input.description.trim(),
     acceptedTokens,
+    assetCode: acceptedTokens[0] || "",
     targetAmount: round(input.targetAmount),
     pledgedAmount: 0,
     deadline: input.deadline,
@@ -664,6 +690,30 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     },
     { source: 'local' } as BlockchainMetadata,
   );
+
+  // Check if contributor has reached their limit and record event
+  if (
+    campaign.maxPerContributor !== undefined &&
+    campaign.maxPerContributor > 0
+  ) {
+    const newContributorTotal = round(
+      getContributorPledgedTotal(campaignId, input.contributor),
+    );
+    if (newContributorTotal >= campaign.maxPerContributor) {
+      recordEvent(
+        campaignId,
+        "pledge_limit_reached",
+        createdAt,
+        input.contributor,
+        newContributorTotal,
+        {
+          maxPerContributor: campaign.maxPerContributor,
+          assetCode,
+        },
+        { source: "local" } as BlockchainMetadata,
+      );
+    }
+  }
 
   return getCampaign(campaignId)!;
 }
@@ -977,4 +1027,41 @@ export function refundContributor(
     campaign: getCampaign(campaignId)!,
     refundedAmount,
   };
+}
+
+/**
+ * Retrieves the top contributors globally, ranked by total pledged amount.
+ *
+ * @param limit - Maximum number of top contributors to return (default: 10).
+ * @returns An array of {@link LeaderboardEntry} objects sorted by total pledged amount (descending).
+ */
+export function getTopContributors(limit: number = 10): LeaderboardEntry[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT 
+         contributor,
+         COALESCE(SUM(amount), 0) AS total_pledged,
+         COUNT(DISTINCT campaign_id) AS campaign_count,
+         COALESCE(AVG(amount), 0) AS avg_pledge
+       FROM pledges
+       WHERE refunded_at IS NULL
+       GROUP BY contributor
+       ORDER BY total_pledged DESC
+       LIMIT ?`,
+    )
+    .all(limit) as Array<{
+    contributor: string;
+    total_pledged: number;
+    campaign_count: number;
+    avg_pledge: number;
+  }>;
+
+  return rows.map((row, index) => ({
+    rank: index + 1,
+    contributor: row.contributor,
+    totalPledged: round(row.total_pledged),
+    campaignCount: row.campaign_count,
+    averagePledgeAmount: round(row.avg_pledge),
+  }));
 }

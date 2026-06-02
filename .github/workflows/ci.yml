@@ -35,6 +35,23 @@ jobs:
         working-directory: backend
         run: npm run lint
 
+      - name: Audit backend dependencies
+        working-directory: backend
+        run: npm audit --audit-level=high
+        continue-on-error: false
+
+      - name: Upload backend audit report
+        if: always()
+        run: npm audit --json --audit-level=none > /tmp/backend-audit.json 2>&1 || true
+        working-directory: backend
+
+      - name: Upload backend audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-npm-audit
+          path: /tmp/backend-audit.json
+
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest

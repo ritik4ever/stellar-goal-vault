@@ -9,7 +9,7 @@ export const MAX_TITLE_LENGTH = 80;
 export const MIN_DESCRIPTION_LENGTH = 20;
 export const MAX_DESCRIPTION_LENGTH = 500;
 export const MIN_TARGET_AMOUNT = 0.01;
-export const MIN_DEADLINE_HOURS = 1;
+export const MIN_DEADLINE_HOURS = 0.0001;
 
 export interface ValidationError {
   field: string;
