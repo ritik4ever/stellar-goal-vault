@@ -1,10 +1,10 @@
-import { LucideIcon } from "lucide-react";
+import { LucideIcon } from 'lucide-react';
 
 interface EmptyStateProps {
   title?: string;
   message: string;
   icon?: LucideIcon;
-  variant?: "card" | "inline";
+  variant?: 'card' | 'inline';
   className?: string;
 }
 
@@ -16,11 +16,12 @@ export function EmptyState({
   title,
   message,
   icon: Icon,
-  variant = "inline",
-  className = "",
+  variant = 'inline',
+  className = '',
 }: EmptyStateProps) {
-  const containerClass = variant === "card" ? "card empty-state-container" : "empty-state-container";
-  
+  const containerClass =
+    variant === 'card' ? 'card empty-state-container' : 'empty-state-container';
+
   return (
     <div className={`${containerClass} animate-fade-in ${className}`}>
       {Icon && (

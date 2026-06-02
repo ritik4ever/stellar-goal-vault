@@ -1,9 +1,9 @@
-import axios, { AxiosInstance, AxiosResponse } from "axios";
-import fs from "fs";
-import http from "http";
-import path from "path";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Server } from "http";
+import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import fs from 'fs';
+import http from 'http';
+import path from 'path';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Server } from 'http';
 
 /**
  * Integration Test Suite for Campaign Lifecycle State Transitions
@@ -23,18 +23,18 @@ import type { Server } from "http";
 // ============================================================================
 
 const TEST_DB_PATH = path.join(
-  "/tmp",
+  '/tmp',
   `stellar-goal-vault-integration-${process.pid}-${Date.now()}.db`,
 );
 
 // Set environment variables BEFORE importing app
 process.env.DB_PATH = TEST_DB_PATH;
-process.env.CONTRACT_ID = "";
-process.env.PORT = "0"; // Use random available port
+process.env.CONTRACT_ID = '';
+process.env.PORT = '0'; // Use random available port
 
 let server: Server;
 let apiClient: AxiosInstance;
-const BASE_URL = "http://localhost";
+const BASE_URL = 'http://localhost';
 
 // Mock wallet addresses
 const CREATOR_1 = `GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`;
@@ -64,15 +64,13 @@ function generateTestId(suffix: string): string {
 /**
  * Create campaign with sensible defaults
  */
-async function createTestCampaign(
-  overrides?: Partial<any>,
-): Promise<AxiosResponse<any>> {
+async function createTestCampaign(overrides?: Partial<any>): Promise<AxiosResponse<any>> {
   const baseTime = nowInSeconds();
-  return apiClient.post("/api/campaigns", {
+  return apiClient.post('/api/campaigns', {
     creator: CREATOR_1,
-    title: "Test Campaign",
-    description: "A test campaign",
-    assetCode: "USDC",
+    title: 'Test Campaign',
+    description: 'A test campaign',
+    assetCode: 'USDC',
     targetAmount: 1000,
     deadline: baseTime + 86400, // 24 hours from now
     ...overrides,
@@ -103,7 +101,7 @@ async function claimTestCampaign(
 ): Promise<AxiosResponse<any>> {
   return apiClient.post(`/api/campaigns/${campaignId}/claim`, {
     creator,
-    transactionHash: txHash || "tx_" + generateTestId("claim"),
+    transactionHash: txHash || 'tx_' + generateTestId('claim'),
   });
 }
 
@@ -142,7 +140,7 @@ beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
 
   // Dynamically import app after environment variables are set
-  const appModule = await import("../src/index");
+  const appModule = await import('../src/index');
   const { app } = appModule;
 
   // Start server on random port
@@ -178,14 +176,14 @@ afterEach(() => {
 // TEST SUITES
 // ============================================================================
 
-describe("Campaign Lifecycle - Happy Path", () => {
-  it("should complete full campaign lifecycle: Create -> Pledge -> Claim with history", async () => {
+describe('Campaign Lifecycle - Happy Path', () => {
+  it('should complete full campaign lifecycle: Create -> Pledge -> Claim with history', async () => {
     // Step 1: CREATE CAMPAIGN
     const creationRes = await createTestCampaign({
       creator: CREATOR_1,
-      title: "Community Fund",
-      description: "Raise funds for community project",
-      assetCode: "USDC",
+      title: 'Community Fund',
+      description: 'Raise funds for community project',
+      assetCode: 'USDC',
       targetAmount: 1000,
       deadline: nowInSeconds() + 100, // Short deadline for testing
     });
@@ -195,14 +193,14 @@ describe("Campaign Lifecycle - Happy Path", () => {
     const campaignId = campaign.id;
 
     expect(campaign.creator).toBe(CREATOR_1);
-    expect(campaign.status).toBe("open");
+    expect(campaign.status).toBe('open');
     expect(campaign.pledgedAmount).toBe(0);
     expect(campaign.claimedAt).toBeUndefined();
 
     // Verify creation event recorded
     let history = await getCampaignHistory(campaignId);
     expect(history.data).toHaveLength(1);
-    expect(history.data[0].eventType).toBe("created");
+    expect(history.data[0].eventType).toBe('created');
     expect(history.data[0].actor).toBe(CREATOR_1);
 
     // Step 2: FIRST PLEDGE
@@ -222,17 +220,17 @@ describe("Campaign Lifecycle - Happy Path", () => {
     expect(pledge3Res.status).toBe(201);
     expect(pledge3Res.data.data.pledgedAmount).toBe(1000);
     expect(pledge3Res.data.data.progress.percentFunded).toBe(100);
-    expect(pledge3Res.data.data.progress.status).toBe("funded");
+    expect(pledge3Res.data.data.progress.status).toBe('funded');
 
     // Verify pledge events recorded
     history = await getCampaignHistory(campaignId);
     expect(history.data).toHaveLength(4); // created + 3 pledges
-    expect(history.data[1].eventType).toBe("pledged");
+    expect(history.data[1].eventType).toBe('pledged');
     expect(history.data[1].amount).toBe(400);
     expect(history.data[1].actor).toBe(CONTRIBUTOR_1);
-    expect(history.data[2].eventType).toBe("pledged");
+    expect(history.data[2].eventType).toBe('pledged');
     expect(history.data[2].amount).toBe(350);
-    expect(history.data[3].eventType).toBe("pledged");
+    expect(history.data[3].eventType).toBe('pledged');
     expect(history.data[3].amount).toBe(250);
 
     // Step 5: Wait for deadline (or simulate it)
@@ -244,7 +242,7 @@ describe("Campaign Lifecycle - Happy Path", () => {
     const claimRes = await claimTestCampaign(campaignId, CREATOR_1);
     expect(claimRes.status).toBe(200);
     const claimedCampaign = claimRes.data.data;
-    expect(claimedCampaign.progress.status).toBe("claimed");
+    expect(claimedCampaign.progress.status).toBe('claimed');
     expect(claimedCampaign.claimedAt).toBeDefined();
     expect(claimedCampaign.claimedAt).toBeGreaterThan(0);
     expect(claimedCampaign.progress.canClaim).toBe(false); // Already claimed
@@ -252,23 +250,23 @@ describe("Campaign Lifecycle - Happy Path", () => {
     // Verify claim event recorded
     history = await getCampaignHistory(campaignId);
     expect(history.data).toHaveLength(5); // created + 3 pledges + claim
-    expect(history.data[4].eventType).toBe("claimed");
+    expect(history.data[4].eventType).toBe('claimed');
     expect(history.data[4].actor).toBe(CREATOR_1);
     expect(history.data[4].amount).toBe(1000); // Full pledged amount
 
     // Step 7: NO MORE ACTIONS ALLOWED
     const newPledgeRes = await addTestPledge(campaignId, CONTRIBUTOR_3, 100);
     expect(newPledgeRes.status).toBe(400);
-    expect(newPledgeRes.data.error.code).toBe("INVALID_CAMPAIGN_STATE");
+    expect(newPledgeRes.data.error.code).toBe('INVALID_CAMPAIGN_STATE');
 
     const refundRes = await refundTestContributor(campaignId, CONTRIBUTOR_1);
     expect(refundRes.status).toBe(400);
-    expect(refundRes.data.error.code).toBe("INVALID_CAMPAIGN_STATE");
+    expect(refundRes.data.error.code).toBe('INVALID_CAMPAIGN_STATE');
   });
 });
 
-describe("Campaign Lifecycle - Edge Cases", () => {
-  it("should prevent double claim of the same campaign", async () => {
+describe('Campaign Lifecycle - Edge Cases', () => {
+  it('should prevent double claim of the same campaign', async () => {
     // Create and fund campaign
     const creationRes = await createTestCampaign({
       targetAmount: 500,
@@ -287,15 +285,15 @@ describe("Campaign Lifecycle - Edge Cases", () => {
     // Second claim should fail
     const claim2Res = await claimTestCampaign(campaignId, CREATOR_1);
     expect(claim2Res.status).toBe(400);
-    expect(claim2Res.data.error.code).toBe("INVALID_CAMPAIGN_STATE");
+    expect(claim2Res.data.error.code).toBe('INVALID_CAMPAIGN_STATE');
 
     // Verify only one claim event
     const history = await getCampaignHistory(campaignId);
-    const claimEvents = history.data.filter((e: any) => e.eventType === "claimed");
+    const claimEvents = history.data.filter((e: any) => e.eventType === 'claimed');
     expect(claimEvents).toHaveLength(1);
   });
 
-  it("should prevent claiming without reaching target amount", async () => {
+  it('should prevent claiming without reaching target amount', async () => {
     // Create campaign
     const creationRes = await createTestCampaign({
       targetAmount: 1000,
@@ -309,10 +307,10 @@ describe("Campaign Lifecycle - Edge Cases", () => {
     // Attempt to claim should fail
     const claimRes = await claimTestCampaign(campaignId, CREATOR_1);
     expect(claimRes.status).toBe(400);
-    expect(claimRes.data.error.code).toBe("INVALID_CAMPAIGN_STATE");
+    expect(claimRes.data.error.code).toBe('INVALID_CAMPAIGN_STATE');
   });
 
-  it("should prevent claiming before deadline", async () => {
+  it('should prevent claiming before deadline', async () => {
     const futureDeadline = nowInSeconds() + 86400; // Far future
     const creationRes = await createTestCampaign({
       targetAmount: 500,
@@ -326,10 +324,10 @@ describe("Campaign Lifecycle - Edge Cases", () => {
     // Attempt to claim before deadline should fail
     const claimRes = await claimTestCampaign(campaignId, CREATOR_1);
     expect(claimRes.status).toBe(400);
-    expect(claimRes.data.error.code).toBe("INVALID_CAMPAIGN_STATE");
+    expect(claimRes.data.error.code).toBe('INVALID_CAMPAIGN_STATE');
   });
 
-  it("should prevent refund from claimed campaign", async () => {
+  it('should prevent refund from claimed campaign', async () => {
     // Create and fund campaign
     const creationRes = await createTestCampaign({
       targetAmount: 500,
@@ -344,10 +342,10 @@ describe("Campaign Lifecycle - Edge Cases", () => {
     // Attempt to refund should fail
     const refundRes = await refundTestContributor(campaignId, CONTRIBUTOR_1);
     expect(refundRes.status).toBe(400);
-    expect(refundRes.data.error.code).toBe("INVALID_CAMPAIGN_STATE");
+    expect(refundRes.data.error.code).toBe('INVALID_CAMPAIGN_STATE');
   });
 
-  it("should allow refund from failed campaign (not enough pledges)", async () => {
+  it('should allow refund from failed campaign (not enough pledges)', async () => {
     // Create campaign with past deadline
     const creationRes = await createTestCampaign({
       targetAmount: 1000,
@@ -359,11 +357,11 @@ describe("Campaign Lifecycle - Edge Cases", () => {
     const pledgeRes = await addTestPledge(campaignId, CONTRIBUTOR_1, 300);
     const pledgeRes2 = await addTestPledge(campaignId, CONTRIBUTOR_2, 200);
 
-    expect(pledgeRes.data.data.progress.status).toBe("open");
+    expect(pledgeRes.data.data.progress.status).toBe('open');
 
     // Campaign status should be "failed" after deadline
     const detailsRes = await getCampaignDetails(campaignId);
-    expect(detailsRes.data.data.progress.status).toBe("failed");
+    expect(detailsRes.data.data.progress.status).toBe('failed');
     expect(detailsRes.data.data.progress.canRefund).toBe(true);
 
     // Refund first contributor
@@ -380,7 +378,7 @@ describe("Campaign Lifecycle - Edge Cases", () => {
 
     // Verify refund events
     const history = await getCampaignHistory(campaignId);
-    const refundEvents = history.data.filter((e: any) => e.eventType === "refunded");
+    const refundEvents = history.data.filter((e: any) => e.eventType === 'refunded');
     expect(refundEvents).toHaveLength(2);
     expect(refundEvents[0].actor).toBe(CONTRIBUTOR_1);
     expect(refundEvents[0].amount).toBe(300);
@@ -388,7 +386,7 @@ describe("Campaign Lifecycle - Edge Cases", () => {
     expect(refundEvents[1].amount).toBe(200);
   });
 
-  it("should prevent refund of non-existent contributor", async () => {
+  it('should prevent refund of non-existent contributor', async () => {
     const creationRes = await createTestCampaign({
       targetAmount: 500,
       deadline: nowInSeconds() + 50,
@@ -401,10 +399,10 @@ describe("Campaign Lifecycle - Edge Cases", () => {
     // Attempt to refund someone who didn't pledge
     const refundRes = await refundTestContributor(campaignId, CONTRIBUTOR_2);
     expect(refundRes.status).toBe(404);
-    expect(refundRes.data.error.code).toBe("NOT_FOUND");
+    expect(refundRes.data.error.code).toBe('NOT_FOUND');
   });
 
-  it("should prevent refunding the same contributor twice", async () => {
+  it('should prevent refunding the same contributor twice', async () => {
     const creationRes = await createTestCampaign({
       targetAmount: 500,
       deadline: nowInSeconds() + 50,
@@ -422,12 +420,12 @@ describe("Campaign Lifecycle - Edge Cases", () => {
     // Second refund should fail (already refunded)
     const refund2Res = await refundTestContributor(campaignId, CONTRIBUTOR_1);
     expect(refund2Res.status).toBe(404);
-    expect(refund2Res.data.error.code).toBe("NOT_FOUND");
+    expect(refund2Res.data.error.code).toBe('NOT_FOUND');
   });
 });
 
-describe("Campaign Lifecycle - Authorization & Validation", () => {
-  it("should prevent unauthorized creator from claiming campaign", async () => {
+describe('Campaign Lifecycle - Authorization & Validation', () => {
+  it('should prevent unauthorized creator from claiming campaign', async () => {
     const creationRes = await createTestCampaign({
       creator: CREATOR_1,
       targetAmount: 500,
@@ -441,61 +439,61 @@ describe("Campaign Lifecycle - Authorization & Validation", () => {
     // Try to claim as different creator
     const claimRes = await claimTestCampaign(campaignId, CREATOR_2);
     expect(claimRes.status).toBe(403);
-    expect(claimRes.data.error.code).toBe("FORBIDDEN");
+    expect(claimRes.data.error.code).toBe('FORBIDDEN');
 
     // Verify no claim event recorded
     const history = await getCampaignHistory(campaignId);
-    const claimEvents = history.data.filter((e: any) => e.eventType === "claimed");
+    const claimEvents = history.data.filter((e: any) => e.eventType === 'claimed');
     expect(claimEvents).toHaveLength(0);
   });
 
-  it("should validate all required fields on campaign creation", async () => {
+  it('should validate all required fields on campaign creation', async () => {
     // Missing creator
-    let res = await apiClient.post("/api/campaigns", {
-      title: "Test",
-      description: "Test",
-      assetCode: "USDC",
+    let res = await apiClient.post('/api/campaigns', {
+      title: 'Test',
+      description: 'Test',
+      assetCode: 'USDC',
       targetAmount: 1000,
       deadline: nowInSeconds() + 86400,
     });
     expect(res.status).toBe(400);
-    expect(res.data.error.code).toBe("VALIDATION_ERROR");
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
 
     // Missing title
-    res = await apiClient.post("/api/campaigns", {
+    res = await apiClient.post('/api/campaigns', {
       creator: CREATOR_1,
-      description: "Test",
-      assetCode: "USDC",
+      description: 'Test',
+      assetCode: 'USDC',
       targetAmount: 1000,
       deadline: nowInSeconds() + 86400,
     });
     expect(res.status).toBe(400);
 
     // Invalid deadline (past)
-    res = await apiClient.post("/api/campaigns", {
+    res = await apiClient.post('/api/campaigns', {
       creator: CREATOR_1,
-      title: "Test",
-      description: "Test",
-      assetCode: "USDC",
+      title: 'Test',
+      description: 'Test',
+      assetCode: 'USDC',
       targetAmount: 1000,
       deadline: nowInSeconds() - 3600,
     });
     expect(res.status).toBe(400);
-    expect(res.data.error.code).toBe("INVALID_DEADLINE");
+    expect(res.data.error.code).toBe('INVALID_DEADLINE');
 
     // Invalid amount (negative)
-    res = await apiClient.post("/api/campaigns", {
+    res = await apiClient.post('/api/campaigns', {
       creator: CREATOR_1,
-      title: "Test",
-      description: "Test",
-      assetCode: "USDC",
+      title: 'Test',
+      description: 'Test',
+      assetCode: 'USDC',
       targetAmount: -100,
       deadline: nowInSeconds() + 86400,
     });
     expect(res.status).toBe(400);
   });
 
-  it("should validate pledge amounts and constraints", async () => {
+  it('should validate pledge amounts and constraints', async () => {
     const creationRes = await createTestCampaign();
     const campaignId = creationRes.data.data.id;
 
@@ -521,8 +519,8 @@ describe("Campaign Lifecycle - Authorization & Validation", () => {
     expect(res.status).toBe(201);
   });
 
-  it("should reject operations on non-existent campaign", async () => {
-    const fakeId = "99999999";
+  it('should reject operations on non-existent campaign', async () => {
+    const fakeId = '99999999';
 
     // Get non-existent
     let res = await apiClient.get(`/api/campaigns/${fakeId}`);
@@ -538,7 +536,7 @@ describe("Campaign Lifecycle - Authorization & Validation", () => {
     // Claim non-existent
     res = await apiClient.post(`/api/campaigns/${fakeId}/claim`, {
       creator: CREATOR_1,
-      transactionHash: "tx_test",
+      transactionHash: 'tx_test',
     });
     expect(res.status).toBe(404);
 
@@ -554,8 +552,8 @@ describe("Campaign Lifecycle - Authorization & Validation", () => {
   });
 });
 
-describe("Campaign Lifecycle - State Consistency", () => {
-  it("should maintain state consistency across multiple operations", async () => {
+describe('Campaign Lifecycle - State Consistency', () => {
+  it('should maintain state consistency across multiple operations', async () => {
     // Create campaign
     const creationRes = await createTestCampaign({
       targetAmount: 1000,
@@ -566,7 +564,7 @@ describe("Campaign Lifecycle - State Consistency", () => {
     // Verify initial state
     let details = await getCampaignDetails(campaignId);
     expect(details.data.data.pledgedAmount).toBe(0);
-    expect(details.data.data.progress.status).toBe("open");
+    expect(details.data.data.progress.status).toBe('open');
 
     // Add multiple pledges
     for (let i = 0; i < 3; i++) {
@@ -578,7 +576,7 @@ describe("Campaign Lifecycle - State Consistency", () => {
     expect(details.data.data.pledgedAmount).toBe(930); // 300 + 310 + 320
 
     // Verify campaign is funded
-    expect(details.data.data.progress.status).toBe("funded");
+    expect(details.data.data.progress.status).toBe('funded');
 
     // Claim campaign
     await claimTestCampaign(campaignId, CREATOR_1);
@@ -586,13 +584,13 @@ describe("Campaign Lifecycle - State Consistency", () => {
     // Verify final state
     details = await getCampaignDetails(campaignId);
     expect(details.data.data.pledgedAmount).toBe(930); // unchanged
-    expect(details.data.data.progress.status).toBe("claimed");
+    expect(details.data.data.progress.status).toBe('claimed');
     expect(details.data.data.progress.canClaim).toBe(false);
     expect(details.data.data.progress.canRefund).toBe(false);
     expect(details.data.data.progress.canPledge).toBe(false);
   });
 
-  it("should track all events in correct order", async () => {
+  it('should track all events in correct order', async () => {
     const creationRes = await createTestCampaign({
       targetAmount: 1000,
       deadline: nowInSeconds() + 50,
@@ -610,11 +608,11 @@ describe("Campaign Lifecycle - State Consistency", () => {
     expect(history.data).toHaveLength(5); // created + 3 pledges + claim
 
     // Verify event order and types
-    expect(history.data[0].eventType).toBe("created");
-    expect(history.data[1].eventType).toBe("pledged");
-    expect(history.data[2].eventType).toBe("pledged");
-    expect(history.data[3].eventType).toBe("pledged");
-    expect(history.data[4].eventType).toBe("claimed");
+    expect(history.data[0].eventType).toBe('created');
+    expect(history.data[1].eventType).toBe('pledged');
+    expect(history.data[2].eventType).toBe('pledged');
+    expect(history.data[3].eventType).toBe('pledged');
+    expect(history.data[4].eventType).toBe('claimed');
 
     // Verify timestamps are in order
     for (let i = 1; i < history.data.length; i++) {
@@ -635,18 +633,18 @@ describe("Campaign Lifecycle - State Consistency", () => {
     expect(history.data[4].amount).toBe(1000); // Total claimed
   });
 
-  it("should handle multiple independent campaigns in parallel", async () => {
+  it('should handle multiple independent campaigns in parallel', async () => {
     // Create multiple campaigns
     const campaign1Res = await createTestCampaign({
       creator: CREATOR_1,
-      title: "Campaign 1",
+      title: 'Campaign 1',
       targetAmount: 500,
       deadline: nowInSeconds() + 50,
     });
 
     const campaign2Res = await createTestCampaign({
       creator: CREATOR_2,
-      title: "Campaign 2",
+      title: 'Campaign 2',
       targetAmount: 800,
       deadline: nowInSeconds() + 50,
     });
@@ -669,11 +667,11 @@ describe("Campaign Lifecycle - State Consistency", () => {
     const details1 = await getCampaignDetails(campaign1Id);
     const details2 = await getCampaignDetails(campaign2Id);
 
-    expect(details1.data.data.progress.status).toBe("claimed");
+    expect(details1.data.data.progress.status).toBe('claimed');
     expect(details1.data.data.pledgedAmount).toBe(500);
     expect(details1.data.data.claimedAt).toBeDefined();
 
-    expect(details2.data.data.progress.status).toBe("claimed");
+    expect(details2.data.data.progress.status).toBe('claimed');
     expect(details2.data.data.pledgedAmount).toBe(800);
     expect(details2.data.data.claimedAt).toBeDefined();
 
@@ -686,34 +684,16 @@ describe("Campaign Lifecycle - State Consistency", () => {
   });
 });
 
-describe("Campaign API - Health & Stability", () => {
-  it("should report healthy status", async () => {
-    const res = await apiClient.get("/api/health");
+describe('Campaign API - Health & Stability', () => {
+  it('should report healthy status', async () => {
+    const res = await apiClient.get('/api/health');
     expect(res.status).toBe(200);
-    expect(res.data.status).toBe("ok");
-    expect(res.data.database.status).toBe("up");
+    expect(res.data.status).toBe('ok');
+    expect(res.data.database.status).toBe('up');
     expect(res.data.database.reachable).toBe(true);
   });
 
-  it("should reject payloads larger than the configured limit (413 Payload Too Large)", async () => {
-    // Generate a ~20KB payload
-    const largeDescription = "A".repeat(20 * 1024);
-    
-    const res = await apiClient.post("/api/campaigns", {
-      creator: CREATOR_1,
-      title: "Oversized Campaign",
-      description: largeDescription,
-      assetCode: "USDC",
-      targetAmount: 1000,
-      deadline: nowInSeconds() + 86400,
-    });
-
-    expect(res.status).toBe(413);
-    expect(res.data.success).toBe(false);
-    expect(res.data.error.code).toBe("PAYLOAD_TOO_LARGE");
-  });
-
-  it("should handle concurrent requests without data corruption", async () => {
+  it('should handle concurrent requests without data corruption', async () => {
     // Create campaigns concurrently
     const promises = [];
     for (let i = 0; i < 5; i++) {

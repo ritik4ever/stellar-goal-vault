@@ -1,4 +1,4 @@
-import { getDb, initDb } from "./db";
+import { getDb, initDb } from './db';
 
 const FIXED_NOW = 1_750_000_000;
 
@@ -17,11 +17,11 @@ type SeedCampaign = {
 
 const SEED_CAMPAIGNS: SeedCampaign[] = [
   {
-    id: "1",
-    creator: `G${"A".repeat(55)}`,
-    title: "Open deterministic campaign",
-    description: "Deterministic campaign seed for open status checks.",
-    assetCode: "USDC",
+    id: '1',
+    creator: `G${'A'.repeat(55)}`,
+    title: 'Open deterministic campaign',
+    description: 'Deterministic campaign seed for open status checks.',
+    assetCode: 'USDC',
     targetAmount: 500,
     pledgedAmount: 100,
     deadline: FIXED_NOW + 86_400,
@@ -29,11 +29,11 @@ const SEED_CAMPAIGNS: SeedCampaign[] = [
     claimedAt: null,
   },
   {
-    id: "2",
-    creator: `G${"B".repeat(55)}`,
-    title: "Funded deterministic campaign",
-    description: "Deterministic campaign seed for funded status checks.",
-    assetCode: "XLM",
+    id: '2',
+    creator: `G${'B'.repeat(55)}`,
+    title: 'Funded deterministic campaign',
+    description: 'Deterministic campaign seed for funded status checks.',
+    assetCode: 'XLM',
     targetAmount: 250,
     pledgedAmount: 250,
     deadline: FIXED_NOW + 43_200,
@@ -41,11 +41,11 @@ const SEED_CAMPAIGNS: SeedCampaign[] = [
     claimedAt: null,
   },
   {
-    id: "3",
-    creator: `G${"C".repeat(55)}`,
-    title: "Claimed deterministic campaign",
-    description: "Deterministic campaign seed for claimed status checks.",
-    assetCode: "USDC",
+    id: '3',
+    creator: `G${'C'.repeat(55)}`,
+    title: 'Claimed deterministic campaign',
+    description: 'Deterministic campaign seed for claimed status checks.',
+    assetCode: 'USDC',
     targetAmount: 300,
     pledgedAmount: 300,
     deadline: FIXED_NOW - 600,
@@ -86,16 +86,16 @@ export function seedDeterministicState(): void {
   db.prepare(
     `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
      VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-  ).run("1", `G${"D".repeat(55)}`, 100, "USDC", FIXED_NOW - 250);
+  ).run('1', `G${'D'.repeat(55)}`, 100, 'USDC', FIXED_NOW - 250);
 
   db.prepare(
     `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
      VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-  ).run("2", `G${"E".repeat(55)}`, 250, "XLM", FIXED_NOW - 150);
+  ).run('2', `G${'E'.repeat(55)}`, 250, 'XLM', FIXED_NOW - 150);
 }
 
 if (require.main === module) {
   seedDeterministicState();
   // eslint-disable-next-line no-console
-  console.log("Deterministic database seed complete.");
+  console.log('Deterministic database seed complete.');
 }
