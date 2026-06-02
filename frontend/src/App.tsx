@@ -557,7 +557,7 @@ function App() {
       ) {
         return;
       }
-      addToast(getErrorMessage(error), 'error');
+
     } finally {
       setPendingPledgeCampaignId(null);
     }

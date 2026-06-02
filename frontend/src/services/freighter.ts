@@ -58,6 +58,36 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+const STROOPS_PER_XLM = 10_000_000;
+
+export interface EstimatedFee {
+  stroops: number;
+  xlm: string;
+}
+
+function formatStroopsAsXlm(stroops: number): string {
+  return (stroops / STROOPS_PER_XLM).toFixed(7).replace(/\.?0+$/, "");
+}
+
+/**
+ * Derives the estimated network fee from a transaction that has already been
+ * prepared from a Soroban simulation. The prepared transaction's fee covers the
+ * inclusion fee plus the simulated resource fee, i.e. what the wallet will be
+ * asked to pay. Returns null when the fee cannot be parsed so the UI can fall
+ * back to a "Calculating..." state instead of showing a misleading value.
+ */
+function estimateFeeFromTransaction(transaction: { fee: string }): EstimatedFee | null {
+  try {
+    const feeStroops = Number(transaction.fee);
+    if (!Number.isFinite(feeStroops) || feeStroops < 0) {
+      return null;
+    }
+    return { stroops: feeStroops, xlm: formatStroopsAsXlm(feeStroops) };
+  } catch {
+    return null;
+  }
+}
+
 export function amountToContractUnits(amount: number, decimals: number): bigint {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw buildError('INVALID_AMOUNT', 'Pledge amount must be greater than zero.');
@@ -168,6 +198,7 @@ export async function submitFreighterClaim(params: {
     assetCode?: string;
     contract: string;
     xdr: string;
+    estimatedFee?: EstimatedFee;
   }) => Promise<boolean>;
 }): Promise<PledgeTransactionResult> {
   const { campaignId, creator, config } = params;
@@ -231,6 +262,7 @@ export async function submitFreighterClaim(params: {
       operation: 'claim',
       contract: config.contractId,
       xdr: preparedTransaction.toXDR(),
+      estimatedFee: estimateFeeFromTransaction(preparedTransaction) ?? undefined,
     });
     if (!isApproved) {
       throw buildError('USER_CANCELLED', 'User cancelled the transaction from the preview panel.');
@@ -291,6 +323,7 @@ export async function submitFreighterPledge(params: {
     assetCode?: string;
     contract: string;
     xdr: string;
+    estimatedFee?: EstimatedFee;
   }) => Promise<boolean>;
 }): Promise<PledgeTransactionResult> {
   const { campaignId, contributor, amount, config, assetCode } = params;
@@ -368,6 +401,7 @@ export async function submitFreighterPledge(params: {
       assetCode: params.assetCode,
       contract: config.contractId,
       xdr: preparedTransaction.toXDR(),
+      estimatedFee: estimateFeeFromTransaction(preparedTransaction) ?? undefined,
     });
     if (!isApproved) {
       throw buildError('USER_CANCELLED', 'User cancelled the transaction from the preview panel.');

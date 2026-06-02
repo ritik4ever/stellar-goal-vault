@@ -1,9 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { MousePointer2 } from 'lucide-react';
-import { AppConfig, Campaign } from '../types/campaign';
-import { ContributorSummary } from './ContributorSummary';
-import { CopyButton } from './CopyButton';
-import { EmptyState } from './EmptyState';
+
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -18,6 +13,24 @@ interface CampaignDetailPanelProps {
   onClaim?: (campaign: Campaign) => Promise<void>;
   onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
+}
+
+const FEE_ESTIMATION_ERROR_CODES = new Set([
+  "SIMULATION_FAILED",
+  "SIMULATION_PREPARE_FAILED",
+  "SOURCE_ACCOUNT_LOAD_FAILED",
+  "STATE_RESTORE_REQUIRED",
+]);
+
+function describePledgeError(error: unknown): string {
+  const code = (error as { code?: string } | null)?.code;
+  if (code && FEE_ESTIMATION_ERROR_CODES.has(code)) {
+    return "Could not estimate fee. Check your connection and retry.";
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return "The pledge could not be completed. Please try again.";
 }
 
 function networkName(config: AppConfig | null | undefined): string {
@@ -53,10 +66,10 @@ export function CampaignDetailPanel({
   const [pledgeAmount, setPledgeAmount] = useState('25');
   const [refundContributor, setRefundContributor] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pledgeError, setPledgeError] = useState<string | null>(null);
 
   useEffect(() => {
-    setPledgeAmount('25');
-    setRefundContributor(connectedWallet ?? '');
+
   }, [campaign?.id, connectedWallet]);
 
   const walletReady = Boolean(appConfig?.walletIntegrationReady ?? appConfig?.soroban?.enabled);
@@ -98,14 +111,24 @@ export function CampaignDetailPanel({
 
   const activeCampaign = campaign;
 
-  async function handlePledge(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  // Simulation is run (and the network fee estimated) before the preview modal
+  // opens. If that simulation fails, surface a retry-able error next to the
+  // pledge button instead of only relying on the toast.
+  async function submitPledge() {
+    setPledgeError(null);
     setIsSubmitting(true);
     try {
       await onPledge(activeCampaign.id, Number(pledgeAmount), activeCampaign.assetCode);
+    } catch (error) {
+      setPledgeError(describePledgeError(error));
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handlePledge(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void submitPledge();
   }
 
   async function handleRefund() {
@@ -263,6 +286,22 @@ export function CampaignDetailPanel({
             Claim vault
           </button>
         </div>
+
+        {pledgeError ? (
+          <div className="pledge-error" role="alert">
+            <p className="error-text">{pledgeError}</p>
+            <button
+              className="btn-ghost"
+              type="button"
+              disabled={isSubmitting || isPledgePending}
+              onClick={() => {
+                void submitPledge();
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
       </form>
 
       <div className="form-grid" style={{ marginTop: 16 }}>
@@ -302,13 +341,7 @@ export function CampaignDetailPanel({
       ) : null}
 
       {activeCampaign.metadata?.imageUrl ? (
-        <div className="campaign-image-container">
-          <img
-            src={activeCampaign.metadata.imageUrl}
-            alt={activeCampaign.title}
-            className="campaign-image"
-          />
-        </div>
+        <CampaignImage url={activeCampaign.metadata.imageUrl} alt={activeCampaign.title} />
       ) : null}
 
       {activeCampaign.metadata?.externalLink ? (

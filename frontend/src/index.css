@@ -425,6 +425,24 @@ select {
   border: 1px solid var(--error-border);
 }
 
+.error-text {
+  color: var(--error-text);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.pledge-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--error-border);
+  background: var(--error-bg);
+  border-radius: 8px;
+}
+
 .form-success {
   color: var(--success-text);
   background: var(--success-bg);
@@ -1289,6 +1307,21 @@ tbody tr:hover td {
 .campaign-image-container,
 .external-link-container {
   margin-top: 20px;
+}
+
+.campaign-image-skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.05),
+    rgba(255, 255, 255, 0.12),
+    rgba(255, 255, 255, 0.05)
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius-lg);
+  pointer-events: none;
 }
 
 .campaign-image {
