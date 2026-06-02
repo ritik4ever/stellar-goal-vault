@@ -292,7 +292,10 @@ export function calculateProgress(
     remainingAmount: round(
       Math.max(0, campaign.targetAmount - campaign.pledgedAmount),
     ),
-    pledgeCount: pledgeCountOverride !== undefined ? pledgeCountOverride : getActivePledgeCount(campaign.id),
+    pledgeCount:
+      pledgeCountOverride !== undefined
+        ? pledgeCountOverride
+        : getActivePledgeCount(campaign.id),
     hoursLeft: round(Math.max(0, campaign.deadline - at) / 3600),
     canPledge,
     canClaim,
@@ -355,6 +358,7 @@ const MAX_CAMPAIGN_DURATION_SECONDS = 60 * 60 * 24 * 180;
  * @param options - Optional filters: `searchQuery`, `assetCode`, `status`, `includeDeleted`, `page`, `limit`.
  * @returns A {@link ListCampaignsResult} with the matching campaign records and the total count.
  */
+
 export function listCampaigns(
   options?: ListCampaignsOptions,
 ): ListCampaignsResult {
@@ -409,7 +413,7 @@ export function listCampaigns(
     }
   }
 
-  let whereClause = '';
+  let whereClause = "";
   if (!options?.includeDeleted) {
     whereClauses.push(`campaigns.deleted_at IS NULL`);
   }
@@ -423,8 +427,28 @@ export function listCampaigns(
     db.prepare(countQuery).get(...params) as { total: number }
   ).total;
 
-  const dataQuery = `SELECT * ${baseQuery} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-  const rows = db.prepare(dataQuery).all(...params, limit, offset) as CampaignRow[];
+  const dataQuery = `SELECT * FROM campaigns${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+  const rows = db
+    .prepare(dataQuery)
+    .all(...params, limit, offset) as CampaignRow[];
+
+  // Build pledge counts map
+  const pledgeCounts: Record<string, number> = {};
+  const campaignIds = rows.map((row) => row.id);
+  if (campaignIds.length > 0) {
+    const placeholders = campaignIds.map(() => "?").join(",");
+    const pledgeRows = db
+      .prepare(
+        `SELECT campaign_id, COUNT(*) as count FROM pledges WHERE campaign_id IN (${placeholders}) AND refunded_at IS NULL GROUP BY campaign_id`,
+      )
+      .all(...campaignIds) as Array<{ campaign_id: string; count: number }>;
+
+    pledgeRows.forEach((row) => {
+      pledgeCounts[row.campaign_id] = row.count;
+    });
+  }
+
+  const campaigns = rows.map(rowToCampaign);
 
   return {
     campaigns,

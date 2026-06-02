@@ -35,7 +35,10 @@ import { checkDbHealth } from "./services/db";
 import { getCampaignHistory } from "./services/eventHistory";
 import { startEventIndexer } from "./services/eventIndexer";
 import { fetchOpenIssues } from "./services/openIssues";
-import { ensureSorobanRefundConfig, verifyRefundTransaction } from "./services/sorobanRpc";
+import {
+  ensureSorobanRefundConfig,
+  verifyRefundTransaction,
+} from "./services/sorobanRpc";
 import { AppError, ApiErrorDetail, ApiErrorResponse } from "./types/errors";
 import {
   campaignIdSchema,
@@ -310,12 +313,17 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
   const data = filterCampaignList(
     campaigns.map((campaign) => ({
       ...campaign,
-      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
+      progress: calculateProgress(
+        campaign,
+        undefined,
+        pledgeCounts[campaign.id],
+      ),
     })),
     filters,
   );
 
-  const hasMore = paginationResult.page * paginationResult.pageSize < totalCount;
+  const hasMore =
+    paginationResult.page * paginationResult.pageSize < totalCount;
 
   res.json({
     data,
@@ -585,72 +593,67 @@ app.get("/api/stats", (_req: Request, res: Response) => {
   res.json({ data: stats });
 });
 
-app.use((error: unknown, req: RequestWithId, res: Response, _next: express.NextFunction) => {
-  if (error instanceof Error && error.message === "Not allowed by CORS") {
-    return res.status(403).json({
+app.use(
+  (
+    error: unknown,
+    req: RequestWithId,
+    res: Response,
+    _next: express.NextFunction,
+  ) => {
+    if (error instanceof Error && error.message === "Not allowed by CORS") {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "FORBIDDEN",
+          message: "CORS policy violation",
+          requestId: req.requestId,
+        },
+      });
+    }
+
+    const err =
+      error instanceof AppError
+        ? error
+        : error instanceof Error
+          ? error
+          : new Error("An unexpected error occurred");
+
+    const statusCode =
+      err instanceof AppError
+        ? err.statusCode
+        : ((err as { statusCode?: number }).statusCode ?? 500);
+    const code =
+      err instanceof AppError
+        ? err.code
+        : ((err as { code?: string }).code ?? "INTERNAL_SERVER_ERROR");
+    const response: ApiErrorResponse = {
       success: false,
       error: {
-        code: "FORBIDDEN",
-        message: "CORS policy violation",
+        code,
+        message: err.message || "An unexpected error occurred",
         requestId: req.requestId,
       },
-    });
-  }
-});
+    };
 
-  const err =
-    error instanceof AppError
-      ? error
-      : error instanceof Error
-      ? error
-      : new Error("An unexpected error occurred");
+    const details =
+      err instanceof AppError
+        ? err.details
+        : error &&
+            typeof error === "object" &&
+            "details" in error &&
+            Array.isArray((error as { details?: unknown }).details)
+          ? (error as { details?: ApiErrorDetail[] }).details
+          : undefined;
 
-  const statusCode = err instanceof AppError ? err.statusCode : (err as { statusCode?: number }).statusCode ?? 500;
-  const code = err instanceof AppError ? err.code : (err as { code?: string }).code ?? "INTERNAL_SERVER_ERROR";
-  const response: ApiErrorResponse = {
-    success: false,
-    error: {
-      code,
-      message: err.message || "An unexpected error occurred",
-      requestId: req.requestId,
-    },
-  };
-
-  const details =
-    err instanceof AppError
-      ? err.details
-      : error && typeof error === "object" && "details" in error && Array.isArray((error as { details?: unknown }).details)
-      ? (error as { details?: ApiErrorDetail[] }).details
-      : undefined;
-
-  if (details) {
-    response.error.details = details;
-  }
-
-  logError(
-    err,
-    {
-      event: "request_error",
-      requestId: req.requestId,
-      method: req.method,
-      path: req.originalUrl || req.path,
-      status: statusCode,
-      code,
-    },
-    config.logLevel,
-  );
-
-    if (err instanceof AppError && err.details) {
-      response.error.details = err.details;
-    } else if (err.details) {
-      response.error.details = err.details;
+    if (details) {
+      response.error.details = details;
     }
 
     logError(
       err,
       {
         event: "request_error",
-        requestId: (req as RequestWithId).requestId,
+        requestId: req.requestId,
         method: req.method,
         path: req.originalUrl || req.path,
         status: statusCode,
@@ -674,7 +677,6 @@ function printStartupBanner(): void {
     path.join(__dirname, "..", "..", "data", "campaigns.db");
   const nodeEnv = process.env.NODE_ENV || "development";
 
-  /* eslint-disable no-console */
   console.log("");
   console.log("╔════════════════════════════════════════════════════════════╗");
   console.log("║         Stellar Goal Vault Backend - Starting Up          ║");
@@ -684,7 +686,6 @@ function printStartupBanner(): void {
   console.log(`║  Database Path:  ${dbPath.padEnd(42)}║`);
   console.log("╚════════════════════════════════════════════════════════════╝");
   console.log("");
-  /* eslint-enable no-console */
 }
 
 function startServer() {
@@ -696,9 +697,13 @@ function startServer() {
   // Initialize Redis cache in production
   if (process.env.NODE_ENV === "production") {
     initRedisCache().catch((error) => {
-      logError("Failed to initialize Redis cache", {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logError(
+        "Failed to initialize Redis cache",
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+        config.logLevel,
+      );
       // Continue without cache if initialization fails
     });
   }
