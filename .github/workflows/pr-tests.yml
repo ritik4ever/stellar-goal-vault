@@ -54,3 +54,23 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+  status-checks:
+    name: Require all status checks
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - backend-tests
+      - frontend-build
+
+    steps:
+      - name: Verify all required checks passed
+        run: |
+          if [[ "${{ needs.backend-tests.result }}" != "success" ]]; then
+            echo "Backend tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.frontend-build.result }}" != "success" ]]; then
+            echo "Frontend build failed"
+            exit 1
+          fi

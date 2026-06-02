@@ -113,6 +113,8 @@ function getSystemTheme(): ThemeMode {
 }
 
 function App() {
+  const { id: paramId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const freighter = useFreighter();
   const { toasts, addToast, dismiss } = useToast();
   const connectedWallet = freighter.publicKey;
@@ -252,8 +254,15 @@ function App() {
   }, [themeMode]);
 
   useEffect(() => {
-    setCampaignIdInUrl(selectedCampaignId);
-  }, [selectedCampaignId]);
+    setSelectedCampaignId(paramId ?? null);
+    if (!paramId) {
+      const saved = sessionStorage.getItem(SCROLL_KEY);
+      if (saved !== null) {
+        window.scrollTo(0, parseInt(saved, 10));
+        sessionStorage.removeItem(SCROLL_KEY);
+      }
+    }
+  }, [paramId]);
 
   if (visualTestMode === 'campaign-card') {
     return (
@@ -353,11 +362,13 @@ function App() {
     await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
   }
 
+  const initialParamIdRef = useRef(paramId);
+
   useEffect(() => {
     let cancelled = false;
 
     async function bootstrap() {
-      const requestedCampaignId = getCampaignIdFromUrl();
+      const requestedCampaignId = initialParamIdRef.current ?? null;
       setInitialLoad(true);
 
       const [configResult, issuesResult, campaignsResult] = await Promise.allSettled([
@@ -388,6 +399,9 @@ function App() {
         const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
         const resolvedId = exists ? nextId : (data[0]?.id ?? null);
 
+        if (requestedCampaignId && !exists) {
+          navigate('/not-found', { replace: true });
+        }
         setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
         setSelectedCampaignId(resolvedId);
       } else {
@@ -402,7 +416,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [addToast]);
+  }, [addToast, navigate]);
 
   useEffect(() => {
     void refreshSelectedData(selectedCampaignId).catch((error) => {
@@ -632,8 +646,10 @@ function App() {
   }
 
   function handleSelect(campaignId: string) {
+    sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
     setInvalidUrlCampaignId(null);
     setSelectedCampaignId(campaignId);
+    navigate('/campaigns/' + campaignId);
   }
 
   function handleThemeToggle() {

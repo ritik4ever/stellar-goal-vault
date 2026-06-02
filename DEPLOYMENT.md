@@ -267,6 +267,11 @@ npx tsc -p ./tsconfig.json
 
 If these items pass, the deployment guide has been successfully applied.
 
+## Related Documentation
+- [Runbook — Common Operational Tasks](./RUNBOOK.md) — step-by-step procedures for resetting the database, rotating API keys, redeploying contracts, rolling back the backend, and clearing the event cache.
+- [Architecture Diagrams](./ARCHITECTURE_DIAGRAMS.md)
+- [Contributing Guide](./CONTRIBUTING.md)
+
 
 
 

@@ -81,7 +81,10 @@ app.use(
   }),
 );
 
-app.use(express.json());
+app.use(compression({ threshold: 1024 }));
+
+const bodySizeLimit = process.env.MAX_BODY_SIZE || "16kb";
+app.use(express.json({ limit: bodySizeLimit }));
 
 // Add API key authentication middleware (production only)
 if (process.env.NODE_ENV === "production") {
@@ -288,12 +291,12 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
     listOptions.limit = paginationResult.limit;
   }
 
-  const { campaigns, totalCount } = listCampaigns(listOptions);
+  const { campaigns, totalCount, pledgeCounts } = listCampaigns(listOptions);
 
   const data = filterCampaignList(
     campaigns.map((campaign) => ({
       ...campaign,
-      progress: calculateProgress(campaign),
+      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
     })),
     filters,
   );
