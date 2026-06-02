@@ -61,9 +61,7 @@ export function applyFilters(
   campaigns: Campaign[],
   assetCode: string,
   status: string,
-  searchQuery: string = "",
 ): Campaign[] {
-  // Client-side filters (asset/status only, search is server-side)
   return campaigns.filter((c) => {
     const matchesAsset = assetCode === "" || c.assetCode === assetCode;
     const matchesStatus = status === "" || c.progress.status === status;

@@ -8,7 +8,18 @@ interface CreateCampaignFormProps {
   apiError?: ApiError | null;
 }
 
-const INITIAL_VALUES = {
+type CreateCampaignFormValues = {
+  creator: string;
+  title: string;
+  description: string;
+  acceptedTokens: string[];
+  targetAmount: string;
+  deadlineHours: string;
+  imageUrl: string;
+  externalLink: string;
+};
+
+const INITIAL_VALUES: CreateCampaignFormValues = {
   creator: "",
   title: "",
   description: "",
@@ -25,7 +36,7 @@ export function CreateCampaignForm({
   apiError,
 }: CreateCampaignFormProps) {
   const assetOptions = allowedAssets.length > 0 ? allowedAssets : ["USDC"];
-  const [values, setValues] = useState({
+  const [values, setValues] = useState<CreateCampaignFormValues>({
     ...INITIAL_VALUES,
     acceptedTokens: assetOptions.slice(0, 1),
   });
@@ -48,7 +59,7 @@ export function CreateCampaignForm({
     });
   }, [assetOptions]);
 
-  function update(field: keyof typeof INITIAL_VALUES, value: any) {
+  function update(field: keyof CreateCampaignFormValues, value: string | string[]) {
     const nextValues = { ...values, [field]: value };
     setValues(nextValues);
     setValidationErrors(validateForm(nextValues));
@@ -75,17 +86,21 @@ export function CreateCampaignForm({
     try {
       const deadline = Math.floor(Date.now() / 1000) + Number(values.deadlineHours) * 3600;
 
+      const imageUrl = values.imageUrl.trim();
+      const externalLink = values.externalLink.trim();
+
+      const metadata: { imageUrl?: string; externalLink?: string } = {};
+      if (imageUrl) metadata.imageUrl = imageUrl;
+      if (externalLink) metadata.externalLink = externalLink;
+
       await onCreate({
         creator: values.creator.trim(),
         title: values.title.trim(),
         description: values.description.trim(),
-        acceptedTokens: values.acceptedTokens.map(t => t.trim().toUpperCase()),
+        acceptedTokens: values.acceptedTokens.map((t) => t.trim().toUpperCase()),
         targetAmount: Number(values.targetAmount),
         deadline,
-        metadata: {
-          imageUrl: values.imageUrl.trim() || undefined,
-          externalLink: values.externalLink.trim() || undefined,
-        },
+        metadata,
       });
 
       const resetValues = {

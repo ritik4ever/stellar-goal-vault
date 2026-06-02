@@ -45,38 +45,47 @@ export const unixTimestampSchema = z.coerce
   .int("deadline must be a valid UNIX timestamp in seconds.")
   .positive("deadline must be a valid UNIX timestamp in seconds.");
 
-export const createCampaignPayloadSchema = z.object({
-  creator: stellarAccountIdSchema,
-  title: z.string().trim().min(4, "Title must be at least 4 characters.").max(80),
-  description: z
-    .string()
-    .trim()
-    .min(20, "Description must be at least 20 characters.")
-    .max(500),
-  acceptedTokens: z
-    .array(assetCodeSchema)
-    .min(1, "At least one accepted token is required."),
-  targetAmount: positiveAmountSchema,
-  deadline: unixTimestampSchema,
-  metadata: z
-    .object({
-      imageUrl: z.string().url().optional(),
-      externalLink: z.string().url().optional(),
-    })
-    .optional(),
-  maxPerContributor: optionalPositiveIntSchema,
-});
+export const createCampaignPayloadSchema = z
+  .object({
+    creator: stellarAccountIdSchema,
+    title: z.string().trim().min(4, "Title must be at least 4 characters.").max(80),
+    description: z
+      .string()
+      .trim()
+      .min(20, "Description must be at least 20 characters.")
+      .max(500),
+    acceptedTokens: z.array(assetCodeSchema).optional(),
+    assetCode: assetCodeSchema.optional(),
+    targetAmount: positiveAmountSchema,
+    deadline: unixTimestampSchema,
+    metadata: z
+      .object({
+        imageUrl: z.string().url().optional(),
+        externalLink: z.string().url().optional(),
+      })
+      .optional(),
+    maxPerContributor: optionalPositiveIntSchema,
+  })
+  .superRefine((data, ctx) => {
+    if (!data.acceptedTokens?.length && !data.assetCode) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Either acceptedTokens or assetCode must be provided.",
+        path: ["acceptedTokens"],
+      });
+    }
+  });
 
 export const createPledgePayloadSchema = z.object({
   contributor: stellarAccountIdSchema,
   amount: positiveAmountSchema,
-  assetCode: assetCodeSchema,
+  assetCode: assetCodeSchema.optional(),
 });
 
 export const reconcilePledgePayloadSchema = z.object({
   contributor: stellarAccountIdSchema,
   amount: positiveAmountSchema,
-  assetCode: assetCodeSchema,
+  assetCode: assetCodeSchema.optional(),
   transactionHash: z
     .string()
     .trim()
@@ -161,35 +170,18 @@ function parsePositiveIntegerQueryParam(
 }
 
 /**
- * Parses optional `page` and `limit` for GET /api/campaigns.
- * Omitting both means no pagination (caller lists the full filtered set).
- * Supplying only one is invalid (400).
+ * Parses optional `page` and `pageSize` for GET /api/campaigns.
+ * Defaults: page=1, pageSize=20. Max pageSize=100.
  */
 export function parseCampaignListPaginationQuery(query: {
   page?: unknown;
-  limit?: unknown;
-}): { ok: true; page?: number; limit?: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+  pageSize?: unknown;
+}): { ok: true; page: number; pageSize: number } | { ok: false; issues: z.core.$ZodIssue[] } {
   const pageStr = singleCampaignListQueryParam(query.page);
-  const limitStr = singleCampaignListQueryParam(query.limit);
+  const pageSizeStr = singleCampaignListQueryParam(query.pageSize);
 
-  if (pageStr === undefined && limitStr === undefined) {
-    return { ok: true };
-  }
-  if (pageStr === undefined || limitStr === undefined) {
-    return {
-      ok: false,
-      issues: [
-        {
-          code: "custom",
-          message: "Pagination requires both page and limit query parameters.",
-          path: pageStr === undefined ? ["page"] : ["limit"],
-        },
-      ],
-    };
-  }
-
-  const pageNum = Number(pageStr);
-  const limitNum = Number(limitStr);
+  const pageNum = pageStr ? Number(pageStr) : 1;
+  const pageSizeNum = pageSizeStr ? Number(pageSizeStr) : 20;
   const issues: z.core.$ZodIssue[] = [];
 
   if (!Number.isFinite(pageNum) || !Number.isInteger(pageNum) || pageNum < 1) {
@@ -200,15 +192,15 @@ export function parseCampaignListPaginationQuery(query: {
     });
   }
   if (
-    !Number.isFinite(limitNum) ||
-    !Number.isInteger(limitNum) ||
-    limitNum < 1 ||
-    limitNum > 100
+    !Number.isFinite(pageSizeNum) ||
+    !Number.isInteger(pageSizeNum) ||
+    pageSizeNum < 1 ||
+    pageSizeNum > 100
   ) {
     issues.push({
       code: "custom",
-      message: "limit must be an integer from 1 to 100.",
-      path: ["limit"],
+      message: "pageSize must be an integer from 1 to 100.",
+      path: ["pageSize"],
     });
   }
 
@@ -216,7 +208,7 @@ export function parseCampaignListPaginationQuery(query: {
     return { ok: false, issues };
   }
 
-  return { ok: true, page: pageNum, limit: limitNum };
+  return { ok: true, page: pageNum, pageSize: pageSizeNum };
 }
 
 export function parsePledgeListPaginationQuery(query: {

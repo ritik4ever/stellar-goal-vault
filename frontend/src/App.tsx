@@ -33,7 +33,6 @@ import {
   listOpenIssues,
   reconcilePledge,
   refundCampaign,
-  softDeleteCampaign,
 } from "./services/api";
 import {
   submitFreighterClaim,
@@ -55,8 +54,6 @@ import {
 
 const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
-const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
-const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
 
 type ThemeMode = "light" | "dark";
 
@@ -152,6 +149,7 @@ function App() {
   const isOnline = useOnlineStatus();
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaignsPagination, setCampaignsPagination] = useState<{ total: number; page: number; pageSize: number; hasMore: boolean }>({ total: 0, page: 1, pageSize: 20, hasMore: false });
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
@@ -162,14 +160,12 @@ function App() {
     null,
   );
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
-  const [isIssuesLoading, setIsIssuesLoading] = useState(false);
+  const [isIssuesLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [themeMode, setThemeMode] = useLocalStorage<ThemeMode>(THEME_STORAGE_KEY, getSystemTheme());
-  const [, setSortOrder] = useLocalStorage<string>(SORT_ORDER_KEY, 'default');
-  const [, setFilterState] = useLocalStorage<string[]>(FILTER_STATE_KEY, []);
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -218,16 +214,22 @@ function App() {
     };
   }, [transactionPreview]);
 
-  async function refreshCampaigns(searchQuery: string = '', nextSelectedId?: string | null): Promise<Campaign[]> {
+  async function refreshCampaigns(searchQuery: string = '', nextSelectedId?: string | null, page: number = 1): Promise<Campaign[]> {
     setIsCampaignsLoading(true);
     try {
-      const data = await listCampaigns({ search: searchQuery });
-      setCampaigns(data);
+      const response = await listCampaigns({ search: searchQuery, page, pageSize: 20 });
+      setCampaigns(response.data);
+      setCampaignsPagination({
+        total: response.total,
+        page: response.page,
+        pageSize: response.pageSize,
+        hasMore: response.hasMore,
+      });
 
       const requestedId = nextSelectedId ?? selectedCampaignId;
-      const nextId = requestedId ?? data[0]?.id ?? null;
-      const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
-      const resolvedId = exists ? nextId : data[0]?.id ?? null;
+      const nextId = requestedId ?? response.data[0]?.id ?? null;
+      const exists = nextId ? response.data.some((campaign) => campaign.id === nextId) : false;
+      const resolvedId = exists ? nextId : response.data[0]?.id ?? null;
 
       setInvalidUrlCampaignId(requestedId && !exists ? requestedId : null);
       setSelectedCampaignId(resolvedId);
@@ -237,7 +239,7 @@ function App() {
         setHistory([]);
       }
 
-      return data;
+      return response.data;
     } finally {
       setIsCampaignsLoading(false);
     }
@@ -282,7 +284,7 @@ function App() {
       const [configResult, issuesResult, campaignsResult] = await Promise.allSettled([
         getAppConfig(),
         listOpenIssues(),
-        listCampaigns({ search: '' }),
+        listCampaigns({ search: '', page: 1, pageSize: 20 }),
       ]);
 
       if (cancelled) {
@@ -300,12 +302,18 @@ function App() {
       }
 
       if (campaignsResult.status === "fulfilled") {
-        const data = campaignsResult.value;
-        setCampaigns(data);
+        const response = campaignsResult.value;
+        setCampaigns(response.data);
+        setCampaignsPagination({
+          total: response.total,
+          page: response.page,
+          pageSize: response.pageSize,
+          hasMore: response.hasMore,
+        });
 
-        const nextId = requestedCampaignId ?? data[0]?.id ?? null;
-        const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
-        const resolvedId = exists ? nextId : data[0]?.id ?? null;
+        const nextId = requestedCampaignId ?? response.data[0]?.id ?? null;
+        const exists = nextId ? response.data.some((campaign) => campaign.id === nextId) : false;
+        const resolvedId = exists ? nextId : response.data[0]?.id ?? null;
 
         setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
         setSelectedCampaignId(resolvedId);
@@ -506,24 +514,6 @@ function App() {
     }
   }
 
-  async function handleSoftDelete(campaignId: string) {
-    if (!window.confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
-      return;
-    }
-
-    setActionError(null);
-    setActionMessage("Soft deleting...");
-
-    try {
-      await softDeleteCampaign(campaignId);
-      await refreshCampaigns();
-      setActionMessage("Campaign soft deleted.");
-    } catch (error) {
-      setActionError(toApiError(error));
-      setActionMessage(null);
-    }
-  }
-
   async function handleRefund(campaignId: string, contributor: string) {
     setActionError(null);
     setActionMessage("Preparing Soroban refund transaction...");
@@ -661,29 +651,19 @@ function App() {
           allowedAssets={appConfig?.allowedAssets ?? []}
         />
         <ErrorBoundary componentName="CampaignDetailPanel">
-          <Suspense
-            fallback={
-              <div
-                className="skeleton-placeholder"
-                style={{ height: "400px", borderRadius: "8px" }}
-              />
-            }
-          >
-            <CampaignDetailPanel
-              campaign={selectedCampaign}
-              appConfig={appConfig}
-              connectedWallet={connectedWallet}
-              isConnectingWallet={isConnectingWallet}
-              isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
-              isLoading={isSelectedLoading || initialLoad}
-              onConnectWallet={handleConnectWallet}
-              onDisconnectWallet={handleDisconnectWallet}
-              onPledge={handlePledge}
-              onClaim={handleClaim}
-              onSoftDelete={handleSoftDelete}
-              onRefund={handleRefund}
-            />
-          </Suspense>
+          <CampaignDetailPanel
+            campaign={selectedCampaign}
+            appConfig={appConfig}
+            connectedWallet={connectedWallet}
+            isConnectingWallet={isConnectingWallet}
+            isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+            isLoading={isSelectedLoading || initialLoad}
+            onConnectWallet={handleConnectWallet}
+            onDisconnectWallet={handleDisconnectWallet}
+            onPledge={handlePledge}
+            onClaim={handleClaim}
+            onRefund={handleRefund}
+          />
         </ErrorBoundary>
       </section>
 
@@ -694,10 +674,16 @@ function App() {
             selectedCampaignId={selectedCampaignId}
             onSelect={handleSelect}
             onSearchChange={(query) => {
-              void refreshCampaigns(query);
+              void refreshCampaigns(query, undefined, 1);
+            }}
+            onPageChange={(page) => {
+              void refreshCampaigns("", undefined, page);
             }}
             isLoading={isCampaignsLoading || initialLoad}
             invalidUrlCampaignId={invalidUrlCampaignId}
+            currentPage={campaignsPagination.page}
+            hasMore={campaignsPagination.hasMore}
+            totalCampaigns={campaignsPagination.total}
           />
         </ErrorBoundary>
 

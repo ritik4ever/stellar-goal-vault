@@ -16,7 +16,6 @@ interface CampaignDetailPanelProps {
   onDisconnectWallet?: () => void;
   onPledge?: (campaignId: string, amount: number, assetCode: string) => Promise<void>;
   onClaim?: (campaign: Campaign) => Promise<void>;
-  onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
 }
 
@@ -47,7 +46,6 @@ export function CampaignDetailPanel({
   onDisconnectWallet = () => {},
   onPledge = async () => {},
   onClaim = async () => {},
-  onSoftDelete = async () => {},
   onRefund = async () => {},
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState("25");

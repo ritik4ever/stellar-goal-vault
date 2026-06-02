@@ -359,18 +359,23 @@ export function listCampaigns(
   options?: ListCampaignsOptions,
 ): ListCampaignsResult {
   const db = getDb();
-  const paginate = options?.page !== undefined && options?.limit !== undefined;
   const page = options?.page ?? 1;
-  const limit = options?.limit ?? 10;
-  const offset = paginate ? (page - 1) * limit : 0;
+  const limit = options?.limit ?? 20;
+  const offset = (page - 1) * limit;
 
   const whereClauses: string[] = [];
-  const params: any[] = [];
+  const params: Array<unknown> = [];
 
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
-    whereClauses.push(`LOWER(campaigns.title) LIKE ?`);
-    params.push(searchTerm);
+    whereClauses.push(
+      `(
+        LOWER(title) LIKE ? OR
+        LOWER(creator) LIKE ? OR
+        CAST(id AS TEXT) LIKE ?
+      )`,
+    );
+    params.push(searchTerm, searchTerm, searchTerm);
   }
 
   if (options?.assetCode) {
@@ -418,27 +423,8 @@ export function listCampaigns(
     db.prepare(countQuery).get(...params) as { total: number }
   ).total;
 
-  const dataQuery = paginate
-    ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC LIMIT ? OFFSET ?`
-    : `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC`;
-
-  const countParams = params.slice();
-  if (paginate) {
-    countParams.push(limit, offset);
-  }
-
-  const rows = (
-    paginate
-      ? db.prepare(dataQuery).all(...countParams) as Array<CampaignRow & { pledge_count: number }>
-      : db.prepare(dataQuery).all(...params) as Array<CampaignRow & { pledge_count: number }>
-  );
-
-  const pledgeCounts: Record<string, number> = {};
-  const campaigns = rows.map((row) => {
-    pledgeCounts[row.id] = row.pledge_count;
-    const { pledge_count, ...campaignRow } = row;
-    return rowToCampaign(campaignRow as CampaignRow);
-  });
+  const dataQuery = `SELECT * ${baseQuery} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+  const rows = db.prepare(dataQuery).all(...params, limit, offset) as CampaignRow[];
 
   return {
     campaigns,

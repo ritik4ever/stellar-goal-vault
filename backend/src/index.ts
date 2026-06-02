@@ -35,11 +35,8 @@ import { checkDbHealth } from "./services/db";
 import { getCampaignHistory } from "./services/eventHistory";
 import { startEventIndexer } from "./services/eventIndexer";
 import { fetchOpenIssues } from "./services/openIssues";
-import {
-  ensureSorobanRefundConfig,
-  verifyRefundTransaction,
-} from "./services/sorobanRpc";
-import { AppError, ApiErrorResponse } from "./types/errors";
+import { ensureSorobanRefundConfig, verifyRefundTransaction } from "./services/sorobanRpc";
+import { AppError, ApiErrorDetail, ApiErrorResponse } from "./types/errors";
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
@@ -285,7 +282,7 @@ app.get("/api/health", (_req: Request, res: Response) => {
 app.get("/api/campaigns", (req: Request, res: Response) => {
   const paginationResult = parseCampaignListPaginationQuery({
     page: req.query.page,
-    limit: req.query.limit,
+    pageSize: req.query.pageSize,
   });
   if (!paginationResult.ok) {
     sendValidationError(paginationResult.issues);
@@ -304,11 +301,9 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
     assetCode: filters.asset,
     status: filters.status,
     includeDeleted: filters.includeDeleted,
+    page: paginationResult.page,
+    limit: paginationResult.pageSize,
   };
-  if (paginationResult.page !== undefined) {
-    listOptions.page = paginationResult.page;
-    listOptions.limit = paginationResult.limit;
-  }
 
   const { campaigns, totalCount, pledgeCounts } = listCampaigns(listOptions);
 
@@ -320,21 +315,14 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
     filters,
   );
 
-  const page = paginationResult.page ?? 1;
-  const limit = paginationResult.limit ?? totalCount;
-  const totalPages =
-    paginationResult.limit === undefined || limit <= 0
-      ? 1
-      : Math.max(1, Math.ceil(totalCount / limit));
+  const hasMore = paginationResult.page * paginationResult.pageSize < totalCount;
 
   res.json({
     data,
-    pagination: {
-      total: totalCount,
-      page,
-      limit,
-      totalPages,
-    },
+    total: totalCount,
+    page: paginationResult.page,
+    pageSize: paginationResult.pageSize,
+    hasMore,
   });
 });
 
@@ -597,73 +585,60 @@ app.get("/api/stats", (_req: Request, res: Response) => {
   res.json({ data: stats });
 });
 
-app.get("/api/leaderboard", (req: Request, res: Response) => {
-  try {
-    const limitParam = req.query.limit;
-    const limit = limitParam
-      ? Math.min(Math.max(parseInt(limitParam as string, 10) || 10, 1), 100)
-      : 10;
-
-    const leaderboard = getTopContributors(limit);
-    res.json({ data: leaderboard });
-  } catch (err) {
-    logError(
-      err as Error,
-      {
-        event: "leaderboard_error",
-        requestId: (req as RequestWithId).requestId,
-      },
-      config.logLevel,
-    );
-    res.status(500).json({
+app.use((error: unknown, req: RequestWithId, res: Response, _next: express.NextFunction) => {
+  if (error instanceof Error && error.message === "Not allowed by CORS") {
+    return res.status(403).json({
       success: false,
       error: {
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Failed to fetch leaderboard",
-        requestId: (req as RequestWithId).requestId,
+        code: "FORBIDDEN",
+        message: "CORS policy violation",
+        requestId: req.requestId,
       },
     });
   }
 });
 
-app.use(
-  (err: any, req: Request, res: Response, _next: express.NextFunction) => {
-    if (err.type === "entity.too.large") {
-      return res.status(413).json({
-        success: false,
-        error: {
-          code: "PAYLOAD_TOO_LARGE",
-          message: "Request payload size exceeds the maximum allowed limit",
-          requestId: (req as any).requestId,
-        },
-      });
-    }
+  const err =
+    error instanceof AppError
+      ? error
+      : error instanceof Error
+      ? error
+      : new Error("An unexpected error occurred");
 
-    if (err.message === "Not allowed by CORS") {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: "FORBIDDEN",
-          message: "CORS policy violation",
-          requestId: (req as any).requestId,
-        },
-      });
-    }
+  const statusCode = err instanceof AppError ? err.statusCode : (err as { statusCode?: number }).statusCode ?? 500;
+  const code = err instanceof AppError ? err.code : (err as { code?: string }).code ?? "INTERNAL_SERVER_ERROR";
+  const response: ApiErrorResponse = {
+    success: false,
+    error: {
+      code,
+      message: err.message || "An unexpected error occurred",
+      requestId: req.requestId,
+    },
+  };
 
-    const statusCode =
-      err instanceof AppError ? err.statusCode : (err.statusCode ?? 500);
-    const code =
-      err instanceof AppError
-        ? err.code
-        : (err.code ?? "INTERNAL_SERVER_ERROR");
-    const response: ApiErrorResponse = {
-      success: false,
-      error: {
-        code,
-        message: err.message || "An unexpected error occurred",
-        requestId: (req as RequestWithId).requestId,
-      },
-    };
+  const details =
+    err instanceof AppError
+      ? err.details
+      : error && typeof error === "object" && "details" in error && Array.isArray((error as { details?: unknown }).details)
+      ? (error as { details?: ApiErrorDetail[] }).details
+      : undefined;
+
+  if (details) {
+    response.error.details = details;
+  }
+
+  logError(
+    err,
+    {
+      event: "request_error",
+      requestId: req.requestId,
+      method: req.method,
+      path: req.originalUrl || req.path,
+      status: statusCode,
+      code,
+    },
+    config.logLevel,
+  );
 
     if (err instanceof AppError && err.details) {
       response.error.details = err.details;

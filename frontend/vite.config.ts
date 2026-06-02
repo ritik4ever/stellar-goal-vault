@@ -1,37 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { VitePWA } from 'vite-plugin-pwa';
 
 const isAnalyze = process.env.ANALYZE === 'true';
 
 export default defineConfig(async () => {
-  const plugins = [
-    react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      strategies: 'injectManifest',
-      srcDir: 'src',
-      filename: 'sw.ts',
-      injectManifest: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-      },
-      manifest: {
-        name: 'Stellar Goal Vault',
-        short_name: 'Goal Vault',
-        description: 'Campaign management and funding dashboard for Stellar',
-        theme_color: '#000000',
-        background_color: '#ffffff',
-        display: 'standalone',
-        icons: [
-          {
-            src: 'favicon.ico',
-            sizes: '64x64 32x32 24x24 16x16',
-            type: 'image/x-icon',
-          },
-        ],
-      },
-    }),
-  ];
+  const plugins = [react()];
 
   if (isAnalyze) {
     const { visualizer } = await import('rollup-plugin-visualizer');
@@ -42,7 +15,7 @@ export default defineConfig(async () => {
         gzipSize: true,
         brotliSize: true,
         template: 'treemap',
-      }) as any
+      }),
     );
   }
 
