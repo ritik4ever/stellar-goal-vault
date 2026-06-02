@@ -459,6 +459,9 @@ function App() {
         return;
       }
       addToast(getErrorMessage(error), "error");
+      // Re-throw so CampaignDetailPanel can show an inline, retry-able error
+      // (e.g. when fee simulation fails) next to the pledge button.
+      throw error;
     } finally {
       setPendingPledgeCampaignId(null);
     }

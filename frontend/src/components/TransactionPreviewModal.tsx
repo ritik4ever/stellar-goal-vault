@@ -6,6 +6,10 @@ export interface TransactionPreviewData {
   amount?: number;
   contract: string;
   xdr: string;
+  estimatedFee?: {
+    stroops: number;
+    xlm: string;
+  };
 }
 
 interface TransactionPreviewModalProps {
@@ -46,6 +50,22 @@ export function TransactionPreviewModal({
               {preview.contract}
             </strong>
           </article>
+
+          {preview.estimatedFee && (
+            <article className="detail-stat">
+              <span>Estimated network fee</span>
+              <strong>
+                {preview.estimatedFee.xlm} XLM ({preview.estimatedFee.stroops} stroops)
+              </strong>
+            </article>
+          )}
+
+          {!preview.estimatedFee && (
+            <article className="detail-stat">
+              <span>Estimated network fee</span>
+              <strong className="muted">Calculating...</strong>
+            </article>
+          )}
         </div>
 
         <div className="xdr-section">
