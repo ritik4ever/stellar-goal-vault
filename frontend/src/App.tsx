@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
@@ -48,6 +49,7 @@ const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
 const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
 const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
+const SCROLL_KEY = "sgv-list-scroll";
 
 type ThemeMode = "light" | "dark";
 
@@ -63,21 +65,6 @@ type ConfettiBurst = {
 
 function round(value: number): number {
   return Number(value.toFixed(2));
-}
-
-function getCampaignIdFromUrl(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("campaign");
-}
-
-function setCampaignIdInUrl(campaignId: string | null): void {
-  const url = new URL(window.location.href);
-  if (campaignId) {
-    url.searchParams.set("campaign", campaignId);
-  } else {
-    url.searchParams.delete("campaign");
-  }
-  window.history.replaceState(null, "", url.toString());
 }
 
 function getErrorMessage(error: unknown): string {
@@ -118,6 +105,8 @@ function getSystemTheme(): ThemeMode {
 }
 
 function App() {
+  const { id: paramId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const freighter = useFreighter();
   const { toasts, addToast, dismiss } = useToast();
   const connectedWallet = freighter.publicKey;
@@ -126,9 +115,7 @@ function App() {
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(() =>
-    getCampaignIdFromUrl(),
-  );
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(paramId ?? null);
   const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(
     null,
   );
@@ -164,8 +151,15 @@ function App() {
   }, [themeMode]);
 
   useEffect(() => {
-    setCampaignIdInUrl(selectedCampaignId);
-  }, [selectedCampaignId]);
+    setSelectedCampaignId(paramId ?? null);
+    if (!paramId) {
+      const saved = sessionStorage.getItem(SCROLL_KEY);
+      if (saved !== null) {
+        window.scrollTo(0, parseInt(saved, 10));
+        sessionStorage.removeItem(SCROLL_KEY);
+      }
+    }
+  }, [paramId]);
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -243,11 +237,13 @@ function App() {
     await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
   }
 
+  const initialParamIdRef = useRef(paramId);
+
   useEffect(() => {
     let cancelled = false;
 
     async function bootstrap() {
-      const requestedCampaignId = getCampaignIdFromUrl();
+      const requestedCampaignId = initialParamIdRef.current ?? null;
       setInitialLoad(true);
 
       const [configResult, issuesResult, campaignsResult] = await Promise.allSettled([
@@ -278,6 +274,9 @@ function App() {
         const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
         const resolvedId = exists ? nextId : data[0]?.id ?? null;
 
+        if (requestedCampaignId && !exists) {
+          navigate('/not-found', { replace: true });
+        }
         setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
         setSelectedCampaignId(resolvedId);
       } else {
@@ -292,7 +291,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [addToast]);
+  }, [addToast, navigate]);
 
   useEffect(() => {
     void refreshSelectedData(selectedCampaignId).catch((error) => {
@@ -341,6 +340,7 @@ function App() {
       const campaign = await createCampaign(payload);
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
+      navigate('/campaigns/' + campaign.id);
       addToast(`Campaign #${campaign.id} is live and ready for pledges.`, "success");
     } catch (error) {
       setCreateError(toApiError(error));
@@ -488,6 +488,7 @@ function App() {
     try {
       await softDeleteCampaign(campaignId);
       await refreshCampaigns();
+      navigate('/');
       setActionMessage("Campaign soft deleted.");
     } catch (error) {
       setActionError(toApiError(error));
@@ -512,8 +513,10 @@ function App() {
   }
 
   function handleSelect(campaignId: string) {
+    sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
     setInvalidUrlCampaignId(null);
     setSelectedCampaignId(campaignId);
+    navigate('/campaigns/' + campaignId);
   }
 
   function handleThemeToggle() {
