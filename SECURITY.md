@@ -62,9 +62,28 @@ Out of scope:
 - Denial-of-service attacks requiring physical access or excessive resources.
 - Social engineering.
 
+## Secret Management & Rotation
+
+### Handling Secrets
+
+- **Never** commit secrets (API keys, Stellar secret keys, private keys) to the repository.
+- Use environment variables for local development (kept in `.env`, which is ignored by git).
+- Use GitHub Actions Secrets for CI/CD pipelines and production deployments.
+- In production, use a secure secret manager (e.g., AWS Secrets Manager, HashiCorp Vault).
+
+### Rotating Leaked Secrets
+
+If a secret is accidentally committed:
+
+1. **Rotate immediately**: Generate a new secret and update all systems using it.
+2. **Invalidate the old secret**: Ensure the leaked secret can no longer be used.
+3. **Scan history**: Use `gitleaks` or similar tools to ensure no other secrets are present.
+4. **Purge history (optional but recommended)**: If the secret is highly sensitive, consider using `git-filter-repo` or BFG Repo-Cleaner to remove it from the git history. **Note**: This will rewrite history and requires coordination with the team.
+
 ## Security Best Practices for Contributors
 
 - Never commit `.env` files, secret keys, or wallet private keys.
+- Use `gitleaks` locally before pushing changes.
 - Validate all user input at the API boundary (Zod schemas in `backend/src/validation/`).
 - Keep dependencies up to date (`npm audit` before submitting a PR).
 - Follow the principle of least privilege for any new API endpoints.

@@ -1,15 +1,12 @@
-import compression from "compression";
-import cors from "cors";
-import "dotenv/config";
-import express, { Request, Response } from "express";
-import { validateEnv } from "./validateEnv";
-import { randomUUID } from "crypto";
-import { z } from "zod";
-import path from "path";
-import { config, walletIntegrationReady } from "./config";
-import { apiKeyAuthMiddleware } from "./middleware/apiKeyAuth";
-import { cacheMiddleware } from "./middleware/cacheMiddleware";
-import { initRedisCache } from "./services/cache";
+import cors from 'cors';
+import 'dotenv/config';
+import express, { Request, Response } from 'express';
+import { validateEnv } from './validateEnv';
+import { randomUUID } from 'crypto';
+import { z } from 'zod';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { config, walletIntegrationReady } from './config';
 
 import {
   addPledge,
@@ -30,16 +27,14 @@ import {
   type ListCampaignsOptions,
   reconcileOnChainPledge,
   refundContributor,
-} from "./services/campaignStore";
-import { checkDbHealth } from "./services/db";
-import { getCampaignHistory } from "./services/eventHistory";
-import { startEventIndexer } from "./services/eventIndexer";
-import { fetchOpenIssues } from "./services/openIssues";
-import {
-  ensureSorobanRefundConfig,
-  verifyRefundTransaction,
-} from "./services/sorobanRpc";
-import { AppError, ApiErrorResponse } from "./types/errors";
+  updateCampaign,
+} from './services/campaignStore';
+import { checkDbHealth } from './services/db';
+import { getCampaignHistory } from './services/eventHistory';
+import { startEventIndexer } from './services/eventIndexer';
+import { fetchOpenIssues } from './services/openIssues';
+import { ensureSorobanRefundConfig, verifyRefundTransaction } from './services/sorobanRpc';
+import { AppError, ApiErrorResponse } from './types/errors';
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
@@ -51,8 +46,8 @@ import {
   refundPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
-} from "./validation/schemas";
-import { logError, logInfo, logRequest } from "./logger";
+} from './validation/schemas';
+import { logError, logInfo, logRequest } from './logger';
 export const app = express();
 
 interface RequestWithId extends Request {
@@ -61,15 +56,8 @@ interface RequestWithId extends Request {
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
-const CAMPAIGN_STATUSES: CampaignStatus[] = [
-  "open",
-  "funded",
-  "claimed",
-  "failed",
-];
-const CONTRACT_AMOUNT_DECIMALS = Number(
-  process.env.CONTRACT_AMOUNT_DECIMALS ?? 2,
-);
+const CAMPAIGN_STATUSES: CampaignStatus[] = ['open', 'funded', 'claimed', 'failed'];
+const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 2);
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 120;
 const WRITE_RATE_LIMIT_MAX_REQUESTS = 40;
@@ -78,7 +66,7 @@ const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 app.use(
   cors({
     origin: (origin, callback) => {
-      const isDev = process.env.NODE_ENV !== "production";
+      const isDev = process.env.NODE_ENV !== 'production';
       if (
         !origin ||
         config.corsAllowedOrigins.includes(origin) ||
@@ -86,7 +74,7 @@ app.use(
       ) {
         callback(null, true);
       } else {
-        callback(new Error("Not allowed by CORS"));
+        callback(new Error('Not allowed by CORS'));
       }
     },
     credentials: true,
@@ -125,16 +113,9 @@ function applyRateLimit(maxRequests: number) {
     }
 
     if (current.count >= maxRequests) {
-      const retryAfterSec = Math.max(
-        1,
-        Math.ceil((current.resetAt - now) / 1000),
-      );
-      res.setHeader("Retry-After", String(retryAfterSec));
-      throw new AppError(
-        "Rate limit exceeded. Please retry shortly.",
-        429,
-        "RATE_LIMITED",
-      );
+      const retryAfterSec = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSec));
+      throw new AppError('Rate limit exceeded. Please retry shortly.', 429, 'RATE_LIMITED');
     }
 
     current.count += 1;
@@ -149,7 +130,7 @@ app.use((req: RequestWithId, res: Response, next: express.NextFunction) => {
   req.requestId = randomUUID();
   const startedAt = process.hrtime.bigint();
 
-  res.on("finish", () => {
+  res.on('finish', () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
 
     logRequest(
@@ -171,7 +152,7 @@ function sendValidationError(issues: z.ZodIssue[]): never {
   throw new AppError(
     zodIssuesToErrorMessage(issues),
     400,
-    "VALIDATION_ERROR",
+    'VALIDATION_ERROR',
     zodIssuesToValidationIssues(issues),
   );
 }
@@ -179,14 +160,14 @@ function sendValidationError(issues: z.ZodIssue[]): never {
 function parseCampaignId(
   campaignIdRaw: unknown,
 ): { ok: true; value: string } | { ok: false; issues: z.ZodIssue[] } {
-  if (typeof campaignIdRaw !== "string") {
+  if (typeof campaignIdRaw !== 'string') {
     return {
       ok: false,
       issues: [
         {
-          code: "custom",
-          message: "Campaign ID must be a string.",
-          path: ["id"],
+          code: 'custom',
+          message: 'Campaign ID must be a string.',
+          path: ['id'],
         },
       ],
     };
@@ -201,12 +182,12 @@ function parseCampaignId(
 }
 
 export function normalizeQueryValue(value: unknown): string | undefined {
-  if (typeof value !== "string") {
+  if (typeof value !== 'string') {
     return undefined;
   }
 
   const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
+  return trimmed === '' ? undefined : trimmed;
 }
 
 export function normalizeAssetFilter(assetRaw: unknown): string | undefined {
@@ -269,20 +250,20 @@ export function filterCampaignList(
   });
 }
 
-app.get("/api/health", (_req: Request, res: Response) => {
+app.get('/api/health', (_req: Request, res: Response) => {
   const database = checkDbHealth();
   const healthy = database.reachable;
 
   res.status(healthy ? 200 : 503).json({
-    service: "stellar-goal-vault-backend",
-    status: healthy ? "ok" : "degraded",
+    service: 'stellar-goal-vault-backend',
+    status: healthy ? 'ok' : 'degraded',
     timestamp: new Date().toISOString(),
     uptimeSeconds: Number(process.uptime().toFixed(3)),
     database,
   });
 });
 
-app.get("/api/campaigns", (req: Request, res: Response) => {
+app.get('/api/campaigns', (req: Request, res: Response) => {
   const paginationResult = parseCampaignListPaginationQuery({
     page: req.query.page,
     limit: req.query.limit,
@@ -338,24 +319,21 @@ app.get("/api/campaigns", (req: Request, res: Response) => {
   });
 });
 
-app.get("/api/campaigns/:id", (req: Request, res: Response) => {
+app.get('/api/campaigns/:id', (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
     sendValidationError(parsedId.issues);
   }
 
-  const campaign = getCampaignWithProgress(
-    parsedId.value,
-    CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT,
-  );
+  const campaign = getCampaignWithProgress(parsedId.value, CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT);
   if (!campaign) {
-    throw new AppError("Campaign not found.", 404, "NOT_FOUND");
+    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
   }
 
   res.json({ data: campaign });
 });
 
-app.get("/api/campaigns/:id/pledges", (req: Request, res: Response) => {
+app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
     sendValidationError(parsedId.issues);
@@ -371,7 +349,7 @@ app.get("/api/campaigns/:id/pledges", (req: Request, res: Response) => {
 
   const campaign = getCampaign(parsedId.value);
   if (!campaign) {
-    throw new AppError("Campaign not found.", 404, "NOT_FOUND");
+    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
   }
 
   const { pledges, totalCount } = listCampaignPledges(parsedId.value, {
@@ -394,7 +372,7 @@ app.get("/api/campaigns/:id/pledges", (req: Request, res: Response) => {
   });
 });
 
-app.post("/api/campaigns", (req: Request, res: Response) => {
+app.post('/api/campaigns', (req: Request, res: Response) => {
   const parsedBody = createCampaignPayloadSchema.safeParse(req.body);
   if (!parsedBody.success) {
     sendValidationError(parsedBody.error.issues);
@@ -402,20 +380,14 @@ app.post("/api/campaigns", (req: Request, res: Response) => {
   }
 
   if (parsedBody.data.deadline <= Math.floor(Date.now() / 1000)) {
-    throw new AppError(
-      "deadline must be in the future.",
-      400,
-      "INVALID_DEADLINE",
-    );
+    throw new AppError('deadline must be in the future.', 400, 'INVALID_DEADLINE');
   }
 
   const campaignInput = {
     ...parsedBody.data,
     maxPerContributor:
       parsedBody.data.maxPerContributor ??
-      (config.defaultMaxPerContributor > 0
-        ? config.defaultMaxPerContributor
-        : undefined),
+      (config.defaultMaxPerContributor > 0 ? config.defaultMaxPerContributor : undefined),
   };
 
   const campaign = createCampaign(campaignInput);
@@ -425,7 +397,7 @@ app.post("/api/campaigns", (req: Request, res: Response) => {
 });
 
 app.post(
-  "/api/campaigns/:id/pledges",
+  '/api/campaigns/:id/pledges',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
   (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
@@ -439,14 +411,12 @@ app.post(
     }
 
     const campaign = addPledge(parsedId.value, parsedBody.data);
-    res
-      .status(201)
-      .json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+    res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
   },
 );
 
 app.post(
-  "/api/campaigns/:id/pledges/reconcile",
+  '/api/campaigns/:id/pledges/reconcile',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
   (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
@@ -470,7 +440,7 @@ app.post(
 );
 
 app.post(
-  "/api/campaigns/:id/claim",
+  '/api/campaigns/:id/claim',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
   (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
@@ -493,7 +463,7 @@ app.post(
 );
 
 app.post(
-  "/api/campaigns/:id/refund",
+  '/api/campaigns/:id/refund',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
   async (req: Request, res: Response, next: express.NextFunction) => {
     try {
@@ -508,22 +478,15 @@ app.post(
       }
 
       ensureSorobanRefundConfig();
-      const verified = await verifyRefundTransaction(
-        parsedBody.data.soroban.txHash,
-      );
-      const result = refundContributor(
-        parsedId.value,
-        parsedBody.data.contributor,
-        {
-          ...parsedBody.data.soroban,
-          txHash: verified.txHash,
-          ledger: verified.ledger ?? parsedBody.data.soroban.ledger,
-          createdAt: verified.createdAt ?? parsedBody.data.soroban.createdAt,
-          latestLedger:
-            verified.latestLedger ?? parsedBody.data.soroban.latestLedger,
-          source: "soroban-contract",
-        },
-      );
+      const verified = await verifyRefundTransaction(parsedBody.data.soroban.txHash);
+      const result = refundContributor(parsedId.value, parsedBody.data.contributor, {
+        ...parsedBody.data.soroban,
+        txHash: verified.txHash,
+        ledger: verified.ledger ?? parsedBody.data.soroban.ledger,
+        createdAt: verified.createdAt ?? parsedBody.data.soroban.createdAt,
+        latestLedger: verified.latestLedger ?? parsedBody.data.soroban.latestLedger,
+        source: 'soroban-contract',
+      });
 
       res.json({
         data: {
@@ -538,7 +501,7 @@ app.post(
   },
 );
 
-app.get("/api/campaigns/:id/contributors", (req: Request, res: Response) => {
+app.get('/api/campaigns/:id/contributors', (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
     sendValidationError(parsedId.issues);
@@ -546,14 +509,14 @@ app.get("/api/campaigns/:id/contributors", (req: Request, res: Response) => {
 
   const campaign = getCampaign(parsedId.value);
   if (!campaign) {
-    throw new AppError("Campaign not found.", 404, "NOT_FOUND");
+    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
   }
 
   const summary = getContributorSummary(parsedId.value);
   res.json({ data: summary });
 });
 
-app.get("/api/campaigns/:id/history", (req: Request, res: Response) => {
+app.get('/api/campaigns/:id/history', (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
     sendValidationError(parsedId.issues);
@@ -561,18 +524,18 @@ app.get("/api/campaigns/:id/history", (req: Request, res: Response) => {
 
   const campaign = getCampaign(parsedId.value);
   if (!campaign) {
-    throw new AppError("Campaign not found.", 404, "NOT_FOUND");
+    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
   }
 
   res.json({ data: getCampaignHistory(parsedId.value) });
 });
 
-app.get("/api/open-issues", async (_req: Request, res: Response) => {
+app.get('/api/open-issues', async (_req: Request, res: Response) => {
   const data = await fetchOpenIssues();
   res.json({ data });
 });
 
-app.get("/api/config", (_req: Request, res: Response) => {
+app.get('/api/config', (_req: Request, res: Response) => {
   res.json({
     data: {
       allowedAssets: config.allowedAssets,
@@ -592,52 +555,34 @@ app.get("/api/config", (_req: Request, res: Response) => {
   });
 });
 
-app.get("/api/stats", (_req: Request, res: Response) => {
+app.get('/api/stats', (_req: Request, res: Response) => {
   const stats = getGlobalStats();
   res.json({ data: stats });
 });
 
-app.get("/api/leaderboard", (req: Request, res: Response) => {
-  try {
-    const limitParam = req.query.limit;
-    const limit = limitParam
-      ? Math.min(Math.max(parseInt(limitParam as string, 10) || 10, 1), 100)
-      : 10;
-
-    const leaderboard = getTopContributors(limit);
-    res.json({ data: leaderboard });
-  } catch (err) {
-    logError(
-      err as Error,
-      {
-        event: "leaderboard_error",
-        requestId: (req as RequestWithId).requestId,
-      },
-      config.logLevel,
-    );
-    res.status(500).json({
+app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => {
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
       success: false,
       error: {
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Failed to fetch leaderboard",
-        requestId: (req as RequestWithId).requestId,
+        code: 'FORBIDDEN',
+        message: 'CORS policy violation',
+        requestId: (req as any).requestId,
       },
     });
   }
 });
 
-app.use(
-  (err: any, req: Request, res: Response, _next: express.NextFunction) => {
-    if (err.type === "entity.too.large") {
-      return res.status(413).json({
-        success: false,
-        error: {
-          code: "PAYLOAD_TOO_LARGE",
-          message: "Request payload size exceeds the maximum allowed limit",
-          requestId: (req as any).requestId,
-        },
-      });
-    }
+  const statusCode = err instanceof AppError ? err.statusCode : (err.statusCode ?? 500);
+  const code = err instanceof AppError ? err.code : (err.code ?? 'INTERNAL_SERVER_ERROR');
+  const response: ApiErrorResponse = {
+    success: false,
+    error: {
+      code,
+      message: err.message || 'An unexpected error occurred',
+      requestId: (req as RequestWithId).requestId,
+    },
+  };
 
     if (err.message === "Not allowed by CORS") {
       return res.status(403).json({
@@ -650,20 +595,18 @@ app.use(
       });
     }
 
-    const statusCode =
-      err instanceof AppError ? err.statusCode : (err.statusCode ?? 500);
-    const code =
-      err instanceof AppError
-        ? err.code
-        : (err.code ?? "INTERNAL_SERVER_ERROR");
-    const response: ApiErrorResponse = {
-      success: false,
-      error: {
-        code,
-        message: err.message || "An unexpected error occurred",
-        requestId: (req as RequestWithId).requestId,
-      },
-    };
+  logError(
+    err,
+    {
+      event: 'request_error',
+      requestId: (req as RequestWithId).requestId,
+      method: req.method,
+      path: req.originalUrl || req.path,
+      status: statusCode,
+      code,
+    },
+    config.logLevel,
+  );
 
     if (err instanceof AppError && err.details) {
       response.error.details = err.details;
@@ -689,26 +632,24 @@ app.use(
 );
 
 function printStartupBanner(): void {
-  const isTest = process.env.NODE_ENV === "test";
+  const isTest = process.env.NODE_ENV === 'test';
   if (isTest) {
     return;
   }
 
-  const dbPath =
-    process.env.DB_PATH ||
-    path.join(__dirname, "..", "..", "data", "campaigns.db");
-  const nodeEnv = process.env.NODE_ENV || "development";
+  const dbPath = process.env.DB_PATH || path.join(__dirname, '..', '..', 'data', 'campaigns.db');
+  const nodeEnv = process.env.NODE_ENV || 'development';
 
   /* eslint-disable no-console */
-  console.log("");
-  console.log("╔════════════════════════════════════════════════════════════╗");
-  console.log("║         Stellar Goal Vault Backend - Starting Up          ║");
-  console.log("╠════════════════════════════════════════════════════════════╣");
+  console.log('');
+  console.log('╔════════════════════════════════════════════════════════════╗');
+  console.log('║         Stellar Goal Vault Backend - Starting Up          ║');
+  console.log('╠════════════════════════════════════════════════════════════╣');
   console.log(`║  Port:           ${config.port.toString().padEnd(42)}║`);
   console.log(`║  Environment:    ${nodeEnv.padEnd(42)}║`);
   console.log(`║  Database Path:  ${dbPath.padEnd(42)}║`);
-  console.log("╚════════════════════════════════════════════════════════════╝");
-  console.log("");
+  console.log('╚════════════════════════════════════════════════════════════╝');
+  console.log('');
   /* eslint-enable no-console */
 }
 
@@ -730,7 +671,7 @@ function startServer() {
 
   app.listen(config.port, () => {
     logInfo(
-      "server_started",
+      'server_started',
       {
         message: `Stellar Goal Vault API listening on http://localhost:${config.port}`,
         port: config.port,

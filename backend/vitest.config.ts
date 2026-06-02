@@ -1,13 +1,13 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
     // Use node environment
-    environment: "node",
+    environment: 'node',
 
     // Test file discovery patterns
-    include: ["src/**/*.test.ts", "tests/**/*.test.ts", "tests/**/*.integration.ts"],
-    exclude: ["node_modules", "dist"],
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts', 'tests/**/*.integration.ts'],
+    exclude: ['node_modules', 'dist'],
 
     // Parallelism configuration
     // Run tests in parallel threads to maximize performance
@@ -25,13 +25,13 @@ export default defineConfig({
     testTimeout: 30000,
 
     // Reporter
-    reporters: ["verbose"],
+    reporters: ['verbose'],
 
     // Coverage (optional)
     coverage: {
-      provider: "v8",
-      reporter: ["text", "json", "html"],
-      exclude: ["node_modules/", "tests/", "dist/"],
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: ['node_modules/', 'tests/', 'dist/'],
     },
   },
 });
