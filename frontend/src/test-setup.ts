@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom';
 import { expect } from 'vitest';
 
-const optionalAxeMatchersModule = "vitest-axe/matchers";
+const optionalAxeMatchersModule = 'vitest-axe/matchers';
 
 void import(/* @vite-ignore */ optionalAxeMatchersModule)
   .then((module) => {

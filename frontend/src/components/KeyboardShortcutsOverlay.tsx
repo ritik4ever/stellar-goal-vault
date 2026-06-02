@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from "react";
-import { APP_SHORTCUTS } from "../lib/shortcuts";
+import React, { useEffect, useRef } from 'react';
+import { APP_SHORTCUTS } from '../lib/shortcuts';
 
 interface KeyboardShortcutsOverlayProps {
   isOpen: boolean;
@@ -16,23 +16,19 @@ export const KeyboardShortcutsOverlay: React.FC<KeyboardShortcutsOverlayProps> =
     if (isOpen) {
       overlayRef.current?.focus();
       // Lock scroll when open
-      document.body.style.overflow = "hidden";
+      document.body.style.overflow = 'hidden';
     } else {
-      document.body.style.overflow = "";
+      document.body.style.overflow = '';
     }
     return () => {
-      document.body.style.overflow = "";
+      document.body.style.overflow = '';
     };
   }, [isOpen]);
 
   if (!isOpen) return null;
 
   return (
-    <div
-      className="shortcuts-overlay-backdrop"
-      onClick={onClose}
-      aria-hidden="true"
-    >
+    <div className="shortcuts-overlay-backdrop" onClick={onClose} aria-hidden="true">
       <div
         className="shortcuts-overlay-content card animate-fade-in"
         role="dialog"
@@ -44,11 +40,7 @@ export const KeyboardShortcutsOverlay: React.FC<KeyboardShortcutsOverlayProps> =
       >
         <div className="shortcuts-header">
           <h2 id="shortcuts-title">Keyboard Shortcuts</h2>
-          <button
-            className="btn-close"
-            onClick={onClose}
-            aria-label="Close shortcuts overlay"
-          >
+          <button className="btn-close" onClick={onClose} aria-label="Close shortcuts overlay">
             &times;
           </button>
         </div>
@@ -59,16 +51,16 @@ export const KeyboardShortcutsOverlay: React.FC<KeyboardShortcutsOverlayProps> =
               <kbd className="shortcut-key">{shortcut.key}</kbd>
               <div className="shortcut-info">
                 <span className="shortcut-label">{shortcut.label}</span>
-                <span className="shortcut-description">
-                  {shortcut.description}
-                </span>
+                <span className="shortcut-description">{shortcut.description}</span>
               </div>
             </div>
           ))}
         </div>
 
         <div className="shortcuts-footer">
-          <p>Press <kbd className="shortcut-key">Esc</kbd> to close</p>
+          <p>
+            Press <kbd className="shortcut-key">Esc</kbd> to close
+          </p>
         </div>
       </div>
     </div>

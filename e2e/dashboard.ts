@@ -18,7 +18,9 @@ export class DashboardPage {
     this.page = page;
     this.creatorInput = page.locator('input[placeholder*="G... creator public key"]');
     this.titleInput = page.locator('input[placeholder="Stellar community design sprint"]');
-    this.descriptionInput = page.locator('textarea[placeholder*="Describe what the campaign funds"]');
+    this.descriptionInput = page.locator(
+      'textarea[placeholder*="Describe what the campaign funds"]',
+    );
     this.targetAmountInput = page.locator('label:has-text("Target amount") >> input');
     this.deadlineHoursInput = page.locator('label:has-text("Deadline in hours") >> input');
     this.createButton = page.locator('button:has-text("Create campaign")');
@@ -40,7 +42,7 @@ export class DashboardPage {
     await this.targetAmountInput.fill(target);
     await this.deadlineHoursInput.fill(deadlineHours);
     await this.createButton.click();
-    
+
     // Wait for the new campaign to appear in the table
     await expect(this.page.locator(`text=${title}`)).toBeVisible();
   }

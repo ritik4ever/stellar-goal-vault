@@ -1,4 +1,4 @@
-export type CampaignStatus = "open" | "funded" | "claimed" | "failed";
+export type CampaignStatus = 'open' | 'funded' | 'claimed' | 'failed';
 
 export interface CampaignProgress {
   status: CampaignStatus;
@@ -50,13 +50,13 @@ export interface BlockchainMetadata {
   ledgerCloseTime?: number;
   eventIndex?: number;
   contractId?: string;
-  source?: "local" | "soroban";
+  source?: 'local' | 'soroban';
 }
 
 export interface CampaignEvent {
   id: number;
   campaignId: string;
-  eventType: "created" | "pledged" | "claimed" | "refunded";
+  eventType: 'created' | 'pledged' | 'claimed' | 'refunded';
   timestamp: number;
   actor?: string;
   amount?: number;
@@ -141,7 +141,7 @@ export interface OpenIssue {
   title: string;
   labels: string[];
   summary: string;
-  complexity: "Trivial" | "Medium" | "High";
+  complexity: 'Trivial' | 'Medium' | 'High';
   points: 100 | 150 | 200;
 }
 

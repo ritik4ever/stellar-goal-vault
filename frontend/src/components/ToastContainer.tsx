@@ -1,5 +1,5 @@
-import { CheckCircle2, Info, X, XCircle } from "lucide-react";
-import type { Toast, ToastVariant } from "../hooks/useToast";
+import { CheckCircle2, Info, X, XCircle } from 'lucide-react';
+import type { Toast, ToastVariant } from '../hooks/useToast';
 
 interface ToastContainerProps {
   toasts: Toast[];
