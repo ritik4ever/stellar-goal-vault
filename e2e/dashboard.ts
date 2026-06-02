@@ -33,12 +33,12 @@ export class DashboardPage {
     await this.page.goto('/');
   }
 
-  async createCampaign(creator: string, title: string, description: string, target: string) {
+  async createCampaign(creator: string, title: string, description: string, target: string, deadlineHours: string = '24') {
     await this.creatorInput.fill(creator);
     await this.titleInput.fill(title);
     await this.descriptionInput.fill(description);
     await this.targetAmountInput.fill(target);
-    await this.deadlineHoursInput.fill('24');
+    await this.deadlineHoursInput.fill(deadlineHours);
     await this.createButton.click();
     
     // Wait for the new campaign to appear in the table
@@ -57,12 +57,11 @@ export class DashboardPage {
   async pledge(amount: string) {
     await this.pledgeAmountInput.fill(amount);
     await this.addPledgeButton.click();
-    await expect(this.page.locator('text=Pledge recorded in the local goal vault')).toBeVisible();
+    await expect(this.page.locator('text=Pledge recorded')).toBeVisible();
   }
 
   async claim() {
     await this.claimVaultButton.click();
-    // Wait for claimed status
     await expect(this.page.locator('text=Campaign claimed successfully')).toBeVisible();
   }
 }

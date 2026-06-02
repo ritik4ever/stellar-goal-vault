@@ -256,11 +256,13 @@ function checkContributorLimit(
  *
  * @param campaign - The campaign record to evaluate.
  * @param at - Unix timestamp (seconds) to evaluate state against; defaults to now.
+ * @param pledgeCountOverride - Optional pledge count to use instead of querying database.
  * @returns A {@link CampaignProgress} object with status, funding percentages, and action flags.
  */
 export function calculateProgress(
   campaign: CampaignRecord,
   at = nowInSeconds(),
+  pledgeCountOverride?: number,
 ): CampaignProgress {
   const deadlineReached = at >= campaign.deadline;
   const canClaim =
@@ -290,7 +292,7 @@ export function calculateProgress(
     remainingAmount: round(
       Math.max(0, campaign.targetAmount - campaign.pledgedAmount),
     ),
-    pledgeCount: getActivePledgeCount(campaign.id),
+    pledgeCount: pledgeCountOverride !== undefined ? pledgeCountOverride : getActivePledgeCount(campaign.id),
     hoursLeft: round(Math.max(0, campaign.deadline - at) / 3600),
     canPledge,
     canClaim,
@@ -310,6 +312,7 @@ export interface ListCampaignsOptions {
 export interface ListCampaignsResult {
   campaigns: CampaignRecord[];
   totalCount: number;
+  pledgeCounts: Record<string, number>;
 }
 
 export interface ListCampaignPledgesOptions {
@@ -366,12 +369,12 @@ export function listCampaigns(
 
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
-    whereClauses.push(`LOWER(title) LIKE ?`);
+    whereClauses.push(`LOWER(campaigns.title) LIKE ?`);
     params.push(searchTerm);
   }
 
   if (options?.assetCode) {
-    whereClauses.push(`accepted_tokens_json LIKE ?`);
+    whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);
   }
 
@@ -379,55 +382,68 @@ export function listCampaigns(
     const now = Math.floor(Date.now() / 1000);
     switch (options.status) {
       case "claimed":
-        whereClauses.push(`claimed_at IS NOT NULL`);
+        whereClauses.push(`campaigns.claimed_at IS NOT NULL`);
         break;
       case "funded":
         whereClauses.push(
-          `claimed_at IS NULL AND pledged_amount >= target_amount`,
+          `campaigns.claimed_at IS NULL AND campaigns.pledged_amount >= campaigns.target_amount`,
         );
         break;
       case "failed":
         whereClauses.push(
-          `claimed_at IS NULL AND pledged_amount < target_amount AND deadline <= ?`,
+          `campaigns.claimed_at IS NULL AND campaigns.pledged_amount < campaigns.target_amount AND campaigns.deadline <= ?`,
         );
         params.push(now);
         break;
       case "open":
         whereClauses.push(
-          `claimed_at IS NULL AND pledged_amount < target_amount AND deadline > ?`,
+          `campaigns.claimed_at IS NULL AND campaigns.pledged_amount < campaigns.target_amount AND campaigns.deadline > ?`,
         );
         params.push(now);
         break;
     }
   }
 
-  let baseQuery = `FROM campaigns`;
-
+  let whereClause = '';
   if (!options?.includeDeleted) {
-    whereClauses.push(`deleted_at IS NULL`);
+    whereClauses.push(`campaigns.deleted_at IS NULL`);
   }
 
   if (whereClauses.length > 0) {
-    baseQuery += ` WHERE ` + whereClauses.join(" AND ");
+    whereClause = ` WHERE ` + whereClauses.join(" AND ");
   }
 
-  const countQuery = `SELECT COUNT(*) as total ${baseQuery}`;
+  const countQuery = `SELECT COUNT(*) as total FROM campaigns${whereClause}`;
   const totalCount = (
     db.prepare(countQuery).get(...params) as { total: number }
   ).total;
 
   const dataQuery = paginate
-    ? `SELECT * ${baseQuery} ORDER BY created_at DESC LIMIT ? OFFSET ?`
-    : `SELECT * ${baseQuery} ORDER BY created_at DESC`;
+    ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC LIMIT ? OFFSET ?`
+    : `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC`;
+
+  const countParams = params.slice();
+  if (paginate) {
+    countParams.push(limit, offset);
+  }
+
   const rows = (
     paginate
-      ? db.prepare(dataQuery).all(...params, limit, offset)
-      : db.prepare(dataQuery).all(...params)
-  ) as CampaignRow[];
+      ? db.prepare(dataQuery).all(...countParams) as Array<CampaignRow & { pledge_count: number }>
+      : db.prepare(dataQuery).all(...params) as Array<CampaignRow & { pledge_count: number }>
+  );
+
+  const pledgeCounts: Record<string, number> = {};
+  const campaigns = rows.map((row) => {
+    pledgeCounts[row.id] = row.pledge_count;
+    const { pledge_count, ...campaignRow } = row;
+    return rowToCampaign(campaignRow as CampaignRow);
+  });
 
   return {
-    campaigns: rows.map(rowToCampaign),
+    campaigns,
     totalCount,
+    pledgeCounts,
   };
 }
 
@@ -605,6 +621,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     title: input.title.trim(),
     description: input.description.trim(),
     acceptedTokens,
+    assetCode: acceptedTokens[0] || "",
     targetAmount: round(input.targetAmount),
     pledgedAmount: 0,
     deadline: input.deadline,
