@@ -391,9 +391,7 @@ app.post('/api/campaigns', (req: Request, res: Response) => {
   };
 
   const campaign = createCampaign(campaignInput);
-  res
-    .status(201)
-    .json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+  res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
 });
 
 app.post(
@@ -584,17 +582,6 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     },
   };
 
-    if (err.message === "Not allowed by CORS") {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: "FORBIDDEN",
-          message: "CORS policy violation",
-          requestId: (req as any).requestId,
-        },
-      });
-    }
-
   logError(
     err,
     {
@@ -608,11 +595,18 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     config.logLevel,
   );
 
-    if (err instanceof AppError && err.details) {
-      response.error.details = err.details;
-    } else if (err.details) {
-      response.error.details = err.details;
-    }
+  logError(
+    err,
+    {
+      event: 'request_error',
+      requestId: (req as RequestWithId).requestId,
+      method: req.method,
+      path: req.originalUrl || req.path,
+      status: statusCode,
+      code,
+    },
+    config.logLevel,
+  );
 
     logError(
       err,

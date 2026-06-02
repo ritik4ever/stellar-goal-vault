@@ -11,7 +11,7 @@ export interface VerifiedSorobanTransaction {
 }
 
 interface RpcTransactionResponse {
-
+  status: 'SUCCESS' | 'FAILED' | 'NOT_FOUND';
   txHash: string;
   latestLedger: number;
   ledger?: number;
@@ -115,7 +115,7 @@ export async function verifyRefundTransaction(txHash: string): Promise<VerifiedS
       );
     }
 
-
+    if (result.status === 'NOT_FOUND') {
       throw new AppError(
         'Refund transaction has not been confirmed on Soroban yet. Try again in a moment.',
         409,

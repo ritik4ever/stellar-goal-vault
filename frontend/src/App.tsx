@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { CampaignCard } from './components/CampaignCard';
 import { CampaignDetailPanel } from './components/CampaignDetailPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FundedConfetti } from './components/FundedConfetti';
@@ -117,6 +118,7 @@ function App() {
   const freighter = useFreighter();
   const { toasts, addToast, dismiss } = useToast();
   const connectedWallet = freighter.publicKey;
+  const visualTestMode = new URLSearchParams(window.location.search).get('visualTest');
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [issues, setIssues] = useState<OpenIssue[]>([]);
@@ -133,6 +135,102 @@ function App() {
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [themeMode, setThemeMode] = useLocalStorage<ThemeMode>(THEME_STORAGE_KEY, getSystemTheme());
+  const [visualSelectedCampaignId, setVisualSelectedCampaignId] = useState('campaign-open');
+
+  const visualCampaigns = useMemo<Campaign[]>(
+    () => [
+      {
+        id: 'campaign-open',
+        creator: 'GCFP7Y6PJY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY',
+        title: 'Open campaign',
+        description: 'Open campaign ready for pledges.',
+        acceptedTokens: ['XLM'],
+        assetCode: 'XLM',
+        targetAmount: 100,
+        pledgedAmount: 30,
+        deadline: 1924972800,
+        createdAt: 1700000000,
+        progress: {
+          status: 'open',
+          percentFunded: 30,
+          remainingAmount: 70,
+          pledgeCount: 4,
+          hoursLeft: 72,
+          canPledge: true,
+          canClaim: false,
+          canRefund: false,
+        },
+      },
+      {
+        id: 'campaign-funded',
+        creator: 'GCGH7Y6PJY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PZ',
+        title: 'Funded campaign',
+        description: 'Campaign reached its goal and is ready to claim.',
+        acceptedTokens: ['USDC'],
+        assetCode: 'USDC',
+        targetAmount: 100,
+        pledgedAmount: 100,
+        deadline: 1924972800,
+        createdAt: 1700001000,
+        progress: {
+          status: 'funded',
+          percentFunded: 100,
+          remainingAmount: 0,
+          pledgeCount: 8,
+          hoursLeft: 12,
+          canPledge: false,
+          canClaim: true,
+          canRefund: false,
+        },
+      },
+      {
+        id: 'campaign-claimed',
+        creator: 'GCLL7Y6PJY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PX',
+        title: 'Claimed campaign',
+        description: 'Campaign has already been claimed by the creator.',
+        acceptedTokens: ['XLM'],
+        assetCode: 'XLM',
+        targetAmount: 100,
+        pledgedAmount: 100,
+        deadline: 1700000000,
+        createdAt: 1699000000,
+        claimedAt: 1700001000,
+        progress: {
+          status: 'claimed',
+          percentFunded: 100,
+          remainingAmount: 0,
+          pledgeCount: 15,
+          hoursLeft: 0,
+          canPledge: false,
+          canClaim: false,
+          canRefund: false,
+        },
+      },
+      {
+        id: 'campaign-failed',
+        creator: 'GCKK7Y6PJY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY',
+        title: 'Failed campaign',
+        description: 'Campaign failed to reach its target before the deadline.',
+        acceptedTokens: ['USDC'],
+        assetCode: 'USDC',
+        targetAmount: 100,
+        pledgedAmount: 55,
+        deadline: 1680000000,
+        createdAt: 1679000000,
+        progress: {
+          status: 'failed',
+          percentFunded: 55,
+          remainingAmount: 45,
+          pledgeCount: 6,
+          hoursLeft: 0,
+          canPledge: false,
+          canClaim: false,
+          canRefund: true,
+        },
+      },
+    ],
+    [],
+  );
   const [, setSortOrder] = useLocalStorage<string>(SORT_ORDER_KEY, 'default');
   const [, setFilterState] = useLocalStorage<string[]>(FILTER_STATE_KEY, []);
   const [createError, setCreateError] = useState<ApiError | null>(null);
@@ -165,6 +263,25 @@ function App() {
       }
     }
   }, [paramId]);
+
+  if (visualTestMode === 'campaign-card') {
+    return (
+      <main style={{ minHeight: '100vh', padding: 32, background: 'var(--bg)', color: 'var(--text-main)' }}>
+        <h1>CampaignCard visual regression</h1>
+        <div style={{ display: 'grid', gap: 24, marginTop: 24 }}>
+          {visualCampaigns.map((campaign) => (
+            <div key={campaign.id} data-testid={`campaign-card-${campaign.progress.status}`}>
+              <CampaignCard
+                campaign={campaign}
+                selectedCampaignId={visualSelectedCampaignId}
+                onSelect={setVisualSelectedCampaignId}
+              />
+            </div>
+          ))}
+        </div>
+      </main>
+    );
+  }
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
