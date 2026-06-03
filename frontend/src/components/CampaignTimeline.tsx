@@ -1,6 +1,6 @@
-import { History } from "lucide-react";
-import { CampaignEvent } from "../types/campaign";
-import { EmptyState } from "./EmptyState";
+import { History } from 'lucide-react';
+import { CampaignEvent } from '../types/campaign';
+import { EmptyState } from './EmptyState';
 
 interface CampaignTimelineProps {
   history: CampaignEvent[];
@@ -21,14 +21,14 @@ function truncate(value: string, start = 10, end = 8): string {
 
 function describeEvent(event: CampaignEvent): string {
   switch (event.eventType) {
-    case "created":
-      return "Campaign created";
-    case "pledged":
-      return "New pledge received";
-    case "claimed":
-      return "Creator claimed vault";
-    case "refunded":
-      return "Contributor refunded";
+    case 'created':
+      return 'Campaign created';
+    case 'pledged':
+      return 'New pledge received';
+    case 'claimed':
+      return 'Creator claimed vault';
+    case 'refunded':
+      return 'Contributor refunded';
     default:
       return event.eventType;
   }
@@ -42,39 +42,39 @@ function getMetadataLines(event: CampaignEvent): string[] {
     lines.push(`Actor: ${truncate(event.actor)}`);
   }
 
-  if (typeof event.amount === "number") {
+  if (typeof event.amount === 'number') {
     lines.push(`Amount: ${event.amount}`);
   }
 
-  if (typeof metadata.refundedPledgeCount === "number") {
+  if (typeof metadata.refundedPledgeCount === 'number') {
     lines.push(`Refunded pledges: ${metadata.refundedPledgeCount}`);
   }
 
-  if (typeof metadata.txHash === "string") {
+  if (typeof metadata.txHash === 'string') {
     lines.push(`Tx: ${truncate(metadata.txHash, 12, 10)}`);
   }
 
-  if (typeof metadata.walletAddress === "string") {
+  if (typeof metadata.walletAddress === 'string') {
     lines.push(`Wallet: ${truncate(metadata.walletAddress)}`);
   }
 
-  if (typeof metadata.refundSource === "string") {
+  if (typeof metadata.refundSource === 'string') {
     lines.push(`Source: ${String(metadata.refundSource)}`);
   }
 
-  if (typeof metadata.contractId === "string") {
+  if (typeof metadata.contractId === 'string') {
     lines.push(`Contract: ${truncate(metadata.contractId, 12, 10)}`);
   }
 
-  if (typeof metadata.rpcUrl === "string") {
+  if (typeof metadata.rpcUrl === 'string') {
     lines.push(`RPC: ${String(metadata.rpcUrl)}`);
   }
 
-  if (typeof metadata.ledger === "number") {
+  if (typeof metadata.ledger === 'number') {
     lines.push(`Ledger: ${metadata.ledger}`);
   }
 
-  if (typeof metadata.latestLedger === "number") {
+  if (typeof metadata.latestLedger === 'number') {
     lines.push(`Latest ledger seen: ${metadata.latestLedger}`);
   }
 
@@ -109,8 +109,8 @@ export function CampaignTimeline({ history, isLoading = false }: CampaignTimelin
       <div className="section-heading">
         <h2>Timeline</h2>
         <p className="muted">
-          Local history is reconciled after successful contract actions so contributors
-          can inspect refund metadata.
+          Local history is reconciled after successful contract actions so contributors can inspect
+          refund metadata.
         </p>
       </div>
 
@@ -120,15 +120,12 @@ export function CampaignTimeline({ history, isLoading = false }: CampaignTimelin
           const metadataLines = getMetadataLines(event);
 
           return (
-            <article
-              key={event.id}
-              className={`timeline-item ${isPending ? "pending" : ""}`}
-            >
+            <article key={event.id} className={`timeline-item ${isPending ? 'pending' : ''}`}>
               <div className="timeline-dot" aria-hidden />
               <div className="timeline-copy">
                 <strong>
                   {describeEvent(event)}
-                  {isPending ? " (pending...)" : ""}
+                  {isPending ? ' (pending...)' : ''}
                 </strong>
                 <span className="muted">{formatTimestamp(event.timestamp)}</span>
                 {metadataLines.length > 0 ? (

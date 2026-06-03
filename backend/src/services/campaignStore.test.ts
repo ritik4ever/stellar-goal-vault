@@ -1,37 +1,34 @@
-import fs from "fs";
-import path from "path";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import fs from 'fs';
+import path from 'path';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-const TEST_DB_PATH = path.join(
-  "/tmp",
-  `stellar-goal-vault-campaign-store-${process.pid}.db`,
-);
+const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-campaign-store-${process.pid}.db`);
 
 process.env.DB_PATH = TEST_DB_PATH;
-process.env.CONTRACT_ID = "";
+process.env.CONTRACT_ID = '';
 
-type CampaignStoreModule = typeof import("./campaignStore");
-type DbModule = typeof import("./db");
-type EventHistoryModule = typeof import("./eventHistory");
+type CampaignStoreModule = typeof import('./campaignStore');
+type DbModule = typeof import('./db');
+type EventHistoryModule = typeof import('./eventHistory');
 
-let createCampaign: CampaignStoreModule["createCampaign"];
+let createCampaign: CampaignStoreModule['createCampaign'];
 
-let initCampaignStore: CampaignStoreModule["initCampaignStore"];
-let listCampaigns: CampaignStoreModule["listCampaigns"];
-let listCampaignPledges: CampaignStoreModule["listCampaignPledges"];
-let reconcileOnChainPledge: CampaignStoreModule["reconcileOnChainPledge"];
-let updateCampaign: CampaignStoreModule["updateCampaign"];
-let getCampaign: CampaignStoreModule["getCampaign"];
-let getPledges: CampaignStoreModule["getPledges"];
-let getGlobalStats: CampaignStoreModule["getGlobalStats"];
-let getDb: DbModule["getDb"];
-let getCampaignHistory: EventHistoryModule["getCampaignHistory"];
-let addPledge: CampaignStoreModule["addPledge"];
+let initCampaignStore: CampaignStoreModule['initCampaignStore'];
+let listCampaigns: CampaignStoreModule['listCampaigns'];
+let listCampaignPledges: CampaignStoreModule['listCampaignPledges'];
+let reconcileOnChainPledge: CampaignStoreModule['reconcileOnChainPledge'];
+let updateCampaign: CampaignStoreModule['updateCampaign'];
+let getCampaign: CampaignStoreModule['getCampaign'];
+let getPledges: CampaignStoreModule['getPledges'];
+let getGlobalStats: CampaignStoreModule['getGlobalStats'];
+let getDb: DbModule['getDb'];
+let getCampaignHistory: EventHistoryModule['getCampaignHistory'];
+let addPledge: CampaignStoreModule['addPledge'];
 
-const CREATOR = `G${"A".repeat(55)}`;
-const CONTRIBUTOR = `G${"B".repeat(55)}`;
-const CONTRIBUTOR2 = `G${"C".repeat(55)}`;
-const TX_HASH = "a".repeat(64);
+const CREATOR = `G${'A'.repeat(55)}`;
+const CONTRIBUTOR = `G${'B'.repeat(55)}`;
+const CONTRIBUTOR2 = `G${'C'.repeat(55)}`;
+const TX_HASH = 'a'.repeat(64);
 
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
@@ -47,10 +44,9 @@ beforeAll(async () => {
     getCampaign,
     getPledges,
     addPledge,
-
-  } = await import("./campaignStore"));
-  ({ getDb } = await import("./db"));
-  ({ getCampaignHistory } = await import("./eventHistory"));
+  } = await import('./campaignStore'));
+  ({ getDb } = await import('./db'));
+  ({ getCampaignHistory } = await import('./eventHistory'));
   initCampaignStore();
 });
 
@@ -61,57 +57,57 @@ beforeEach(() => {
   db.prepare(`DELETE FROM campaigns`).run();
 });
 
-describe("campaign store search", () => {
-  it("returns all campaigns when no search query is provided", () => {
+describe('campaign store search', () => {
+  it('returns all campaigns when no search query is provided', () => {
     const result = listCampaigns();
     expect(Array.isArray(result.campaigns)).toBe(true);
   });
 
-  it("returns empty array when search query matches nothing", () => {
-    const result = listCampaigns({ searchQuery: "nonexistent-campaign-xyz-123" });
+  it('returns empty array when search query matches nothing', () => {
+    const result = listCampaigns({ searchQuery: 'nonexistent-campaign-xyz-123' });
     expect(result.campaigns).toEqual([]);
     expect(result.totalCount).toBe(0);
   });
 
-  it("handles empty search query gracefully", () => {
+  it('handles empty search query gracefully', () => {
     const allCampaigns = listCampaigns();
-    const emptySearchCampaigns = listCampaigns({ searchQuery: "" });
+    const emptySearchCampaigns = listCampaigns({ searchQuery: '' });
     expect(emptySearchCampaigns.campaigns.length).toBe(allCampaigns.campaigns.length);
   });
 
-  it("handles whitespace-only search query gracefully", () => {
+  it('handles whitespace-only search query gracefully', () => {
     const allCampaigns = listCampaigns();
-    const whitespaceSearchCampaigns = listCampaigns({ searchQuery: "   " });
+    const whitespaceSearchCampaigns = listCampaigns({ searchQuery: '   ' });
     expect(whitespaceSearchCampaigns.campaigns.length).toBe(allCampaigns.campaigns.length);
   });
 
-  it("searches campaigns by title, creator, and id case-insensitively", () => {
+  it('searches campaigns by title, creator, and id case-insensitively', () => {
     const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
     const campaign = createCampaign({
       creator: CREATOR,
-      title: "Build a Rocket Ship",
-      description: "We need funding to build an amazing rocket ship for space exploration.",
-      assetCode: "USDC",
+      title: 'Build a Rocket Ship',
+      description: 'We need funding to build an amazing rocket ship for space exploration.',
+      assetCode: 'USDC',
       targetAmount: 10000,
       deadline: futureDeadline,
     });
 
-    expect(listCampaigns({ searchQuery: "rocket" }).campaigns[0].id).toBe(campaign.id);
+    expect(listCampaigns({ searchQuery: 'rocket' }).campaigns[0].id).toBe(campaign.id);
     expect(
-      listCampaigns({ searchQuery: "gaaa" }).campaigns.some((row) => row.id === campaign.id),
+      listCampaigns({ searchQuery: 'gaaa' }).campaigns.some((row) => row.id === campaign.id),
     ).toBe(true);
     expect(listCampaigns({ searchQuery: campaign.id }).campaigns[0].id).toBe(campaign.id);
   });
 });
 
-describe("on-chain pledge reconciliation", () => {
-  it("records a reconciled pledge with transaction metadata", () => {
+describe('on-chain pledge reconciliation', () => {
+  it('records a reconciled pledge with transaction metadata', () => {
     const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
     const campaign = createCampaign({
       creator: CREATOR,
-      title: "Real Soroban campaign",
-      description: "A campaign used to verify Freighter-signed pledge reconciliation.",
-      assetCode: "USDC",
+      title: 'Real Soroban campaign',
+      description: 'A campaign used to verify Freighter-signed pledge reconciliation.',
+      assetCode: 'USDC',
       targetAmount: 250,
       deadline: futureDeadline,
     });
@@ -131,19 +127,19 @@ describe("on-chain pledge reconciliation", () => {
     expect(pledges[0].transactionHash).toBe(TX_HASH);
 
     const history = getCampaignHistory(campaign.id);
-    const pledgeEvent = history.find((event) => event.eventType === "pledged");
+    const pledgeEvent = history.find((event) => event.eventType === 'pledged');
     expect(pledgeEvent?.blockchainMetadata?.txHash).toBe(TX_HASH);
-    expect(pledgeEvent?.blockchainMetadata?.source).toBe("soroban");
+    expect(pledgeEvent?.blockchainMetadata?.source).toBe('soroban');
     expect(pledgeEvent?.metadata?.onChain).toBe(true);
   });
 
-  it("treats duplicate transaction hashes as idempotent", () => {
+  it('treats duplicate transaction hashes as idempotent', () => {
     const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
     const campaign = createCampaign({
       creator: CREATOR,
-      title: "Idempotent campaign",
-      description: "A campaign used to verify duplicate transaction hashes are ignored.",
-      assetCode: "USDC",
+      title: 'Idempotent campaign',
+      description: 'A campaign used to verify duplicate transaction hashes are ignored.',
+      assetCode: 'USDC',
       targetAmount: 250,
       deadline: futureDeadline,
     });
@@ -165,19 +161,19 @@ describe("on-chain pledge reconciliation", () => {
     expect(secondResult.pledgedAmount).toBe(10);
     expect(getPledges(campaign.id)).toHaveLength(1);
     expect(
-      getCampaignHistory(campaign.id).filter((event) => event.eventType === "pledged"),
+      getCampaignHistory(campaign.id).filter((event) => event.eventType === 'pledged'),
     ).toHaveLength(1);
   });
 });
 
-describe("campaign pledge pagination", () => {
-  it("returns pledges in reverse chronological order with pagination metadata inputs", () => {
+describe('campaign pledge pagination', () => {
+  it('returns pledges in reverse chronological order with pagination metadata inputs', () => {
     const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
     const campaign = createCampaign({
       creator: CREATOR,
-      title: "Paginated pledge campaign",
-      description: "A campaign used to verify paginated pledge retrieval order and slicing.",
-      assetCode: "USDC",
+      title: 'Paginated pledge campaign',
+      description: 'A campaign used to verify paginated pledge retrieval order and slicing.',
+      assetCode: 'USDC',
       targetAmount: 500,
       deadline: futureDeadline,
     });

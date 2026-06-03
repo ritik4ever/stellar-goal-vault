@@ -35,6 +35,23 @@ jobs:
         working-directory: backend
         run: npm run lint
 
+      - name: Audit backend dependencies
+        working-directory: backend
+        run: npm audit --audit-level=high
+        continue-on-error: false
+
+      - name: Upload backend audit report
+        if: always()
+        run: npm audit --json --audit-level=none > /tmp/backend-audit.json 2>&1 || true
+        working-directory: backend
+
+      - name: Upload backend audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-npm-audit
+          path: /tmp/backend-audit.json
+
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest
@@ -61,6 +78,27 @@ jobs:
       - name: Lint frontend
         working-directory: frontend
         run: npm run lint
+
+  format-check:
+    name: Prettier Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Run prettier format check
+        run: npm run format:check
 
   contract-build:
     name: Contract Build

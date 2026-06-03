@@ -1,4 +1,4 @@
-import { Campaign } from "../types/campaign";
+import { Campaign } from '../types/campaign';
 
 export function didCampaignBecomeFunded(
   previousCampaign: Campaign | null | undefined,
@@ -8,8 +8,5 @@ export function didCampaignBecomeFunded(
     return false;
   }
 
-  return (
-    previousCampaign.progress.status !== "funded" &&
-    nextCampaign.progress.status === "funded"
-  );
+  return previousCampaign.progress.status !== 'funded' && nextCampaign.progress.status === 'funded';
 }
