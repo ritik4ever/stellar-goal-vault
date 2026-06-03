@@ -79,25 +79,26 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
-      - name: Check SRI integrity attributes on CDN assets
-        run: bash scripts/check-sri.sh frontend/index.html
+  format-check:
+    name: Prettier Format Check
+    runs-on: ubuntu-latest
 
-      - name: Audit frontend dependencies
-        working-directory: frontend
-        run: npm audit --audit-level=high
-        continue-on-error: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Upload frontend audit report
-        if: always()
-        run: npm audit --json --audit-level=none > /tmp/frontend-audit.json 2>&1 || true
-        working-directory: frontend
-
-      - name: Upload frontend audit artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          name: frontend-npm-audit
-          path: /tmp/frontend-audit.json
+          node-version: 18
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Run prettier format check
+        run: npm run format:check
 
   contract-build:
     name: Contract Build

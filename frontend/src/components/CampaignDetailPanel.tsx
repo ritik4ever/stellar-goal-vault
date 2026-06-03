@@ -1,9 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
-import { MousePointer2 } from "lucide-react";
-import { AppConfig, Campaign } from "../types/campaign";
-import { ContributorSummary } from "./ContributorSummary";
-import { CopyButton } from "./CopyButton";
-import { EmptyState } from "./EmptyState";
+
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -20,20 +15,38 @@ interface CampaignDetailPanelProps {
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
 }
 
+const FEE_ESTIMATION_ERROR_CODES = new Set([
+  "SIMULATION_FAILED",
+  "SIMULATION_PREPARE_FAILED",
+  "SOURCE_ACCOUNT_LOAD_FAILED",
+  "STATE_RESTORE_REQUIRED",
+]);
+
+function describePledgeError(error: unknown): string {
+  const code = (error as { code?: string } | null)?.code;
+  if (code && FEE_ESTIMATION_ERROR_CODES.has(code)) {
+    return "Could not estimate fee. Check your connection and retry.";
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return "The pledge could not be completed. Please try again.";
+}
+
 function networkName(config: AppConfig | null | undefined): string {
   const passphrase = config?.networkPassphrase ?? config?.soroban?.networkPassphrase;
 
   if (!passphrase) {
-    return "Configured network";
+    return 'Configured network';
   }
-  if (passphrase === "Test SDF Network ; September 2015") {
-    return "Stellar Testnet";
+  if (passphrase === 'Test SDF Network ; September 2015') {
+    return 'Stellar Testnet';
   }
-  if (passphrase === "Public Global Stellar Network ; September 2015") {
-    return "Stellar Mainnet";
+  if (passphrase === 'Public Global Stellar Network ; September 2015') {
+    return 'Stellar Mainnet';
   }
 
-  return "Configured network";
+  return 'Configured network';
 }
 
 export function CampaignDetailPanel({
@@ -50,18 +63,16 @@ export function CampaignDetailPanel({
   onSoftDelete = async () => {},
   onRefund = async () => {},
 }: CampaignDetailPanelProps) {
-  const [pledgeAmount, setPledgeAmount] = useState("25");
-  const [refundContributor, setRefundContributor] = useState("");
+  const [pledgeAmount, setPledgeAmount] = useState('25');
+  const [refundContributor, setRefundContributor] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pledgeError, setPledgeError] = useState<string | null>(null);
 
   useEffect(() => {
-    setPledgeAmount("25");
-    setRefundContributor(connectedWallet ?? "");
+
   }, [campaign?.id, connectedWallet]);
 
-  const walletReady = Boolean(
-    appConfig?.walletIntegrationReady ?? appConfig?.soroban?.enabled,
-  );
+  const walletReady = Boolean(appConfig?.walletIntegrationReady ?? appConfig?.soroban?.enabled);
 
   if (isLoading) {
     return (
@@ -70,10 +81,7 @@ export function CampaignDetailPanel({
           <h2>
             <div className="skeleton skeleton-line" style={{ width: 220 }} />
           </h2>
-          <div
-            className="skeleton skeleton-line"
-            style={{ width: 320, height: 14 }}
-          />
+          <div className="skeleton skeleton-line" style={{ width: 320, height: 14 }} />
         </div>
         <div className="detail-grid">
           {Array.from({ length: 4 }).map((_, index) => (
@@ -103,14 +111,24 @@ export function CampaignDetailPanel({
 
   const activeCampaign = campaign;
 
-  async function handlePledge(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  // Simulation is run (and the network fee estimated) before the preview modal
+  // opens. If that simulation fails, surface a retry-able error next to the
+  // pledge button instead of only relying on the toast.
+  async function submitPledge() {
+    setPledgeError(null);
     setIsSubmitting(true);
     try {
       await onPledge(activeCampaign.id, Number(pledgeAmount), activeCampaign.assetCode);
+    } catch (error) {
+      setPledgeError(describePledgeError(error));
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handlePledge(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void submitPledge();
   }
 
   async function handleRefund() {
@@ -150,12 +168,9 @@ export function CampaignDetailPanel({
         <div className="wallet-connected">
           {connectedWallet ? (
             <>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <strong className="mono">{connectedWallet.slice(0, 16)}...</strong>
-                <CopyButton
-                  value={connectedWallet}
-                  ariaLabel="Copy connected wallet address"
-                />
+                <CopyButton value={connectedWallet} ariaLabel="Copy connected wallet address" />
               </div>
               <button
                 className="btn-ghost"
@@ -170,10 +185,12 @@ export function CampaignDetailPanel({
             <button
               className="btn-ghost"
               type="button"
-              onClick={() => { void onConnectWallet(); }}
+              onClick={() => {
+                void onConnectWallet();
+              }}
               disabled={isSubmitting || isConnectingWallet}
             >
-              {isConnectingWallet ? "Connecting..." : "Connect Freighter"}
+              {isConnectingWallet ? 'Connecting...' : 'Connect Freighter'}
             </button>
           )}
         </div>
@@ -182,7 +199,7 @@ export function CampaignDetailPanel({
       <div className="detail-grid">
         <article className="detail-stat">
           <span>Creator</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
             <CopyButton value={activeCampaign.creator} ariaLabel="Copy creator address" />
           </div>
@@ -210,8 +227,8 @@ export function CampaignDetailPanel({
 
       {!walletReady ? (
         <p className="pending-note">
-          Wallet integration is not fully configured yet. Freighter actions that
-          require Soroban contract calls may stay disabled until backend config is set.
+          Wallet integration is not fully configured yet. Freighter actions that require Soroban
+          contract calls may stay disabled until backend config is set.
         </p>
       ) : null}
 
@@ -220,7 +237,7 @@ export function CampaignDetailPanel({
           <span>Connected contributor</span>
           <input
             type="text"
-            value={connectedWallet ?? ""}
+            value={connectedWallet ?? ''}
             placeholder="Connect Freighter to use the pledge flow"
             readOnly
           />
@@ -249,7 +266,7 @@ export function CampaignDetailPanel({
               !connectedWallet
             }
           >
-            {isPledgePending ? "Submitting..." : "Add pledge"}
+            {isPledgePending ? 'Submitting...' : 'Add pledge'}
           </button>
 
           <button
@@ -269,6 +286,22 @@ export function CampaignDetailPanel({
             Claim vault
           </button>
         </div>
+
+        {pledgeError ? (
+          <div className="pledge-error" role="alert">
+            <p className="error-text">{pledgeError}</p>
+            <button
+              className="btn-ghost"
+              type="button"
+              disabled={isSubmitting || isPledgePending}
+              onClick={() => {
+                void submitPledge();
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
       </form>
 
       <div className="form-grid" style={{ marginTop: 16 }}>
@@ -302,19 +335,13 @@ export function CampaignDetailPanel({
 
       {isPledgePending ? (
         <p className="pending-note">
-          The pledge transaction is in flight. Campaign state will refresh after
-          the backend reconciles the result.
+          The pledge transaction is in flight. Campaign state will refresh after the backend
+          reconciles the result.
         </p>
       ) : null}
 
       {activeCampaign.metadata?.imageUrl ? (
-        <div className="campaign-image-container">
-          <img
-            src={activeCampaign.metadata.imageUrl}
-            alt={activeCampaign.title}
-            className="campaign-image"
-          />
-        </div>
+        <CampaignImage url={activeCampaign.metadata.imageUrl} alt={activeCampaign.title} />
       ) : null}
 
       {activeCampaign.metadata?.externalLink ? (

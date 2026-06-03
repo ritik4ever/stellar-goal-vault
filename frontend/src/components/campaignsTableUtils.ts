@@ -1,5 +1,5 @@
-import type { Campaign } from "../types/campaign";
-import type { SortOption } from "./SortDropdown";
+import type { Campaign } from '../types/campaign';
+import type { SortOption } from './SortDropdown';
 
 /**
  * Returns sorted, deduplicated assetCode values from the given campaigns.
@@ -20,12 +20,9 @@ export function getDistinctAssetCodes(campaigns: Campaign[]): string[] {
  * @param searchQuery - Search query string (empty string skips search)
  * @returns Filtered campaigns matching the search query
  */
-export function searchCampaigns(
-  campaigns: Campaign[],
-  searchQuery: string,
-): Campaign[] {
+export function searchCampaigns(campaigns: Campaign[], searchQuery: string): Campaign[] {
   // Skip filtering if search query is empty or only whitespace
-  if (!searchQuery || searchQuery.trim() === "") {
+  if (!searchQuery || searchQuery.trim() === '') {
     return campaigns;
   }
 
@@ -61,64 +58,61 @@ export function applyFilters(
   campaigns: Campaign[],
   assetCode: string,
   status: string,
-  searchQuery: string = "",
+  searchQuery: string = '',
 ): Campaign[] {
   // Client-side filters (asset/status only, search is server-side)
   return campaigns.filter((c) => {
-    const matchesAsset = assetCode === "" || c.assetCode === assetCode;
-    const matchesStatus = status === "" || c.progress.status === status;
+    const matchesAsset = assetCode === '' || c.assetCode === assetCode;
+    const matchesStatus = status === '' || c.progress.status === status;
     return matchesAsset && matchesStatus;
   });
 }
 
 /**
  * Sorts campaigns by the specified sort option.
- * 
+ *
  * Sorting is stable - campaigns with equal sort values maintain their original order.
  * This ensures the selected campaign state is preserved during sorting.
- * 
+ *
  * @param campaigns - Array of campaigns to sort
  * @param sortBy - Sort option (newest, deadline, percentFunded, totalPledged)
  * @returns Sorted array of campaigns
  */
-export function sortCampaigns(
-  campaigns: Campaign[],
-  sortBy: SortOption,
-): Campaign[] {
+export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption): Campaign[] {
   // Create a copy to avoid mutating the original array
   const sorted = [...campaigns];
-  
+
   sorted.sort((a, b) => {
     let comparison = 0;
-    
+
     switch (sortBy) {
-      case "newest":
+      case 'newest':
         // Sort by createdAt descending (newest first)
         comparison = b.createdAt - a.createdAt;
         break;
-      
-      case "deadline":
+
+      case 'deadline':
         // Sort by deadline ascending (nearest deadline first)
         comparison = a.deadline - b.deadline;
         break;
-      
-      case "percentFunded":
+
+      case 'percentFunded':
         // Sort by percentFunded descending (highest first)
         comparison = b.progress.percentFunded - a.progress.percentFunded;
         break;
-      
-      case "totalPledged":
+
+      case 'totalPledged':
         // Sort by pledgedAmount descending (largest first)
         comparison = b.pledgedAmount - a.pledgedAmount;
         break;
-      
+
       default:
         // No sorting for unknown options
         comparison = 0;
     }
-    
+
     return comparison;
   });
-  
+
   return sorted;
 }

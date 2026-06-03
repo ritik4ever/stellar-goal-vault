@@ -1,5 +1,5 @@
-import { X, Search } from "lucide-react";
-import "./SearchInput.css";
+import { X, Search } from 'lucide-react';
+import './SearchInput.css';
 
 interface SearchInputProps {
   value: string;
@@ -27,12 +27,12 @@ interface SearchInputProps {
 export function SearchInput({
   value,
   onChange,
-  placeholder = "Search campaigns...",
+  placeholder = 'Search campaigns...',
   disabled = false,
-  ariaLabel = "Search campaigns by title, creator, or ID",
+  ariaLabel = 'Search campaigns by title, creator, or ID',
 }: SearchInputProps) {
   const handleClear = () => {
-    onChange("");
+    onChange('');
   };
 
   return (
