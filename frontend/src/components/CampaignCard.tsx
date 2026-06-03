@@ -1,7 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
-import { Campaign } from '../types/campaign';
-import { CopyButton } from './CopyButton';
-import { AddressAvatar } from './AddressAvatar';
+
 
 interface CampaignCardProps {
   campaign: Campaign;
@@ -9,7 +6,7 @@ interface CampaignCardProps {
   onSelect: (campaignId: string) => void;
 }
 
-export function CampaignCard({ campaign, selectedCampaignId, onSelect }: CampaignCardProps) {
+
   const prevPercentRef = useRef<number | null>(null);
   const [animate, setAnimate] = useState(false);
 
@@ -85,5 +82,7 @@ export function CampaignCard({ campaign, selectedCampaignId, onSelect }: Campaig
     </article>
   );
 }
+
+export const CampaignCard = memo(CampaignCardInner, areEqual);
 
 export default CampaignCard;

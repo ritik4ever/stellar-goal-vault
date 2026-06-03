@@ -1,5 +1,5 @@
 import { LayoutGrid } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+
 import { useDebounce } from "../hooks/useDebounce";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
@@ -12,6 +12,7 @@ import {
 import { SearchInput } from "./SearchInput";
 import { SortDropdown, SortOption } from "./SortDropdown";
 import { AddressAvatar } from "./AddressAvatar";
+import { CampaignCard } from "./CampaignCard";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 
@@ -63,10 +64,7 @@ export function CampaignsTable({
   isLoading = false,
   invalidUrlCampaignId = null,
 }: CampaignsTableProps) {
-  const [assetCode, setAssetCode] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('');
-  const [sortBy, setSortBy] = useState<SortOption>('newest');
-  const [searchQuery, setSearchQuery] = useState('');
+
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
   useEffect(() => {
@@ -375,21 +373,7 @@ export function CampaignsTable({
                       >
                         {selectedCampaignId === campaign.id ? "Selected" : "View"}
                       </button>
-                    </div>
-                  </article>
-                );
-              })}
-              {virtualizer.getVirtualItems().length > 0 && (
-                <div
-                  style={{
-                    height:
-                      virtualizer.getTotalSize() -
-                      virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1].end,
-                  }}
-                />
-              )}
-            </div>
-          )}
+
         </>
       )}
     </section>

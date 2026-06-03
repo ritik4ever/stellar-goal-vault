@@ -2,7 +2,7 @@ import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
-import { createServer, Server } from "http";
+
 import { validateEnv } from "./validateEnv";
 import { randomUUID } from "crypto";
 import { z } from "zod";
@@ -383,7 +383,7 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/campaigns', (req: Request, res: Response) => {
+
   const parsedBody = createCampaignPayloadSchema.safeParse(req.body);
   if (!parsedBody.success) {
     sendValidationError(parsedBody.error.issues);
@@ -674,11 +674,7 @@ function startServer() {
   // Initialize Redis cache in production
   if (process.env.NODE_ENV === "production") {
     initRedisCache().catch((error) => {
-      logError(
 
-        },
-        config.logLevel,
-      );
       // Continue without cache if initialization fails
     });
   }
