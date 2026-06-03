@@ -84,4 +84,57 @@ describe('useLocalStorage', () => {
       expect(result.current[0]).toBe('new-value');
     });
   });
+
+  describe('theme persistence with system preference fallback', () => {
+    const THEME_KEY = 'stellar-goal-vault-theme';
+
+    it('reads stored theme from localStorage', () => {
+      localStorage.setItem(THEME_KEY, JSON.stringify('dark'));
+      const { result } = renderHook(() => useLocalStorage<string>(THEME_KEY, 'light'));
+      expect(result.current[0]).toBe('dark');
+    });
+
+    it('falls back to system preference when localStorage is empty', () => {
+      // Simulate system preferring dark mode
+      vi.spyOn(window, 'matchMedia').mockReturnValue({
+        matches: true,
+        media: '(prefers-color-scheme: dark)',
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      });
+
+      const systemPreference = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      const { result } = renderHook(() => useLocalStorage<string>(THEME_KEY, systemPreference));
+      expect(result.current[0]).toBe('dark');
+    });
+
+    it('persists theme changes to localStorage', () => {
+      const { result } = renderHook(() => useLocalStorage<string>(THEME_KEY, 'light'));
+
+      act(() => {
+        result.current[1]('dark');
+      });
+
+      expect(result.current[0]).toBe('dark');
+      expect(JSON.parse(localStorage.getItem(THEME_KEY)!)).toBe('dark');
+    });
+
+    it('handles theme toggle between light and dark', () => {
+      const { result } = renderHook(() => useLocalStorage<string>(THEME_KEY, 'light'));
+
+      act(() => {
+        result.current[1]('dark');
+      });
+      expect(result.current[0]).toBe('dark');
+
+      act(() => {
+        result.current[1]('light');
+      });
+      expect(result.current[0]).toBe('light');
+    });
+  });
 });
