@@ -1,4 +1,4 @@
-import { Request } from "express";
+import { Request } from 'express';
 
 export interface ApiErrorDetail {
   field: string;
@@ -31,7 +31,7 @@ export interface CampaignListItem {
   createdAt: number;
   claimedAt?: number;
   progress: {
-    status: "open" | "funded" | "claimed" | "failed";
+    status: 'open' | 'funded' | 'claimed' | 'failed';
     percentFunded: number;
     remainingAmount: number;
     pledgeCount: number;
@@ -50,11 +50,11 @@ export class AppError extends Error {
   constructor(
     public message: string,
     public statusCode: number = 500,
-    public code: string = "INTERNAL_SERVER_ERROR",
+    public code: string = 'INTERNAL_SERVER_ERROR',
     public details?: ApiErrorDetail[],
   ) {
     super(message);
-    this.name = "AppError";
+    this.name = 'AppError';
     Object.setPrototypeOf(this, AppError.prototype);
   }
 }

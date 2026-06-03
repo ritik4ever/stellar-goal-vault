@@ -1,4 +1,4 @@
-export type SortOption = "newest" | "deadline" | "percentFunded" | "totalPledged";
+export type SortOption = 'newest' | 'deadline' | 'percentFunded' | 'totalPledged';
 
 export interface SortDropdownProps {
   value: SortOption;
@@ -6,11 +6,7 @@ export interface SortDropdownProps {
   disabled?: boolean;
 }
 
-export function SortDropdown({
-  value,
-  onChange,
-  disabled = false,
-}: SortDropdownProps) {
+export function SortDropdown({ value, onChange, disabled = false }: SortDropdownProps) {
   return (
     <select
       value={value}
@@ -18,7 +14,7 @@ export function SortDropdown({
       disabled={disabled}
       aria-label="Sort campaigns"
       className="control-select"
-      style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1 }}
+      style={{ cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.55 : 1 }}
     >
       <option value="newest">Newest</option>
       <option value="deadline">Deadline</option>

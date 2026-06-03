@@ -1,0 +1,41 @@
+name: Playwright Visual Regression
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  visual-regression:
+    name: Visual regression
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Run visual regression tests
+        run: npm run test:visual
+
+      - name: Upload visual regression artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-artifacts
+          path: |
+            playwright-report
+            test-results
+            e2e/screenshots

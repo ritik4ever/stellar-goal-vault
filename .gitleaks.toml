@@ -1,0 +1,38 @@
+[allowlist]
+    description = "Allowlisted files and patterns"
+    paths = [
+        # Documentation examples
+        "README.md",
+        "FAQ.md",
+        "RUNBOOK.md",
+        "SECURITY.md",
+        "ARCHITECTURE_DIAGRAMS.md",
+        # Test files often contain dummy keys
+        "backend/src/tests/.*",
+        "frontend/src/tests/.*",
+        "contracts/src/tests/.*",
+        "e2e/.*",
+        "backend/src/services/seedDeterministic.ts",
+    ]
+    regexes = [
+        # Allow Stellar public keys (G...)
+        '''G[A-Z2-7]{55}''',
+        # Allow placeholder Stellar secret keys (S...)
+        '''S\.\.\.''',
+        '''"S"{55}''',
+        # Allow integrity hashes in package-lock.json
+        '''sha512-[a-zA-Z0-9+/=]+''',
+    ]
+
+[rules]
+    [[rules]]
+        description = "Stellar Secret Key"
+        id = "stellar-secret-key"
+        regex = '''S[A-Z2-7]{55}'''
+        keywords = ["S"]
+
+    [[rules]]
+        description = "Generic API Key"
+        id = "generic-api-key"
+        regex = '''(?i)(api_key|apikey|secret|password|private_key|token)[-|_|=|\s|:]{1,4}[a-z0-9]{16,128}'''
+        keywords = ["api", "key", "secret", "password", "token"]
