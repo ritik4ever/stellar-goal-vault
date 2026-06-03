@@ -88,6 +88,71 @@ If a secret is accidentally committed:
 - Keep dependencies up to date (`npm audit` before submitting a PR).
 - Follow the principle of least privilege for any new API endpoints.
 
+## Content Security Policy (CSP)
+
+The frontend injects a **Content-Security-Policy-Report-Only** `<meta>` tag into
+every page via a custom Vite plugin in `frontend/vite.config.ts`. In report-only
+mode violations are logged to the browser console but **do not block** any
+resources. Once validated in production, the policy can be switched to
+enforcement mode.
+
+### Active Directives
+
+| Directive | Value | Purpose |
+| ------------ | ----------------------------------------------------- | ------------------------------------------------------ |
+| `default-src` | `'none'` | Deny-by-default; every resource type must be listed |
+| `script-src` | `'self'` | Only first-party scripts (no inline, no external CDN) |
+| `style-src` | `'self' 'unsafe-inline' https://fonts.googleapis.com` | App CSS + React/Recharts inline styles + Google Fonts |
+| `font-src` | `'self' https://fonts.gstatic.com` | Google Fonts font-file delivery |
+| `img-src` | `'self' https: data:` | App images + user-submitted campaign images + data URIs |
+| `connect-src` | `'self' https://soroban-testnet.stellar.org` | Backend API (`/api`) + Soroban testnet RPC |
+| `frame-src` | `'none'` | No iframes required |
+| `object-src` | `'none'` | No plugins (Flash, Java, etc.) |
+| `base-uri` | `'self'` | Prevents `<base>` tag injection |
+| `form-action` | `'self'` | Prevents form-action hijacking |
+
+> **Note:** `frame-ancestors` is not supported in `<meta>` tags. For
+> clickjacking protection via HTTP headers, add the `helmet` middleware to the
+> Express backend in a future iteration.
+
+### Dev-Mode Relaxations
+
+During local development (`vite dev`), the plugin automatically detects dev mode
+and relaxes two directives so Vite Hot Module Replacement (HMR) works:
+
+- `script-src` adds `'unsafe-inline'` (Vite injects inline scripts for React
+  Fast Refresh)
+- `connect-src` adds `ws:` (Vite HMR uses WebSocket connections)
+
+These relaxations are **not** included in production builds.
+
+### Switching to Enforcement Mode
+
+Once you have confirmed no legitimate resources are blocked in report-only mode
+(check the browser console for `[Report Only]` violations):
+
+1. Open `frontend/vite.config.ts`.
+2. In the `cspMetaTagPlugin` function, change:
+   ```ts
+   `<meta http-equiv="Content-Security-Policy-Report-Only" ...>`
+   ```
+   to:
+   ```ts
+   `<meta http-equiv="Content-Security-Policy" ...>`
+   ```
+3. Rebuild and deploy.
+
+### Adding a New Trusted Domain
+
+To allow a new external resource (e.g., a new CDN or API endpoint):
+
+1. Identify the correct directive (`script-src`, `style-src`, `connect-src`,
+   etc.).
+2. Add the domain to the corresponding array entry in the `directives` list
+   inside `cspMetaTagPlugin()` in `frontend/vite.config.ts`.
+3. Update the table above in this document.
+4. Test in report-only mode before switching to enforcement.
+
 ## Automated Security Analysis
 
 This project uses GitHub CodeQL for automated security analysis. The CodeQL workflow runs automatically on:
