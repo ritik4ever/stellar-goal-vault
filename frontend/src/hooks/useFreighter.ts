@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
-import { isConnected } from "@stellar/freighter-api";
-import { connectFreighterWallet } from "../services/freighter";
+import { useCallback, useEffect, useState } from 'react';
+import { isConnected } from '@stellar/freighter-api';
+import { connectFreighterWallet } from '../services/freighter';
 
-export type FreighterStatus = "checking" | "unavailable" | "available" | "connected";
+export type FreighterStatus = 'checking' | 'unavailable' | 'available' | 'connected';
 
 export interface UseFreighterResult {
   status: FreighterStatus;
@@ -13,17 +13,17 @@ export interface UseFreighterResult {
 }
 
 export function useFreighter(): UseFreighterResult {
-  const [status, setStatus] = useState<FreighterStatus>("checking");
+  const [status, setStatus] = useState<FreighterStatus>('checking');
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     isConnected()
       .then((connected) => {
-        setStatus(connected ? "available" : "unavailable");
+        setStatus(connected ? 'available' : 'unavailable');
       })
       .catch(() => {
-        setStatus("unavailable");
+        setStatus('unavailable');
       });
   }, []);
 
@@ -32,10 +32,10 @@ export function useFreighter(): UseFreighterResult {
     try {
       const wallet = await connectFreighterWallet(networkPassphrase);
       setPublicKey(wallet.publicKey);
-      setStatus("connected");
+      setStatus('connected');
       return wallet.publicKey;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to connect wallet.";
+      const message = err instanceof Error ? err.message : 'Failed to connect wallet.';
       setError(message);
       return null;
     }
@@ -43,7 +43,7 @@ export function useFreighter(): UseFreighterResult {
 
   const disconnect = useCallback(() => {
     setPublicKey(null);
-    setStatus("available");
+    setStatus('available');
   }, []);
 
   return { status, publicKey, connect, disconnect, error };

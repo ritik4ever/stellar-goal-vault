@@ -1,19 +1,19 @@
-import Database from "better-sqlite3";
-import path from "path";
+import Database from 'better-sqlite3';
+import path from 'path';
 
 type SQLiteDatabase = ReturnType<typeof Database>;
 
 let db: SQLiteDatabase | null = null;
 
 function resolveDbPath(): string {
-  return process.env.DB_PATH || path.join(__dirname, "..", "..", "data", "campaigns.db");
+  return process.env.DB_PATH || path.join(__dirname, '..', '..', 'data', 'campaigns.db');
 }
 
-export type DbHealthStatus = "up" | "down";
+export type DbHealthStatus = 'up' | 'down';
 
 export function getDb(): SQLiteDatabase {
   if (!db) {
-    throw new Error("Database not initialized. Call initDb() first.");
+    throw new Error('Database not initialized. Call initDb() first.');
   }
 
   return db;
@@ -24,21 +24,21 @@ export function initDb(): void {
     return;
   }
 
-  const fs = require("fs") as typeof import("fs");
+  const fs = require('fs') as typeof import('fs');
   const dbPath = resolveDbPath();
   const dir = path.dirname(dbPath);
 
-  if (dbPath !== ":memory:" && !fs.existsSync(dir)) {
+  if (dbPath !== ':memory:' && !fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
   db = new Database(dbPath);
-  
+
   // Enable Write-Ahead Logging (WAL) mode.
   // This is the chosen journal mode to prevent unnecessary lock contention,
   // allowing reads and writes to occur concurrently without blocking each other.
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
 
   migrate(db);
 }
@@ -56,15 +56,15 @@ export function checkDbHealth(): {
 } {
   try {
     const database = getDb();
-    database.prepare("SELECT 1 AS ok").get();
+    database.prepare('SELECT 1 AS ok').get();
 
     return {
-      status: "up",
+      status: 'up',
       reachable: true,
     };
   } catch {
     return {
-      status: "down",
+      status: 'down',
       reachable: false,
     };
   }
@@ -116,37 +116,41 @@ function migrate(database: SQLiteDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
   `);
 
-  const pledgeColumns = database
-    .prepare(`PRAGMA table_info(pledges)`)
-    .all() as Array<{ name: string }>;
+  const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
+    name: string;
+  }>;
 
-  const hasTransactionHash = pledgeColumns.some((column) => column.name === "transaction_hash");
+  const hasTransactionHash = pledgeColumns.some((column) => column.name === 'transaction_hash');
   if (!hasTransactionHash) {
     database.exec(`ALTER TABLE pledges ADD COLUMN transaction_hash TEXT`);
   }
 
-  const hasAssetCode = pledgeColumns.some((column) => column.name === "asset_code");
+  const hasAssetCode = pledgeColumns.some((column) => column.name === 'asset_code');
   if (!hasAssetCode) {
     database.exec(`ALTER TABLE pledges ADD COLUMN asset_code TEXT NOT NULL DEFAULT 'XLM'`);
   }
 
   // Add deleted_at column if not exists
-  const campaignColumns = database
-    .prepare(`PRAGMA table_info(campaigns)`)
-    .all() as Array<{ name: string }>;
-  if (!campaignColumns.some((column) => column.name === "deleted_at")) {
+  const campaignColumns = database.prepare(`PRAGMA table_info(campaigns)`).all() as Array<{
+    name: string;
+  }>;
+  if (!campaignColumns.some((column) => column.name === 'deleted_at')) {
     database.exec(`ALTER TABLE campaigns ADD COLUMN deleted_at INTEGER`);
   }
 
   // Migrate asset_code to accepted_tokens_json if needed
-  if (campaignColumns.some((column) => column.name === "asset_code") &&
-      !campaignColumns.some((column) => column.name === "accepted_tokens_json")) {
-    database.exec(`ALTER TABLE campaigns ADD COLUMN accepted_tokens_json TEXT NOT NULL DEFAULT '[]'`);
+  if (
+    campaignColumns.some((column) => column.name === 'asset_code') &&
+    !campaignColumns.some((column) => column.name === 'accepted_tokens_json')
+  ) {
+    database.exec(
+      `ALTER TABLE campaigns ADD COLUMN accepted_tokens_json TEXT NOT NULL DEFAULT '[]'`,
+    );
     // Migrate existing asset_code to accepted_tokens_json
     database.exec(`UPDATE campaigns SET accepted_tokens_json = json_array(asset_code)`);
     // Optionally drop asset_code column (SQLite doesn't support DROP COLUMN directly)
   }
-  
+
   database.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pledges_transaction_hash
     ON pledges(transaction_hash)
@@ -160,7 +164,7 @@ function migrate(database: SQLiteDatabase): void {
   }
 
   const hasMaxPerContributor = campaignColumns.some(
-    (column) => column.name === "max_per_contributor",
+    (column) => column.name === 'max_per_contributor',
   );
   if (!hasMaxPerContributor) {
     database.exec(`ALTER TABLE campaigns ADD COLUMN max_per_contributor INTEGER`);

@@ -3,8 +3,7 @@ import { ContributorSummary } from '../types/campaign';
 export function buildContributorCsv(contributors: ContributorSummary[]): string {
   const header = 'address,totalPledged,refundedAmount,isFullyRefunded';
   const rows = contributors.map(
-    (c) =>
-      `${c.contributor},${c.totalPledged},${c.refundedAmount},${c.isFullyRefunded}`,
+    (c) => `${c.contributor},${c.totalPledged},${c.refundedAmount},${c.isFullyRefunded}`,
   );
   return [header, ...rows].join('\n');
 }

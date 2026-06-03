@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
-import { useDebounce } from "./useDebounce";
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { renderHook, act, waitFor } from '@testing-library/react';
+import { useDebounce } from './useDebounce';
 
-describe("useDebounce Hook", () => {
+describe('useDebounce Hook', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -11,25 +11,24 @@ describe("useDebounce Hook", () => {
     vi.restoreAllMocks();
   });
 
-  describe("Basic Functionality", () => {
-    it("should initialize with the same value as input", () => {
-      const { result } = renderHook(() => useDebounce("test", 300));
-      expect(result.current).toBe("test");
+  describe('Basic Functionality', () => {
+    it('should initialize with the same value as input', () => {
+      const { result } = renderHook(() => useDebounce('test', 300));
+      expect(result.current).toBe('test');
     });
 
-    it("should debounce value changes", async () => {
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: "initial" } }
-      );
+    it('should debounce value changes', async () => {
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: 'initial' },
+      });
 
-      expect(result.current).toBe("initial");
+      expect(result.current).toBe('initial');
 
       // Change value
-      rerender({ value: "updated" });
+      rerender({ value: 'updated' });
 
       // Should still be old value before delay
-      expect(result.current).toBe("initial");
+      expect(result.current).toBe('initial');
 
       // Fast-forward through delay
       act(() => {
@@ -38,24 +37,23 @@ describe("useDebounce Hook", () => {
 
       // Now should be updated
       await waitFor(() => {
-        expect(result.current).toBe("updated");
+        expect(result.current).toBe('updated');
       });
     });
 
-    it("should use default delay of 300ms when not specified", async () => {
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value),
-        { initialProps: { value: "start" } }
-      );
+    it('should use default delay of 300ms when not specified', async () => {
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value), {
+        initialProps: { value: 'start' },
+      });
 
-      rerender({ value: "end" });
+      rerender({ value: 'end' });
 
       // 100ms should not be enough
       act(() => {
         vi.advanceTimersByTime(100);
       });
 
-      expect(result.current).toBe("start");
+      expect(result.current).toBe('start');
 
       // 200ms more (total 300ms) should be enough
       act(() => {
@@ -63,24 +61,23 @@ describe("useDebounce Hook", () => {
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("end");
+        expect(result.current).toBe('end');
       });
     });
 
-    it("should use custom delay when specified", async () => {
-      const { result, rerender } = renderHook(
-        ({ value, delay }) => useDebounce(value, delay),
-        { initialProps: { value: "initial", delay: 500 } }
-      );
+    it('should use custom delay when specified', async () => {
+      const { result, rerender } = renderHook(({ value, delay }) => useDebounce(value, delay), {
+        initialProps: { value: 'initial', delay: 500 },
+      });
 
-      rerender({ value: "updated", delay: 500 });
+      rerender({ value: 'updated', delay: 500 });
 
       // 300ms should not be enough with 500ms delay
       act(() => {
         vi.advanceTimersByTime(300);
       });
 
-      expect(result.current).toBe("initial");
+      expect(result.current).toBe('initial');
 
       // 200ms more (total 500ms)
       act(() => {
@@ -88,30 +85,29 @@ describe("useDebounce Hook", () => {
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("updated");
+        expect(result.current).toBe('updated');
       });
     });
   });
 
-  describe("Rapid Changes", () => {
-    it("should only apply the last value after rapid changes", async () => {
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: "first" } }
-      );
+  describe('Rapid Changes', () => {
+    it('should only apply the last value after rapid changes', async () => {
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: 'first' },
+      });
 
       // Make several changes rapidly
-      rerender({ value: "second" });
+      rerender({ value: 'second' });
       act(() => {
         vi.advanceTimersByTime(100);
       });
 
-      rerender({ value: "third" });
+      rerender({ value: 'third' });
       act(() => {
         vi.advanceTimersByTime(100);
       });
 
-      rerender({ value: "fourth" });
+      rerender({ value: 'fourth' });
 
       // After original delay from first change, still shouldn't update
       // because we keep resetting the timer
@@ -119,7 +115,7 @@ describe("useDebounce Hook", () => {
         vi.advanceTimersByTime(100);
       });
 
-      expect(result.current).toBe("first");
+      expect(result.current).toBe('first');
 
       // After full delay from the last change
       act(() => {
@@ -127,34 +123,33 @@ describe("useDebounce Hook", () => {
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("fourth");
+        expect(result.current).toBe('fourth');
       });
     });
 
-    it("should reset timer on each value change", async () => {
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: "a" } }
-      );
+    it('should reset timer on each value change', async () => {
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: 'a' },
+      });
 
-      rerender({ value: "b" });
+      rerender({ value: 'b' });
 
       // Wait 200ms (not enough)
       act(() => {
         vi.advanceTimersByTime(200);
       });
 
-      expect(result.current).toBe("a");
+      expect(result.current).toBe('a');
 
       // Change again before timer completes
-      rerender({ value: "c" });
+      rerender({ value: 'c' });
 
       // The timer should reset, so we need another 300ms from this point
       act(() => {
         vi.advanceTimersByTime(200);
       });
 
-      expect(result.current).toBe("a");
+      expect(result.current).toBe('a');
 
       // Complete the full 300ms from last change
       act(() => {
@@ -162,34 +157,32 @@ describe("useDebounce Hook", () => {
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("c");
+        expect(result.current).toBe('c');
       });
     });
   });
 
-  describe("Different Value Types", () => {
-    it("should debounce string values", async () => {
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: "search text" } }
-      );
+  describe('Different Value Types', () => {
+    it('should debounce string values', async () => {
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: 'search text' },
+      });
 
-      rerender({ value: "updated text" });
+      rerender({ value: 'updated text' });
 
       act(() => {
         vi.advanceTimersByTime(300);
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("updated text");
+        expect(result.current).toBe('updated text');
       });
     });
 
-    it("should debounce number values", async () => {
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: 42 } }
-      );
+    it('should debounce number values', async () => {
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: 42 },
+      });
 
       rerender({ value: 100 });
 
@@ -202,11 +195,10 @@ describe("useDebounce Hook", () => {
       });
     });
 
-    it("should debounce boolean values", async () => {
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: false } }
-      );
+    it('should debounce boolean values', async () => {
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: false },
+      });
 
       rerender({ value: true });
 
@@ -219,14 +211,13 @@ describe("useDebounce Hook", () => {
       });
     });
 
-    it("should debounce object values", async () => {
-      const obj1 = { name: "first" };
-      const obj2 = { name: "second" };
+    it('should debounce object values', async () => {
+      const obj1 = { name: 'first' };
+      const obj2 = { name: 'second' };
 
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: obj1 } }
-      );
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: obj1 },
+      });
 
       expect(result.current).toBe(obj1);
 
@@ -241,14 +232,13 @@ describe("useDebounce Hook", () => {
       });
     });
 
-    it("should debounce array values", async () => {
+    it('should debounce array values', async () => {
       const arr1 = [1, 2, 3];
       const arr2 = [4, 5, 6];
 
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: arr1 } }
-      );
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: arr1 },
+      });
 
       rerender({ value: arr2 });
 
@@ -262,11 +252,11 @@ describe("useDebounce Hook", () => {
     });
   });
 
-  describe("Edge Cases", () => {
-    it("should handle null values", async () => {
+  describe('Edge Cases', () => {
+    it('should handle null values', async () => {
       const { result, rerender } = renderHook(
         ({ value }) => useDebounce(value as string | null, 300),
-        { initialProps: { value: "text" } }
+        { initialProps: { value: 'text' } },
       );
 
       rerender({ value: null });
@@ -280,10 +270,10 @@ describe("useDebounce Hook", () => {
       });
     });
 
-    it("should handle undefined values", async () => {
+    it('should handle undefined values', async () => {
       const { result, rerender } = renderHook(
         ({ value }) => useDebounce(value as string | undefined, 300),
-        { initialProps: { value: "text" } }
+        { initialProps: { value: 'text' } },
       );
 
       rerender({ value: undefined });
@@ -297,28 +287,26 @@ describe("useDebounce Hook", () => {
       });
     });
 
-    it("should handle empty strings", async () => {
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: "text" } }
-      );
+    it('should handle empty strings', async () => {
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: 'text' },
+      });
 
-      rerender({ value: "" });
+      rerender({ value: '' });
 
       act(() => {
         vi.advanceTimersByTime(300);
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("");
+        expect(result.current).toBe('');
       });
     });
 
-    it("should handle zero values", async () => {
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: 42 } }
-      );
+    it('should handle zero values', async () => {
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: 42 },
+      });
 
       rerender({ value: 0 });
 
@@ -332,16 +320,15 @@ describe("useDebounce Hook", () => {
     });
   });
 
-  describe("Cleanup", () => {
-    it("should cleanup timeout on unmount", () => {
-      const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
+  describe('Cleanup', () => {
+    it('should cleanup timeout on unmount', () => {
+      const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
 
-      const { unmount, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: "test" } }
-      );
+      const { unmount, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: 'test' },
+      });
 
-      rerender({ value: "updated" });
+      rerender({ value: 'updated' });
 
       unmount();
 
@@ -349,16 +336,15 @@ describe("useDebounce Hook", () => {
       clearTimeoutSpy.mockRestore();
     });
 
-    it("should cleanup previous timeout when value changes", () => {
-      const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
+    it('should cleanup previous timeout when value changes', () => {
+      const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
 
-      const { rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: "a" } }
-      );
+      const { rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: 'a' },
+      });
 
-      rerender({ value: "b" });
-      rerender({ value: "c" });
+      rerender({ value: 'b' });
+      rerender({ value: 'c' });
 
       // Should have called clearTimeout for each previous change
       expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
@@ -367,40 +353,39 @@ describe("useDebounce Hook", () => {
     });
   });
 
-  describe("Search Use Case", () => {
-    it("should simulate typing a search query (campaign vault scenario)", async () => {
-      const { result, rerender } = renderHook(
-        ({ value }) => useDebounce(value, 300),
-        { initialProps: { value: "" } }
-      );
+  describe('Search Use Case', () => {
+    it('should simulate typing a search query (campaign vault scenario)', async () => {
+      const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+        initialProps: { value: '' },
+      });
 
       // User types: "r"
-      rerender({ value: "r" });
+      rerender({ value: 'r' });
       act(() => {
         vi.advanceTimersByTime(100);
       });
-      expect(result.current).toBe("");
+      expect(result.current).toBe('');
 
       // User types: "o" (before first debounce completes)
-      rerender({ value: "ro" });
+      rerender({ value: 'ro' });
       act(() => {
         vi.advanceTimersByTime(100);
       });
-      expect(result.current).toBe("");
+      expect(result.current).toBe('');
 
       // User types: "c"
-      rerender({ value: "roc" });
+      rerender({ value: 'roc' });
       act(() => {
         vi.advanceTimersByTime(100);
       });
-      expect(result.current).toBe("");
+      expect(result.current).toBe('');
 
       // User types: "k"
-      rerender({ value: "rock" });
+      rerender({ value: 'rock' });
       act(() => {
         vi.advanceTimersByTime(100);
       });
-      expect(result.current).toBe("");
+      expect(result.current).toBe('');
 
       // Wait for debounce to complete
       act(() => {
@@ -408,33 +393,32 @@ describe("useDebounce Hook", () => {
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("rock");
+        expect(result.current).toBe('rock');
       });
     });
 
-    it("should perform efficient debouncing for multiple searches", async () => {
-      const { result, rerender } = renderHook(
-        ({ value, delay }) => useDebounce(value, delay),
-        { initialProps: { value: "initial", delay: 300 } }
-      );
+    it('should perform efficient debouncing for multiple searches', async () => {
+      const { result, rerender } = renderHook(({ value, delay }) => useDebounce(value, delay), {
+        initialProps: { value: 'initial', delay: 300 },
+      });
 
       // First search
-      rerender({ value: "search1", delay: 300 });
+      rerender({ value: 'search1', delay: 300 });
       act(() => {
         vi.advanceTimersByTime(300);
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("search1");
+        expect(result.current).toBe('search1');
       });
 
       // Second search before waiting
-      rerender({ value: "search2", delay: 300 });
+      rerender({ value: 'search2', delay: 300 });
       act(() => {
         vi.advanceTimersByTime(150);
       });
 
-      expect(result.current).toBe("search1");
+      expect(result.current).toBe('search1');
 
       // Complete second debounce
       act(() => {
@@ -442,26 +426,25 @@ describe("useDebounce Hook", () => {
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("search2");
+        expect(result.current).toBe('search2');
       });
     });
   });
 
-  describe("Delay Changes", () => {
-    it("should respect delay changes", async () => {
-      const { result, rerender } = renderHook(
-        ({ value, delay }) => useDebounce(value, delay),
-        { initialProps: { value: "initial", delay: 300 } }
-      );
+  describe('Delay Changes', () => {
+    it('should respect delay changes', async () => {
+      const { result, rerender } = renderHook(({ value, delay }) => useDebounce(value, delay), {
+        initialProps: { value: 'initial', delay: 300 },
+      });
 
-      rerender({ value: "updated", delay: 500 });
+      rerender({ value: 'updated', delay: 500 });
 
       // 300ms not enough for 500ms delay
       act(() => {
         vi.advanceTimersByTime(300);
       });
 
-      expect(result.current).toBe("initial");
+      expect(result.current).toBe('initial');
 
       // 200ms more = 500ms total
       act(() => {
@@ -469,26 +452,25 @@ describe("useDebounce Hook", () => {
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("updated");
+        expect(result.current).toBe('updated');
       });
     });
 
-    it("should handle decreasing delay", async () => {
-      const { result, rerender } = renderHook(
-        ({ value, delay }) => useDebounce(value, delay),
-        { initialProps: { value: "initial", delay: 500 } }
-      );
+    it('should handle decreasing delay', async () => {
+      const { result, rerender } = renderHook(({ value, delay }) => useDebounce(value, delay), {
+        initialProps: { value: 'initial', delay: 500 },
+      });
 
-      rerender({ value: "updated", delay: 500 });
+      rerender({ value: 'updated', delay: 500 });
 
       act(() => {
         vi.advanceTimersByTime(300);
       });
 
       // Change to shorter delay
-      rerender({ value: "final", delay: 100 });
+      rerender({ value: 'final', delay: 100 });
 
-      expect(result.current).toBe("initial");
+      expect(result.current).toBe('initial');
 
       // After 100ms with new delay
       act(() => {
@@ -496,7 +478,7 @@ describe("useDebounce Hook", () => {
       });
 
       await waitFor(() => {
-        expect(result.current).toBe("final");
+        expect(result.current).toBe('final');
       });
     });
   });

@@ -18,7 +18,7 @@ export function AssetFilterDropdown({
       disabled={disabled}
       aria-label="Filter by asset"
       className="control-select"
-      style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1 }}
+      style={{ cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.55 : 1 }}
     >
       <option value="">All Assets</option>
       {options.map((code) => (

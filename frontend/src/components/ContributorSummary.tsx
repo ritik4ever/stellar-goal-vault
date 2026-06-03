@@ -1,10 +1,10 @@
-import { useMemo } from "react";
-import { Users } from "lucide-react";
-import { CopyButton } from "./CopyButton";
-import { AddressAvatar } from "./AddressAvatar";
-import { EmptyState } from "./EmptyState";
-import { Pledge } from "../types/campaign";
-import { buildContributorCsv, downloadCsv } from "../utils/exportCsv";
+import { useMemo } from 'react';
+import { Users } from 'lucide-react';
+import { CopyButton } from './CopyButton';
+import { AddressAvatar } from './AddressAvatar';
+import { EmptyState } from './EmptyState';
+import { Pledge } from '../types/campaign';
+import { buildContributorCsv, downloadCsv } from '../utils/exportCsv';
 
 function round2(value: number): number {
   return Number(value.toFixed(2));
@@ -53,90 +53,81 @@ export function ContributorSummary({
     );
   }
 
-  const {
-    rows,
-    uniqueAddresses,
-    activeAddresses,
-    activeGrandTotal,
-    refundedGrandTotal,
-  } = useMemo(() => {
-    const list = pledges ?? [];
-    const byContributor = new Map<
-      string,
-      {
-        activeTotal: number;
-        activePledgeCount: number;
-        refundedTotal: number;
-        refundedPledgeCount: number;
-        hasPending: boolean;
+  const { rows, uniqueAddresses, activeAddresses, activeGrandTotal, refundedGrandTotal } =
+    useMemo(() => {
+      const list = pledges ?? [];
+      const byContributor = new Map<
+        string,
+        {
+          activeTotal: number;
+          activePledgeCount: number;
+          refundedTotal: number;
+          refundedPledgeCount: number;
+          hasPending: boolean;
+        }
+      >();
+
+      for (const pledge of list) {
+        let bucket = byContributor.get(pledge.contributor);
+        if (!bucket) {
+          bucket = {
+            activeTotal: 0,
+            activePledgeCount: 0,
+            refundedTotal: 0,
+            refundedPledgeCount: 0,
+            hasPending: false,
+          };
+          byContributor.set(pledge.contributor, bucket);
+        }
+
+        if (pledge.refundedAt !== undefined) {
+          bucket.refundedTotal += pledge.amount;
+          bucket.refundedPledgeCount += 1;
+        } else {
+          bucket.activeTotal += pledge.amount;
+          bucket.activePledgeCount += 1;
+        }
+
+        if (pledge.id < 0) {
+          bucket.hasPending = true;
+        }
       }
-    >();
 
-    for (const pledge of list) {
-      let bucket = byContributor.get(pledge.contributor);
-      if (!bucket) {
-        bucket = {
-          activeTotal: 0,
-          activePledgeCount: 0,
-          refundedTotal: 0,
-          refundedPledgeCount: 0,
-          hasPending: false,
-        };
-        byContributor.set(pledge.contributor, bucket);
-      }
+      const aggregated: AggregatedContributor[] = [...byContributor.entries()].map(
+        ([contributor, bucket]) => ({
+          contributor,
+          activeTotal: round2(bucket.activeTotal),
+          activePledgeCount: bucket.activePledgeCount,
+          refundedTotal: round2(bucket.refundedTotal),
+          refundedPledgeCount: bucket.refundedPledgeCount,
+          hasPending: bucket.hasPending,
+        }),
+      );
 
-      if (pledge.refundedAt !== undefined) {
-        bucket.refundedTotal += pledge.amount;
-        bucket.refundedPledgeCount += 1;
-      } else {
-        bucket.activeTotal += pledge.amount;
-        bucket.activePledgeCount += 1;
-      }
+      aggregated.sort((a, b) => {
+        if (b.activeTotal !== a.activeTotal) {
+          return b.activeTotal - a.activeTotal;
+        }
+        if (b.refundedTotal !== a.refundedTotal) {
+          return b.refundedTotal - a.refundedTotal;
+        }
+        return a.contributor.localeCompare(b.contributor);
+      });
 
-      if (pledge.id < 0) {
-        bucket.hasPending = true;
-      }
-    }
+      const activeAddresses = aggregated.filter((row) => row.activePledgeCount > 0).length;
+      const activeGrandTotal = round2(aggregated.reduce((sum, row) => sum + row.activeTotal, 0));
+      const refundedGrandTotal = round2(
+        aggregated.reduce((sum, row) => sum + row.refundedTotal, 0),
+      );
 
-    const aggregated: AggregatedContributor[] = [
-      ...byContributor.entries(),
-    ].map(([contributor, bucket]) => ({
-      contributor,
-      activeTotal: round2(bucket.activeTotal),
-      activePledgeCount: bucket.activePledgeCount,
-      refundedTotal: round2(bucket.refundedTotal),
-      refundedPledgeCount: bucket.refundedPledgeCount,
-      hasPending: bucket.hasPending,
-    }));
-
-    aggregated.sort((a, b) => {
-      if (b.activeTotal !== a.activeTotal) {
-        return b.activeTotal - a.activeTotal;
-      }
-      if (b.refundedTotal !== a.refundedTotal) {
-        return b.refundedTotal - a.refundedTotal;
-      }
-      return a.contributor.localeCompare(b.contributor);
-    });
-
-    const activeAddresses = aggregated.filter(
-      (row) => row.activePledgeCount > 0,
-    ).length;
-    const activeGrandTotal = round2(
-      aggregated.reduce((sum, row) => sum + row.activeTotal, 0),
-    );
-    const refundedGrandTotal = round2(
-      aggregated.reduce((sum, row) => sum + row.refundedTotal, 0),
-    );
-
-    return {
-      rows: aggregated,
-      uniqueAddresses: byContributor.size,
-      activeAddresses,
-      activeGrandTotal,
-      refundedGrandTotal,
-    };
-  }, [pledges]);
+      return {
+        rows: aggregated,
+        uniqueAddresses: byContributor.size,
+        activeAddresses,
+        activeGrandTotal,
+        refundedGrandTotal,
+      };
+    }, [pledges]);
 
   function handleExportCsv() {
     const summaries = rows.map((row) => ({
@@ -199,9 +190,7 @@ export function ContributorSummary({
           <strong>
             {activeGrandTotal} {assetCode}
           </strong>
-          <span className="contributor-stat-hint muted">
-            Sum of all non-refunded pledges.
-          </span>
+          <span className="contributor-stat-hint muted">Sum of all non-refunded pledges.</span>
         </article>
         <article className="contributor-stat">
           <span className="contributor-stat-label">Refunded total</span>
@@ -214,35 +203,21 @@ export function ContributorSummary({
         </article>
       </div>
 
-      <div
-        className="contributor-table-wrap"
-        role="table"
-        aria-label="Contributors by address"
-      >
-        <div
-          className="contributor-table contributor-table-head"
-          role="rowgroup"
-        >
+      <div className="contributor-table-wrap" role="table" aria-label="Contributors by address">
+        <div className="contributor-table contributor-table-head" role="rowgroup">
           <div role="row" className="contributor-table-row">
             <span role="columnheader">Contributor</span>
             <span role="columnheader">Active</span>
             <span role="columnheader">Refunded</span>
           </div>
         </div>
-        <div
-          className="contributor-table contributor-table-body"
-          role="rowgroup"
-        >
+        <div className="contributor-table contributor-table-body" role="rowgroup">
           {rows.map((row) => (
-            <div
-              key={row.contributor}
-              role="row"
-              className="contributor-table-row"
-            >
+            <div key={row.contributor} role="row" className="contributor-table-row">
               <div
                 role="cell"
                 className="contributor-address"
-                style={{ display: "flex", alignItems: "center", gap: 10 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 10 }}
               >
                 <AddressAvatar address={row.contributor} size={24} />
                 <span className="mono">{row.contributor.slice(0, 12)}…</span>
@@ -252,9 +227,7 @@ export function ContributorSummary({
                   className="small"
                 />
                 {row.hasPending ? (
-                  <span className="badge badge-neutral contributor-pending-badge">
-                    Pending
-                  </span>
+                  <span className="badge badge-neutral contributor-pending-badge">Pending</span>
                 ) : null}
               </div>
               <div role="cell" className="contributor-amounts">
@@ -264,9 +237,9 @@ export function ContributorSummary({
                       {row.activeTotal} {assetCode}
                     </strong>
                     <span className="muted">
-                      {" "}
+                      {' '}
                       ({row.activePledgeCount} pledge
-                      {row.activePledgeCount === 1 ? "" : "s"})
+                      {row.activePledgeCount === 1 ? '' : 's'})
                     </span>
                   </span>
                 ) : (
@@ -279,10 +252,7 @@ export function ContributorSummary({
                     <strong>
                       {row.refundedTotal} {assetCode}
                     </strong>
-                    <span className="muted">
-                      {" "}
-                      ({row.refundedPledgeCount} refunded)
-                    </span>
+                    <span className="muted"> ({row.refundedPledgeCount} refunded)</span>
                   </span>
                 ) : (
                   <span className="muted">—</span>

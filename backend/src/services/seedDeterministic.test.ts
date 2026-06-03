@@ -1,28 +1,28 @@
-import fs from "fs";
-import path from "path";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import fs from 'fs';
+import path from 'path';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-const TEST_DB_PATH = path.join("/tmp", `stellar-goal-vault-seed-${process.pid}.db`);
+const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-seed-${process.pid}.db`);
 process.env.DB_PATH = TEST_DB_PATH;
 
-type DbModule = typeof import("./db");
-type SeedModule = typeof import("./seedDeterministic");
+type DbModule = typeof import('./db');
+type SeedModule = typeof import('./seedDeterministic');
 
-let getDb: DbModule["getDb"];
-let seedDeterministicState: SeedModule["seedDeterministicState"];
+let getDb: DbModule['getDb'];
+let seedDeterministicState: SeedModule['seedDeterministicState'];
 
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
-  ({ getDb } = await import("./db"));
-  ({ seedDeterministicState } = await import("./seedDeterministic"));
+  ({ getDb } = await import('./db'));
+  ({ seedDeterministicState } = await import('./seedDeterministic'));
 });
 
 beforeEach(() => {
   seedDeterministicState();
 });
 
-describe("deterministic seed state", () => {
-  it("produces stable campaign and pledge rows across repeated runs", () => {
+describe('deterministic seed state', () => {
+  it('produces stable campaign and pledge rows across repeated runs', () => {
     const db = getDb();
     const firstCampaigns = db
       .prepare(

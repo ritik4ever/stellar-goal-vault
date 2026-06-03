@@ -9,6 +9,9 @@
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
     "build": "cd backend && npm run build && cd ../frontend && npm run build",
+    "test:visual": "npx playwright test --config=playwright.visual.config.ts",
+    "format": "npx prettier --write \"**/*.{ts,tsx,json}\"",
+    "format:check": "npx prettier --check \"**/*.{ts,tsx,json}\"",
     "deploy:contract": "./scripts/deploy.sh"
   },
   "license": "MIT",
@@ -25,6 +28,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.0",
-    "playwright": "^1.59.1"
+    "playwright": "^1.59.1",
+    "prettier": "^3.0.0"
   }
 }

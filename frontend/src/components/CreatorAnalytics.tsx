@@ -22,16 +22,12 @@ export const CreatorAnalytics: React.FC<CreatorAnalyticsProps> = ({
     }
 
     const creatorCampaigns = campaigns.filter(
-      (c) => c.creator.toLowerCase() === creatorAddress.toLowerCase()
+      (c) => c.creator.toLowerCase() === creatorAddress.toLowerCase(),
     );
 
-    const fundedCampaigns = creatorCampaigns.filter(
-      (c) => c.progress.status === 'funded'
-    ).length;
+    const fundedCampaigns = creatorCampaigns.filter((c) => c.progress.status === 'funded').length;
 
-    const claimedVaults = creatorCampaigns.filter(
-      (c) => c.progress.status === 'claimed'
-    ).length;
+    const claimedVaults = creatorCampaigns.filter((c) => c.progress.status === 'claimed').length;
 
     return {
       campaignsCreated: creatorCampaigns.length,
