@@ -52,8 +52,23 @@ export const createCampaignPayloadSchema = z.object({
   deadline: unixTimestampSchema,
   metadata: z
     .object({
-      imageUrl: z.string().url().optional(),
-      externalLink: z.string().url().optional(),
+      // SSRF protection: only https:// URLs are accepted (#308)
+      imageUrl: z
+        .string()
+        .url("imageUrl must be a valid URL")
+        .refine(
+          (url) => url.startsWith("https://"),
+          "Only https:// URLs are allowed for imageUrl (SSRF protection)",
+        )
+        .optional(),
+      externalLink: z
+        .string()
+        .url("externalLink must be a valid URL")
+        .refine(
+          (url) => url.startsWith("https://"),
+          "Only https:// URLs are allowed for externalLink (SSRF protection)",
+        )
+        .optional(),
     })
     .optional(),
   maxPerContributor: optionalPositiveIntSchema,
