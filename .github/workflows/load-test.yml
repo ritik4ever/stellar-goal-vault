@@ -1,0 +1,18 @@
+name: Load Test
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install autocannon
+        run: npm install -g autocannon
+      - name: Run load test
+        run: |
+          autocannon --connections 50 --duration 30 \
+            ${{ secrets.STAGING_URL }}/api/health
