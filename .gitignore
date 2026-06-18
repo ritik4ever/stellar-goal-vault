@@ -10,3 +10,9 @@ contracts/target/
 contracts/.stellar/
 backend/data/
 CLAUDE.md
+.vscode/
+.idea/
+dist/
+build/
+.DS_Store
+.env.local
