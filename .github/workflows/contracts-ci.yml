@@ -64,17 +64,36 @@ jobs:
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release
 
-      - name: Report WASM binary size
+      - name: Optimize WASM with wasm-opt
         working-directory: contracts
         run: |
           WASM_FILE=$(find target/wasm32-unknown-unknown/release -name "*.wasm" | head -1)
           if [ -n "$WASM_FILE" ]; then
-            SIZE_BYTES=$(wc -c < "$WASM_FILE")
-            SIZE_KB=$(echo "scale=2; $SIZE_BYTES / 1024" | bc)
+            echo "Optimizing $WASM_FILE with wasm-opt..."
+            cp "$WASM_FILE" "${WASM_FILE}.unoptimized"
+            npx -y wasm-opt@latest "$WASM_FILE" -Oz -o "$WASM_FILE" 2>/dev/null || \
+              echo "wasm-opt not available, skipping optimization."
+          else
+            echo "No WASM file found."
+          fi
+
+      - name: Report WASM binary size before and after
+        working-directory: contracts
+        run: |
+          WASM_FILE=$(find target/wasm32-unknown-unknown/release -name "*.wasm" | head -1)
+          if [ -n "$WASM_FILE" ]; then
+            SIZE_KB=$(echo "scale=2; $(wc -c < "$WASM_FILE") / 1024" | bc)
             echo "### WASM Binary Size" >> $GITHUB_STEP_SUMMARY
             echo "| File | Size |" >> $GITHUB_STEP_SUMMARY
             echo "|------|------|" >> $GITHUB_STEP_SUMMARY
-            echo "| \`$WASM_FILE\` | ${SIZE_KB} KB (${SIZE_BYTES} bytes) |" >> $GITHUB_STEP_SUMMARY
+            echo "| \`$(basename $WASM_FILE)\` | ${SIZE_KB} KB (wasm-opt -Oz) |" >> $GITHUB_STEP_SUMMARY
+            if [ -f "${WASM_FILE}.unoptimized" ]; then
+              RAW_KB=$(echo "scale=2; $(wc -c < "${WASM_FILE}.unoptimized") / 1024" | bc)
+              SAVING=$(echo "scale=1; (1 - $(wc -c < "$WASM_FILE") / $(wc -c < "${WASM_FILE}.unoptimized")) * 100" | bc)
+              echo "| Raw build | ${RAW_KB} KB |" >> $GITHUB_STEP_SUMMARY
+              echo "| Reduction | ${SAVING}% |" >> $GITHUB_STEP_SUMMARY
+              rm -f "${WASM_FILE}.unoptimized"
+            fi
           else
             echo "No WASM file found." >> $GITHUB_STEP_SUMMARY
           fi
