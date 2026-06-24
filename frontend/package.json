@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@stellar/freighter-api": "^2.0.0",
-    "@stellar/stellar-sdk": "^14.5.0",
+    "@stellar/stellar-sdk": "^16.0.1",
     "@tanstack/react-virtual": "^3.13.26",
     "axios": "^1.13.6",
     "lucide-react": "^0.294.0",
