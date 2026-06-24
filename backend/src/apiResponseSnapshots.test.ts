@@ -14,8 +14,8 @@ const TEST_DB_PATH = path.join(
 process.env.DB_PATH = TEST_DB_PATH;
 process.env.CONTRACT_ID = "";
 
-const CREATOR = `G${"A".repeat(55)}`;
-const CONTRIBUTOR = `G${"B".repeat(55)}`;
+const CREATOR = 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI';
+const CONTRIBUTOR = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
 
 let server: Server;
 let baseUrl: string;

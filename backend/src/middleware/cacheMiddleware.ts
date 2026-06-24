@@ -38,7 +38,8 @@ export function cacheMiddleware(ttlSeconds: number = 300) {
     if (cachedResponse) {
       res.setHeader("X-Cache", "HIT");
       res.setHeader("Content-Type", "application/json");
-      return res.send(cachedResponse);
+      res.send(cachedResponse);
+      return;
     }
 
     // Intercept response to cache it

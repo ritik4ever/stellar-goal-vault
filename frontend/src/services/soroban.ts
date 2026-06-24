@@ -1,4 +1,4 @@
-import { getNetworkDetails, requestAccess, signTransaction } from "@stellar/freighter-api";
+import { getNetworkDetails, requestAccess, signTransaction } from '@stellar/freighter-api';
 import {
   Address,
   BASE_FEE,
@@ -6,19 +6,19 @@ import {
   TransactionBuilder,
   nativeToScVal,
   rpc,
-} from "@stellar/stellar-sdk";
-import { getAppConfig } from "./api";
-import { SorobanRefundMetadata } from "../types/campaign";
+} from '@stellar/stellar-sdk';
+import { getAppConfig } from './api';
+import { SorobanRefundMetadata } from '../types/campaign';
 
 function stringifyErrorDetails(value: unknown): string {
-  if (typeof value === "string" && value.trim().length > 0) {
+  if (typeof value === 'string' && value.trim().length > 0) {
     return value;
   }
 
   try {
     return JSON.stringify(value);
   } catch {
-    return "Unknown Soroban RPC error.";
+    return 'Unknown Soroban RPC error.';
   }
 }
 
@@ -46,33 +46,30 @@ export async function submitRefundTransaction(
 
   if (!contractId || !networkPassphrase || !rpcUrl) {
     throw new Error(
-      "Soroban refund configuration is incomplete. Set the contract, network, and RPC settings on the backend.",
+      'Soroban refund configuration is incomplete. Set the contract, network, and RPC settings on the backend.',
     );
   }
 
   const walletAddress = await requestAccess();
   if (!walletAddress) {
-    throw new Error("Freighter did not return a wallet address for this refund.");
+    throw new Error('Freighter did not return a wallet address for this refund.');
   }
 
   if (walletAddress !== contributor) {
     throw new Error(
-      "The connected Freighter account must match the contributor address entered for the refund.",
+      'The connected Freighter account must match the contributor address entered for the refund.',
     );
   }
 
   const networkDetails = await getNetworkDetails().catch(() => null);
-  if (
-    networkDetails?.networkPassphrase &&
-    networkDetails.networkPassphrase !== networkPassphrase
-  ) {
+  if (networkDetails?.networkPassphrase && networkDetails.networkPassphrase !== networkPassphrase) {
     throw new Error(
-      "Freighter is connected to a different Stellar network than the configured Soroban refund flow.",
+      'Freighter is connected to a different Stellar network than the configured Soroban refund flow.',
     );
   }
 
   const server = new rpc.Server(rpcUrl, {
-    allowHttp: rpcUrl.startsWith("http://"),
+    allowHttp: rpcUrl.startsWith('http://'),
   });
 
   const sourceAccount = await server.getAccount(walletAddress);
@@ -84,8 +81,8 @@ export async function submitRefundTransaction(
   })
     .addOperation(
       contract.call(
-        "refund",
-        nativeToScVal(BigInt(campaignId), { type: "u64" }),
+        'refund',
+        nativeToScVal(BigInt(campaignId), { type: 'u64' }),
         new Address(contributor).toScVal(),
       ),
     )
@@ -107,7 +104,7 @@ export async function submitRefundTransaction(
   const signedTransaction = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
   const sendResponse = await server.sendTransaction(signedTransaction);
 
-  if (sendResponse.status === "ERROR" || !sendResponse.hash) {
+  if (sendResponse.status === 'ERROR' || !sendResponse.hash) {
     throw new Error(getSendErrorMessage(sendResponse));
   }
 

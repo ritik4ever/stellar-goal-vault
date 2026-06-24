@@ -36,12 +36,12 @@ let server: Server;
 let apiClient: AxiosInstance;
 const BASE_URL = "http://localhost";
 
-// Mock wallet addresses
-const CREATOR_1 = `GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`;
-const CREATOR_2 = `GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB`;
-const CONTRIBUTOR_1 = `GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC`;
-const CONTRIBUTOR_2 = `GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD`;
-const CONTRIBUTOR_3 = `GEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE`;
+// Mock wallet addresses (56 characters each - G + 55 more)
+const CREATOR_1 = `GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`;
+const CREATOR_2 = `GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB`;
+const CONTRIBUTOR_1 = `GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC`;
+const CONTRIBUTOR_2 = `GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD`;
+const CONTRIBUTOR_3 = `GEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE`;
 
 // ============================================================================
 // HELPERS & UTILITIES
@@ -62,6 +62,15 @@ function generateTestId(suffix: string): string {
 }
 
 /**
+ * Generate a valid 64-character hex transaction hash for testing
+ */
+function generateTxHash(prefix: string = "tx"): string {
+  const timestamp = Date.now().toString(16).padStart(12, "0");
+  const random = Math.random().toString(16).substring(2).padStart(52, "0");
+  return (timestamp + random).substring(0, 64);
+}
+
+/**
  * Create campaign with sensible defaults
  */
 async function createTestCampaign(
@@ -71,8 +80,8 @@ async function createTestCampaign(
   return apiClient.post("/api/campaigns", {
     creator: CREATOR_1,
     title: "Test Campaign",
-    description: "A test campaign",
-    assetCode: "USDC",
+    description: "A test campaign for integration testing purposes",
+    acceptedTokens: ["USDC"],
     targetAmount: 1000,
     deadline: baseTime + 86400, // 24 hours from now
     ...overrides,
@@ -90,6 +99,7 @@ async function addTestPledge(
   return apiClient.post(`/api/campaigns/${campaignId}/pledges`, {
     contributor,
     amount,
+    assetCode: "USDC",
   });
 }
 
@@ -103,7 +113,7 @@ async function claimTestCampaign(
 ): Promise<AxiosResponse<any>> {
   return apiClient.post(`/api/campaigns/${campaignId}/claim`, {
     creator,
-    transactionHash: txHash || "tx_" + generateTestId("claim"),
+    transactionHash: txHash || generateTxHash(),
   });
 }
 
@@ -144,6 +154,10 @@ beforeAll(async () => {
   // Dynamically import app after environment variables are set
   const appModule = await import("../src/index");
   const { app } = appModule;
+  
+  // Import and initialize campaign store
+  const { initCampaignStore } = await import("../src/services/campaignStore");
+  initCampaignStore();
 
   // Start server on random port
   server = app.listen(0);
@@ -201,9 +215,9 @@ describe("Campaign Lifecycle - Happy Path", () => {
 
     // Verify creation event recorded
     let history = await getCampaignHistory(campaignId);
-    expect(history.data).toHaveLength(1);
-    expect(history.data[0].eventType).toBe("created");
-    expect(history.data[0].actor).toBe(CREATOR_1);
+    expect(history.data.data).toHaveLength(1);
+    expect(history.data.data[0].eventType).toBe("created");
+    expect(history.data.data[0].actor).toBe(CREATOR_1);
 
     // Step 2: FIRST PLEDGE
     const pledge1Res = await addTestPledge(campaignId, CONTRIBUTOR_1, 400);
@@ -226,14 +240,14 @@ describe("Campaign Lifecycle - Happy Path", () => {
 
     // Verify pledge events recorded
     history = await getCampaignHistory(campaignId);
-    expect(history.data).toHaveLength(4); // created + 3 pledges
-    expect(history.data[1].eventType).toBe("pledged");
-    expect(history.data[1].amount).toBe(400);
-    expect(history.data[1].actor).toBe(CONTRIBUTOR_1);
-    expect(history.data[2].eventType).toBe("pledged");
-    expect(history.data[2].amount).toBe(350);
-    expect(history.data[3].eventType).toBe("pledged");
-    expect(history.data[3].amount).toBe(250);
+    expect(history.data.data).toHaveLength(4); // created + 3 pledges
+    expect(history.data.data[1].eventType).toBe("pledged");
+    expect(history.data.data[1].amount).toBe(400);
+    expect(history.data.data[1].actor).toBe(CONTRIBUTOR_1);
+    expect(history.data.data[2].eventType).toBe("pledged");
+    expect(history.data.data[2].amount).toBe(350);
+    expect(history.data.data[3].eventType).toBe("pledged");
+    expect(history.data.data[3].amount).toBe(250);
 
     // Step 5: Wait for deadline (or simulate it)
     // Since we set deadline in the past, campaign should be claimable now
@@ -251,10 +265,10 @@ describe("Campaign Lifecycle - Happy Path", () => {
 
     // Verify claim event recorded
     history = await getCampaignHistory(campaignId);
-    expect(history.data).toHaveLength(5); // created + 3 pledges + claim
-    expect(history.data[4].eventType).toBe("claimed");
-    expect(history.data[4].actor).toBe(CREATOR_1);
-    expect(history.data[4].amount).toBe(1000); // Full pledged amount
+    expect(history.data.data).toHaveLength(5); // created + 3 pledges + claim
+    expect(history.data.data[4].eventType).toBe("claimed");
+    expect(history.data.data[4].actor).toBe(CREATOR_1);
+    expect(history.data.data[4].amount).toBe(1000); // Full pledged amount
 
     // Step 7: NO MORE ACTIONS ALLOWED
     const newPledgeRes = await addTestPledge(campaignId, CONTRIBUTOR_3, 100);
@@ -291,7 +305,7 @@ describe("Campaign Lifecycle - Edge Cases", () => {
 
     // Verify only one claim event
     const history = await getCampaignHistory(campaignId);
-    const claimEvents = history.data.filter((e: any) => e.eventType === "claimed");
+    const claimEvents = history.data.data.filter((e: any) => e.eventType === "claimed");
     expect(claimEvents).toHaveLength(1);
   });
 
@@ -380,7 +394,7 @@ describe("Campaign Lifecycle - Edge Cases", () => {
 
     // Verify refund events
     const history = await getCampaignHistory(campaignId);
-    const refundEvents = history.data.filter((e: any) => e.eventType === "refunded");
+    const refundEvents = history.data.data.filter((e: any) => e.eventType === "refunded");
     expect(refundEvents).toHaveLength(2);
     expect(refundEvents[0].actor).toBe(CONTRIBUTOR_1);
     expect(refundEvents[0].amount).toBe(300);
@@ -445,7 +459,7 @@ describe("Campaign Lifecycle - Authorization & Validation", () => {
 
     // Verify no claim event recorded
     const history = await getCampaignHistory(campaignId);
-    const claimEvents = history.data.filter((e: any) => e.eventType === "claimed");
+    const claimEvents = history.data.data.filter((e: any) => e.eventType === "claimed");
     expect(claimEvents).toHaveLength(0);
   });
 
@@ -607,32 +621,32 @@ describe("Campaign Lifecycle - State Consistency", () => {
 
     // Get full history
     const history = await getCampaignHistory(campaignId);
-    expect(history.data).toHaveLength(5); // created + 3 pledges + claim
+    expect(history.data.data).toHaveLength(5); // created + 3 pledges + claim
 
     // Verify event order and types
-    expect(history.data[0].eventType).toBe("created");
-    expect(history.data[1].eventType).toBe("pledged");
-    expect(history.data[2].eventType).toBe("pledged");
-    expect(history.data[3].eventType).toBe("pledged");
-    expect(history.data[4].eventType).toBe("claimed");
+    expect(history.data.data[0].eventType).toBe("created");
+    expect(history.data.data[1].eventType).toBe("pledged");
+    expect(history.data.data[2].eventType).toBe("pledged");
+    expect(history.data.data[3].eventType).toBe("pledged");
+    expect(history.data.data[4].eventType).toBe("claimed");
 
     // Verify timestamps are in order
-    for (let i = 1; i < history.data.length; i++) {
-      expect(history.data[i].timestamp).toBeGreaterThanOrEqual(history.data[i - 1].timestamp);
+    for (let i = 1; i < history.data.data.length; i++) {
+      expect(history.data.data[i].timestamp).toBeGreaterThanOrEqual(history.data.data[i - 1].timestamp);
     }
 
     // Verify actors
-    expect(history.data[0].actor).toBe(CREATOR_1);
-    expect(history.data[1].actor).toBe(CONTRIBUTOR_1);
-    expect(history.data[2].actor).toBe(CONTRIBUTOR_2);
-    expect(history.data[3].actor).toBe(CONTRIBUTOR_3);
-    expect(history.data[4].actor).toBe(CREATOR_1);
+    expect(history.data.data[0].actor).toBe(CREATOR_1);
+    expect(history.data.data[1].actor).toBe(CONTRIBUTOR_1);
+    expect(history.data.data[2].actor).toBe(CONTRIBUTOR_2);
+    expect(history.data.data[3].actor).toBe(CONTRIBUTOR_3);
+    expect(history.data.data[4].actor).toBe(CREATOR_1);
 
     // Verify amounts
-    expect(history.data[1].amount).toBe(300);
-    expect(history.data[2].amount).toBe(400);
-    expect(history.data[3].amount).toBe(300);
-    expect(history.data[4].amount).toBe(1000); // Total claimed
+    expect(history.data.data[1].amount).toBe(300);
+    expect(history.data.data[2].amount).toBe(400);
+    expect(history.data.data[3].amount).toBe(300);
+    expect(history.data.data[4].amount).toBe(1000); // Total claimed
   });
 
   it("should handle multiple independent campaigns in parallel", async () => {
@@ -681,8 +695,8 @@ describe("Campaign Lifecycle - State Consistency", () => {
     const history1 = await getCampaignHistory(campaign1Id);
     const history2 = await getCampaignHistory(campaign2Id);
 
-    expect(history1.data).toHaveLength(3); // created + 1 pledge + claim
-    expect(history2.data).toHaveLength(4); // created + 2 pledges + claim
+    expect(history1.data.data).toHaveLength(3); // created + 1 pledge + claim
+    expect(history2.data.data).toHaveLength(4); // created + 2 pledges + claim
   });
 });
 
@@ -693,6 +707,24 @@ describe("Campaign API - Health & Stability", () => {
     expect(res.data.status).toBe("ok");
     expect(res.data.database.status).toBe("up");
     expect(res.data.database.reachable).toBe(true);
+  });
+
+  it("should reject payloads larger than the configured limit (413 Payload Too Large)", async () => {
+    // Generate a ~20KB payload
+    const largeDescription = "A".repeat(20 * 1024);
+    
+    const res = await apiClient.post("/api/campaigns", {
+      creator: CREATOR_1,
+      title: "Oversized Campaign",
+      description: largeDescription,
+      assetCode: "USDC",
+      targetAmount: 1000,
+      deadline: nowInSeconds() + 86400,
+    });
+
+    expect(res.status).toBe(413);
+    expect(res.data.success).toBe(false);
+    expect(res.data.error.code).toBe("PAYLOAD_TOO_LARGE");
   });
 
   it("should handle concurrent requests without data corruption", async () => {
@@ -722,5 +754,322 @@ describe("Campaign API - Health & Stability", () => {
     const ids = responses.map((r: AxiosResponse<any>) => r.data.data.id);
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(5); // All unique
+  });
+});
+
+describe("Pledge Reconcile Flow - Integration", () => {
+  it("should complete full reconcile flow: Create -> Pledge -> Reconcile -> Verify History", async () => {
+    // Step 1: CREATE CAMPAIGN
+    const creationRes = await createTestCampaign({
+      creator: CREATOR_1,
+      title: "On-Chain Reconcile Campaign",
+      description: "Testing full reconcile flow with blockchain integration",
+      acceptedTokens: ["USDC"],
+      targetAmount: 1000,
+      deadline: nowInSeconds() + 86400, // 24 hours from now
+    });
+
+    expect(creationRes.status).toBe(201);
+    const campaign = creationRes.data.data;
+    const campaignId = campaign.id;
+
+    expect(campaign.creator).toBe(CREATOR_1);
+    expect(campaign.progress.status).toBe("open");
+    expect(campaign.pledgedAmount).toBe(0);
+
+    // Verify creation event recorded
+    let history = await getCampaignHistory(campaignId);
+    expect(history.data.data).toHaveLength(1);
+    expect(history.data.data[0].eventType).toBe("created");
+    expect(history.data.data[0].actor).toBe(CREATOR_1);
+
+    // Step 2: ADD OFF-CHAIN PLEDGE
+    const offChainPledgeRes = await addTestPledge(campaignId, CONTRIBUTOR_1, 300);
+    expect(offChainPledgeRes.status).toBe(201);
+    expect(offChainPledgeRes.data.data.pledgedAmount).toBe(300);
+
+    // Verify off-chain pledge event
+    history = await getCampaignHistory(campaignId);
+    expect(history.data.data).toHaveLength(2);
+    expect(history.data.data[1].eventType).toBe("pledged");
+    expect(history.data.data[1].actor).toBe(CONTRIBUTOR_1);
+    expect(history.data.data[1].amount).toBe(300);
+
+    // Step 3: RECONCILE ON-CHAIN PLEDGE
+    const txHash = generateTxHash();
+    const reconcileRes = await apiClient.post(
+      `/api/campaigns/${campaignId}/pledges/reconcile`,
+      {
+        contributor: CONTRIBUTOR_2,
+        amount: 450,
+        assetCode: "USDC",
+        transactionHash: txHash,
+        confirmedAt: nowInSeconds(),
+      },
+    );
+
+    expect(reconcileRes.status).toBe(201);
+    expect(reconcileRes.data.data.campaign.pledgedAmount).toBe(750); // 300 + 450
+    expect(reconcileRes.data.data.transactionHash).toBe(txHash);
+
+    // Step 4: VERIFY RECONCILE EVENT IN HISTORY
+    history = await getCampaignHistory(campaignId);
+    expect(history.data.data).toHaveLength(3); // created + off-chain pledge + reconciled pledge
+
+    const reconcileEvent = history.data.data[2];
+    expect(reconcileEvent.eventType).toBe("pledged");
+    expect(reconcileEvent.actor).toBe(CONTRIBUTOR_2);
+    expect(reconcileEvent.amount).toBe(450);
+    expect(reconcileEvent.metadata?.onChain).toBe(true);
+    expect(reconcileEvent.metadata?.reconciled).toBe(true);
+    expect(reconcileEvent.blockchainMetadata?.txHash).toBe(txHash);
+    expect(reconcileEvent.blockchainMetadata?.source).toBe("soroban");
+
+    // Step 5: VERIFY CAMPAIGN STATE
+    const campaignDetails = await getCampaignDetails(campaignId);
+    expect(campaignDetails.status).toBe(200);
+    expect(campaignDetails.data.data.pledgedAmount).toBe(750);
+    expect(campaignDetails.data.data.progress.percentFunded).toBe(75);
+
+    // Step 6: IDEMPOTENCY CHECK - Second reconcile with same hash returns existing pledge
+    const secondReconcileRes = await apiClient.post(
+      `/api/campaigns/${campaignId}/pledges/reconcile`,
+      {
+        contributor: CONTRIBUTOR_2,
+        amount: 450, // Same amount
+        assetCode: "USDC",
+        transactionHash: txHash, // Same transaction hash
+        confirmedAt: nowInSeconds(),
+      },
+    );
+
+    expect(secondReconcileRes.status).toBe(201);
+    expect(secondReconcileRes.data.data.campaign.pledgedAmount).toBe(750); // Still 750, not 1200
+
+    // Verify no duplicate event was created
+    history = await getCampaignHistory(campaignId);
+    expect(history.data.data).toHaveLength(3); // Still only 3 events
+    const pledgeEvents = history.data.data.filter((e: any) => e.eventType === "pledged");
+    expect(pledgeEvents).toHaveLength(2); // Still only 2 pledge events
+
+    // Step 7: VERIFY PLEDGES LIST
+    const pledgesRes = await apiClient.get(`/api/campaigns/${campaignId}/pledges`);
+    expect(pledgesRes.status).toBe(200);
+    expect(pledgesRes.data.data).toHaveLength(2);
+
+    // Find the reconciled pledge
+    const reconciledPledge = pledgesRes.data.data.find(
+      (p: any) => p.transactionHash === txHash,
+    );
+    expect(reconciledPledge).toBeDefined();
+    expect(reconciledPledge.contributor).toBe(CONTRIBUTOR_2);
+    expect(reconciledPledge.amount).toBe(450);
+    expect(reconciledPledge.transactionHash).toBe(txHash);
+  });
+
+  it("should prevent reconciling pledge that exceeds campaign target", async () => {
+    // Create campaign with low target
+    const creationRes = await createTestCampaign({
+      targetAmount: 500,
+      deadline: nowInSeconds() + 86400,
+    });
+    const campaignId = creationRes.data.data.id;
+
+    // Add pledge close to target
+    await addTestPledge(campaignId, CONTRIBUTOR_1, 400);
+
+    // Try to reconcile pledge that would exceed target
+    const txHash = generateTxHash();
+    const reconcileRes = await apiClient.post(
+      `/api/campaigns/${campaignId}/pledges/reconcile`,
+      {
+        contributor: CONTRIBUTOR_2,
+        amount: 200, // Would make total 600, exceeding 500 target
+        assetCode: "USDC",
+        transactionHash: txHash,
+        confirmedAt: nowInSeconds(),
+      },
+    );
+
+    expect(reconcileRes.status).toBe(400);
+    expect(reconcileRes.data.error.code).toBe("CAMPAIGN_FUNDING_CAP_EXCEEDED");
+
+    // Verify campaign state unchanged
+    const campaignDetails = await getCampaignDetails(campaignId);
+    expect(campaignDetails.data.data.pledgedAmount).toBe(400);
+
+    // Verify no reconcile event was recorded
+    const history = await getCampaignHistory(campaignId);
+    const pledgeEvents = history.data.data.filter((e: any) => e.eventType === "pledged");
+    expect(pledgeEvents).toHaveLength(1); // Only the first pledge
+  });
+
+  it("should prevent reconciling pledge to closed campaign", async () => {
+    // Create campaign with short deadline
+    const creationRes = await createTestCampaign({
+      targetAmount: 1000,
+      deadline: nowInSeconds() + 2, // Very short deadline (2 seconds)
+    });
+    const campaignId = creationRes.data.data.id;
+
+    // Add pledge to reach target
+    await addTestPledge(campaignId, CONTRIBUTOR_1, 1000);
+
+    // Wait for deadline to pass
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    // Claim the campaign (should succeed since target is reached and deadline passed)
+    const claimRes = await claimTestCampaign(campaignId, CREATOR_1);
+    expect(claimRes.status).toBe(200);
+
+    // Verify campaign is claimed
+    const campaignDetails = await getCampaignDetails(campaignId);
+    expect(campaignDetails.data.data.progress.status).toBe("claimed");
+
+    // Try to reconcile pledge to claimed campaign
+    const txHash = generateTxHash();
+    const reconcileRes = await apiClient.post(
+      `/api/campaigns/${campaignId}/pledges/reconcile`,
+      {
+        contributor: CONTRIBUTOR_2,
+        amount: 100,
+        assetCode: "USDC",
+        transactionHash: txHash,
+        confirmedAt: nowInSeconds(),
+      },
+    );
+
+    expect(reconcileRes.status).toBe(400);
+    expect(reconcileRes.data.error.code).toBe("INVALID_CAMPAIGN_STATE");
+
+    // Verify campaign state unchanged
+    const finalDetails = await getCampaignDetails(campaignId);
+    expect(finalDetails.data.data.pledgedAmount).toBe(1000);
+  });
+
+  it("should reject reconcile with transaction hash from different campaign", async () => {
+    // Create two campaigns
+    const campaign1Res = await createTestCampaign({
+      creator: CREATOR_1,
+      title: "Campaign 1",
+      targetAmount: 500,
+      deadline: nowInSeconds() + 86400,
+    });
+    const campaign1Id = campaign1Res.data.data.id;
+
+    const campaign2Res = await createTestCampaign({
+      creator: CREATOR_2,
+      title: "Campaign 2",
+      targetAmount: 800,
+      deadline: nowInSeconds() + 86400,
+    });
+    const campaign2Id = campaign2Res.data.data.id;
+
+    // Reconcile pledge to campaign 1
+    const txHash = generateTxHash();
+    const reconcile1Res = await apiClient.post(
+      `/api/campaigns/${campaign1Id}/pledges/reconcile`,
+      {
+        contributor: CONTRIBUTOR_1,
+        amount: 200,
+        assetCode: "USDC",
+        transactionHash: txHash,
+        confirmedAt: nowInSeconds(),
+      },
+    );
+    expect(reconcile1Res.status).toBe(201);
+
+    // Try to use same transaction hash for campaign 2
+    const reconcile2Res = await apiClient.post(
+      `/api/campaigns/${campaign2Id}/pledges/reconcile`,
+      {
+        contributor: CONTRIBUTOR_2,
+        amount: 300,
+        assetCode: "USDC",
+        transactionHash: txHash, // Same hash
+        confirmedAt: nowInSeconds(),
+      },
+    );
+
+    expect(reconcile2Res.status).toBe(409);
+    expect(reconcile2Res.data.error.code).toBe("TRANSACTION_HASH_CONFLICT");
+
+    // Verify campaign 2 state unchanged
+    const campaign2Details = await getCampaignDetails(campaign2Id);
+    expect(campaign2Details.data.data.pledgedAmount).toBe(0);
+  });
+
+  it("should handle multiple reconciled pledges from different contributors", async () => {
+    // Create campaign
+    const creationRes = await createTestCampaign({
+      targetAmount: 1000,
+      deadline: nowInSeconds() + 86400,
+    });
+    const campaignId = creationRes.data.data.id;
+
+    // Reconcile multiple pledges
+    const txHash1 = generateTxHash();
+    const txHash2 = generateTxHash();
+    const txHash3 = generateTxHash();
+
+    const reconcile1 = await apiClient.post(
+      `/api/campaigns/${campaignId}/pledges/reconcile`,
+      {
+        contributor: CONTRIBUTOR_1,
+        amount: 250,
+        assetCode: "USDC",
+        transactionHash: txHash1,
+        confirmedAt: nowInSeconds(),
+      },
+    );
+    expect(reconcile1.status).toBe(201);
+
+    const reconcile2 = await apiClient.post(
+      `/api/campaigns/${campaignId}/pledges/reconcile`,
+      {
+        contributor: CONTRIBUTOR_2,
+        amount: 350,
+        assetCode: "USDC",
+        transactionHash: txHash2,
+        confirmedAt: nowInSeconds() + 1,
+      },
+    );
+    expect(reconcile2.status).toBe(201);
+
+    const reconcile3 = await apiClient.post(
+      `/api/campaigns/${campaignId}/pledges/reconcile`,
+      {
+        contributor: CONTRIBUTOR_3,
+        amount: 400,
+        assetCode: "USDC",
+        transactionHash: txHash3,
+        confirmedAt: nowInSeconds() + 2,
+      },
+    );
+    expect(reconcile3.status).toBe(201);
+
+    // Verify total pledged amount
+    const campaignDetails = await getCampaignDetails(campaignId);
+    expect(campaignDetails.data.data.pledgedAmount).toBe(1000);
+    expect(campaignDetails.data.data.progress.status).toBe("funded");
+
+    // Verify all events in history
+    const history = await getCampaignHistory(campaignId);
+    expect(history.data.data).toHaveLength(4); // created + 3 reconciled pledges
+
+    const pledgeEvents = history.data.data.filter((e: any) => e.eventType === "pledged");
+    expect(pledgeEvents).toHaveLength(3);
+
+    // Verify all are marked as on-chain and reconciled
+    pledgeEvents.forEach((event: any) => {
+      expect(event.metadata?.onChain).toBe(true);
+      expect(event.metadata?.reconciled).toBe(true);
+      expect(event.blockchainMetadata?.source).toBe("soroban");
+      expect(event.blockchainMetadata?.txHash).toBeDefined();
+    });
+
+    // Verify transaction hashes are unique
+    const txHashes = pledgeEvents.map((e: any) => e.blockchainMetadata?.txHash);
+    expect(new Set(txHashes).size).toBe(3);
   });
 });

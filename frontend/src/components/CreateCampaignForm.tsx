@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useState } from "react";
-import { ApiError, CreateCampaignPayload } from "../types/campaign";
-import { FormErrors, isFormValid, validateForm } from "../utils/validation";
+import { FormEvent, useEffect, useState } from 'react';
+import { ApiError, CreateCampaignPayload } from '../types/campaign';
+import { FormErrors, isFormValid, validateForm } from '../utils/validation';
 
 interface CreateCampaignFormProps {
   onCreate: (payload: CreateCampaignPayload) => Promise<void>;
@@ -9,14 +9,14 @@ interface CreateCampaignFormProps {
 }
 
 const INITIAL_VALUES = {
-  creator: "",
-  title: "",
-  description: "",
-  acceptedTokens: ["USDC"],
-  targetAmount: "250",
-  deadlineHours: "72",
-  imageUrl: "",
-  externalLink: "",
+  creator: '',
+  title: '',
+  description: '',
+  acceptedTokens: ['USDC'],
+  targetAmount: '250',
+  deadlineHours: '72',
+  imageUrl: '',
+  externalLink: '',
 };
 
 export function CreateCampaignForm({
@@ -24,7 +24,7 @@ export function CreateCampaignForm({
   allowedAssets = [],
   apiError,
 }: CreateCampaignFormProps) {
-  const assetOptions = allowedAssets.length > 0 ? allowedAssets : ["USDC"];
+  const assetOptions = allowedAssets.length > 0 ? allowedAssets : ['USDC'];
   const [values, setValues] = useState({
     ...INITIAL_VALUES,
     acceptedTokens: assetOptions.slice(0, 1),
@@ -58,8 +58,8 @@ export function CreateCampaignForm({
     const nextTokens = values.acceptedTokens.includes(token)
       ? values.acceptedTokens.filter((t) => t !== token)
       : [...values.acceptedTokens, token];
-    
-    update("acceptedTokens", nextTokens);
+
+    update('acceptedTokens', nextTokens);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -79,7 +79,7 @@ export function CreateCampaignForm({
         creator: values.creator.trim(),
         title: values.title.trim(),
         description: values.description.trim(),
-        acceptedTokens: values.acceptedTokens.map(t => t.trim().toUpperCase()),
+        acceptedTokens: values.acceptedTokens.map((t) => t.trim().toUpperCase()),
         targetAmount: Number(values.targetAmount),
         deadline,
         metadata: {
@@ -104,8 +104,7 @@ export function CreateCampaignForm({
       <div className="section-heading">
         <h2>Create Campaign</h2>
         <p className="muted">
-          Spin up a Stellar goal vault for contributors and prototype the funding
-          lifecycle.
+          Spin up a Stellar goal vault for contributors and prototype the funding lifecycle.
         </p>
       </div>
 
@@ -115,9 +114,9 @@ export function CreateCampaignForm({
           <input
             type="text"
             value={values.creator}
-            onChange={(event) => update("creator", event.target.value)}
+            onChange={(event) => update('creator', event.target.value)}
             placeholder="G... creator public key"
-            className={validationErrors.creator ? "input-error" : ""}
+            className={validationErrors.creator ? 'input-error' : ''}
             required
           />
           {validationErrors.creator ? (
@@ -130,11 +129,11 @@ export function CreateCampaignForm({
           <input
             type="text"
             value={values.title}
-            onChange={(event) => update("title", event.target.value)}
+            onChange={(event) => update('title', event.target.value)}
             placeholder="Stellar community design sprint"
             minLength={4}
             maxLength={80}
-            className={validationErrors.title ? "input-error" : ""}
+            className={validationErrors.title ? 'input-error' : ''}
             required
           />
           {validationErrors.title ? (
@@ -146,12 +145,12 @@ export function CreateCampaignForm({
           <span>Description</span>
           <textarea
             value={values.description}
-            onChange={(event) => update("description", event.target.value)}
+            onChange={(event) => update('description', event.target.value)}
             placeholder="Describe what the campaign funds, who benefits, and the delivery plan."
             rows={5}
             minLength={20}
             maxLength={500}
-            className={validationErrors.description ? "input-error" : ""}
+            className={validationErrors.description ? 'input-error' : ''}
             required
           />
           {validationErrors.description ? (
@@ -185,8 +184,8 @@ export function CreateCampaignForm({
             min="0.01"
             step="0.01"
             value={values.targetAmount}
-            onChange={(event) => update("targetAmount", event.target.value)}
-            className={validationErrors.targetAmount ? "input-error" : ""}
+            onChange={(event) => update('targetAmount', event.target.value)}
+            className={validationErrors.targetAmount ? 'input-error' : ''}
             required
           />
           {validationErrors.targetAmount ? (
@@ -201,8 +200,8 @@ export function CreateCampaignForm({
             min="0.0001"
             step="0.0001"
             value={values.deadlineHours}
-            onChange={(event) => update("deadlineHours", event.target.value)}
-            className={validationErrors.deadlineHours ? "input-error" : ""}
+            onChange={(event) => update('deadlineHours', event.target.value)}
+            className={validationErrors.deadlineHours ? 'input-error' : ''}
             required
           />
           {validationErrors.deadlineHours ? (
@@ -216,7 +215,7 @@ export function CreateCampaignForm({
             <input
               type="url"
               value={values.imageUrl}
-              onChange={(event) => update("imageUrl", event.target.value)}
+              onChange={(event) => update('imageUrl', event.target.value)}
               placeholder="https://example.com/image.png"
             />
           </label>
@@ -226,7 +225,7 @@ export function CreateCampaignForm({
             <input
               type="url"
               value={values.externalLink}
-              onChange={(event) => update("externalLink", event.target.value)}
+              onChange={(event) => update('externalLink', event.target.value)}
               placeholder="https://example.com/project"
             />
           </label>
@@ -247,7 +246,7 @@ export function CreateCampaignForm({
             {apiError.code ? (
               <small className="error-meta">
                 Code: {apiError.code}
-                {apiError.requestId ? ` | Request ID: ${apiError.requestId}` : ""}
+                {apiError.requestId ? ` | Request ID: ${apiError.requestId}` : ''}
               </small>
             ) : null}
           </div>
@@ -258,7 +257,7 @@ export function CreateCampaignForm({
           type="submit"
           disabled={isSubmitting || !isFormValid(validationErrors)}
         >
-          {isSubmitting ? "Creating..." : "Create campaign"}
+          {isSubmitting ? 'Creating...' : 'Create campaign'}
         </button>
       </form>
     </section>

@@ -1,5 +1,5 @@
 import { LayoutGrid } from "lucide-react";
-import { useMemo, useState } from "react";
+
 import { useDebounce } from "../hooks/useDebounce";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
@@ -12,15 +12,18 @@ import {
 import { SearchInput } from "./SearchInput";
 import { SortDropdown, SortOption } from "./SortDropdown";
 import { AddressAvatar } from "./AddressAvatar";
+import { CampaignCard } from "./CampaignCard";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 
-type StatusFilterValue = "" | CampaignStatus;
+type StatusFilterValue = '' | CampaignStatus;
 
 const STATUS_FILTERS: Array<{ value: StatusFilterValue; label: string }> = [
-  { value: "", label: "All" },
-  { value: "open", label: "Open" },
-  { value: "funded", label: "Funded" },
-  { value: "claimed", label: "Claimed" },
-  { value: "failed", label: "Failed" },
+  { value: '', label: 'All' },
+  { value: 'open', label: 'Open' },
+  { value: 'funded', label: 'Funded' },
+  { value: 'claimed', label: 'Claimed' },
+  { value: 'failed', label: 'Failed' },
 ];
 
 interface CampaignsTableProps {
@@ -33,22 +36,21 @@ interface CampaignsTableProps {
 }
 
 function formatTimestamp(value: number | string): string {
-  const date =
-    typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  const date = typeof value === 'number' ? new Date(value * 1000) : new Date(value);
 
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
-function getStatusLabel(status: Campaign["progress"]["status"]): string {
+function getStatusLabel(status: Campaign['progress']['status']): string {
   switch (status) {
-    case "open":
-      return "open";
-    case "funded":
-      return "funded";
-    case "claimed":
-      return "claimed";
-    case "failed":
-      return "failed";
+    case 'open':
+      return 'open';
+    case 'funded':
+      return 'funded';
+    case 'claimed':
+      return 'claimed';
+    case 'failed':
+      return 'failed';
     default:
       return status;
   }
@@ -58,13 +60,11 @@ export function CampaignsTable({
   campaigns,
   selectedCampaignId,
   onSelect,
+  onSearchChange,
   isLoading = false,
   invalidUrlCampaignId = null,
 }: CampaignsTableProps) {
-  const [assetCode, setAssetCode] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("");
-  const [sortBy, setSortBy] = useState<SortOption>("newest");
-  const [searchQuery, setSearchQuery] = useState("");
+
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
   useEffect(() => {
@@ -73,10 +73,7 @@ export function CampaignsTable({
 
   const isEmpty = campaigns.length === 0;
 
-  const assetOptions = useMemo(
-    () => getDistinctAssetCodes(campaigns),
-    [campaigns],
-  );
+  const assetOptions = useMemo(() => getDistinctAssetCodes(campaigns), [campaigns]);
   const statusCounts = useMemo(() => {
     const counts: Record<CampaignStatus, number> = {
       open: 0,
@@ -100,10 +97,18 @@ export function CampaignsTable({
       campaigns,
       assetCode,
       statusFilter,
-      "", // server-side search, no client search
+      '', // server-side search, no client search
     );
     return sortCampaigns(filtered, sortBy);
   }, [campaigns, assetCode, statusFilter, sortBy]);
+
+  const isMobile = useMediaQuery("(max-width: 767px)");
+
+  const virtualizer = useWindowVirtualizer({
+    count: filteredCampaigns.length,
+    estimateSize: () => (isMobile ? 180 : 72),
+    overscan: 5,
+  });
 
   if (isLoading && isEmpty) {
     return (
@@ -138,17 +143,13 @@ export function CampaignsTable({
 
       {invalidUrlCampaignId ? (
         <p className="banner-warn muted">
-          Campaign <code>#{invalidUrlCampaignId}</code> from the URL was not
-          found. Showing the first available campaign instead.
+          Campaign <code>#{invalidUrlCampaignId}</code> from the URL was not found. Showing the
+          first available campaign instead.
         </p>
       ) : null}
 
       <div className="board-controls">
-        <SearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          disabled={isLoading}
-        />
+        <SearchInput value={searchQuery} onChange={setSearchQuery} disabled={isLoading} />
         <label className="field-group" style={{ minWidth: 180 }}>
           <span>Asset:</span>
           <AssetFilterDropdown
@@ -167,16 +168,13 @@ export function CampaignsTable({
           >
             {STATUS_FILTERS.map((filter) => {
               const isActive = statusFilter === filter.value;
-              const count =
-                filter.value === ""
-                  ? statusCounts.all
-                  : statusCounts[filter.value];
+              const count = filter.value === '' ? statusCounts.all : statusCounts[filter.value];
 
               return (
                 <button
                   key={filter.label}
                   type="button"
-                  className={`status-filter-tab ${isActive ? "status-filter-tab-active" : ""}`}
+                  className={`status-filter-tab ${isActive ? 'status-filter-tab-active' : ''}`}
                   onClick={() => setStatusFilter(filter.value)}
                   aria-pressed={isActive}
                   disabled={isLoading}
@@ -190,11 +188,7 @@ export function CampaignsTable({
         </label>
         <label className="field-group" style={{ minWidth: 180 }}>
           <span>Sort:</span>
-          <SortDropdown
-            value={sortBy}
-            onChange={setSortBy}
-            disabled={isLoading}
-          />
+          <SortDropdown value={sortBy} onChange={setSortBy} disabled={isLoading} />
         </label>
       </div>
 
@@ -206,71 +200,168 @@ export function CampaignsTable({
         />
       ) : (
         <>
-          <div className="table-wrap table-only">
-            <table>
-              <thead>
-                <tr>
-                  <th>Campaign</th>
-                  <th>Creator</th>
-                  <th>Funding</th>
-                  <th>Status</th>
-                  <th>Deadline</th>
-                  <th>
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredCampaigns.map((campaign) => (
-                  <tr key={campaign.id}>
-                    <td>
-                      <div className="stacked">
-                        <strong>{campaign.title}</strong>
-                        <span className="muted">#{campaign.id}</span>
+          {!isMobile && (
+            <div className="table-wrap table-only">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Campaign</th>
+                    <th>Creator</th>
+                    <th>Funding</th>
+                    <th>Status</th>
+                    <th>Deadline</th>
+                    <th>
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {virtualizer.getVirtualItems().length > 0 && (
+                    <tr style={{ height: virtualizer.getVirtualItems()[0].start }} />
+                  )}
+                  {virtualizer.getVirtualItems().map((virtualRow) => {
+                    const campaign = filteredCampaigns[virtualRow.index];
+                    return (
+                      <tr key={campaign.id} ref={virtualizer.measureElement} data-index={virtualRow.index}>
+                        <td>
+                          <div className="stacked">
+                            <strong>{campaign.title}</strong>
+                            <span className="muted">#{campaign.id}</span>
+                          </div>
+                        </td>
+                        <td className="mono">
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
+                            }}
+                          >
+                            <AddressAvatar address={campaign.creator} size={28} />
+                            <span>{campaign.creator.slice(0, 12)}...</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="progress-copy">
+                            {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
+                            {campaign.assetCode}
+                          </div>
+                          <div className="progress-bar" aria-hidden>
+                            <div
+                              style={{
+                                width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                              }}
+                            />
+                          </div>
+                          <span className="muted">
+                            {campaign.progress.percentFunded}% funded
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            className={`badge badge-${campaign.progress.status}`}
+                          >
+                            {getStatusLabel(campaign.progress.status)}
+                          </span>
+                        </td>
+                        <td className="stacked">
+                          <span>{formatTimestamp(campaign.deadline)}</span>
+                          <span className="muted">
+                            {campaign.progress.hoursLeft}h left
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            className={
+                              selectedCampaignId === campaign.id
+                                ? "btn-secondary"
+                                : "btn-ghost"
+                            }
+                            type="button"
+                            onClick={() => onSelect(campaign.id)}
+                          >
+                            {selectedCampaignId === campaign.id
+                              ? "Selected"
+                              : "View"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {virtualizer.getVirtualItems().length > 0 && (
+                    <tr
+                      style={{
+                        height:
+                          virtualizer.getTotalSize() -
+                          virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1].end,
+                      }}
+                    />
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {isMobile && (
+            <div className="cards-only">
+              {virtualizer.getVirtualItems().length > 0 && (
+                <div style={{ height: virtualizer.getVirtualItems()[0].start }} />
+              )}
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const campaign = filteredCampaigns[virtualRow.index];
+                return (
+                  <article
+                    key={campaign.id}
+                    ref={virtualizer.measureElement}
+                    data-index={virtualRow.index}
+                    className={`campaign-card ${
+                      selectedCampaignId === campaign.id
+                        ? "campaign-card-selected"
+                        : ""
+                    }`}
+                  >
+                    <div className="campaign-card-main">
+                      <div className="campaign-card-header">
+                        <strong className="campaign-title">{campaign.title}</strong>
+                        <span className={`badge badge-${campaign.progress.status}`}>
+                          {getStatusLabel(campaign.progress.status)}
+                        </span>
                       </div>
-                    </td>
-                    <td className="mono">
                       <div
+                        className="campaign-creator mono"
                         style={{
                           display: "flex",
                           alignItems: "center",
                           gap: 10,
+                          marginBottom: 12,
                         }}
                       >
-                        <AddressAvatar address={campaign.creator} size={28} />
-                        <span>{campaign.creator.slice(0, 12)}...</span>
+                        <AddressAvatar address={campaign.creator} size={24} />
+                        <span>{campaign.creator.slice(0, 16)}...</span>
                       </div>
-                    </td>
-                    <td>
-                      <div className="progress-copy">
-                        {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-                        {campaign.assetCode}
+                      <div className="campaign-progress">
+                        <div className="progress-copy">
+                          {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
+                          {campaign.assetCode}
+                        </div>
+                        <div className="progress-bar" aria-hidden>
+                          <div
+                            style={{
+                              width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                            }}
+                          />
+                        </div>
                       </div>
-                      <div className="progress-bar" aria-hidden>
-                        <div
-                          style={{
-                            width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
-                          }}
-                        />
+                      <div className="campaign-meta">
+                        <span className="muted">
+                          {campaign.progress.hoursLeft}h left
+                        </span>
+                        <span className="muted">
+                          {formatTimestamp(campaign.deadline)}
+                        </span>
                       </div>
-                      <span className="muted">
-                        {campaign.progress.percentFunded}% funded
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`badge badge-${campaign.progress.status}`}
-                      >
-                        {getStatusLabel(campaign.progress.status)}
-                      </span>
-                    </td>
-                    <td className="stacked">
-                      <span>{formatTimestamp(campaign.deadline)}</span>
-                      <span className="muted">
-                        {campaign.progress.hoursLeft}h left
-                      </span>
-                    </td>
-                    <td>
+                    </div>
+                    <div className="campaign-card-actions">
                       <button
                         className={
                           selectedCampaignId === campaign.id
@@ -280,84 +371,9 @@ export function CampaignsTable({
                         type="button"
                         onClick={() => onSelect(campaign.id)}
                       >
-                        {selectedCampaignId === campaign.id
-                          ? "Selected"
-                          : "View"}
+                        {selectedCampaignId === campaign.id ? "Selected" : "View"}
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
 
-          <div className="cards-only">
-            {filteredCampaigns.map((campaign) => (
-              <article
-                key={campaign.id}
-                className={`campaign-card ${
-                  selectedCampaignId === campaign.id
-                    ? "campaign-card-selected"
-                    : ""
-                }`}
-              >
-                <div className="campaign-card-main">
-                  <div className="campaign-card-header">
-                    <strong className="campaign-title">{campaign.title}</strong>
-                    <span className={`badge badge-${campaign.progress.status}`}>
-                      {getStatusLabel(campaign.progress.status)}
-                    </span>
-                  </div>
-                  <div
-                    className="campaign-creator mono"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      marginBottom: 12,
-                    }}
-                  >
-                    <AddressAvatar address={campaign.creator} size={24} />
-                    <span>{campaign.creator.slice(0, 16)}...</span>
-                  </div>
-                  <div className="campaign-progress">
-                    <div className="progress-copy">
-                      {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-                      {campaign.assetCode}
-                    </div>
-                    <div className="progress-bar" aria-hidden>
-                      <div
-                        style={{
-                          width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="campaign-meta">
-                    <span className="muted">
-                      {campaign.progress.hoursLeft}h left
-                    </span>
-                    <span className="muted">
-                      {formatTimestamp(campaign.deadline)}
-                    </span>
-                  </div>
-                </div>
-                <div className="campaign-card-actions">
-                  <button
-                    className={
-                      selectedCampaignId === campaign.id
-                        ? "btn-secondary"
-                        : "btn-ghost"
-                    }
-                    type="button"
-                    onClick={() => onSelect(campaign.id)}
-                  >
-                    {selectedCampaignId === campaign.id ? "Selected" : "View"}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
         </>
       )}
     </section>

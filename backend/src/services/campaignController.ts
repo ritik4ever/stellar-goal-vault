@@ -8,8 +8,9 @@ export const getCampaigns = async (req, res) => {
 
   // Acceptance Criteria: Invalid sort values return 400
   if (!VALID_SORT_FIELDS.includes(sortBy) || !VALID_ORDERS.includes(order)) {
-    return res.status(400).json({ 
-      error: "Invalid sort field or order. Use: createdTime, deadline, pledgedAmount, or percentFunded." 
+    return res.status(400).json({
+      error:
+        'Invalid sort field or order. Use: createdTime, deadline, pledgedAmount, or percentFunded.',
     });
   }
 
@@ -20,6 +21,5 @@ export const getCampaigns = async (req, res) => {
   });
 
   res.json(campaigns);
-//  Define allowed values for Acceptance Criteria
+  //  Define allowed values for Acceptance Criteria
 };
-

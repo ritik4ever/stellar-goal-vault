@@ -1,4 +1,4 @@
-import { AxiosInstance } from "axios";
+import { AxiosInstance } from 'axios';
 
 /**
  * Test Utilities & Fixtures
@@ -26,8 +26,8 @@ export const MOCK_CONTRIBUTORS = {
 };
 
 export const MOCK_ASSETS = {
-  USDC: "USDC",
-  XLM: "XLM",
+  USDC: 'USDC',
+  XLM: 'XLM',
 };
 
 // ============================================================================
@@ -44,7 +44,7 @@ export function nowInSeconds(): number {
 /**
  * Generate a unique transaction hash for testing
  */
-export function generateTxHash(prefix = "tx"): string {
+export function generateTxHash(prefix = 'tx'): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 }
 
@@ -69,15 +69,12 @@ export function roundAmount(value: number): number {
 /**
  * Campaign creation helper with sensible defaults
  */
-export async function createCampaign(
-  apiClient: AxiosInstance,
-  overrides?: Partial<any>,
-) {
+export async function createCampaign(apiClient: AxiosInstance, overrides?: Partial<any>) {
   const baseTime = nowInSeconds();
-  return apiClient.post("/api/campaigns", {
+  return apiClient.post('/api/campaigns', {
     creator: MOCK_CREATORS.alice,
-    title: "Test Campaign",
-    description: "A test campaign",
+    title: 'Test Campaign',
+    description: 'A test campaign',
     assetCode: MOCK_ASSETS.USDC,
     targetAmount: 1000,
     deadline: baseTime + 86400,
@@ -127,7 +124,7 @@ export async function claimCampaign(
 ) {
   return apiClient.post(`/api/campaigns/${campaignId}/claim`, {
     creator,
-    transactionHash: txHash || generateTxHash("claim"),
+    transactionHash: txHash || generateTxHash('claim'),
   });
 }
 
@@ -144,7 +141,7 @@ export async function reconcilePledge(
   return apiClient.post(`/api/campaigns/${campaignId}/pledges/reconcile`, {
     contributor,
     amount,
-    transactionHash: transactionHash || generateTxHash("pledge"),
+    transactionHash: transactionHash || generateTxHash('pledge'),
   });
 }
 
@@ -164,20 +161,14 @@ export async function refundContributor(
 /**
  * Get campaign details
  */
-export async function getCampaign(
-  apiClient: AxiosInstance,
-  campaignId: string,
-) {
+export async function getCampaign(apiClient: AxiosInstance, campaignId: string) {
   return apiClient.get(`/api/campaigns/${campaignId}`);
 }
 
 /**
  * Get campaign history
  */
-export async function getCampaignHistory(
-  apiClient: AxiosInstance,
-  campaignId: string,
-) {
+export async function getCampaignHistory(apiClient: AxiosInstance, campaignId: string) {
   return apiClient.get(`/api/campaigns/${campaignId}/history`);
 }
 
@@ -194,14 +185,14 @@ export async function listCampaigns(
     limit?: number;
   },
 ) {
-  return apiClient.get("/api/campaigns", { params: filters });
+  return apiClient.get('/api/campaigns', { params: filters });
 }
 
 /**
  * Get API health status
  */
 export async function getHealth(apiClient: AxiosInstance) {
-  return apiClient.get("/api/health");
+  return apiClient.get('/api/health');
 }
 
 // ============================================================================
@@ -214,7 +205,7 @@ export async function getHealth(apiClient: AxiosInstance) {
 export function assertCampaignState(
   campaign: any,
   expectedState: {
-    status?: "open" | "funded" | "claimed" | "failed";
+    status?: 'open' | 'funded' | 'claimed' | 'failed';
     pledgedAmount?: number;
     canPledge?: boolean;
     canClaim?: boolean;
@@ -268,7 +259,7 @@ export function assertCampaignState(
 export function assertHistoryContains(
   history: any[],
   expectedEvents: Array<{
-    eventType: "created" | "pledged" | "claimed" | "refunded";
+    eventType: 'created' | 'pledged' | 'claimed' | 'refunded';
     actor?: string;
     amount?: number;
   }>,
@@ -277,7 +268,7 @@ export function assertHistoryContains(
     throw new Error(
       `Expected ${expectedEvents.length} events, got ${history.length}: ${history
         .map((e) => e.eventType)
-        .join(", ")}`,
+        .join(', ')}`,
     );
   }
 
@@ -292,15 +283,11 @@ export function assertHistoryContains(
     }
 
     if (expected.actor && actual.actor !== expected.actor) {
-      throw new Error(
-        `Event ${i}: expected actor "${expected.actor}", got "${actual.actor}"`,
-      );
+      throw new Error(`Event ${i}: expected actor "${expected.actor}", got "${actual.actor}"`);
     }
 
     if (expected.amount !== undefined && actual.amount !== expected.amount) {
-      throw new Error(
-        `Event ${i}: expected amount "${expected.amount}", got "${actual.amount}"`,
-      );
+      throw new Error(`Event ${i}: expected amount "${expected.amount}", got "${actual.amount}"`);
     }
   }
 }
@@ -308,11 +295,7 @@ export function assertHistoryContains(
 /**
  * Verify response indicates an error
  */
-export function assertError(
-  response: any,
-  expectedCode: string,
-  expectedStatus?: number,
-) {
+export function assertError(response: any, expectedCode: string, expectedStatus?: number) {
   if (expectedStatus && response.status !== expectedStatus) {
     throw new Error(
       `Expected status ${expectedStatus}, got ${response.status}. Response: ${JSON.stringify(
@@ -333,10 +316,7 @@ export function assertError(
 /**
  * Verify response indicates success
  */
-export function assertSuccess(
-  response: any,
-  expectedStatus?: number,
-) {
+export function assertSuccess(response: any, expectedStatus?: number) {
   if (expectedStatus && response.status !== expectedStatus) {
     throw new Error(
       `Expected status ${expectedStatus}, got ${response.status}. Response: ${JSON.stringify(

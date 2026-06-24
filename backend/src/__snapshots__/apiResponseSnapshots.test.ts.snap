@@ -10,12 +10,12 @@ exports[`API response snapshots > matches the campaign detail response shape 1`]
       ],
       "assetCode": "USDC",
       "createdAt": "<timestamp>",
-      "creator": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "creator": "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
       "deadline": "<deadline>",
       "description": "A stable fixture used to capture API response shapes for campaign endpoints.",
       "history": [
         {
-          "actor": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "actor": "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
           "blockchainMetadata": {
             "source": "local",
           },
@@ -34,7 +34,7 @@ exports[`API response snapshots > matches the campaign detail response shape 1`]
           "timestamp": "<timestamp>",
         },
         {
-          "actor": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "actor": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
           "amount": 75,
           "blockchainMetadata": {
             "source": "local",
@@ -62,7 +62,7 @@ exports[`API response snapshots > matches the campaign detail response shape 1`]
           "amount": 75,
           "assetCode": "USDC",
           "campaignId": "1",
-          "contributor": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "contributor": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
           "createdAt": "<timestamp>",
           "id": 1,
         },
@@ -90,7 +90,7 @@ exports[`API response snapshots > matches the campaign history response shape 1`
   "data": {
     "data": [
       {
-        "actor": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "actor": "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
         "blockchainMetadata": {
           "source": "local",
         },
@@ -109,7 +109,7 @@ exports[`API response snapshots > matches the campaign history response shape 1`
         "timestamp": "<timestamp>",
       },
       {
-        "actor": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "actor": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
         "amount": 75,
         "blockchainMetadata": {
           "source": "local",
@@ -141,7 +141,7 @@ exports[`API response snapshots > matches the campaigns list response shape 1`] 
         ],
         "assetCode": "USDC",
         "createdAt": "<timestamp>",
-        "creator": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "creator": "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
         "deadline": "<deadline>",
         "description": "A stable fixture used to capture API response shapes for campaign endpoints.",
         "history": undefined,
