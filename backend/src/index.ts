@@ -70,23 +70,22 @@ const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 app.use(
   cors({
     origin: (origin, callback) => {
-
-      }
-
-      // Check if wildcard is configured
-      if (config.corsAllowedOrigins.includes("*")) {
+      if (!origin) {
         callback(null, true);
         return;
       }
 
-      // Check if origin is in allowed list
+      if (config.corsAllowedOrigins.includes('*')) {
+        callback(null, true);
+        return;
+      }
+
       if (config.corsAllowedOrigins.includes(origin)) {
         callback(null, true);
         return;
       }
 
-      // Reject unrecognized origins
-      callback(new Error("Not allowed by CORS"));
+      callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
   }),
@@ -307,7 +306,7 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
   const data = filterCampaignList(
     campaigns.map((campaign) => ({
       ...campaign,
-      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
+      progress: calculateProgress(campaign),
     })),
     filters,
   );
@@ -383,7 +382,7 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
   });
 });
 
-
+app.post('/api/campaigns', (req: Request, res: Response) => {
   const parsedBody = createCampaignPayloadSchema.safeParse(req.body);
   if (!parsedBody.success) {
     sendValidationError(parsedBody.error.issues);
@@ -580,7 +579,6 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
       },
     });
   }
-});
 
   const statusCode = err instanceof AppError ? err.statusCode : (err.statusCode ?? 500);
   const code = err instanceof AppError ? err.code : (err.code ?? 'INTERNAL_SERVER_ERROR');
@@ -593,18 +591,11 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     },
   };
 
-  logError(
-    err,
-    {
-      event: 'request_error',
-      requestId: (req as RequestWithId).requestId,
-      method: req.method,
-      path: req.originalUrl || req.path,
-      status: statusCode,
-      code,
-    },
-    config.logLevel,
-  );
+  if (err instanceof AppError && err.details) {
+    response.error.details = err.details;
+  } else if (err.details) {
+    response.error.details = err.details;
+  }
 
   logError(
     err,
@@ -619,22 +610,8 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     config.logLevel,
   );
 
-    logError(
-      err,
-      {
-        event: "request_error",
-        requestId: (req as RequestWithId).requestId,
-        method: req.method,
-        path: req.originalUrl || req.path,
-        status: statusCode,
-        code,
-      },
-      config.logLevel,
-    );
-
-    res.status(statusCode).json(response);
-  },
-);
+  res.status(statusCode).json(response);
+});
 
 function printStartupBanner(): void {
   const isTest = process.env.NODE_ENV === 'test';
