@@ -368,32 +368,27 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
     }
   }
 
-  let whereClause = '';
   if (!options?.includeDeleted) {
     whereClauses.push(`campaigns.deleted_at IS NULL`);
   }
 
+  let whereClause = '';
   if (whereClauses.length > 0) {
-    baseQuery += ` WHERE ` + whereClauses.join(' AND ');
+    whereClause = ` WHERE ${whereClauses.join(' AND ')}`;
   }
 
-  const countQuery = `SELECT COUNT(*) as total ${baseQuery}`;
+  const countQuery = `SELECT COUNT(DISTINCT campaigns.id) as total FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause}`;
   const totalCount = (db.prepare(countQuery).get(...params) as { total: number }).total;
 
   const dataQuery = paginate
     ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC LIMIT ? OFFSET ?`
     : `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC`;
 
-  const countParams = params.slice();
-  if (paginate) {
-    countParams.push(limit, offset);
-  }
-
   const rows = (
     paginate
-      ? db.prepare(dataQuery).all(...countParams) as Array<CampaignRow & { pledge_count: number }>
-      : db.prepare(dataQuery).all(...params) as Array<CampaignRow & { pledge_count: number }>
-  );
+      ? db.prepare(dataQuery).all(...params, limit, offset)
+      : db.prepare(dataQuery).all(...params)
+  ) as Array<CampaignRow & { pledge_count: number }>;
 
   const pledgeCounts: Record<string, number> = {};
   const campaigns = rows.map((row) => {

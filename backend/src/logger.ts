@@ -52,6 +52,16 @@ function getConsoleMethod(
 }
 /* eslint-enable no-console */
 
+import { getRequestId } from './requestContext';
+
+function withRequestContext(fields: LogFields): LogFields {
+  const requestId = getRequestId();
+  if (requestId && fields.requestId === undefined) {
+    return { requestId, ...fields };
+  }
+  return fields;
+}
+
 export function logLine(
   level: LogLevel,
   event: string,
@@ -62,7 +72,7 @@ export function logLine(
     return;
   }
 
-  getConsoleMethod(level)(createLogLine(level, event, fields));
+  getConsoleMethod(level)(createLogLine(level, event, withRequestContext(fields)));
 }
 
 export function logInfo(event: string, fields: LogFields, configuredLevel: LogLevel): void {

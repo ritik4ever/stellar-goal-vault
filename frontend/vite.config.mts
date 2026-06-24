@@ -113,7 +113,18 @@ export default defineConfig(async () => {
     server: {
       port: 3000,
       proxy: {
-        '/api': 'http://localhost:3001',
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq, req) => {
+              const requestId = req.headers['x-request-id'];
+              if (typeof requestId === 'string' && requestId.trim().length > 0) {
+                proxyReq.setHeader('X-Request-ID', requestId);
+              }
+            });
+          },
+        },
       },
     },
     test: {

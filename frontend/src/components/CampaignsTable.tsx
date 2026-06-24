@@ -1,5 +1,5 @@
 import { LayoutGrid } from "lucide-react";
-
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebounce } from "../hooks/useDebounce";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
@@ -12,18 +12,17 @@ import {
 import { SearchInput } from "./SearchInput";
 import { SortDropdown, SortOption } from "./SortDropdown";
 import { AddressAvatar } from "./AddressAvatar";
-import { CampaignCard } from "./CampaignCard";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 
-type StatusFilterValue = '' | CampaignStatus;
+type StatusFilterValue = "" | CampaignStatus;
 
 const STATUS_FILTERS: Array<{ value: StatusFilterValue; label: string }> = [
-  { value: '', label: 'All' },
-  { value: 'open', label: 'Open' },
-  { value: 'funded', label: 'Funded' },
-  { value: 'claimed', label: 'Claimed' },
-  { value: 'failed', label: 'Failed' },
+  { value: "", label: "All" },
+  { value: "open", label: "Open" },
+  { value: "funded", label: "Funded" },
+  { value: "claimed", label: "Claimed" },
+  { value: "failed", label: "Failed" },
 ];
 
 interface CampaignsTableProps {
@@ -31,26 +30,30 @@ interface CampaignsTableProps {
   selectedCampaignId: string | null;
   onSelect: (campaignId: string) => void;
   onSearchChange?: (query: string) => void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
   isLoading?: boolean;
   invalidUrlCampaignId?: string | null;
 }
 
 function formatTimestamp(value: number | string): string {
-  const date = typeof value === 'number' ? new Date(value * 1000) : new Date(value);
+  const date =
+    typeof value === "number" ? new Date(value * 1000) : new Date(value);
 
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
-function getStatusLabel(status: Campaign['progress']['status']): string {
+function getStatusLabel(status: Campaign["progress"]["status"]): string {
   switch (status) {
-    case 'open':
-      return 'open';
-    case 'funded':
-      return 'funded';
-    case 'claimed':
-      return 'claimed';
-    case 'failed':
-      return 'failed';
+    case "open":
+      return "open";
+    case "funded":
+      return "funded";
+    case "claimed":
+      return "claimed";
+    case "failed":
+      return "failed";
     default:
       return status;
   }
@@ -61,19 +64,48 @@ export function CampaignsTable({
   selectedCampaignId,
   onSelect,
   onSearchChange,
+  onLoadMore,
+  hasMore = false,
+  isLoadingMore = false,
   isLoading = false,
   invalidUrlCampaignId = null,
 }: CampaignsTableProps) {
-
+  const [assetCode, setAssetCode] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("");
+  const [sortBy, setSortBy] = useState<SortOption>("newest");
+  const [searchQuery, setSearchQuery] = useState("");
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
   useEffect(() => {
     onSearchChange?.(debouncedSearchQuery);
   }, [debouncedSearchQuery, onSearchChange]);
 
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel || !onLoadMore || !hasMore) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          onLoadMore();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, onLoadMore]);
+
   const isEmpty = campaigns.length === 0;
 
-  const assetOptions = useMemo(() => getDistinctAssetCodes(campaigns), [campaigns]);
+  const assetOptions = useMemo(
+    () => getDistinctAssetCodes(campaigns),
+    [campaigns],
+  );
   const statusCounts = useMemo(() => {
     const counts: Record<CampaignStatus, number> = {
       open: 0,
@@ -97,7 +129,7 @@ export function CampaignsTable({
       campaigns,
       assetCode,
       statusFilter,
-      '', // server-side search, no client search
+      "", // server-side search, no client search
     );
     return sortCampaigns(filtered, sortBy);
   }, [campaigns, assetCode, statusFilter, sortBy]);
@@ -143,13 +175,17 @@ export function CampaignsTable({
 
       {invalidUrlCampaignId ? (
         <p className="banner-warn muted">
-          Campaign <code>#{invalidUrlCampaignId}</code> from the URL was not found. Showing the
-          first available campaign instead.
+          Campaign <code>#{invalidUrlCampaignId}</code> from the URL was not
+          found. Showing the first available campaign instead.
         </p>
       ) : null}
 
       <div className="board-controls">
-        <SearchInput value={searchQuery} onChange={setSearchQuery} disabled={isLoading} />
+        <SearchInput
+          value={searchQuery}
+          onChange={setSearchQuery}
+          disabled={isLoading}
+        />
         <label className="field-group" style={{ minWidth: 180 }}>
           <span>Asset:</span>
           <AssetFilterDropdown
@@ -168,13 +204,16 @@ export function CampaignsTable({
           >
             {STATUS_FILTERS.map((filter) => {
               const isActive = statusFilter === filter.value;
-              const count = filter.value === '' ? statusCounts.all : statusCounts[filter.value];
+              const count =
+                filter.value === ""
+                  ? statusCounts.all
+                  : statusCounts[filter.value];
 
               return (
                 <button
                   key={filter.label}
                   type="button"
-                  className={`status-filter-tab ${isActive ? 'status-filter-tab-active' : ''}`}
+                  className={`status-filter-tab ${isActive ? "status-filter-tab-active" : ""}`}
                   onClick={() => setStatusFilter(filter.value)}
                   aria-pressed={isActive}
                   disabled={isLoading}
@@ -188,7 +227,11 @@ export function CampaignsTable({
         </label>
         <label className="field-group" style={{ minWidth: 180 }}>
           <span>Sort:</span>
-          <SortDropdown value={sortBy} onChange={setSortBy} disabled={isLoading} />
+          <SortDropdown
+            value={sortBy}
+            onChange={setSortBy}
+            disabled={isLoading}
+          />
         </label>
       </div>
 
@@ -373,7 +416,29 @@ export function CampaignsTable({
                       >
                         {selectedCampaignId === campaign.id ? "Selected" : "View"}
                       </button>
+                    </div>
+                  </article>
+                );
+              })}
+              {virtualizer.getVirtualItems().length > 0 && (
+                <div
+                  style={{
+                    height:
+                      virtualizer.getTotalSize() -
+                      virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1].end,
+                  }}
+                />
+              )}
+            </div>
+          )}
 
+          <div ref={loadMoreRef} aria-hidden="true" />
+          {isLoadingMore ? (
+            <p className="muted campaigns-load-more">Loading more campaigns...</p>
+          ) : null}
+          {!hasMore && filteredCampaigns.length > 0 ? (
+            <p className="muted campaigns-end-of-list">You have reached the end of the campaign list.</p>
+          ) : null}
         </>
       )}
     </section>

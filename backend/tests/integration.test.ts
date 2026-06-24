@@ -1,9 +1,8 @@
-import axios, { AxiosInstance, AxiosResponse } from "axios";
 import fs from "fs";
-import http from "http";
 import path from "path";
+import request from "supertest";
+import type { Express } from "express";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Server } from "http";
 
 /**
  * Integration Test Suite for Campaign Lifecycle State Transitions
@@ -30,11 +29,31 @@ const TEST_DB_PATH = path.join(
 // Set environment variables BEFORE importing app
 process.env.DB_PATH = TEST_DB_PATH;
 process.env.CONTRACT_ID = "";
-process.env.PORT = "0"; // Use random available port
+process.env.NODE_ENV = "test";
 
-let server: Server;
-let apiClient: AxiosInstance;
-const BASE_URL = "http://localhost";
+let app: Express;
+
+type ApiResponse<T> = { status: number; data: T };
+
+type ApiClient = {
+  get: <T>(url: string) => Promise<ApiResponse<T>>;
+  post: <T>(url: string, body?: unknown) => Promise<ApiResponse<T>>;
+};
+
+let apiClient: ApiClient;
+
+function createInProcessApiClient(expressApp: Express): ApiClient {
+  return {
+    get: async <T>(url: string) => {
+      const response = await request(expressApp).get(url);
+      return { status: response.status, data: response.body as T };
+    },
+    post: async <T>(url: string, body?: unknown) => {
+      const response = await request(expressApp).post(url).send(body);
+      return { status: response.status, data: response.body as T };
+    },
+  };
+}
 
 // Mock wallet addresses (56 characters each - G + 55 more)
 const CREATOR_1 = `GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`;
@@ -75,7 +94,7 @@ function generateTxHash(prefix: string = "tx"): string {
  */
 async function createTestCampaign(
   overrides?: Partial<any>,
-): Promise<AxiosResponse<any>> {
+): Promise<ApiResponse<any>> {
   const baseTime = nowInSeconds();
   return apiClient.post("/api/campaigns", {
     creator: CREATOR_1,
@@ -95,7 +114,7 @@ async function addTestPledge(
   campaignId: string,
   contributor: string,
   amount: number,
-): Promise<AxiosResponse<any>> {
+): Promise<ApiResponse<any>> {
   return apiClient.post(`/api/campaigns/${campaignId}/pledges`, {
     contributor,
     amount,
@@ -110,7 +129,7 @@ async function claimTestCampaign(
   campaignId: string,
   creator: string,
   txHash?: string,
-): Promise<AxiosResponse<any>> {
+): Promise<ApiResponse<any>> {
   return apiClient.post(`/api/campaigns/${campaignId}/claim`, {
     creator,
     transactionHash: txHash || generateTxHash(),
@@ -123,7 +142,7 @@ async function claimTestCampaign(
 async function refundTestContributor(
   campaignId: string,
   contributor: string,
-): Promise<AxiosResponse<any>> {
+): Promise<ApiResponse<any>> {
   return apiClient.post(`/api/campaigns/${campaignId}/refund`, {
     contributor,
   });
@@ -132,15 +151,55 @@ async function refundTestContributor(
 /**
  * Get campaign details
  */
-async function getCampaignDetails(campaignId: string): Promise<AxiosResponse<any>> {
+async function getCampaignDetails(campaignId: string): Promise<ApiResponse<any>> {
   return apiClient.get(`/api/campaigns/${campaignId}`);
 }
 
 /**
  * Get campaign history
  */
-async function getCampaignHistory(campaignId: string): Promise<AxiosResponse<{ data: any[] }>> {
-  return apiClient.get(`/api/campaigns/${campaignId}/history`);
+async function getCampaignHistory(
+  campaignId: string,
+  options?: { page?: number; pageSize?: number },
+): Promise<ApiResponse<{ data: any[]; total: number; page: number; pageSize: number; hasMore: boolean }>> {
+  if (options?.page !== undefined) {
+    const query = new URLSearchParams({
+      page: String(options.page),
+      pageSize: String(options.pageSize ?? 20),
+    });
+    return apiClient.get(`/api/campaigns/${campaignId}/history?${query.toString()}`);
+  }
+
+  let page = 1;
+  let allEvents: any[] = [];
+  let hasMore = true;
+  let lastResponse: ApiResponse<{
+    data: any[];
+    total: number;
+    page: number;
+    pageSize: number;
+    hasMore: boolean;
+  }> | null = null;
+
+  while (hasMore) {
+    lastResponse = await apiClient.get(`/api/campaigns/${campaignId}/history?page=${page}&pageSize=100`);
+    allEvents = [...allEvents, ...lastResponse.data.data];
+    hasMore = lastResponse.data.hasMore;
+    page += 1;
+  }
+
+  allEvents.sort((left, right) => left.timestamp - right.timestamp || left.id - right.id);
+
+  return {
+    status: lastResponse?.status ?? 200,
+    data: {
+      data: allEvents,
+      total: allEvents.length,
+      page: 1,
+      pageSize: 100,
+      hasMore: false,
+    },
+  };
 }
 
 // ============================================================================
@@ -148,38 +207,19 @@ async function getCampaignHistory(campaignId: string): Promise<AxiosResponse<{ d
 // ============================================================================
 
 beforeAll(async () => {
-  // Clean up any existing test database
   fs.rmSync(TEST_DB_PATH, { force: true });
 
-  // Dynamically import app after environment variables are set
   const appModule = await import("../src/index");
-  const { app } = appModule;
-  
-  // Import and initialize campaign store
+  app = appModule.app;
+
   const { initCampaignStore } = await import("../src/services/campaignStore");
   initCampaignStore();
 
-  // Start server on random port
-  server = app.listen(0);
-  const port = (server.address() as any).port;
-
-  // Initialize API client
-  apiClient = axios.create({
-    baseURL: `${BASE_URL}:${port}`,
-    validateStatus: () => true, // Don't throw on any status code
-  });
-
-  console.log(`Integration test server started on port ${port}`);
+  apiClient = createInProcessApiClient(app);
 });
 
 afterAll(async () => {
-  // Clean up
-  return new Promise<void>((resolve) => {
-    server.close(() => {
-      fs.rmSync(TEST_DB_PATH, { force: true });
-      resolve();
-    });
-  });
+  fs.rmSync(TEST_DB_PATH, { force: true });
 });
 
 afterEach(() => {
@@ -745,13 +785,13 @@ describe("Campaign API - Health & Stability", () => {
 
     // All should succeed
     expect(responses).toHaveLength(5);
-    responses.forEach((res: AxiosResponse<any>) => {
+    responses.forEach((res: ApiResponse<any>) => {
       expect(res.status).toBe(201);
       expect(res.data.data.id).toBeDefined();
     });
 
     // Verify all campaigns are distinct
-    const ids = responses.map((r: AxiosResponse<any>) => r.data.data.id);
+    const ids = responses.map((r: ApiResponse<any>) => r.data.data.id);
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(5); // All unique
   });
@@ -1071,5 +1111,35 @@ describe("Pledge Reconcile Flow - Integration", () => {
     // Verify transaction hashes are unique
     const txHashes = pledgeEvents.map((e: any) => e.blockchainMetadata?.txHash);
     expect(new Set(txHashes).size).toBe(3);
+  });
+});
+
+describe("Campaign History Pagination", () => {
+  it("returns paginated history boundaries via supertest", async () => {
+    const { recordEvent } = await import("../src/services/eventHistory");
+    const creationRes = await createTestCampaign({
+      title: "Paginated history campaign",
+      description: "Campaign used to verify paginated history boundaries in integration tests.",
+    });
+    const campaignId = creationRes.data.data.id;
+
+    for (let index = 0; index < 25; index += 1) {
+      recordEvent(campaignId, "updated", nowInSeconds() + index, CREATOR_1, undefined, {
+        index,
+      });
+    }
+
+    const pageOne = await getCampaignHistory(campaignId, { page: 1, pageSize: 20 });
+    expect(pageOne.status).toBe(200);
+    expect(pageOne.data.page).toBe(1);
+    expect(pageOne.data.pageSize).toBe(20);
+    expect(pageOne.data.total).toBe(26);
+    expect(pageOne.data.data).toHaveLength(20);
+    expect(pageOne.data.hasMore).toBe(true);
+
+    const pageTwo = await getCampaignHistory(campaignId, { page: 2, pageSize: 20 });
+    expect(pageTwo.status).toBe(200);
+    expect(pageTwo.data.data).toHaveLength(6);
+    expect(pageTwo.data.hasMore).toBe(false);
   });
 });

@@ -4,12 +4,13 @@ import "dotenv/config";
 import express, { Request, Response } from "express";
 
 import { validateEnv } from "./validateEnv";
-import { randomUUID } from "crypto";
 import { z } from "zod";
 import path from "path";
 import { config, walletIntegrationReady } from "./config";
 import { apiKeyAuthMiddleware } from "./middleware/apiKeyAuth";
 import { cacheMiddleware } from "./middleware/cacheMiddleware";
+import { requestIdMiddleware } from "./middleware/requestId";
+import type { RequestWithId } from "./middleware/types";
 import { initRedisCache } from "./services/cache";
 
 import {
@@ -34,7 +35,7 @@ import {
   updateCampaign,
 } from './services/campaignStore';
 import { checkDbHealth } from './services/db';
-import { getCampaignHistory } from './services/eventHistory';
+import { listCampaignHistory } from './services/eventHistory';
 import { startEventIndexer } from './services/eventIndexer';
 import { fetchOpenIssues } from './services/openIssues';
 import { ensureSorobanRefundConfig, verifyRefundTransaction } from './services/sorobanRpc';
@@ -45,18 +46,15 @@ import {
   createCampaignPayloadSchema,
   createPledgePayloadSchema,
   parseCampaignListPaginationQuery,
+  parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
 } from './validation/schemas';
-import { logError, logInfo, logRequest } from './logger';
+import { logError, logInfo } from './logger';
 export const app = express();
-
-interface RequestWithId extends Request {
-  requestId?: string;
-}
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
@@ -70,23 +68,17 @@ const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 app.use(
   cors({
     origin: (origin, callback) => {
-
-      }
-
-      // Check if wildcard is configured
-      if (config.corsAllowedOrigins.includes("*")) {
+      const isDev = process.env.NODE_ENV !== 'production';
+      if (
+        !origin ||
+        config.corsAllowedOrigins.includes(origin) ||
+        config.corsAllowedOrigins.includes('*') ||
+        (isDev && config.corsAllowedOrigins.length === 0)
+      ) {
         callback(null, true);
-        return;
+      } else {
+        callback(new Error('Not allowed by CORS'));
       }
-
-      // Check if origin is in allowed list
-      if (config.corsAllowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      // Reject unrecognized origins
-      callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
   }),
@@ -137,27 +129,7 @@ function applyRateLimit(maxRequests: number) {
 
 app.use(applyRateLimit(RATE_LIMIT_MAX_REQUESTS));
 
-app.use((req: RequestWithId, res: Response, next: express.NextFunction) => {
-  req.requestId = randomUUID();
-  const startedAt = process.hrtime.bigint();
-
-  res.on('finish', () => {
-    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
-
-    logRequest(
-      {
-        requestId: req.requestId,
-        method: req.method,
-        path: req.originalUrl || req.path,
-        status: res.statusCode,
-        durationMs,
-      },
-      config.logLevel,
-    );
-  });
-
-  next();
-});
+app.use(requestIdMiddleware);
 
 function sendValidationError(issues: z.ZodIssue[]): never {
   throw new AppError(
@@ -383,7 +355,7 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
   });
 });
 
-
+app.post('/api/campaigns', (req: Request, res: Response) => {
   const parsedBody = createCampaignPayloadSchema.safeParse(req.body);
   if (!parsedBody.success) {
     sendValidationError(parsedBody.error.issues);
@@ -536,7 +508,17 @@ app.get('/api/campaigns/:id/history', (req: Request, res: Response) => {
     throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
   }
 
-  res.json({ data: getCampaignHistory(parsedId.value) });
+  const paginationParsed = parseHistoryPaginationQuery(req.query);
+  if (!paginationParsed.ok) {
+    sendValidationError(paginationParsed.issues);
+  }
+
+  const result = listCampaignHistory(parsedId.value, {
+    page: paginationParsed.page,
+    pageSize: paginationParsed.pageSize,
+  });
+
+  res.json(result);
 });
 
 app.get('/api/open-issues', async (_req: Request, res: Response) => {
@@ -569,18 +551,57 @@ app.get('/api/stats', (_req: Request, res: Response) => {
   res.json({ data: stats });
 });
 
+app.get('/api/leaderboard', (req: Request, res: Response) => {
+  try {
+    const limitParam = req.query.limit;
+    const limit = limitParam
+      ? Math.min(Math.max(parseInt(limitParam as string, 10) || 10, 1), 100)
+      : 10;
+
+    const leaderboard = getTopContributors(limit);
+    res.json({ data: leaderboard });
+  } catch (err) {
+    logError(
+      err as Error,
+      {
+        event: 'leaderboard_error',
+        requestId: (req as RequestWithId).requestId,
+      },
+      config.logLevel,
+    );
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to fetch leaderboard',
+        requestId: (req as RequestWithId).requestId,
+      },
+    });
+  }
+});
+
 app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Request payload size exceeds the maximum allowed limit',
+        requestId: (req as RequestWithId).requestId,
+      },
+    });
+  }
+
   if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({
       success: false,
       error: {
         code: 'FORBIDDEN',
         message: 'CORS policy violation',
-        requestId: (req as any).requestId,
+        requestId: (req as RequestWithId).requestId,
       },
     });
   }
-});
 
   const statusCode = err instanceof AppError ? err.statusCode : (err.statusCode ?? 500);
   const code = err instanceof AppError ? err.code : (err.code ?? 'INTERNAL_SERVER_ERROR');
@@ -593,18 +614,11 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     },
   };
 
-  logError(
-    err,
-    {
-      event: 'request_error',
-      requestId: (req as RequestWithId).requestId,
-      method: req.method,
-      path: req.originalUrl || req.path,
-      status: statusCode,
-      code,
-    },
-    config.logLevel,
-  );
+  if (err instanceof AppError && err.details) {
+    response.error.details = err.details;
+  } else if (err.details) {
+    response.error.details = err.details;
+  }
 
   logError(
     err,
@@ -619,22 +633,8 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     config.logLevel,
   );
 
-    logError(
-      err,
-      {
-        event: "request_error",
-        requestId: (req as RequestWithId).requestId,
-        method: req.method,
-        path: req.originalUrl || req.path,
-        status: statusCode,
-        code,
-      },
-      config.logLevel,
-    );
-
-    res.status(statusCode).json(response);
-  },
-);
+  res.status(statusCode).json(response);
+});
 
 function printStartupBanner(): void {
   const isTest = process.env.NODE_ENV === 'test';
@@ -672,10 +672,9 @@ function startServer() {
   startEventIndexer();
 
   // Initialize Redis cache in production
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.NODE_ENV === 'production') {
     initRedisCache().catch((error) => {
-
-      // Continue without cache if initialization fails
+      logError(error, { event: 'redis_init_failed' }, config.logLevel);
     });
   }
 

@@ -85,6 +85,14 @@ export function recordEvent(
   });
 }
 
+export interface CampaignHistoryPage {
+  data: CampaignEvent[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}
+
 /**
  * Returns all events for a given campaign in chronological order.
  *
@@ -98,6 +106,38 @@ export function getCampaignHistory(campaignId: string): CampaignEvent[] {
     .all(campaignId) as EventRow[];
 
   return rows.map(rowToEvent);
+}
+
+/**
+ * Returns a paginated slice of campaign events, newest first.
+ */
+export function listCampaignHistory(
+  campaignId: string,
+  options: { page?: number; pageSize?: number } = {},
+): CampaignHistoryPage {
+  const page = options.page ?? 1;
+  const pageSize = options.pageSize ?? 20;
+  const offset = (page - 1) * pageSize;
+
+  const db = getDb();
+  const countRow = db
+    .prepare(`SELECT COUNT(*) as total FROM campaign_events WHERE campaign_id = ?`)
+    .get(campaignId) as { total: number };
+  const total = countRow.total;
+
+  const rows = db
+    .prepare(
+      `SELECT * FROM campaign_events WHERE campaign_id = ? ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?`,
+    )
+    .all(campaignId, pageSize, offset) as EventRow[];
+
+  return {
+    data: rows.map(rowToEvent),
+    total,
+    page,
+    pageSize,
+    hasMore: page * pageSize < total,
+  };
 }
 
 /**

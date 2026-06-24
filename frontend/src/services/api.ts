@@ -8,42 +8,26 @@ import {
   ReconcilePledgePayload,
   SorobanRefundMetadata,
 } from '../types/campaign';
+import { apiRequest } from './httpClient';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
-
-type ApiErrorBody = {
-  error?: {
-    code: string;
-    message: string;
-    details?: Array<{ field: string; message: string }>;
-    requestId?: string;
+export type CampaignListResponse = {
+  data: Campaign[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
   };
 };
-
-async function parseResponse<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch(() => ({}))) as T & ApiErrorBody;
-
-  if (!response.ok) {
-    const errorMsg = body.error?.message ?? 'Unexpected API error';
-    const error = new Error(errorMsg);
-    if (body.error) {
-      (error as Error & { code?: string }).code = body.error.code;
-      (error as Error & { details?: Array<{ field: string; message: string }> }).details =
-        body.error.details;
-      (error as Error & { requestId?: string }).requestId = body.error.requestId;
-    }
-    throw error;
-  }
-
-  return body;
-}
 
 export async function listCampaigns(filters?: {
   includeDeleted?: boolean;
   search?: string;
   asset?: string;
   status?: string;
-}): Promise<Campaign[]> {
+  page?: number;
+  limit?: number;
+}): Promise<CampaignListResponse> {
   const params = new URLSearchParams();
   if (filters?.includeDeleted) {
     params.set('includeDeleted', 'true');
@@ -57,34 +41,43 @@ export async function listCampaigns(filters?: {
   if (filters?.status) {
     params.set('status', filters.status);
   }
-  const url = `${API_BASE}/campaigns${params.toString() ? `?${params.toString()}` : ''}`;
-  const response = await fetch(url);
-  const body = await parseResponse<{
-    data: Campaign[];
-    pagination?: { total: number };
-  }>(response);
-  return body.data;
+  if (filters?.page !== undefined) {
+    params.set('page', String(filters.page));
+  }
+  if (filters?.limit !== undefined) {
+    params.set('limit', String(filters.limit));
+  }
+
+  const query = params.toString();
+  return apiRequest<CampaignListResponse>({
+    url: `/campaigns${query ? `?${query}` : ''}`,
+    method: 'GET',
+  });
 }
 
 export async function getCampaign(campaignId: string): Promise<Campaign> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}`);
-  const body = await parseResponse<{ data: Campaign }>(response);
+  const body = await apiRequest<{ data: Campaign }>({
+    url: `/campaigns/${campaignId}`,
+    method: 'GET',
+  });
   return body.data;
 }
 
 export async function getAppConfig(): Promise<AppConfig> {
-  const response = await fetch(`${API_BASE}/config`);
-  const body = await parseResponse<{ data: AppConfig }>(response);
+  const body = await apiRequest<{ data: AppConfig }>({
+    url: '/config',
+    method: 'GET',
+  });
   return body.data;
 }
 
 export async function createCampaign(payload: CreateCampaignPayload): Promise<Campaign> {
-  const response = await fetch(`${API_BASE}/campaigns`, {
+  const body = await apiRequest<{ data: Campaign }>({
+    url: '/campaigns',
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    data: payload,
   });
-  const body = await parseResponse<{ data: Campaign }>(response);
   return body.data;
 }
 
@@ -92,12 +85,12 @@ export async function addPledge(
   campaignId: string,
   payload: CreatePledgePayload,
 ): Promise<Campaign> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/pledges`, {
+  const body = await apiRequest<{ data: Campaign }>({
+    url: `/campaigns/${campaignId}/pledges`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    data: payload,
   });
-  const body = await parseResponse<{ data: Campaign }>(response);
   return body.data;
 }
 
@@ -105,14 +98,14 @@ export async function reconcilePledge(
   campaignId: string,
   payload: ReconcilePledgePayload,
 ): Promise<{ campaign: Campaign; transactionHash: string }> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/pledges/reconcile`, {
+  const body = await apiRequest<{
+    data: { campaign: Campaign; transactionHash: string };
+  }>({
+    url: `/campaigns/${campaignId}/pledges/reconcile`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    data: payload,
   });
-  const body = await parseResponse<{
-    data: { campaign: Campaign; transactionHash: string };
-  }>(response);
   return body.data;
 }
 
@@ -122,23 +115,21 @@ export async function claimCampaign(
   transactionHash: string,
   confirmedAt: number,
 ): Promise<Campaign> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/claim`, {
+  const body = await apiRequest<{ data: Campaign }>({
+    url: `/campaigns/${campaignId}/claim`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ creator, transactionHash, confirmedAt }),
+    data: { creator, transactionHash, confirmedAt },
   });
-  const body = await parseResponse<{ data: Campaign }>(response);
   return body.data;
 }
 
 export async function softDeleteCampaign(campaignId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/soft-delete`, {
+  const response = await apiRequest<unknown>({
+    url: `/campaigns/${campaignId}/soft-delete`,
     method: 'POST',
   });
-  if (!response.ok) {
-    const content = await response.text();
-    throw new Error(content || 'Soft delete failed');
-  }
+  void response;
 }
 
 export async function refundCampaign(
@@ -146,23 +137,42 @@ export async function refundCampaign(
   contributor: string,
   soroban: SorobanRefundMetadata,
 ): Promise<Campaign> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/refund`, {
+  const body = await apiRequest<{ data: Campaign }>({
+    url: `/campaigns/${campaignId}/refund`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contributor, soroban }),
+    data: { contributor, soroban },
   });
-  const body = await parseResponse<{ data: Campaign }>(response);
   return body.data;
 }
 
 export async function getCampaignHistory(campaignId: string): Promise<CampaignEvent[]> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/history`);
-  const body = await parseResponse<{ data: CampaignEvent[] }>(response);
-  return body.data;
+  const allEvents: CampaignEvent[] = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore) {
+    const body = await apiRequest<{
+      data: CampaignEvent[];
+      hasMore: boolean;
+    }>({
+      url: `/campaigns/${campaignId}/history`,
+      method: 'GET',
+      params: { page, pageSize: 100 },
+    });
+
+    allEvents.push(...body.data);
+    hasMore = body.hasMore;
+    page += 1;
+  }
+
+  return allEvents.sort((left, right) => left.timestamp - right.timestamp || left.id - right.id);
 }
 
 export async function listOpenIssues(): Promise<OpenIssue[]> {
-  const response = await fetch(`${API_BASE}/open-issues`);
-  const body = await parseResponse<{ data: OpenIssue[] }>(response);
+  const body = await apiRequest<{ data: OpenIssue[] }>({
+    url: '/open-issues',
+    method: 'GET',
+  });
   return body.data;
 }
