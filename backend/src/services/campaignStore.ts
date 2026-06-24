@@ -337,8 +337,10 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
     const exactTerm = options.searchQuery.trim();
-    whereClauses.push(`(LOWER(campaigns.title) LIKE ? OR LOWER(campaigns.creator) LIKE ? OR campaigns.id = ?)`);
-    params.push(searchTerm, searchTerm, exactTerm);
+    whereClauses.push(
+      `(LOWER(campaigns.title) LIKE ? OR LOWER(campaigns.description) LIKE ? OR LOWER(campaigns.creator) LIKE ? OR campaigns.id = ? OR CAST(campaigns.id AS TEXT) LIKE ?)`,
+    );
+    params.push(searchTerm, searchTerm, searchTerm, exactTerm, searchTerm);
   }
 
   if (options?.assetCode) {
@@ -350,10 +352,12 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
     const now = Math.floor(Date.now() / 1000);
     switch (options.status) {
       case 'claimed':
-        whereClauses.push(`claimed_at IS NOT NULL`);
+        whereClauses.push(`campaigns.claimed_at IS NOT NULL`);
         break;
       case 'funded':
-        whereClauses.push(`claimed_at IS NULL AND pledged_amount >= target_amount`);
+        whereClauses.push(
+          `campaigns.claimed_at IS NULL AND campaigns.pledged_amount >= campaigns.target_amount`,
+        );
         break;
       case 'failed':
         whereClauses.push(
@@ -362,38 +366,38 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
         params.push(now);
         break;
       case 'open':
-        whereClauses.push(`claimed_at IS NULL AND pledged_amount < target_amount AND deadline > ?`);
+        whereClauses.push(
+          `campaigns.claimed_at IS NULL AND campaigns.pledged_amount < campaigns.target_amount AND campaigns.deadline > ?`,
+        );
         params.push(now);
         break;
     }
   }
 
-  let whereClause = '';
   if (!options?.includeDeleted) {
     whereClauses.push(`campaigns.deleted_at IS NULL`);
   }
 
-  if (whereClauses.length > 0) {
-    baseQuery += ` WHERE ` + whereClauses.join(' AND ');
-  }
+  const baseFrom =
+    'FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL';
+  const whereClause =
+    whereClauses.length > 0 ? ` WHERE ${whereClauses.join(' AND ')}` : '';
 
-  const countQuery = `SELECT COUNT(*) as total ${baseQuery}`;
+  const countQuery = `SELECT COUNT(DISTINCT campaigns.id) as total ${baseFrom}${whereClause}`;
   const totalCount = (db.prepare(countQuery).get(...params) as { total: number }).total;
 
   const dataQuery = paginate
-    ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC LIMIT ? OFFSET ?`
-    : `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC`;
+    ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count ${baseFrom}${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC LIMIT ? OFFSET ?`
+    : `SELECT campaigns.*, COUNT(pledges.id) as pledge_count ${baseFrom}${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC`;
 
-  const countParams = params.slice();
+  const dataParams = [...params];
   if (paginate) {
-    countParams.push(limit, offset);
+    dataParams.push(limit, offset);
   }
 
-  const rows = (
-    paginate
-      ? db.prepare(dataQuery).all(...countParams) as Array<CampaignRow & { pledge_count: number }>
-      : db.prepare(dataQuery).all(...params) as Array<CampaignRow & { pledge_count: number }>
-  );
+  const rows = db.prepare(dataQuery).all(...dataParams) as Array<
+    CampaignRow & { pledge_count: number }
+  >;
 
   const pledgeCounts: Record<string, number> = {};
   const campaigns = rows.map((row) => {

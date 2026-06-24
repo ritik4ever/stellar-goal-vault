@@ -1,0 +1,179 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`API response snapshots > matches the campaign detail response shape 1`] = `
+{
+  "data": {
+    "data": {
+      "acceptedTokens": [
+        "USDC",
+        "XLM",
+      ],
+      "assetCode": "USDC",
+      "createdAt": "<timestamp>",
+      "creator": "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
+      "deadline": "<deadline>",
+      "description": "A stable fixture used to capture API response shapes for campaign endpoints.",
+      "history": [
+        {
+          "actor": "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
+          "blockchainMetadata": {
+            "source": "local",
+          },
+          "campaignId": "1",
+          "eventType": "created",
+          "id": 1,
+          "metadata": {
+            "acceptedTokens": [
+              "USDC",
+              "XLM",
+            ],
+            "deadline": "<deadline>",
+            "targetAmount": 250,
+            "title": "Snapshot-backed community vault",
+          },
+          "timestamp": "<timestamp>",
+        },
+        {
+          "actor": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+          "amount": 75,
+          "blockchainMetadata": {
+            "source": "local",
+          },
+          "campaignId": "1",
+          "eventType": "pledged",
+          "id": 2,
+          "metadata": {
+            "assetCode": "USDC",
+            "newTotalPledged": 75,
+            "source": "backend-mvp",
+          },
+          "timestamp": "<timestamp>",
+        },
+      ],
+      "id": "1",
+      "maxPerContributor": 150,
+      "metadata": {
+        "externalLink": "https://example.com/vault",
+        "imageUrl": "https://example.com/vault.png",
+      },
+      "pledgedAmount": 75,
+      "pledges": [
+        {
+          "amount": 75,
+          "assetCode": "USDC",
+          "campaignId": "1",
+          "contributor": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+          "createdAt": "<timestamp>",
+          "id": 1,
+        },
+      ],
+      "progress": {
+        "canClaim": false,
+        "canPledge": true,
+        "canRefund": false,
+        "hoursLeft": 24,
+        "percentFunded": 30,
+        "pledgeCount": 1,
+        "remainingAmount": 175,
+        "status": "open",
+      },
+      "targetAmount": 250,
+      "title": "Snapshot-backed community vault",
+    },
+  },
+  "status": 200,
+}
+`;
+
+exports[`API response snapshots > matches the campaign history response shape 1`] = `
+{
+  "data": {
+    "data": [
+      {
+        "actor": "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
+        "blockchainMetadata": {
+          "source": "local",
+        },
+        "campaignId": "1",
+        "eventType": "created",
+        "id": 1,
+        "metadata": {
+          "acceptedTokens": [
+            "USDC",
+            "XLM",
+          ],
+          "deadline": "<deadline>",
+          "targetAmount": 250,
+          "title": "Snapshot-backed community vault",
+        },
+        "timestamp": "<timestamp>",
+      },
+      {
+        "actor": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        "amount": 75,
+        "blockchainMetadata": {
+          "source": "local",
+        },
+        "campaignId": "1",
+        "eventType": "pledged",
+        "id": 2,
+        "metadata": {
+          "assetCode": "USDC",
+          "newTotalPledged": 75,
+          "source": "backend-mvp",
+        },
+        "timestamp": "<timestamp>",
+      },
+    ],
+  },
+  "status": 200,
+}
+`;
+
+exports[`API response snapshots > matches the campaigns list response shape 1`] = `
+{
+  "data": {
+    "data": [
+      {
+        "acceptedTokens": [
+          "USDC",
+          "XLM",
+        ],
+        "assetCode": "USDC",
+        "createdAt": "<timestamp>",
+        "creator": "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
+        "deadline": "<deadline>",
+        "description": "A stable fixture used to capture API response shapes for campaign endpoints.",
+        "history": undefined,
+        "id": "1",
+        "maxPerContributor": 150,
+        "metadata": {
+          "externalLink": "https://example.com/vault",
+          "imageUrl": "https://example.com/vault.png",
+        },
+        "pledgedAmount": 75,
+        "pledges": undefined,
+        "progress": {
+          "canClaim": false,
+          "canPledge": true,
+          "canRefund": false,
+          "hoursLeft": 24,
+          "percentFunded": 30,
+          "pledgeCount": 1,
+          "remainingAmount": 175,
+          "status": "open",
+        },
+        "targetAmount": 250,
+        "title": "Snapshot-backed community vault",
+      },
+    ],
+    "pagination": {
+      "limit": 10,
+      "page": 1,
+      "total": 1,
+      "totalPages": 1,
+    },
+  },
+  "status": 200,
+}
+`;

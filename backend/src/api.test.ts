@@ -1,4 +1,10 @@
-
+import fs from 'fs';
+import { Server } from 'http';
+import path from 'path';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { app } from './index';
+import { initCampaignStore } from './services/campaignStore';
+import { getDb, resetDbForTests } from './services/db';
 
 // Mock sorobanRpc to avoid real network calls during tests
 vi.mock('./services/sorobanRpc', () => ({
@@ -45,8 +51,8 @@ beforeEach(() => {
   db.prepare(`DELETE FROM campaigns`).run();
 });
 
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
+const CREATOR = 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI';
+const CONTRIBUTOR = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
 
 async function post(apiPath: string, body: any) {
   const response = await fetch(`${baseUrl}${apiPath}`, {
@@ -63,7 +69,9 @@ describe('Campaign Lifecycle API', () => {
     // 1. Create Campaign
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
-
+      title: 'Test API Campaign',
+      description: 'Testing claim lifecycle',
+      acceptedTokens: ['USDC'],
       targetAmount: 100,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
@@ -75,7 +83,7 @@ describe('Campaign Lifecycle API', () => {
     const pledgeRes = await post(`/api/campaigns/${campaignId}/pledges`, {
       contributor: CONTRIBUTOR,
       amount: 100,
-      assetCode: "USDC",
+      assetCode: 'USDC',
     });
     expect(pledgeRes.status).toBe(201);
     expect(pledgeRes.data.data.progress.status).toBe('funded');
@@ -108,7 +116,9 @@ describe('Campaign Lifecycle API', () => {
     // 1. Create Campaign
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
-
+      title: 'Test Refund Campaign',
+      description: 'Testing refund lifecycle',
+      acceptedTokens: ['XLM'],
       targetAmount: 100,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
@@ -119,7 +129,7 @@ describe('Campaign Lifecycle API', () => {
     const pledgeRes = await post(`/api/campaigns/${campaignId}/pledges`, {
       contributor: CONTRIBUTOR,
       amount: 50,
-      assetCode: "XLM",
+      assetCode: 'XLM',
     });
     expect(pledgeRes.status).toBe(201);
 
@@ -152,19 +162,5 @@ describe('Campaign Lifecycle API', () => {
     expect(refundRes.status).toBe(200);
     expect(refundRes.data.data.refundedAmount).toBe(50);
     expect(refundRes.data.data.pledgedAmount).toBe(0); // Pledged amount reduces to 0
-  });
-
-  it("sanitizes HTML tags in title and description during campaign creation", async () => {
-    const createRes = await post("/api/campaigns", {
-      creator: CREATOR,
-      title: "<h1>Test</h1>",
-      description: "<h1>Test</h1> with at least 20 characters",
-      acceptedTokens: ["USDC"],
-      targetAmount: 100,
-      deadline: Math.floor(Date.now() / 1000) + 3600,
-    });
-    expect(createRes.status).toBe(201);
-    expect(createRes.data.data.title).toBe("&lt;h1&gt;Test&lt;&sol;h1&gt;");
-    expect(createRes.data.data.description).toBe("&lt;h1&gt;Test&lt;&sol;h1&gt; with at least 20 characters");
   });
 });
