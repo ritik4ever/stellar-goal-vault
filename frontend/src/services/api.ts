@@ -27,6 +27,8 @@ export async function listCampaigns(filters?: {
   status?: string;
   page?: number;
   limit?: number;
+  sort?: string;
+  order?: string;
 }): Promise<CampaignListResponse> {
   const params = new URLSearchParams();
   if (filters?.includeDeleted) {
@@ -46,6 +48,12 @@ export async function listCampaigns(filters?: {
   }
   if (filters?.limit !== undefined) {
     params.set('limit', String(filters.limit));
+  }
+  if (filters?.sort) {
+    params.set('sort', filters.sort);
+  }
+  if (filters?.order) {
+    params.set('order', filters.order);
   }
 
   const query = params.toString();
