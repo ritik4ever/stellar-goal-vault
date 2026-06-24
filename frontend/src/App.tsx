@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
@@ -123,6 +123,9 @@ function App() {
   const [hasMoreCampaigns, setHasMoreCampaigns] = useState(false);
   const [isLoadingMoreCampaigns, setIsLoadingMoreCampaigns] = useState(false);
   const activeSearchRef = useRef("");
+  const activeSortRef = useRef<string>('newest');
+  const activeOrderRef = useRef<string>('desc');
+  const [searchParams] = useSearchParams();
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
@@ -169,11 +172,15 @@ function App() {
     page: number,
     searchQuery = "",
     append = false,
+    sort = activeSortRef.current,
+    order = activeOrderRef.current,
   ): Promise<Awaited<ReturnType<typeof listCampaigns>>> {
     const response = await listCampaigns({
       search: searchQuery,
       page,
       limit: CAMPAIGN_PAGE_SIZE,
+      sort,
+      order,
     });
 
     setCampaigns((current) => (append ? [...current, ...response.data] : response.data));
@@ -728,6 +735,11 @@ function App() {
             onSelect={handleSelect}
             onSearchChange={(query) => {
               void refreshCampaigns(query);
+            }}
+            onSortChange={(sort, order) => {
+              activeSortRef.current = sort;
+              activeOrderRef.current = order;
+              void refreshCampaigns(activeSearchRef.current);
             }}
             onLoadMore={() => {
               void loadMoreCampaigns();

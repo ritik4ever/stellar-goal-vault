@@ -1,6 +1,7 @@
 import { LayoutGrid } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebounce } from "../hooks/useDebounce";
+import { useSearchParams } from "react-router-dom";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
 import { AssetFilterDropdown } from "./AssetFilterDropdown";
@@ -30,6 +31,7 @@ interface CampaignsTableProps {
   selectedCampaignId: string | null;
   onSelect: (campaignId: string) => void;
   onSearchChange?: (query: string) => void;
+  onSortChange?: (sort: SortOption, order: 'asc' | 'desc') => void;
   onLoadMore?: () => void;
   hasMore?: boolean;
   isLoadingMore?: boolean;
@@ -64,18 +66,35 @@ export function CampaignsTable({
   selectedCampaignId,
   onSelect,
   onSearchChange,
+  onSortChange,
   onLoadMore,
   hasMore = false,
   isLoadingMore = false,
   isLoading = false,
   invalidUrlCampaignId = null,
 }: CampaignsTableProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSort = (searchParams.get('sort') as SortOption | null) ?? 'newest';
+  const urlOrder = (searchParams.get('order') as 'asc' | 'desc' | null) ?? 'desc';
+  const VALID_SORTS: SortOption[] = ['newest', 'deadline', 'percentFunded', 'totalPledged'];
+  const sortBy: SortOption = VALID_SORTS.includes(urlSort) ? urlSort : 'newest';
   const [assetCode, setAssetCode] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("");
-  const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [searchQuery, setSearchQuery] = useState("");
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
+
+  function handleSortChange(newSort: SortOption) {
+    // Toggle order if clicking same field, else default to desc
+    const newOrder = newSort === sortBy && urlOrder === 'desc' ? 'asc' : 'desc';
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('sort', newSort);
+      next.set('order', newOrder);
+      return next;
+    }, { replace: true });
+    onSortChange?.(newSort, newOrder);
+  }
 
   useEffect(() => {
     onSearchChange?.(debouncedSearchQuery);
@@ -131,6 +150,7 @@ export function CampaignsTable({
       statusFilter,
       "", // server-side search, no client search
     );
+    // Server already sorted; only apply client-side sort as a tie-break fallback
     return sortCampaigns(filtered, sortBy);
   }, [campaigns, assetCode, statusFilter, sortBy]);
 
@@ -229,7 +249,7 @@ export function CampaignsTable({
           <span>Sort:</span>
           <SortDropdown
             value={sortBy}
-            onChange={setSortBy}
+            onChange={handleSortChange}
             disabled={isLoading}
           />
         </label>

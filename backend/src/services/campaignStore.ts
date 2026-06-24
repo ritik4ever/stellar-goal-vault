@@ -272,6 +272,9 @@ export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds())
   };
 }
 
+export type CampaignSortField = 'newest' | 'deadline' | 'percentFunded' | 'totalPledged';
+export type SortOrder = 'asc' | 'desc';
+
 export interface ListCampaignsOptions {
   searchQuery?: string;
   assetCode?: string;
@@ -279,6 +282,8 @@ export interface ListCampaignsOptions {
   includeDeleted?: boolean;
   page?: number;
   limit?: number;
+  sort?: CampaignSortField;
+  order?: SortOrder;
 }
 
 export interface ListCampaignsResult {
@@ -383,9 +388,30 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const countQuery = `SELECT COUNT(DISTINCT campaigns.id) as total FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause}`;
   const totalCount = (db.prepare(countQuery).get(...params) as { total: number }).total;
 
+  // Build ORDER BY clause from sort options
+  const sortField = options?.sort ?? 'newest';
+  const sortOrder = options?.order ?? 'desc';
+  const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
+  let orderByClause: string;
+  switch (sortField) {
+    case 'deadline':
+      orderByClause = `campaigns.deadline ${sortOrder === 'desc' ? 'DESC' : 'ASC'}`;
+      break;
+    case 'percentFunded':
+      orderByClause = `(CAST(campaigns.pledged_amount AS REAL) / CAST(campaigns.target_amount AS REAL)) ${orderDir}`;
+      break;
+    case 'totalPledged':
+      orderByClause = `campaigns.pledged_amount ${orderDir}`;
+      break;
+    case 'newest':
+    default:
+      orderByClause = `campaigns.created_at ${orderDir}`;
+      break;
+  }
+
   const dataQuery = paginate
-    ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC LIMIT ? OFFSET ?`
-    : `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY campaigns.created_at DESC`;
+    ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY ${orderByClause} LIMIT ? OFFSET ?`
+    : `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY ${orderByClause}`;
 
   const rows = (
     paginate

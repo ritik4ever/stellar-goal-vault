@@ -18,6 +18,7 @@ import {
   calculateProgress,
   CampaignProgress,
   CampaignRecord,
+  CampaignSortField,
   CampaignStatus,
   claimCampaign,
   createCampaign,
@@ -32,6 +33,7 @@ import {
   type ListCampaignsOptions,
   reconcileOnChainPledge,
   refundContributor,
+  SortOrder,
   updateCampaign,
 } from './services/campaignStore';
 import { checkDbHealth } from './services/db';
@@ -201,18 +203,28 @@ export function parseCampaignListFilters(query: {
   q?: unknown;
   search?: unknown;
   includeDeleted?: unknown;
+  sort?: unknown;
+  order?: unknown;
 }): {
   asset?: string;
   status?: CampaignStatus;
   searchQuery?: string;
   includeDeleted?: boolean;
+  sort?: CampaignSortField;
+  order?: SortOrder;
 } {
+  const VALID_SORT_FIELDS: CampaignSortField[] = ['newest', 'deadline', 'percentFunded', 'totalPledged'];
+  const VALID_ORDERS: SortOrder[] = ['asc', 'desc'];
+  const rawSort = normalizeQueryValue(query.sort);
+  const rawOrder = normalizeQueryValue(query.order);
   return {
     asset: normalizeAssetFilter(query.asset),
     status: normalizeStatusFilter(query.status),
     searchQuery:
       normalizeQueryValue(query.search) || normalizeQueryValue(query.q),
     includeDeleted: query.includeDeleted === "true",
+    sort: rawSort && VALID_SORT_FIELDS.includes(rawSort as CampaignSortField) ? (rawSort as CampaignSortField) : undefined,
+    order: rawOrder && VALID_ORDERS.includes(rawOrder as SortOrder) ? (rawOrder as SortOrder) : undefined,
   };
 }
 
@@ -261,6 +273,8 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
     q: req.query.q,
     search: req.query.search,
     includeDeleted: req.query.includeDeleted,
+    sort: req.query.sort,
+    order: req.query.order,
   });
 
   const listOptions: ListCampaignsOptions = {
@@ -268,6 +282,8 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
     assetCode: filters.asset,
     status: filters.status,
     includeDeleted: filters.includeDeleted,
+    sort: filters.sort,
+    order: filters.order,
   };
   if (paginationResult.page !== undefined) {
     listOptions.page = paginationResult.page;
