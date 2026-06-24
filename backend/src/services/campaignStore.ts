@@ -41,6 +41,7 @@ export interface CampaignRecord {
   deadline: number;
   createdAt: number;
   claimedAt?: number;
+  failedAt?: number;
   deletedAt?: number;
   metadata?: {
     imageUrl?: string;
@@ -94,6 +95,7 @@ interface CampaignRow {
   deadline: number;
   created_at: number;
   claimed_at: number | null;
+  failed_at: number | null;
   deleted_at: number | null;
   metadata_json: string | null;
   max_per_contributor: number | null;
@@ -144,6 +146,7 @@ function rowToCampaign(row: CampaignRow): CampaignRecord {
     deadline: row.deadline,
     createdAt: row.created_at,
     claimedAt: row.claimed_at ?? undefined,
+    failedAt: row.failed_at ?? undefined,
     deletedAt: row.deleted_at ?? undefined,
     metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined,
     maxPerContributor: row.max_per_contributor ?? undefined,
@@ -394,6 +397,13 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const campaigns = rows.map((row) => {
     pledgeCounts[row.id] = row.pledge_count;
     const { pledge_count, ...campaignRow } = row;
+    
+    const now = Math.floor(Date.now() / 1000);
+    if (campaignRow.claimed_at === null && campaignRow.pledged_amount < campaignRow.target_amount && now >= campaignRow.deadline && campaignRow.failed_at === null) {
+        campaignRow.failed_at = campaignRow.deadline;
+        db.prepare(`UPDATE campaigns SET failed_at = ? WHERE id = ?`).run(campaignRow.deadline, campaignRow.id);
+    }
+    
     return rowToCampaign(campaignRow as CampaignRow);
   });
 
@@ -416,7 +426,15 @@ export function getCampaign(campaignId: string): CampaignRecord | undefined {
     | CampaignRow
     | undefined;
 
-  return row ? rowToCampaign(row) : undefined;
+  if (row) {
+    const now = Math.floor(Date.now() / 1000);
+    if (row.claimed_at === null && row.pledged_amount < row.target_amount && now >= row.deadline && row.failed_at === null) {
+        row.failed_at = row.deadline;
+        db.prepare(`UPDATE campaigns SET failed_at = ? WHERE id = ?`).run(row.deadline, row.id);
+    }
+    return rowToCampaign(row);
+  }
+  return undefined;
 }
 
 /**
@@ -580,9 +598,9 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
 
   db.prepare(
     `INSERT INTO campaigns (
-      id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json, max_per_contributor
+      id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, failed_at, metadata_json, max_per_contributor
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )`,
   ).run(
     campaign.id,
@@ -594,6 +612,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     campaign.pledgedAmount,
     campaign.deadline,
     campaign.createdAt,
+    null,
     null,
     campaign.metadata ? JSON.stringify(campaign.metadata) : null,
     campaign.maxPerContributor ?? null,

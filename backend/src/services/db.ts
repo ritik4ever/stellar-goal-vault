@@ -83,6 +83,7 @@ function migrate(database: SQLiteDatabase): void {
       deadline              INTEGER NOT NULL,
       created_at            INTEGER NOT NULL,
       claimed_at            INTEGER,
+      failed_at             INTEGER,
       metadata_json         TEXT,
       max_per_contributor   INTEGER
     );
@@ -136,6 +137,11 @@ function migrate(database: SQLiteDatabase): void {
   }>;
   if (!campaignColumns.some((column) => column.name === 'deleted_at')) {
     database.exec(`ALTER TABLE campaigns ADD COLUMN deleted_at INTEGER`);
+  }
+
+  // Add failed_at column if not exists
+  if (!campaignColumns.some((column) => column.name === 'failed_at')) {
+    database.exec(`ALTER TABLE campaigns ADD COLUMN failed_at INTEGER`);
   }
 
   // Migrate asset_code to accepted_tokens_json if needed
