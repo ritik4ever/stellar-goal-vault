@@ -10,6 +10,14 @@ use soroban_sdk::{
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MIN_CONTRIBUTION: i128 = 100;
 
+/// Maximum number of distinct tokens a campaign can accept.
+/// This prevents unbounded Vec storage growth attacks where an adversary
+/// creates a campaign with thousands of token addresses, inflating the
+/// ledger entry size and forcing other validators to pay higher fees for
+/// processing oversized entries. A limit of 10 is sufficient for realistic
+/// multi-token donation campaigns while keeping storage costs predictable.
+const MAX_ACCEPTED_TOKENS: u32 = 10;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Campaign {
@@ -106,6 +114,9 @@ impl StellarGoalVaultContract {
         }
         if accepted_tokens.len() == 0 {
             panic!("at least one accepted token required");
+        }
+        if accepted_tokens.len() > MAX_ACCEPTED_TOKENS {
+            panic!("too many accepted tokens");
         }
 
         let mut next_id: u64 = env
