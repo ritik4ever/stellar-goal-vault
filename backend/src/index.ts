@@ -562,9 +562,19 @@ app.get('/api/config', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/api/stats', (_req: Request, res: Response) => {
-  const stats = getGlobalStats();
-  res.json({ data: stats });
+app.get('/api/stats', async (_req: Request, res: Response) => {
+  try {
+    const stats = getGlobalStats();
+    // Fetch on-chain campaign count if available
+    const { getCampaignCountFromContract } = await import('./services/sorobanRpc');
+    const onChainCount = await getCampaignCountFromContract();
+    stats.onChainCampaignCount = onChainCount;
+    res.json({ data: stats });
+  } catch (error) {
+    // If contract call fails, still return stats (graceful degradation)
+    const stats = getGlobalStats();
+    res.json({ data: stats });
+  }
 });
 
 app.get('/api/leaderboard', (req: Request, res: Response) => {

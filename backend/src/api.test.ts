@@ -65,6 +65,15 @@ async function post(apiPath: string, body: any) {
   return { status: response.status, data };
 }
 
+async function get(apiPath: string) {
+  const response = await fetch(`${baseUrl}${apiPath}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const data = await response.json().catch(() => null);
+  return { status: response.status, data };
+}
+
 describe('Campaign Lifecycle API', () => {
   it('covers create, pledge, claim end-to-end', async () => {
     // 1. Create Campaign
@@ -173,5 +182,92 @@ describe('Campaign Lifecycle API', () => {
     expect(createRes.status).toBe(201);
     expect(createRes.data.data.title).toBe("&lt;h1&gt;Test&lt;&sol;h1&gt;");
     expect(createRes.data.data.description).toBe("&lt;h1&gt;Test&lt;&sol;h1&gt; with at least 20 characters");
+  });
+});
+
+describe('GET /api/stats', () => {
+  it('returns stats object with totalCampaigns and campaign counts', async () => {
+    const res = await get('/api/stats');
+    expect(res.status).toBe(200);
+    expect(res.data).toHaveProperty('data');
+    expect(res.data.data).toHaveProperty('totalCampaigns');
+    expect(res.data.data).toHaveProperty('campaignCountByStatus');
+    expect(res.data.data).toHaveProperty('totalPledgedAmount');
+    expect(res.data.data).toHaveProperty('totalContributors');
+    expect(typeof res.data.data.totalCampaigns).toBe('number');
+    // onChainCampaignCount is optional (may be 0 if contract not configured)
+    if (res.data.data.onChainCampaignCount !== undefined) {
+      expect(typeof res.data.data.onChainCampaignCount).toBe('number');
+    }
+  });
+
+  it('returns zero stats for fresh database', async () => {
+    const res = await get('/api/stats');
+    expect(res.status).toBe(200);
+    expect(res.data.data.totalCampaigns).toBe(0);
+    expect(res.data.data.campaignCountByStatus.open).toBe(0);
+    expect(res.data.data.campaignCountByStatus.funded).toBe(0);
+    expect(res.data.data.campaignCountByStatus.claimed).toBe(0);
+    expect(res.data.data.campaignCountByStatus.failed).toBe(0);
+    expect(res.data.data.totalPledgedAmount).toBe(0);
+    expect(res.data.data.totalContributors).toBe(0);
+  });
+
+  it('counts campaign after creation', async () => {
+    // Create a campaign
+    const createRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      targetAmount: 100,
+      deadline: Math.floor(Date.now() / 1000) + 3600,
+    });
+    expect(createRes.status).toBe(201);
+
+    // Check stats
+    const statsRes = await get('/api/stats');
+    expect(statsRes.status).toBe(200);
+    expect(statsRes.data.data.totalCampaigns).toBe(1);
+    expect(statsRes.data.data.campaignCountByStatus.open).toBe(1);
+  });
+
+  it('counts multiple campaigns', async () => {
+    // Create 3 campaigns
+    for (let i = 0; i < 3; i++) {
+      await post('/api/campaigns', {
+        creator: CREATOR,
+        targetAmount: 100,
+        deadline: Math.floor(Date.now() / 1000) + 3600,
+      });
+    }
+
+    // Check stats
+    const statsRes = await get('/api/stats');
+    expect(statsRes.status).toBe(200);
+    expect(statsRes.data.data.totalCampaigns).toBe(3);
+    expect(statsRes.data.data.campaignCountByStatus.open).toBe(3);
+  });
+
+  it('reflects funded status in stats after pledge', async () => {
+    // Create campaign
+    const createRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      targetAmount: 100,
+      deadline: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const campaignId = createRes.data.data.id;
+
+    // Add pledge to fund it
+    await post(`/api/campaigns/${campaignId}/pledges`, {
+      contributor: CONTRIBUTOR,
+      amount: 100,
+      assetCode: 'USDC',
+    });
+
+    // Check stats
+    const statsRes = await get('/api/stats');
+    expect(statsRes.status).toBe(200);
+    expect(statsRes.data.data.totalCampaigns).toBe(1);
+    expect(statsRes.data.data.campaignCountByStatus.funded).toBe(1);
+    expect(statsRes.data.data.totalPledgedAmount).toBe(100);
+    expect(statsRes.data.data.totalContributors).toBe(1);
   });
 });

@@ -314,6 +314,7 @@ export interface GlobalStats {
   campaignCountByStatus: Record<CampaignStatus, number>;
   totalPledgedAmount: number;
   totalContributors: number;
+  onChainCampaignCount?: number; // Total campaigns from contract
 }
 
 export interface LeaderboardEntry {

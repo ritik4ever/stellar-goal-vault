@@ -215,6 +215,8 @@ mod tests {
             &deadline,
             &meta("c2"),
         );
+        assert_eq!(client.get_campaign_count(), 2);
+
         client.create_campaign(
             &creator,
             &soroban_sdk::vec![&env, token.clone()],
@@ -222,6 +224,9 @@ mod tests {
             &deadline,
             &meta("c3"),
         );
+        assert_eq!(client.get_campaign_count(), 3);
+        assert_eq!(client.get_next_campaign_id(), 3);
+    }
 
     #[test]
     fn test_contributor_count_zero_on_new_campaign() {

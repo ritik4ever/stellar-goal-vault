@@ -148,6 +148,41 @@ Base URL:
 - `status` is `ok` when the API and database probe succeed, otherwise `degraded`
 - `database.status` is `up` or `down` based on a lightweight SQLite reachability check
 
+### `GET /api/stats`
+
+Returns aggregate statistics across all campaigns and pledges, including data from the Soroban contract.
+
+**Response:**
+
+```json
+{
+  "data": {
+    "totalCampaigns": 42,
+    "campaignCountByStatus": {
+      "open": 15,
+      "funded": 20,
+      "claimed": 5,
+      "failed": 2
+    },
+    "totalPledgedAmount": 9500.00,
+    "totalContributors": 128,
+    "onChainCampaignCount": 42
+  }
+}
+```
+
+**Fields:**
+
+- `totalCampaigns` — total number of campaigns created locally
+- `campaignCountByStatus` — count of campaigns broken down by status:
+  - `open` — campaigns still accepting pledges before deadline
+  - `funded` — campaigns that reached target but not yet claimed
+  - `claimed` — campaigns where creator has claimed funds
+  - `failed` — campaigns that missed target after deadline
+- `totalPledgedAmount` — total amount pledged across all campaigns
+- `totalContributors` — number of unique contributors with unrefunded pledges
+- `onChainCampaignCount` — total number of campaigns created on-chain (from Soroban contract); `0` or omitted if contract is not configured
+
 ### `GET /api/campaigns`
 
 - Returns all campaigns with computed progress
