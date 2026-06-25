@@ -23,7 +23,9 @@ let getPledges: CampaignStoreModule['getPledges'];
 let getGlobalStats: CampaignStoreModule['getGlobalStats'];
 let getDb: DbModule['getDb'];
 let getCampaignHistory: EventHistoryModule['getCampaignHistory'];
+let recordEvent: EventHistoryModule['recordEvent'];
 let addPledge: CampaignStoreModule['addPledge'];
+let getCampaignWithProgress: CampaignStoreModule['getCampaignWithProgress'];
 
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR = `G${'B'.repeat(55)}`;
@@ -36,6 +38,7 @@ beforeAll(async () => {
   ({
     createCampaign,
 
+    getCampaignWithProgress,
     initCampaignStore,
     listCampaigns,
     listCampaignPledges,
@@ -46,7 +49,7 @@ beforeAll(async () => {
     addPledge,
   } = await import('./campaignStore'));
   ({ getDb } = await import('./db'));
-  ({ getCampaignHistory } = await import('./eventHistory'));
+  ({ getCampaignHistory, recordEvent } = await import('./eventHistory'));
   initCampaignStore();
 });
 
@@ -163,6 +166,32 @@ describe('on-chain pledge reconciliation', () => {
     expect(
       getCampaignHistory(campaign.id).filter((event) => event.eventType === 'pledged'),
     ).toHaveLength(1);
+  });
+});
+
+describe('event-sourced campaign status', () => {
+  it('replays lifecycle transition events to derive the final status', () => {
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Lifecycle replay campaign',
+      description: 'A campaign used to verify status derivation from event history.',
+      assetCode: 'USDC',
+      targetAmount: 250,
+      deadline: Math.floor(Date.now() / 1000) + 86400,
+    });
+
+    const openedAt = campaign.createdAt + 10;
+    recordEvent(campaign.id, 'campaign_opened', openedAt, campaign.creator);
+    expect(getCampaign(campaign.id)?.createdAt).toBe(campaign.createdAt);
+
+    recordEvent(campaign.id, 'campaign_funded', openedAt + 30, campaign.creator, 250);
+    expect(getCampaignWithProgress(campaign.id)?.progress.status).toBe('funded');
+
+    recordEvent(campaign.id, 'campaign_failed', openedAt + 60, campaign.creator, 0);
+    expect(getCampaignWithProgress(campaign.id)?.progress.status).toBe('failed');
+
+    recordEvent(campaign.id, 'campaign_canceled', openedAt + 90, campaign.creator, 0);
+    expect(getCampaignWithProgress(campaign.id)?.progress.status).toBe('canceled');
   });
 });
 

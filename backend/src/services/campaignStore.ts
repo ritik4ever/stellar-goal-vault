@@ -1,7 +1,13 @@
 import { getDb, initDb } from './db';
-import { getCampaignHistory, recordEvent, BlockchainMetadata } from './eventHistory';
+import {
+  getCampaignHistory,
+  recordEvent,
+  BlockchainMetadata,
+  getDerivedCampaignStatus,
+  type CampaignLifecycleStatus,
+} from './eventHistory';
 
-export type CampaignStatus = 'open' | 'funded' | 'claimed' | 'failed';
+export type CampaignStatus = CampaignLifecycleStatus;
 
 export interface CampaignInput {
   creator: string;
@@ -132,6 +138,48 @@ function round(value: number): number {
   return Number(value.toFixed(2));
 }
 
+function deriveLegacyCampaignStatus(campaign: CampaignRecord, at: number): CampaignStatus {
+  if (campaign.claimedAt !== undefined) {
+    return 'claimed';
+  }
+  if (campaign.pledgedAmount >= campaign.targetAmount) {
+    return 'funded';
+  }
+  if (at >= campaign.deadline) {
+    return 'failed';
+  }
+  return 'open';
+}
+
+function transitionCampaignToFailed(campaign: CampaignRecord, at: number): boolean {
+  if (
+    campaign.claimedAt === undefined &&
+    campaign.pledgedAmount < campaign.targetAmount &&
+    at >= campaign.deadline &&
+    campaign.failedAt === undefined
+  ) {
+    const db = getDb();
+    db.prepare(`UPDATE campaigns SET failed_at = ? WHERE id = ? AND failed_at IS NULL`).run(
+      campaign.deadline,
+      campaign.id,
+    );
+
+    recordEvent(
+      campaign.id,
+      'campaign_failed',
+      campaign.deadline,
+      campaign.creator,
+      campaign.pledgedAmount,
+      { targetAmount: campaign.targetAmount, deadline: campaign.deadline },
+      { source: 'local' } as BlockchainMetadata,
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
 function rowToCampaign(row: CampaignRow): CampaignRecord {
   const acceptedTokens = JSON.parse(row.accepted_tokens_json);
   return {
@@ -241,24 +289,23 @@ function checkContributorLimit(
  */
 export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds()): CampaignProgress {
   const deadlineReached = at >= campaign.deadline;
+  const fallbackStatus = deriveLegacyCampaignStatus(campaign, at);
+  if (fallbackStatus === 'failed') {
+    transitionCampaignToFailed(campaign, at);
+  }
+
+  const status = getDerivedCampaignStatus(campaign.id, fallbackStatus);
   const canClaim =
+    status === 'funded' &&
     campaign.claimedAt === undefined &&
     deadlineReached &&
     campaign.pledgedAmount >= campaign.targetAmount;
   const canRefund =
+    status === 'failed' &&
     campaign.claimedAt === undefined &&
     deadlineReached &&
     campaign.pledgedAmount < campaign.targetAmount;
-  const canPledge = campaign.claimedAt === undefined && !deadlineReached;
-
-  let status: CampaignStatus = 'open';
-  if (campaign.claimedAt !== undefined) {
-    status = 'claimed';
-  } else if (campaign.pledgedAmount >= campaign.targetAmount) {
-    status = 'funded';
-  } else if (deadlineReached) {
-    status = 'failed';
-  }
+  const canPledge = status === 'open' && campaign.claimedAt === undefined && !deadlineReached;
 
   return {
     status,
@@ -425,12 +472,13 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
     const { pledge_count, ...campaignRow } = row;
     
     const now = Math.floor(Date.now() / 1000);
-    if (campaignRow.claimed_at === null && campaignRow.pledged_amount < campaignRow.target_amount && now >= campaignRow.deadline && campaignRow.failed_at === null) {
-        campaignRow.failed_at = campaignRow.deadline;
-        db.prepare(`UPDATE campaigns SET failed_at = ? WHERE id = ?`).run(campaignRow.deadline, campaignRow.id);
+    const campaign = rowToCampaign(campaignRow as CampaignRow);
+    if (transitionCampaignToFailed(campaign, now)) {
+      campaignRow.failed_at = campaign.deadline;
+      return rowToCampaign(campaignRow as CampaignRow);
     }
-    
-    return rowToCampaign(campaignRow as CampaignRow);
+
+    return campaign;
   });
 
   return {
@@ -454,11 +502,12 @@ export function getCampaign(campaignId: string): CampaignRecord | undefined {
 
   if (row) {
     const now = Math.floor(Date.now() / 1000);
-    if (row.claimed_at === null && row.pledged_amount < row.target_amount && now >= row.deadline && row.failed_at === null) {
-        row.failed_at = row.deadline;
-        db.prepare(`UPDATE campaigns SET failed_at = ? WHERE id = ?`).run(row.deadline, row.id);
+    const campaign = rowToCampaign(row);
+    if (transitionCampaignToFailed(campaign, now)) {
+      row.failed_at = campaign.deadline;
+      return rowToCampaign(row);
     }
-    return rowToCampaign(row);
+    return campaign;
   }
   return undefined;
 }
@@ -658,6 +707,15 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     },
     { source: 'local' } as BlockchainMetadata,
   );
+  recordEvent(
+    campaign.id,
+    'campaign_opened',
+    campaign.createdAt,
+    campaign.creator,
+    undefined,
+    { targetAmount: campaign.targetAmount, deadline: campaign.deadline },
+    { source: 'local' } as BlockchainMetadata,
+  );
 
   return campaign;
 }
@@ -731,6 +789,18 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     },
     { source: 'local' } as BlockchainMetadata,
   );
+
+  if (campaign.pledgedAmount < campaign.targetAmount && nextPledgedAmount >= campaign.targetAmount) {
+    recordEvent(
+      campaignId,
+      'campaign_funded',
+      createdAt,
+      input.contributor,
+      nextPledgedAmount,
+      { targetAmount: campaign.targetAmount, assetCode },
+      { source: 'local' } as BlockchainMetadata,
+    );
+  }
 
   // Check if contributor has reached their limit and record event
   if (
@@ -850,6 +920,21 @@ export function reconcileOnChainPledge(
         txHash: input.transactionHash,
       } as BlockchainMetadata,
     );
+
+    if (campaign.pledgedAmount < campaign.targetAmount && nextPledgedAmount >= campaign.targetAmount) {
+      recordEvent(
+        campaignId,
+        'campaign_funded',
+        createdAt,
+        input.contributor,
+        nextPledgedAmount,
+        { targetAmount: campaign.targetAmount, assetCode, onChain: true },
+        {
+          source: 'soroban',
+          txHash: input.transactionHash,
+        } as BlockchainMetadata,
+      );
+    }
   });
 
   reconcile();
@@ -947,6 +1032,18 @@ function reconcileOnChainClaim(campaignId: string, input: ReconciledClaimInput):
         txHash: input.transactionHash,
       } as BlockchainMetadata,
     );
+    recordEvent(
+      campaignId,
+      'campaign_claimed',
+      claimedAt,
+      input.creator,
+      campaign.pledgedAmount,
+      { targetAmount: campaign.targetAmount },
+      {
+        source: 'soroban',
+        txHash: input.transactionHash,
+      } as BlockchainMetadata,
+    );
   });
 
   commit();
@@ -993,6 +1090,16 @@ export function softDeleteCampaign(campaignId: string): void {
   if (changes.changes === 0) {
     throw toServiceError('Campaign not found or already deleted.', 404, 'NOT_FOUND');
   }
+
+  recordEvent(
+    campaignId,
+    'campaign_canceled',
+    deletedAt,
+    campaign.creator,
+    undefined,
+    { deletedAt },
+    { source: 'local' } as BlockchainMetadata,
+  );
 }
 
 /**

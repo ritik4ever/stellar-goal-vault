@@ -60,7 +60,7 @@ export const app = express();
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
-const CAMPAIGN_STATUSES: CampaignStatus[] = ['open', 'funded', 'claimed', 'failed'];
+const CAMPAIGN_STATUSES: CampaignStatus[] = ['open', 'funded', 'claimed', 'failed', 'canceled'];
 const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 2);
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 120;

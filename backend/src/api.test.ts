@@ -5,7 +5,7 @@ import path from 'path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from './index';
 import { initCampaignStore } from './services/campaignStore';
-import { getDb } from './services/db';
+import { getDb, resetDbForTests } from './services/db';
 
 // Mock sorobanRpc to avoid real network calls during tests
 vi.mock('./services/sorobanRpc', () => ({

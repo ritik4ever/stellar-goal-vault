@@ -1114,6 +1114,28 @@ describe("Pledge Reconcile Flow - Integration", () => {
   });
 });
 
+describe("Event-sourced campaign status", () => {
+  it("replays transition events and exposes the final derived status", async () => {
+    const creationRes = await createTestCampaign({
+      title: "Replay status campaign",
+      description: "Campaign used to verify event-sourced status derivation in integration tests.",
+    });
+    const campaignId = creationRes.data.data.id;
+
+    const { recordEvent } = await import("../src/services/eventHistory");
+    const baseTime = nowInSeconds();
+
+    recordEvent(campaignId, "campaign_opened", baseTime, CREATOR_1);
+    recordEvent(campaignId, "campaign_funded", baseTime + 10, CREATOR_1, 1000);
+    recordEvent(campaignId, "campaign_failed", baseTime + 20, CREATOR_1, 500);
+    recordEvent(campaignId, "campaign_canceled", baseTime + 30, CREATOR_1, 0);
+
+    const campaignDetails = await getCampaignDetails(campaignId);
+    expect(campaignDetails.status).toBe(200);
+    expect(campaignDetails.data.data.progress.status).toBe("canceled");
+  });
+});
+
 describe("Campaign History Pagination", () => {
   it("returns paginated history boundaries via supertest", async () => {
     const { recordEvent } = await import("../src/services/eventHistory");

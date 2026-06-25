@@ -1,6 +1,18 @@
 import { getDb } from './db';
 
-export type CampaignEventType = 'created' | 'pledged' | 'claimed' | 'refunded' | 'updated';
+export type CampaignLifecycleStatus = 'open' | 'funded' | 'claimed' | 'failed' | 'canceled';
+
+export type CampaignEventType =
+  | 'created'
+  | 'pledged'
+  | 'claimed'
+  | 'refunded'
+  | 'updated'
+  | 'campaign_opened'
+  | 'campaign_funded'
+  | 'campaign_claimed'
+  | 'campaign_failed'
+  | 'campaign_canceled';
 
 export interface BlockchainMetadata {
   txHash?: string;
@@ -21,6 +33,16 @@ export interface CampaignEvent {
   metadata?: Record<string, unknown>;
   blockchainMetadata?: BlockchainMetadata;
 }
+
+const STATUS_TRANSITION_EVENTS: Partial<Record<CampaignEventType, CampaignLifecycleStatus>> = {
+  campaign_opened: 'open',
+  campaign_funded: 'funded',
+  campaign_claimed: 'claimed',
+  campaign_failed: 'failed',
+  campaign_canceled: 'canceled',
+};
+
+const statusCache = new Map<string, CampaignLifecycleStatus>();
 
 interface EventRow {
   id: number;
@@ -59,6 +81,32 @@ function rowToEvent(row: EventRow): CampaignEvent {
  * @param metadata - Optional arbitrary key-value data about the event.
  * @param blockchainMetadata - Optional on-chain context (tx hash, ledger info, source).
  */
+export function invalidateCampaignStatusCache(campaignId: string): void {
+  statusCache.delete(campaignId);
+}
+
+export function getDerivedCampaignStatus(
+  campaignId: string,
+  fallbackStatus: CampaignLifecycleStatus,
+): CampaignLifecycleStatus {
+  const cachedStatus = statusCache.get(campaignId);
+  if (cachedStatus !== undefined) {
+    return cachedStatus;
+  }
+
+  const history = getCampaignHistory(campaignId);
+  let currentStatus = fallbackStatus;
+  for (const event of history) {
+    const nextStatus = STATUS_TRANSITION_EVENTS[event.eventType];
+    if (nextStatus) {
+      currentStatus = nextStatus;
+    }
+  }
+
+  statusCache.set(campaignId, currentStatus);
+  return currentStatus;
+}
+
 export function recordEvent(
   campaignId: string,
   eventType: CampaignEventType,
@@ -83,6 +131,8 @@ export function recordEvent(
       ? JSON.stringify(blockchainMetadata)
       : null,
   });
+
+  invalidateCampaignStatusCache(campaignId);
 }
 
 export interface CampaignHistoryPage {
