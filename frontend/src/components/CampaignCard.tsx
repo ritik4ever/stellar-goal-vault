@@ -1,4 +1,7 @@
-
+import { memo, useRef, useState, useEffect } from 'react';
+import { Campaign } from '../types/campaign';
+import { AddressAvatar } from './AddressAvatar';
+import { CopyButton } from './CopyButton';
 
 interface CampaignCardProps {
   campaign: Campaign;
@@ -6,7 +9,11 @@ interface CampaignCardProps {
   onSelect: (campaignId: string) => void;
 }
 
+const areEqual = (prev: CampaignCardProps, next: CampaignCardProps) => {
+  return prev.campaign.id === next.campaign.id && prev.selectedCampaignId === next.selectedCampaignId;
+};
 
+function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignCardProps) {
   const prevPercentRef = useRef<number | null>(null);
   const [animate, setAnimate] = useState(false);
 

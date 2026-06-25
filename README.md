@@ -50,6 +50,39 @@ Architecture decision records
 - See `adr/0002-react-express-mvp.md` for the React + Express + Soroban MVP architecture decision.
 - See `adr/0003-freighter-wallet-integration.md` for the Freighter wallet signing approach.
 
+## TypeScript Bindings
+
+Type-safe bindings are auto-generated from the Soroban contract ABI and committed to `frontend/src/generated/`.
+
+### Regenerating Bindings
+
+After making changes to the contract, regenerate bindings:
+
+```bash
+# Set your contract ID
+export CONTRACT_ID=YOUR_DEPLOYED_CONTRACT_ID
+
+# Generate bindings
+npm run gen:bindings
+```
+
+### How It Works
+
+1. `npm run gen:bindings` calls `stellar contract bindings typescript` (or uses manual templates during development)
+2. Generated types are output to `frontend/src/generated/`
+3. `frontend/src/services/soroban.ts` imports from generated bindings via `GoalVaultContract` client
+4. CI checks for ABI drift on every PR that touches contracts
+
+### Mainnet
+
+```bash
+NETWORK=mainnet \
+CONTRACT_ID=YOUR_MAINNET_CONTRACT_ID \
+RPC_URL=https://soroban-mainnet.stellar.org \
+NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015" \
+npm run gen:bindings
+```
+
 ## Core campaign model
 
 Each campaign stores:
