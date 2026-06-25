@@ -2,6 +2,7 @@ import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
+import { createServer, type Server } from "http";
 
 import { validateEnv } from "./validateEnv";
 import { z } from "zod";
@@ -34,7 +35,6 @@ import {
   reconcileOnChainPledge,
   refundContributor,
   SortOrder,
-  updateCampaign,
 } from './services/campaignStore';
 import { checkDbHealth } from './services/db';
 import { listCampaignHistory } from './services/eventHistory';
