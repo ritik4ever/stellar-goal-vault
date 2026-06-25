@@ -387,4 +387,5 @@ mod tests {
         client.contribute(&campaign_id, &contributor, &token, &300);
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
     }
+
 }
