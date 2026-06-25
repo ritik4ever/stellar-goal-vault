@@ -1,16 +1,16 @@
 {
   "generators": {
-    "address": 5,
+    "address": 4,
     "nonce": 0
   },
   "auth": [
     [
       [
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJXFF",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGO6V",
         {
           "function": {
             "contract_fn": {
-              "contract_address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN",
+              "contract_address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF",
               "function_name": "set_admin",
               "args": [
                 {
@@ -29,17 +29,55 @@
         {
           "function": {
             "contract_fn": {
-              "contract_address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN",
+              "contract_address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF",
               "function_name": "mint",
               "args": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
                   "i128": {
                     "hi": 0,
                     "lo": 1000
                   }
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "function_name": "create_campaign",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                },
+                {
+                  "vec": [
+                    {
+                      "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
+                    }
+                  ]
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                },
+                {
+                  "u64": 1000
+                },
+                {
+                  "string": "get campaign"
                 }
               ]
             }
@@ -63,7 +101,7 @@
       [
         {
           "account": {
-            "account_id": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJXFF"
+            "account_id": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGO6V"
           }
         },
         [
@@ -71,7 +109,7 @@
             "last_modified_ledger_seq": 0,
             "data": {
               "account": {
-                "account_id": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJXFF",
+                "account_id": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGO6V",
                 "balance": 0,
                 "seq_num": 0,
                 "num_sub_entries": 0,
@@ -91,7 +129,7 @@
       [
         {
           "contract_data": {
-            "contract": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJXFF",
+            "contract": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGO6V",
             "key": {
               "ledger_key_nonce": {
                 "nonce": 801925984706572462
@@ -106,10 +144,43 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJXFF",
+                "contract": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGO6V",
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 801925984706572462
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 1033654523790656264
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 1033654523790656264
                   }
                 },
                 "durability": "temporary",
@@ -157,7 +228,174 @@
       [
         {
           "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "Campaign"
+                },
+                {
+                  "u64": 1
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "Campaign"
+                    },
+                    {
+                      "u64": 1
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "accepted_tokens"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "canceled"
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "claimed"
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "contributor_count"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "creator"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "deadline"
+                      },
+                      "val": {
+                        "u64": 1000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "metadata"
+                      },
+                      "val": {
+                        "string": "get campaign"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "pledged_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 0
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "target_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "NextCampaignId"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "NextCampaignId"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "u64": 1
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
             "key": "ledger_key_contract_instance",
             "durability": "persistent"
           }
@@ -168,7 +406,7 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
                 "key": "ledger_key_contract_instance",
                 "durability": "persistent",
                 "val": {
@@ -189,14 +427,14 @@
       [
         {
           "contract_data": {
-            "contract": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN",
+            "contract": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF",
             "key": {
               "vec": [
                 {
                   "symbol": "Balance"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 }
               ]
             },
@@ -209,14 +447,14 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN",
+                "contract": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF",
                 "key": {
                   "vec": [
                     {
                       "symbol": "Balance"
                     },
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                     }
                   ]
                 },
@@ -262,7 +500,7 @@
       [
         {
           "contract_data": {
-            "contract": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN",
+            "contract": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF",
             "key": "ledger_key_contract_instance",
             "durability": "persistent"
           }
@@ -273,7 +511,7 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN",
+                "contract": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF",
                 "key": "ledger_key_contract_instance",
                 "durability": "persistent",
                 "val": {
@@ -299,7 +537,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "string": "aaa:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJXFF"
+                                "string": "aaa:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGO6V"
                               }
                             },
                             {
@@ -353,7 +591,7 @@
                                     "symbol": "issuer"
                                   },
                                   "val": {
-                                    "bytes": "0000000000000000000000000000000000000000000000000000000000000004"
+                                    "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
                                   }
                                 }
                               ]
@@ -407,14 +645,14 @@
                 "symbol": "fn_call"
               },
               {
-                "bytes": "8011bbf4cdf04e5bc6ac886935b99aa4b2c0cabde133f9d7fb3e656799f0a896"
+                "bytes": "692c360a04a982db02db346a106cbf008ad9e058c384bdaaf77bc0c48799b3a4"
               },
               {
                 "symbol": "init_asset"
               }
             ],
             "data": {
-              "bytes": "0000000161616100000000000000000000000000000000000000000000000000000000000000000000000004"
+              "bytes": "0000000161616100000000000000000000000000000000000000000000000000000000000000000000000003"
             }
           }
         }
@@ -424,7 +662,7 @@
     {
       "event": {
         "ext": "v0",
-        "contract_id": "8011bbf4cdf04e5bc6ac886935b99aa4b2c0cabde133f9d7fb3e656799f0a896",
+        "contract_id": "692c360a04a982db02db346a106cbf008ad9e058c384bdaaf77bc0c48799b3a4",
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -454,7 +692,7 @@
                 "symbol": "fn_call"
               },
               {
-                "bytes": "8011bbf4cdf04e5bc6ac886935b99aa4b2c0cabde133f9d7fb3e656799f0a896"
+                "bytes": "692c360a04a982db02db346a106cbf008ad9e058c384bdaaf77bc0c48799b3a4"
               },
               {
                 "symbol": "set_admin"
@@ -471,7 +709,7 @@
     {
       "event": {
         "ext": "v0",
-        "contract_id": "8011bbf4cdf04e5bc6ac886935b99aa4b2c0cabde133f9d7fb3e656799f0a896",
+        "contract_id": "692c360a04a982db02db346a106cbf008ad9e058c384bdaaf77bc0c48799b3a4",
         "type_": "contract",
         "body": {
           "v0": {
@@ -480,10 +718,10 @@
                 "symbol": "set_admin"
               },
               {
-                "address": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJXFF"
+                "address": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGO6V"
               },
               {
-                "string": "aaa:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJXFF"
+                "string": "aaa:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGO6V"
               }
             ],
             "data": {
@@ -497,7 +735,7 @@
     {
       "event": {
         "ext": "v0",
-        "contract_id": "8011bbf4cdf04e5bc6ac886935b99aa4b2c0cabde133f9d7fb3e656799f0a896",
+        "contract_id": "692c360a04a982db02db346a106cbf008ad9e058c384bdaaf77bc0c48799b3a4",
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -527,7 +765,7 @@
                 "symbol": "fn_call"
               },
               {
-                "bytes": "8011bbf4cdf04e5bc6ac886935b99aa4b2c0cabde133f9d7fb3e656799f0a896"
+                "bytes": "692c360a04a982db02db346a106cbf008ad9e058c384bdaaf77bc0c48799b3a4"
               },
               {
                 "symbol": "mint"
@@ -536,7 +774,7 @@
             "data": {
               "vec": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
                   "i128": {
@@ -554,7 +792,7 @@
     {
       "event": {
         "ext": "v0",
-        "contract_id": "8011bbf4cdf04e5bc6ac886935b99aa4b2c0cabde133f9d7fb3e656799f0a896",
+        "contract_id": "692c360a04a982db02db346a106cbf008ad9e058c384bdaaf77bc0c48799b3a4",
         "type_": "contract",
         "body": {
           "v0": {
@@ -566,10 +804,10 @@
                 "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
               },
               {
-                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
               },
               {
-                "string": "aaa:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJXFF"
+                "string": "aaa:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGO6V"
               }
             ],
             "data": {
@@ -586,7 +824,7 @@
     {
       "event": {
         "ext": "v0",
-        "contract_id": "8011bbf4cdf04e5bc6ac886935b99aa4b2c0cabde133f9d7fb3e656799f0a896",
+        "contract_id": "692c360a04a982db02db346a106cbf008ad9e058c384bdaaf77bc0c48799b3a4",
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -616,7 +854,7 @@
                 "symbol": "fn_call"
               },
               {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000005"
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000004"
               },
               {
                 "symbol": "create_campaign"
@@ -628,142 +866,123 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 1000
-                  }
-                },
-                {
-                  "u64": 15638400
-                },
-                {
-                  "string": "duration limit"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000005",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "log"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "string": "caught panic 'deadline exceeds maximum campaign duration' from contract function 'Symbol(obj#155)'"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
-                },
-                {
-                  "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 1000
-                  }
-                },
-                {
-                  "u64": 15638400
-                },
-                {
-                  "string": "duration limit"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000005",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "wasm_vm": "invalid_action"
-                }
-              }
-            ],
-            "data": {
-              "string": "caught error from function"
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "wasm_vm": "invalid_action"
-                }
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "string": "contract call failed"
-                },
-                {
-                  "symbol": "create_campaign"
-                },
-                {
                   "vec": [
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
-                    },
-                    {
-                      "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
-                    },
-                    {
-                      "i128": {
-                        "hi": 0,
-                        "lo": 1000
-                      }
-                    },
-                    {
-                      "u64": 15638400
-                    },
-                    {
-                      "string": "duration limit"
+                      "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
                     }
                   ]
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                },
+                {
+                  "u64": 1000
+                },
+                {
+                  "string": "get campaign"
                 }
               ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000004",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "Goal"
+              },
+              {
+                "symbol": "Create"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "campaign_id"
+                  },
+                  "val": {
+                    "u64": 1
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "creator"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "deadline"
+                  },
+                  "val": {
+                    "u64": 1000
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "metadata"
+                  },
+                  "val": {
+                    "string": "get campaign"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "target_amount"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 1000
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "token"
+                  },
+                  "val": {
+                    "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000004",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "create_campaign"
+              }
+            ],
+            "data": {
+              "u64": 1
             }
           }
         }
@@ -779,16 +998,123 @@
           "v0": {
             "topics": [
               {
-                "symbol": "error"
+                "symbol": "fn_call"
               },
               {
-                "error": {
-                  "wasm_vm": "invalid_action"
-                }
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000004"
+              },
+              {
+                "symbol": "get_campaign"
               }
             ],
             "data": {
-              "string": "escalating error to panic"
+              "u64": 1
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000004",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "get_campaign"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "accepted_tokens"
+                  },
+                  "val": {
+                    "vec": [
+                      {
+                        "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "canceled"
+                  },
+                  "val": {
+                    "bool": false
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "claimed"
+                  },
+                  "val": {
+                    "bool": false
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "contributor_count"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "creator"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "deadline"
+                  },
+                  "val": {
+                    "u64": 1000
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "metadata"
+                  },
+                  "val": {
+                    "string": "get campaign"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "pledged_amount"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 0
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "target_amount"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 1000
+                    }
+                  }
+                }
+              ]
             }
           }
         }

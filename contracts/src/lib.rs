@@ -277,6 +277,34 @@ impl StellarGoalVaultContract {
         }
     }
 
+    pub fn cancel_campaign(env: Env, campaign_id: u64, creator: Address) {
+        creator.require_auth();
+
+        let mut campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign already canceled");
+        }
+
+        campaign.canceled = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Cancel")),
+            CampaignCanceled {
+                campaign_id,
+                creator,
+            },
+        );
+    }
+
     pub fn refund(env: Env, campaign_id: u64, contributor: Address) {
         contributor.require_auth();
 
