@@ -56,9 +56,20 @@ jobs:
         working-directory: contracts
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run contract tests
+      - name: Run contract tests and verify snapshots
         working-directory: contracts
-        run: cargo test
+        run: |
+          # Remove all existing snapshots, regenerate, and verify no diff.
+          # This catches: modified snapshots (behavior changed), new untracked
+          # snapshots (tests added without committing snaps), and orphaned
+          # snapshots (tests removed without deleting snaps).
+          rm -rf test_snapshots/
+          cargo test
+          git diff --exit-code test_snapshots/ || {
+            echo "::error::Snapshot files have changed or new snapshots created."
+            echo "::error::Regenerate with 'cargo test' and commit the updated/added snapshots."
+            exit 1
+          }
 
       - name: Build WASM release binary
         working-directory: contracts

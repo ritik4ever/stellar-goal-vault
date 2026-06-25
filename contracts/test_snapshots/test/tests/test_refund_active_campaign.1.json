@@ -38,7 +38,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 500
+                    "lo": 1000
                   }
                 }
               ]
@@ -70,14 +70,14 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 500
+                    "lo": 1000
                   }
                 },
                 {
                   "u64": 1000
                 },
                 {
-                  "string": "early claim test"
+                  "string": "refund active"
                 }
               ]
             }
@@ -407,7 +407,7 @@
                         "symbol": "metadata"
                       },
                       "val": {
-                        "string": "early claim test"
+                        "string": "refund active"
                       }
                     },
                     {
@@ -428,7 +428,7 @@
                       "val": {
                         "i128": {
                           "hi": 0,
-                          "lo": 500
+                          "lo": 1000
                         }
                       }
                     }
@@ -670,7 +670,7 @@
                       "val": {
                         "i128": {
                           "hi": 0,
-                          "lo": 0
+                          "lo": 500
                         }
                       }
                     },
@@ -1054,7 +1054,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 500
+                    "lo": 1000
                   }
                 }
               ]
@@ -1088,7 +1088,7 @@
             "data": {
               "i128": {
                 "hi": 0,
-                "lo": 500
+                "lo": 1000
               }
             }
           }
@@ -1150,14 +1150,14 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 500
+                    "lo": 1000
                   }
                 },
                 {
                   "u64": 1000
                 },
                 {
-                  "string": "early claim test"
+                  "string": "refund active"
                 }
               ]
             }
@@ -1212,7 +1212,7 @@
                     "symbol": "metadata"
                   },
                   "val": {
-                    "string": "early claim test"
+                    "string": "refund active"
                   }
                 },
                 {
@@ -1222,7 +1222,7 @@
                   "val": {
                     "i128": {
                       "hi": 0,
-                      "lo": 500
+                      "lo": 1000
                     }
                   }
                 },
@@ -1493,7 +1493,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000005"
               },
               {
-                "symbol": "claim"
+                "symbol": "refund"
               }
             ],
             "data": {
@@ -1502,7 +1502,7 @@
                   "u64": 1
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 }
               ]
             }
@@ -1526,13 +1526,13 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'campaign is still active' from contract function 'Symbol(claim)'"
+                  "string": "caught panic 'campaign is still active' from contract function 'Symbol(refund)'"
                 },
                 {
                   "u64": 1
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 }
               ]
             }
@@ -1589,7 +1589,7 @@
                   "string": "contract call failed"
                 },
                 {
-                  "symbol": "claim"
+                  "symbol": "refund"
                 },
                 {
                   "vec": [
@@ -1597,7 +1597,7 @@
                       "u64": 1
                     },
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                     }
                   ]
                 }

@@ -74,10 +74,10 @@
                   }
                 },
                 {
-                  "u64": 1000
+                  "u64": 50
                 },
                 {
-                  "string": "early claim test"
+                  "string": "refund funded"
                 }
               ]
             }
@@ -146,7 +146,7 @@
   "ledger": {
     "protocol_version": 21,
     "sequence_number": 0,
-    "timestamp": 0,
+    "timestamp": 51,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -399,7 +399,7 @@
                         "symbol": "deadline"
                       },
                       "val": {
-                        "u64": 1000
+                        "u64": 50
                       }
                     },
                     {
@@ -407,7 +407,7 @@
                         "symbol": "metadata"
                       },
                       "val": {
-                        "string": "early claim test"
+                        "string": "refund funded"
                       }
                     },
                     {
@@ -1154,10 +1154,10 @@
                   }
                 },
                 {
-                  "u64": 1000
+                  "u64": 50
                 },
                 {
-                  "string": "early claim test"
+                  "string": "refund funded"
                 }
               ]
             }
@@ -1204,7 +1204,7 @@
                     "symbol": "deadline"
                   },
                   "val": {
-                    "u64": 1000
+                    "u64": 50
                   }
                 },
                 {
@@ -1212,7 +1212,7 @@
                     "symbol": "metadata"
                   },
                   "val": {
-                    "string": "early claim test"
+                    "string": "refund funded"
                   }
                 },
                 {
@@ -1493,7 +1493,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000005"
               },
               {
-                "symbol": "claim"
+                "symbol": "refund"
               }
             ],
             "data": {
@@ -1502,7 +1502,7 @@
                   "u64": 1
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 }
               ]
             }
@@ -1526,13 +1526,13 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'campaign is still active' from contract function 'Symbol(claim)'"
+                  "string": "caught panic 'funded campaigns cannot be refunded' from contract function 'Symbol(refund)'"
                 },
                 {
                   "u64": 1
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 }
               ]
             }
@@ -1589,7 +1589,7 @@
                   "string": "contract call failed"
                 },
                 {
-                  "symbol": "claim"
+                  "symbol": "refund"
                 },
                 {
                   "vec": [
@@ -1597,7 +1597,7 @@
                       "u64": 1
                     },
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                     }
                   ]
                 }
