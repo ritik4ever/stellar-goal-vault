@@ -195,6 +195,27 @@ Returns aggregate statistics across all campaigns and pledges, including data fr
 
 - Returns one campaign with pledges and event history
 
+### `GET /api/campaigns/:id/pledges`
+
+- Returns only pledge information together with pagination metadata.
+
+**Query Parameters:**
+- `page` (optional): Page number (e.g., `?page=1`)
+- `limit` (optional): Results per page (e.g., `?limit=20`)
+
+**Response Schema:**
+```json
+{
+  "data": [],
+  "pagination": {
+    "total": 0,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1
+  }
+}
+```
+
 ### `POST /api/campaigns`
 
 - Create a campaign

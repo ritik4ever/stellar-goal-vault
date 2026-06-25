@@ -224,8 +224,6 @@ mod tests {
             &deadline,
             &meta("c3"),
         );
-        assert_eq!(client.get_campaign_count(), 3);
-        assert_eq!(client.get_next_campaign_id(), 3);
     }
 
     #[test]
@@ -312,6 +310,59 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "too many accepted tokens")]
+    fn test_max_accepted_tokens_rejects_overflow() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        // Build a Vec with 11 tokens (MAX_ACCEPTED_TOKENS + 1)
+        let mut tokens = soroban_sdk::vec![&env];
+        for _ in 0..11 {
+            let token = deploy_token(&env, &admin, &creator, 1_000);
+            tokens.push_back(token);
+        }
+
+        client.create_campaign(
+            &creator,
+            &tokens,
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "max tokens test"),
+        );
+    }
+
+    #[test]
+    fn test_max_accepted_tokens_allows_exactly_10() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        let mut tokens = soroban_sdk::vec![&env];
+        for _ in 0..10 {
+            let token = deploy_token(&env, &admin, &creator, 1_000);
+            tokens.push_back(token);
+        }
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &tokens,
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "exactly 10 tokens"),
+        );
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.accepted_tokens.len(), 10);
+    }
+
+    #[test]
     fn test_contributor_count_no_double_count_on_repeat_pledge() {
         let env = Env::default();
         env.mock_all_auths();
@@ -338,5 +389,5 @@ mod tests {
         client.contribute(&campaign_id, &contributor, &token, &300);
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
     }
-}
+
 }

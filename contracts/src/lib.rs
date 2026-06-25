@@ -10,6 +10,14 @@ use soroban_sdk::{
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MIN_CONTRIBUTION: i128 = 100;
 
+/// Maximum number of distinct tokens a campaign can accept.
+/// This prevents unbounded Vec storage growth attacks where an adversary
+/// creates a campaign with thousands of token addresses, inflating the
+/// ledger entry size and forcing other validators to pay higher fees for
+/// processing oversized entries. A limit of 10 is sufficient for realistic
+/// multi-token donation campaigns while keeping storage costs predictable.
+const MAX_ACCEPTED_TOKENS: u32 = 10;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Campaign {
@@ -28,9 +36,17 @@ pub struct Campaign {
 pub enum DataKey {
     NextCampaignId,
     ContractVersion,
+    DeploymentTimestamp,
     Campaign(u64),
     Contribution(u64, Address, Address), // (campaign_id, contributor, token)
     CampaignTokenBalance(u64, Address),  // (campaign_id, token)
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeployInfo {
+    pub version: String,
+    pub deployed_at: u64,
 }
 
 #[contracttype]
@@ -105,7 +121,22 @@ impl StellarGoalVaultContract {
             panic!("deadline exceeds maximum campaign duration");
         }
         if accepted_tokens.len() == 0 {
-            panic!("at least one accepted token required");
+            panic!("accepted_tokens must not be empty");
+        }
+        
+        let mut i = 0;
+        while i < accepted_tokens.len() {
+            let mut j = i + 1;
+            while j < accepted_tokens.len() {
+                if accepted_tokens.get(i).unwrap() == accepted_tokens.get(j).unwrap() {
+                    panic!("duplicate token addresses");
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        if accepted_tokens.len() > MAX_ACCEPTED_TOKENS {
+            panic!("too many accepted tokens");
         }
 
         let mut next_id: u64 = env
@@ -372,6 +403,22 @@ impl StellarGoalVaultContract {
                     .set(&DataKey::ContractVersion, &version);
                 version
             }
+        }
+    }
+
+    pub fn get_deploy_info(env: Env) -> DeployInfo {
+        let version = Self::get_version(env.clone());
+        let deployed_at: u64 = match env.storage().instance().get(&DataKey::DeploymentTimestamp) {
+            Some(ts) => ts,
+            None => {
+                let ts = env.ledger().timestamp();
+                env.storage().instance().set(&DataKey::DeploymentTimestamp, &ts);
+                ts
+            }
+        };
+        DeployInfo {
+            version,
+            deployed_at,
         }
     }
 }
