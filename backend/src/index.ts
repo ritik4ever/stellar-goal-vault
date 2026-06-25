@@ -62,9 +62,9 @@ type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
 const CAMPAIGN_STATUSES: CampaignStatus[] = ['open', 'funded', 'claimed', 'failed'];
 const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 2);
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_REQUESTS = 120;
-const WRITE_RATE_LIMIT_MAX_REQUESTS = 40;
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60000);
+const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_READ_LIMIT ?? process.env.RATE_LIMIT_MAX_REQUESTS ?? 120);
+const WRITE_RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_WRITE_LIMIT ?? process.env.WRITE_RATE_LIMIT_MAX_REQUESTS ?? 20);
 const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 
 app.use(
@@ -103,33 +103,44 @@ if (process.env.NODE_ENV === "production") {
 
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
-function applyRateLimit(maxRequests: number) {
+export function applyRateLimit(limitOverride?: number) {
   return (req: Request, res: Response, next: express.NextFunction) => {
-    const key = `${req.ip}:${req.path}:${maxRequests}`;
+    if ((req as any).rateLimitedProcessed) {
+      return next();
+    }
+    (req as any).rateLimitedProcessed = true;
+
+    const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
+    const maxRequests = limitOverride ?? (isWrite ? WRITE_RATE_LIMIT_MAX_REQUESTS : RATE_LIMIT_MAX_REQUESTS);
+
+    const key = `${req.ip}:${isWrite ? "write" : "read"}`;
     const now = Date.now();
     const current = rateLimitBuckets.get(key);
 
-    if (!current || now >= current.resetAt) {
-      rateLimitBuckets.set(key, {
-        count: 1,
-        resetAt: now + RATE_LIMIT_WINDOW_MS,
-      });
-      return next();
+    let count = 1;
+    let resetAt = now + RATE_LIMIT_WINDOW_MS;
+
+    if (current && now < current.resetAt) {
+      count = current.count + 1;
+      resetAt = current.resetAt;
     }
 
-    if (current.count >= maxRequests) {
+    res.setHeader("X-RateLimit-Limit", String(maxRequests));
+    res.setHeader("X-RateLimit-Remaining", String(Math.max(0, maxRequests - count)));
+    res.setHeader("X-RateLimit-Reset", String(Math.ceil(resetAt / 1000)));
+
+    if (current && now < current.resetAt && current.count >= maxRequests) {
       const retryAfterSec = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
-      res.setHeader('Retry-After', String(retryAfterSec));
-      throw new AppError('Rate limit exceeded. Please retry shortly.', 429, 'RATE_LIMITED');
+      res.setHeader("Retry-After", String(retryAfterSec));
+      throw new AppError("Rate limit exceeded. Please retry shortly.", 429, "RATE_LIMITED");
     }
 
-    current.count += 1;
-    rateLimitBuckets.set(key, current);
+    rateLimitBuckets.set(key, { count, resetAt });
     return next();
   };
 }
 
-app.use(applyRateLimit(RATE_LIMIT_MAX_REQUESTS));
+app.use(applyRateLimit());
 
 app.use(requestIdMiddleware);
 
