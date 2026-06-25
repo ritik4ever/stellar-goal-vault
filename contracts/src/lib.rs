@@ -429,5 +429,5 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .get(&DataKey::Campaign(campaign_id))
         .unwrap_or_else(|| panic!("campaign not found"))
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "testutils"))]
 mod test;
