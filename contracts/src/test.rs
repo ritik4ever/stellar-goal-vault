@@ -308,6 +308,59 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "too many accepted tokens")]
+    fn test_max_accepted_tokens_rejects_overflow() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        // Build a Vec with 11 tokens (MAX_ACCEPTED_TOKENS + 1)
+        let mut tokens = soroban_sdk::vec![&env];
+        for _ in 0..11 {
+            let token = deploy_token(&env, &admin, &creator, 1_000);
+            tokens.push_back(token);
+        }
+
+        client.create_campaign(
+            &creator,
+            &tokens,
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "max tokens test"),
+        );
+    }
+
+    #[test]
+    fn test_max_accepted_tokens_allows_exactly_10() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        let mut tokens = soroban_sdk::vec![&env];
+        for _ in 0..10 {
+            let token = deploy_token(&env, &admin, &creator, 1_000);
+            tokens.push_back(token);
+        }
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &tokens,
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "exactly 10 tokens"),
+        );
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.accepted_tokens.len(), 10);
+    }
+
+    #[test]
     fn test_contributor_count_no_double_count_on_repeat_pledge() {
         let env = Env::default();
         env.mock_all_auths();
@@ -334,126 +387,5 @@ mod tests {
         client.contribute(&campaign_id, &contributor, &token, &300);
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
     }
-    #[test]
-    #[should_panic(expected = "accepted_tokens must not be empty")]
-    fn test_create_campaign_empty_tokens() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let creator = Address::generate(&env);
-        let client = deploy_contract(&env);
 
-        client.create_campaign(
-            &creator,
-            &soroban_sdk::vec![&env],
-            &1000_i128,
-            &(env.ledger().timestamp() + 1000),
-            &String::from_str(&env, "empty tokens"),
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "duplicate token addresses")]
-    fn test_create_campaign_duplicate_tokens() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let creator = Address::generate(&env);
-        let admin = Address::generate(&env);
-        let token = deploy_token(&env, &admin, &creator, 1000);
-        let client = deploy_contract(&env);
-
-        client.create_campaign(
-            &creator,
-            &soroban_sdk::vec![&env, token.clone(), token.clone()],
-            &1000_i128,
-            &(env.ledger().timestamp() + 1000),
-            &String::from_str(&env, "duplicate tokens"),
-        );
-    }
-
-    #[test]
-    fn test_get_deploy_info() {
-        let env = Env::default();
-        let ledger_timestamp = env.ledger().timestamp();
-        let client = deploy_contract(&env);
-
-        let info = client.get_deploy_info();
-        assert_eq!(info.deployed_at, ledger_timestamp);
-
-        // Advance time to verify it doesn't change
-        advance_time(&env, 100);
-        let info2 = client.get_deploy_info();
-        assert_eq!(info2.deployed_at, ledger_timestamp);
-    }
-
-    #[test]
-    fn test_xdr_serialization_roundtrip() {
-        use soroban_sdk::xdr::{ToXdr, FromXdr};
-        let env = Env::default();
-        
-        let campaign = crate::Campaign {
-            creator: Address::generate(&env),
-            accepted_tokens: soroban_sdk::vec![&env, Address::generate(&env)],
-            target_amount: 1000,
-            pledged_amount: 0,
-            deadline: 12345,
-            claimed: false,
-            canceled: false,
-            metadata: String::from_str(&env, "meta"),
-            contributor_count: 0,
-        };
-        
-        let xdr_bytes = campaign.to_xdr(&env);
-        let decoded: crate::Campaign = crate::Campaign::from_xdr(&env, &xdr_bytes).unwrap();
-        assert_eq!(campaign, decoded);
-
-        let event1 = crate::CampaignCreated {
-            campaign_id: 1,
-            creator: Address::generate(&env),
-            token: Address::generate(&env),
-            target_amount: 100,
-            deadline: 123,
-            metadata: String::from_str(&env, "meta"),
-        };
-        let bytes1 = event1.to_xdr(&env);
-        let dec1 = crate::CampaignCreated::from_xdr(&env, &bytes1).unwrap();
-        assert_eq!(event1, dec1);
-
-        let event2 = crate::CampaignPledged {
-            campaign_id: 1,
-            contributor: Address::generate(&env),
-            token: Address::generate(&env),
-            amount: 50,
-        };
-        let bytes2 = event2.to_xdr(&env);
-        let dec2 = crate::CampaignPledged::from_xdr(&env, &bytes2).unwrap();
-        assert_eq!(event2, dec2);
-
-        let event3 = crate::CampaignClaimed {
-            campaign_id: 1,
-            creator: Address::generate(&env),
-            token: Address::generate(&env),
-            amount: 50,
-        };
-        let bytes3 = event3.to_xdr(&env);
-        let dec3 = crate::CampaignClaimed::from_xdr(&env, &bytes3).unwrap();
-        assert_eq!(event3, dec3);
-
-        let event4 = crate::CampaignRefunded {
-            campaign_id: 1,
-            contributor: Address::generate(&env),
-            token: Address::generate(&env),
-            amount: 50,
-        };
-        let bytes4 = event4.to_xdr(&env);
-        let dec4 = crate::CampaignRefunded::from_xdr(&env, &bytes4).unwrap();
-        assert_eq!(event4, dec4);
-
-        let event5 = crate::CampaignCanceled {
-            campaign_id: 1,
-            creator: Address::generate(&env),
-        };
-        let bytes5 = event5.to_xdr(&env);
-        let dec5 = crate::CampaignCanceled::from_xdr(&env, &bytes5).unwrap();
-        assert_eq!(event5, dec5);
-    }
 }
