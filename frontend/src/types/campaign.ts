@@ -42,6 +42,7 @@ export interface Campaign {
     imageUrl?: string;
     externalLink?: string;
   };
+  tokenBalances?: Record<string, number>;
 }
 
 export interface BlockchainMetadata {
@@ -56,7 +57,7 @@ export interface BlockchainMetadata {
 export interface CampaignEvent {
   id: number;
   campaignId: string;
-  eventType: 'created' | 'pledged' | 'claimed' | 'refunded';
+  eventType: 'created' | 'pledged' | 'claimed' | 'refunded' | 'metadata_updated';
   timestamp: number;
   actor?: string;
   amount?: number;

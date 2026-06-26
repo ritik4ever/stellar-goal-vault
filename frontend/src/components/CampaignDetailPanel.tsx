@@ -74,6 +74,7 @@ export function CampaignDetailPanel({
   onClose,
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState('25');
+  const [pledgeToken, setPledgeToken] = useState('');
   const [refundContributor, setRefundContributor] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pledgeError, setPledgeError] = useState<string | null>(null);
@@ -125,11 +126,13 @@ export function CampaignDetailPanel({
   // Simulation is run (and the network fee estimated) before the preview modal
   // opens. If that simulation fails, surface a retry-able error next to the
   // pledge button instead of only relying on the toast.
+  const selectedToken = pledgeToken || activeCampaign.assetCode;
+
   async function submitPledge() {
     setPledgeError(null);
     setIsSubmitting(true);
     try {
-      await onPledge(activeCampaign.id, Number(pledgeAmount), activeCampaign.assetCode);
+      await onPledge(activeCampaign.id, Number(pledgeAmount), selectedToken);
     } catch (error) {
       setPledgeError(describePledgeError(error));
     } finally {
@@ -260,6 +263,23 @@ export function CampaignDetailPanel({
             readOnly
           />
         </label>
+
+        {activeCampaign.acceptedTokens?.length > 1 && (
+          <label className="field-group">
+            <span>Token</span>
+            <select
+              value={selectedToken}
+              onChange={(e) => setPledgeToken(e.target.value)}
+              required
+            >
+              {activeCampaign.acceptedTokens.map((token) => (
+                <option key={token} value={token}>
+                  {token}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <label className="field-group">
           <span>Pledge amount</span>

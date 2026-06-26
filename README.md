@@ -57,10 +57,12 @@ Each campaign stores:
 - `creator`
 - `title`
 - `description`
-- `assetCode`
+- `acceptedTokens` — one or more Stellar asset codes the campaign accepts
+- `assetCode` — first accepted token (backward-compatibility alias)
 - `targetAmount`
 - `pledgedAmount`
 - `deadline`
+- `tokenBalances` — per-token pledge totals (`Record<assetCode, amount>`)
 
 Campaign states:
 
@@ -68,6 +70,59 @@ Campaign states:
 - `funded` when pledged amount is at least the target and funds have not been claimed
 - `claimed` when the creator has claimed a funded vault
 - `failed` when deadline has passed without reaching the target
+
+## Contract rules
+
+### Minimum contribution (issue #184)
+
+The Soroban contract enforces a minimum contribution per pledge. The default is **100 stroops**. This is configurable at deploy time via `initialize(admin, min_contribution)`.
+
+```bash
+# Deploy with a custom minimum (e.g. 500 stroops)
+stellar contract invoke --id $CONTRACT_ID -- initialize \
+  --admin $ADMIN_ADDRESS \
+  --min_contribution 500
+```
+
+Contributions below the minimum are rejected with `"contribution below minimum"`.
+
+### Metadata updates (issue #185)
+
+A campaign creator can update the campaign metadata before the deadline:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- update_metadata \
+  --campaign_id 1 \
+  --creator $CREATOR_ADDRESS \
+  --new_metadata "Updated description"
+```
+
+The contract emits a `MetadataUpdated` event containing both the old and new metadata values. The backend event indexer processes this event and updates local state automatically.
+
+### Deadline extension governance (issue #192)
+
+Any existing contributor can request a deadline extension:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- request_deadline_extension \
+  --campaign_id 1 \
+  --caller $CONTRIBUTOR_ADDRESS \
+  --new_deadline <unix_timestamp>
+```
+
+Other contributors can vote to approve:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- approve_extension \
+  --campaign_id 1 \
+  --caller $OTHER_CONTRIBUTOR
+```
+
+The extension is applied once **more than 50%** of unique contributors have approved. Constraints:
+
+- New deadline must be later than the current deadline
+- New deadline cannot exceed `MAX_CAMPAIGN_DURATION_SECONDS` (180 days) from the campaign creation timestamp
+- Reverts on claimed or canceled campaigns
 
 ## Mutation testing
 
