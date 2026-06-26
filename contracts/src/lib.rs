@@ -8,6 +8,8 @@ use soroban_sdk::{
 };
 
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Default minimum contribution in stroops (100). Overridable via initialize().
 const MIN_CONTRIBUTION: i128 = 100;
 
 /// Maximum number of distinct tokens a campaign can accept.
@@ -30,6 +32,7 @@ pub struct Campaign {
     pub canceled: bool,
     pub metadata: String,
     pub contributor_count: u32,
+    pub created_at: u64,
 }
 
 #[contracttype]
@@ -42,6 +45,9 @@ pub enum DataKey {
     CampaignTokenBalance(u64, Address),  // (campaign_id, token)
     Admin,
     Paused,
+    MinContribution,
+    ExtensionRequest(u64),
+    ExtensionVote(u64, Address),
 }
 
 #[contracttype]
@@ -108,6 +114,34 @@ pub struct ContractUnpaused {
     pub contract_version: String,
 }
 
+/// Emitted when a campaign creator updates the campaign metadata (issue #185).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MetadataUpdated {
+    pub campaign_id: u64,
+    pub creator: Address,
+    pub old_metadata: String,
+    pub new_metadata: String,
+}
+
+/// Stored when a contributor requests a deadline extension (issue #192).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExtensionRequest {
+    pub new_deadline: u64,
+    pub requested_by: Address,
+    pub approval_count: u32,
+}
+
+/// Emitted when a deadline extension is requested (issue #192).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExtensionRequested {
+    pub campaign_id: u64,
+    pub requested_by: Address,
+    pub new_deadline: u64,
+}
+
 #[contract]
 pub struct StellarGoalVaultContract;
 
@@ -115,15 +149,28 @@ const MAX_CAMPAIGN_DURATION_SECONDS: u64 = 60 * 60 * 24 * 180;
 
 #[contractimpl]
 impl StellarGoalVaultContract {
-    /// Sets the admin address once. Must be called by the designated admin.
-    /// Panics if already initialized.
-    pub fn initialize(env: Env, admin: Address) {
+    /// Sets the admin address and the minimum contribution floor (in stroops).
+    /// Panics if already initialized or min_contribution is not positive.
+    pub fn initialize(env: Env, admin: Address, min_contribution: i128) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("already initialized");
+        }
+        if min_contribution <= 0 {
+            panic!("min_contribution must be positive");
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage().instance().set(&DataKey::MinContribution, &min_contribution);
+    }
+
+    /// Returns the current minimum contribution threshold in stroops.
+    /// Falls back to the compile-time default (100) if initialize() was not called.
+    pub fn get_min_contribution(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MinContribution)
+            .unwrap_or(MIN_CONTRIBUTION)
     }
 
     /// Pauses or unpauses all state-mutating entry points. Admin only.
@@ -209,7 +256,7 @@ impl StellarGoalVaultContract {
         if accepted_tokens.len() == 0 {
             panic!("accepted_tokens must not be empty");
         }
-        
+
         let mut i = 0;
         while i < accepted_tokens.len() {
             let mut j = i + 1;
@@ -232,6 +279,8 @@ impl StellarGoalVaultContract {
             .unwrap_or(0);
         next_id += 1;
 
+        let created_at = env.ledger().timestamp();
+
         let campaign = Campaign {
             creator: creator.clone(),
             accepted_tokens: accepted_tokens.clone(),
@@ -242,6 +291,7 @@ impl StellarGoalVaultContract {
             canceled: false,
             metadata: metadata.clone(),
             contributor_count: 0,
+            created_at,
         };
 
         env.storage()
@@ -271,7 +321,12 @@ impl StellarGoalVaultContract {
         require_not_paused(&env);
         contributor.require_auth();
 
-        if amount < MIN_CONTRIBUTION {
+        let min_contribution: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinContribution)
+            .unwrap_or(MIN_CONTRIBUTION);
+        if amount < min_contribution {
             panic!("contribution below minimum");
         }
 
@@ -332,6 +387,160 @@ impl StellarGoalVaultContract {
         );
     }
 
+    /// Updates the campaign metadata. Only the original creator can call this,
+    /// and only before the campaign deadline. Emits a MetadataUpdated event
+    /// containing both old and new values (issue #185).
+    pub fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: String) {
+        require_not_paused(&env);
+        creator.require_auth();
+        let mut campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign canceled");
+        }
+        if env.ledger().timestamp() >= campaign.deadline {
+            panic!("campaign deadline reached");
+        }
+        let old_metadata = campaign.metadata.clone();
+        campaign.metadata = new_metadata.clone();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("MetaUpd")),
+            MetadataUpdated {
+                campaign_id,
+                creator,
+                old_metadata,
+                new_metadata,
+            },
+        );
+    }
+
+    /// Requests a deadline extension for a campaign. The caller must be an
+    /// existing contributor. The requester auto-approves their own request.
+    /// new_deadline must be later than the current deadline and within
+    /// MAX_CAMPAIGN_DURATION_SECONDS of the campaign's creation (issue #192).
+    pub fn request_deadline_extension(
+        env: Env,
+        campaign_id: u64,
+        caller: Address,
+        new_deadline: u64,
+    ) {
+        require_not_paused(&env);
+        caller.require_auth();
+        let campaign = read_campaign(&env, campaign_id);
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign canceled");
+        }
+        if new_deadline <= campaign.deadline {
+            panic!("new deadline must be after current deadline");
+        }
+        if new_deadline > campaign.created_at + MAX_CAMPAIGN_DURATION_SECONDS {
+            panic!("new deadline exceeds maximum campaign duration");
+        }
+
+        // Caller must be a contributor
+        let is_contributor = campaign.accepted_tokens.iter().any(|token| {
+            let key = DataKey::Contribution(campaign_id, caller.clone(), token.clone());
+            let amount: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            amount > 0
+        });
+        if !is_contributor {
+            panic!("caller is not a contributor");
+        }
+
+        let request = ExtensionRequest {
+            new_deadline,
+            requested_by: caller.clone(),
+            approval_count: 1, // requester auto-approves
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::ExtensionRequest(campaign_id), &request);
+        // Mark requester as having voted
+        env.storage()
+            .persistent()
+            .set(&DataKey::ExtensionVote(campaign_id, caller.clone()), &true);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("ExtReq")),
+            ExtensionRequested {
+                campaign_id,
+                requested_by: caller,
+                new_deadline,
+            },
+        );
+    }
+
+    /// Votes to approve a pending deadline extension. The caller must be an
+    /// existing contributor and must not have already voted. When approvals
+    /// exceed 50% of the contributor count, the new deadline is applied and
+    /// the pending request is cleared (issue #192).
+    pub fn approve_extension(env: Env, campaign_id: u64, caller: Address) {
+        require_not_paused(&env);
+        caller.require_auth();
+        let mut campaign = read_campaign(&env, campaign_id);
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign canceled");
+        }
+
+        // Caller must be a contributor
+        let is_contributor = campaign.accepted_tokens.iter().any(|token| {
+            let key = DataKey::Contribution(campaign_id, caller.clone(), token.clone());
+            let amount: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            amount > 0
+        });
+        if !is_contributor {
+            panic!("caller is not a contributor");
+        }
+
+        let vote_key = DataKey::ExtensionVote(campaign_id, caller.clone());
+        let already_voted: bool = env.storage().persistent().get(&vote_key).unwrap_or(false);
+        if already_voted {
+            panic!("already voted");
+        }
+
+        let request_key = DataKey::ExtensionRequest(campaign_id);
+        let mut request: ExtensionRequest = env
+            .storage()
+            .persistent()
+            .get(&request_key)
+            .unwrap_or_else(|| panic!("no extension request"));
+
+        env.storage().persistent().set(&vote_key, &true);
+        request.approval_count += 1;
+
+        // Majority threshold: approval_count * 2 > contributor_count
+        if campaign.contributor_count > 0 && request.approval_count * 2 > campaign.contributor_count {
+            campaign.deadline = request.new_deadline;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Campaign(campaign_id), &campaign);
+            env.storage().persistent().remove(&request_key);
+        } else {
+            env.storage().persistent().set(&request_key, &request);
+        }
+    }
+
+    /// Returns the pending extension request for a campaign, if one exists.
+    pub fn get_extension_request(env: Env, campaign_id: u64) -> Option<ExtensionRequest> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ExtensionRequest(campaign_id))
+    }
+
     pub fn claim(env: Env, campaign_id: u64, creator: Address) {
         require_not_paused(&env);
         creator.require_auth();
@@ -364,11 +573,11 @@ impl StellarGoalVaultContract {
         for token in campaign.accepted_tokens.iter() {
             let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
             let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
-            
+
             if balance > 0 {
                 let token_client = TokenClient::new(&env, &token);
                 token_client.transfer(&contract_address, &creator, &balance);
-                
+
                 // Clear the balance
                 env.storage().persistent().set(&balance_key, &0_i128);
 
@@ -406,7 +615,7 @@ impl StellarGoalVaultContract {
         for token in campaign.accepted_tokens.iter() {
             let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
             let contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
-            
+
             if contribution > 0 {
                 // Transfer back to contributor
                 let token_client = TokenClient::new(&env, &token);
@@ -420,7 +629,7 @@ impl StellarGoalVaultContract {
 
                 // Reset user contribution for this token
                 env.storage().persistent().set(&contribution_key, &0_i128);
-                
+
                 total_refunded += contribution;
 
                 env.events().publish(

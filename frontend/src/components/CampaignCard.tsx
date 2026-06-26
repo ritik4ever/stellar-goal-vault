@@ -61,14 +61,34 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
             {campaign.pledgedAmount} / {campaign.targetAmount}{' '}
             {campaign.acceptedTokens?.length > 1 ? 'Tokens' : campaign.assetCode}
           </div>
-          <div className="progress-bar" aria-hidden>
-            <div
-              className={animate ? 'progress-bar-fill' : undefined}
-              style={{
-                width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
-              }}
-            />
-          </div>
+          {campaign.acceptedTokens?.length > 1 && campaign.tokenBalances ? (
+            <div className="token-progress-list" aria-label="Per-token progress">
+              {campaign.acceptedTokens.map((token) => {
+                const balance = campaign.tokenBalances![token] ?? 0;
+                const pct = campaign.targetAmount > 0
+                  ? Math.min(Math.round((balance / campaign.targetAmount) * 100), 100)
+                  : 0;
+                return (
+                  <div key={token} className="token-progress-row">
+                    <span className="token-label muted">{token}</span>
+                    <div className="progress-bar" aria-hidden>
+                      <div style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="token-balance muted">{balance}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="progress-bar" aria-hidden>
+              <div
+                className={animate ? 'progress-bar-fill' : undefined}
+                style={{
+                  width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                }}
+              />
+            </div>
+          )}
           <div className="muted">{campaign.progress.percentFunded}% funded</div>
         </div>
 
