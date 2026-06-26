@@ -41,7 +41,6 @@ beforeAll(async () => {
 
 afterAll(() => {
   server.close();
-  resetDbForTests();
   fs.rmSync(TEST_DB_PATH, { force: true });
 });
 
@@ -70,7 +69,9 @@ describe('Campaign Lifecycle API', () => {
     // 1. Create Campaign
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
-
+      title: 'Test Campaign',
+      description: 'This is a test campaign with sufficient description length',
+      acceptedTokens: ['USDC'],
       targetAmount: 100,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
@@ -115,7 +116,9 @@ describe('Campaign Lifecycle API', () => {
     // 1. Create Campaign
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
-
+      title: 'Test Campaign 2',
+      description: 'This is another test campaign with enough characters',
+      acceptedTokens: ['XLM'],
       targetAmount: 100,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
@@ -173,5 +176,247 @@ describe('Campaign Lifecycle API', () => {
     expect(createRes.status).toBe(201);
     expect(createRes.data.data.title).toBe("&lt;h1&gt;Test&lt;&sol;h1&gt;");
     expect(createRes.data.data.description).toBe("&lt;h1&gt;Test&lt;&sol;h1&gt; with at least 20 characters");
+  });
+});
+
+describe('Campaign List Query Parameter Validation', () => {
+  async function get(apiPath: string) {
+    const response = await fetch(`${baseUrl}${apiPath}`);
+    const data = await response.json().catch(() => null);
+    return { status: response.status, data };
+  }
+
+  it('returns 400 for invalid page parameter', async () => {
+    const res = await get('/api/campaigns?page=invalid&limit=10');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 for invalid limit parameter', async () => {
+    const res = await get('/api/campaigns?page=1&limit=999');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 when page is provided without limit', async () => {
+    const res = await get('/api/campaigns?page=1');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 when limit is provided without page', async () => {
+    const res = await get('/api/campaigns?limit=10');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 for invalid asset parameter', async () => {
+    const res = await get('/api/campaigns?asset=INVALID');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 for invalid status parameter', async () => {
+    const res = await get('/api/campaigns?status=invalid');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 for invalid sort parameter', async () => {
+    const res = await get('/api/campaigns?sort=invalid');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 for invalid order parameter', async () => {
+    const res = await get('/api/campaigns?order=invalid');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 for invalid createdAfter parameter', async () => {
+    const res = await get('/api/campaigns?createdAfter=not-a-date');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 for invalid createdBefore parameter', async () => {
+    const res = await get('/api/campaigns?createdBefore=invalid-date');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('accepts valid ISO 8601 timestamps', async () => {
+    const res = await get('/api/campaigns?createdAfter=2024-01-01T00:00:00Z&createdBefore=2024-12-31T23:59:59Z');
+    expect(res.status).toBe(200);
+    expect(res.data.data).toBeDefined();
+  });
+
+  it('accepts multi-value asset filter', async () => {
+    const res = await get('/api/campaigns?asset=XLM,USDC');
+    expect(res.status).toBe(200);
+    expect(res.data.data).toBeDefined();
+  });
+
+  it('accepts single asset value', async () => {
+    const res = await get('/api/campaigns?asset=XLM');
+    expect(res.status).toBe(200);
+    expect(res.data.data).toBeDefined();
+  });
+});
+
+describe('Campaign Filters - createdAfter/createdBefore', () => {
+  async function get(apiPath: string) {
+    const response = await fetch(`${baseUrl}${apiPath}`);
+    const data = await response.json().catch(() => null);
+    return { status: response.status, data };
+  }
+
+  it('filters campaigns by createdAfter date', async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    // Create a campaign
+    const createRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Recent Campaign',
+      description: 'Created just now with sufficient description',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+    expect(createRes.status).toBe(201);
+    const campaignId = createRes.data.data.id;
+
+    // Query with createdAfter (should include this campaign)
+    const futureTimestamp = new Date(Date.now() - 60000).toISOString(); // 1 minute ago
+    const res = await get(`/api/campaigns?createdAfter=${encodeURIComponent(futureTimestamp)}`);
+    expect(res.status).toBe(200);
+    expect(res.data.data.some((c: any) => c.id === campaignId)).toBe(true);
+  });
+
+  it('filters campaigns by createdBefore date', async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    // Create a campaign
+    const createRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Old Campaign',
+      description: 'Created earlier with sufficient description text',
+      acceptedTokens: ['XLM'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+    expect(createRes.status).toBe(201);
+
+    // Query with createdBefore in the future (should include this campaign)
+    const futureTimestamp = new Date(Date.now() + 60000).toISOString(); // 1 minute in future
+    const res = await get(`/api/campaigns?createdBefore=${encodeURIComponent(futureTimestamp)}`);
+    expect(res.status).toBe(200);
+    expect(res.data.data.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Campaign Multi-Asset Filter', () => {
+  async function get(apiPath: string) {
+    const response = await fetch(`${baseUrl}${apiPath}`);
+    const data = await response.json().catch(() => null);
+    return { status: response.status, data };
+  }
+
+  it('filters campaigns by multiple asset codes', async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    // Create campaigns with different assets
+    const xlmRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'XLM Campaign',
+      description: 'Campaign accepting XLM tokens only here',
+      acceptedTokens: ['XLM'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+    expect(xlmRes.status).toBe(201);
+
+    const usdcRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'USDC Campaign',
+      description: 'Campaign accepting USDC tokens here now',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+    expect(usdcRes.status).toBe(201);
+
+    // Query with multiple assets
+    const res = await get('/api/campaigns?asset=XLM,USDC');
+    expect(res.status).toBe(200);
+    expect(res.data.data.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('supports case-insensitive multi-asset filter', async () => {
+    const res = await get('/api/campaigns?asset=xlm,usdc');
+    expect(res.status).toBe(200);
+    expect(res.data.data).toBeDefined();
+  });
+});
+
+describe('Campaign maxPerContributor Field', () => {
+  async function get(apiPath: string) {
+    const response = await fetch(`${baseUrl}${apiPath}`);
+    const data = await response.json().catch(() => null);
+    return { status: response.status, data };
+  }
+
+  async function post(apiPath: string, body: any) {
+    const response = await fetch(`${baseUrl}${apiPath}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => null);
+    return { status: response.status, data };
+  }
+
+  it('includes maxPerContributor in GET /api/campaigns list response', async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    const createRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Campaign with maxPerContributor',
+      description: 'Campaign with per-contributor limit',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: now + 3600,
+      maxPerContributor: 50,
+    });
+    expect(createRes.status).toBe(201);
+    const campaignId = createRes.data.data.id;
+
+    const listRes = await get('/api/campaigns?page=1&limit=10');
+    expect(listRes.status).toBe(200);
+
+    const campaign = listRes.data.data.find((c: any) => c.id === campaignId);
+    expect(campaign).toBeDefined();
+    expect(campaign.maxPerContributor).toBe(50);
+  });
+
+  it('includes maxPerContributor in GET /api/campaigns/:id detail response', async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    const createRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Campaign with maxPerContributor',
+      description: 'Campaign with per-contributor limit',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: now + 3600,
+      maxPerContributor: 75,
+    });
+    expect(createRes.status).toBe(201);
+    const campaignId = createRes.data.data.id;
+
+    const detailRes = await get(`/api/campaigns/${campaignId}`);
+    expect(detailRes.status).toBe(200);
+    expect(detailRes.data.data.maxPerContributor).toBe(75);
   });
 });

@@ -54,6 +54,8 @@ import {
   refundPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
+  parseCampaignListQuery,
+  normalizeQueryValue,
 } from './validation/schemas';
 import { logError, logInfo } from './logger';
 export const app = express();
@@ -62,9 +64,9 @@ type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
 const CAMPAIGN_STATUSES: CampaignStatus[] = ['open', 'funded', 'claimed', 'failed'];
 const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 2);
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_REQUESTS = 120;
-const WRITE_RATE_LIMIT_MAX_REQUESTS = 40;
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60000);
+const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_READ_LIMIT ?? process.env.RATE_LIMIT_MAX_REQUESTS ?? 120);
+const WRITE_RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_WRITE_LIMIT ?? process.env.WRITE_RATE_LIMIT_MAX_REQUESTS ?? 20);
 const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 
 app.use(
@@ -103,33 +105,44 @@ if (process.env.NODE_ENV === "production") {
 
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
-function applyRateLimit(maxRequests: number) {
+export function applyRateLimit(limitOverride?: number) {
   return (req: Request, res: Response, next: express.NextFunction) => {
-    const key = `${req.ip}:${req.path}:${maxRequests}`;
+    if ((req as any).rateLimitedProcessed) {
+      return next();
+    }
+    (req as any).rateLimitedProcessed = true;
+
+    const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
+    const maxRequests = limitOverride ?? (isWrite ? WRITE_RATE_LIMIT_MAX_REQUESTS : RATE_LIMIT_MAX_REQUESTS);
+
+    const key = `${req.ip}:${isWrite ? "write" : "read"}`;
     const now = Date.now();
     const current = rateLimitBuckets.get(key);
 
-    if (!current || now >= current.resetAt) {
-      rateLimitBuckets.set(key, {
-        count: 1,
-        resetAt: now + RATE_LIMIT_WINDOW_MS,
-      });
-      return next();
+    let count = 1;
+    let resetAt = now + RATE_LIMIT_WINDOW_MS;
+
+    if (current && now < current.resetAt) {
+      count = current.count + 1;
+      resetAt = current.resetAt;
     }
 
-    if (current.count >= maxRequests) {
+    res.setHeader("X-RateLimit-Limit", String(maxRequests));
+    res.setHeader("X-RateLimit-Remaining", String(Math.max(0, maxRequests - count)));
+    res.setHeader("X-RateLimit-Reset", String(Math.ceil(resetAt / 1000)));
+
+    if (current && now < current.resetAt && current.count >= maxRequests) {
       const retryAfterSec = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
-      res.setHeader('Retry-After', String(retryAfterSec));
-      throw new AppError('Rate limit exceeded. Please retry shortly.', 429, 'RATE_LIMITED');
+      res.setHeader("Retry-After", String(retryAfterSec));
+      throw new AppError("Rate limit exceeded. Please retry shortly.", 429, "RATE_LIMITED");
     }
 
-    current.count += 1;
-    rateLimitBuckets.set(key, current);
+    rateLimitBuckets.set(key, { count, resetAt });
     return next();
   };
 }
 
-app.use(applyRateLimit(RATE_LIMIT_MAX_REQUESTS));
+app.use(applyRateLimit());
 
 app.use(requestIdMiddleware);
 
@@ -164,15 +177,6 @@ function parseCampaignId(
   }
 
   return { ok: true, value: parsed.data };
-}
-
-export function normalizeQueryValue(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed === '' ? undefined : trimmed;
 }
 
 export function normalizeAssetFilter(assetRaw: unknown): string | undefined {
@@ -259,51 +263,39 @@ app.get('/api/health', (_req: Request, res: Response) => {
 });
 
 app.get('/api/campaigns', (req: Request, res: Response) => {
-  const paginationResult = parseCampaignListPaginationQuery({
-    page: req.query.page,
-    limit: req.query.limit,
-  });
-  if (!paginationResult.ok) {
-    sendValidationError(paginationResult.issues);
+  const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
+  if (!queryResult.ok) {
+    sendValidationError(queryResult.issues);
   }
 
-  const filters = parseCampaignListFilters({
-    asset: req.query.asset,
-    status: req.query.status,
-    q: req.query.q,
-    search: req.query.search,
-    includeDeleted: req.query.includeDeleted,
-    sort: req.query.sort,
-    order: req.query.order,
-  });
+  const params = queryResult.data;
 
   const listOptions: ListCampaignsOptions = {
-    searchQuery: filters.searchQuery,
-    assetCode: filters.asset,
-    status: filters.status,
-    includeDeleted: filters.includeDeleted,
-    sort: filters.sort,
-    order: filters.order,
+    searchQuery: params.search || params.q,
+    assetCodes: params.asset,
+    status: params.status,
+    includeDeleted: params.includeDeleted,
+    sort: params.sort,
+    order: params.order,
+    createdAfter: params.createdAfter,
+    createdBefore: params.createdBefore,
   };
-  if (paginationResult.page !== undefined) {
-    listOptions.page = paginationResult.page;
-    listOptions.limit = paginationResult.limit;
+  if (params.page !== undefined) {
+    listOptions.page = params.page;
+    listOptions.limit = params.limit;
   }
 
   const { campaigns, totalCount, pledgeCounts } = listCampaigns(listOptions);
 
-  const data = filterCampaignList(
-    campaigns.map((campaign) => ({
-      ...campaign,
-      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
-    })),
-    filters,
-  );
+  const data = campaigns.map((campaign) => ({
+    ...campaign,
+    progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
+  }));
 
-  const page = paginationResult.page ?? 1;
-  const limit = paginationResult.limit ?? totalCount;
+  const page = params.page ?? 1;
+  const limit = params.limit ?? totalCount;
   const totalPages =
-    paginationResult.limit === undefined || limit <= 0
+    params.limit === undefined || limit <= 0
       ? 1
       : Math.max(1, Math.ceil(totalCount / limit));
 

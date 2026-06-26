@@ -1,17 +1,13 @@
-import { memo, useRef, useState, useEffect } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Campaign } from '../types/campaign';
-import { AddressAvatar } from './AddressAvatar';
-import { CopyButton } from './CopyButton';
+import AddressAvatar from './AddressAvatar';
+import CopyButton from './CopyButton';
 
 interface CampaignCardProps {
   campaign: Campaign;
   selectedCampaignId: string | null;
   onSelect: (campaignId: string) => void;
 }
-
-const areEqual = (prev: CampaignCardProps, next: CampaignCardProps) => {
-  return prev.campaign.id === next.campaign.id && prev.selectedCampaignId === next.selectedCampaignId;
-};
 
 function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignCardProps) {
   const prevPercentRef = useRef<number | null>(null);
@@ -37,7 +33,14 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
         <div className="campaign-card-header">
           <div>
             <strong className="campaign-title">{campaign.title}</strong>
-            <div className="muted">#{campaign.id}</div>
+            <div className="muted" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>#{campaign.id}</span>
+              <CopyButton
+                value={campaign.id}
+                ariaLabel="Copy campaign ID"
+                className="small"
+              />
+            </div>
           </div>
           <div
             className="campaign-creator mono"
@@ -58,14 +61,34 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
             {campaign.pledgedAmount} / {campaign.targetAmount}{' '}
             {campaign.acceptedTokens?.length > 1 ? 'Tokens' : campaign.assetCode}
           </div>
-          <div className="progress-bar" aria-hidden>
-            <div
-              className={animate ? 'progress-bar-fill' : undefined}
-              style={{
-                width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
-              }}
-            />
-          </div>
+          {campaign.acceptedTokens?.length > 1 && campaign.tokenBalances ? (
+            <div className="token-progress-list" aria-label="Per-token progress">
+              {campaign.acceptedTokens.map((token) => {
+                const balance = campaign.tokenBalances![token] ?? 0;
+                const pct = campaign.targetAmount > 0
+                  ? Math.min(Math.round((balance / campaign.targetAmount) * 100), 100)
+                  : 0;
+                return (
+                  <div key={token} className="token-progress-row">
+                    <span className="token-label muted">{token}</span>
+                    <div className="progress-bar" aria-hidden>
+                      <div style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="token-balance muted">{balance}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="progress-bar" aria-hidden>
+              <div
+                className={animate ? 'progress-bar-fill' : undefined}
+                style={{
+                  width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                }}
+              />
+            </div>
+          )}
           <div className="muted">{campaign.progress.percentFunded}% funded</div>
         </div>
 
@@ -87,6 +110,18 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
         </button>
       </div>
     </article>
+  );
+}
+
+function areEqual(
+  prevProps: CampaignCardProps,
+  nextProps: CampaignCardProps,
+): boolean {
+  return (
+    prevProps.campaign.id === nextProps.campaign.id &&
+    prevProps.campaign.pledgedAmount === nextProps.campaign.pledgedAmount &&
+    prevProps.campaign.progress.percentFunded === nextProps.campaign.progress.percentFunded &&
+    prevProps.selectedCampaignId === nextProps.selectedCampaignId
   );
 }
 

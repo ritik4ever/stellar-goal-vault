@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { getDb } from './db';
 import { recordEvent, BlockchainMetadata, CampaignEventType } from './eventHistory';
-import { reconcileOnChainPledge, createCampaign, getCampaign } from './campaignStore';
+import { reconcileOnChainPledge, createCampaign, getCampaign, updateCampaignMetadata } from './campaignStore';
 import dotenv from 'dotenv';
 import { config } from '../config';
 import { logError, logInfo } from '../logger';
@@ -150,11 +150,13 @@ const TOPIC_TO_EVENT: Record<string, CampaignEventType> = {
   CampaignPledged: 'pledged',
   CampaignClaimed: 'claimed',
   CampaignRefunded: 'refunded',
+  MetadataUpdated: 'metadata_updated',
   // Alternative spellings from some contract versions
   'Goal:Create': 'created',
   'Goal:Pledge': 'pledged',
   'Goal:Claim': 'claimed',
   'Goal:Refund': 'refunded',
+  'Goal:MetaUpd': 'metadata_updated',
 };
 
 interface ParsedEvent {
@@ -247,6 +249,17 @@ function parseSorobanEvent(event: any): ParsedEvent | null {
 
 function handleParsedEvent(parsed: ParsedEvent): void {
   try {
+    if (parsed.eventType === 'metadata_updated') {
+      const newMetadata = String((parsed.metadata as any)?.new_metadata ?? '');
+      if (newMetadata && parsed.campaignId) {
+        try {
+          updateCampaignMetadata(parsed.campaignId, newMetadata);
+        } catch (err) {
+          logError(err, { event: 'soroban_metadata_update_error', campaignId: parsed.campaignId }, config.logLevel);
+        }
+      }
+    }
+
     if (parsed.eventType === 'pledged' && parsed.actor && parsed.amount != null) {
       // Check if campaign exists before reconciling
       const exists = getCampaign(parsed.campaignId);

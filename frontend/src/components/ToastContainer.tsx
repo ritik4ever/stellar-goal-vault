@@ -1,4 +1,4 @@
-import { CheckCircle2, Info, X, XCircle } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Info, X, XCircle } from 'lucide-react';
 import type { Toast, ToastVariant } from '../hooks/useToast';
 
 interface ToastContainerProps {
@@ -22,7 +22,20 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
         return (
           <div key={toast.id} className={`toast toast-${toast.variant}`} role="status">
             <Icon size={18} className="toast-icon" aria-hidden="true" />
-            <p className="toast-message">{toast.message}</p>
+            <span className="toast-body">
+              <p className="toast-message">{toast.message}</p>
+              {toast.link ? (
+                <a
+                  href={toast.link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="toast-link"
+                >
+                  {toast.link.label}
+                  <ExternalLink size={12} aria-hidden="true" />
+                </a>
+              ) : null}
+            </span>
             <button
               className="toast-close"
               type="button"
