@@ -215,6 +215,8 @@ mod tests {
             &deadline,
             &meta("c2"),
         );
+        assert_eq!(client.get_campaign_count(), 2);
+
         client.create_campaign(
             &creator,
             &soroban_sdk::vec![&env, token.clone()],
