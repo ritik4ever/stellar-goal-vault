@@ -360,6 +360,205 @@ mod tests {
         assert_eq!(campaign.accepted_tokens.len(), 10);
     }
 
+    // ── admin / pause tests (issue #193) ──────────────────────────────────────
+
+    #[test]
+    fn test_initialize_sets_admin_and_unpaused() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        assert_eq!(client.get_admin(), admin);
+        assert!(!client.get_paused());
+    }
+
+    #[test]
+    #[should_panic(expected = "already initialized")]
+    fn test_initialize_panics_if_called_twice() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        client.initialize(&admin);
+    }
+
+    #[test]
+    fn test_admin_can_pause_and_unpause() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        client.set_paused(&admin, &true);
+        assert!(client.get_paused());
+
+        client.set_paused(&admin, &false);
+        assert!(!client.get_paused());
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
+    fn test_non_admin_cannot_pause() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        client.initialize(&admin);
+        client.set_paused(&attacker, &true);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_contribute_blocked_when_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "pause test"),
+        );
+
+        client.set_paused(&admin, &true);
+        client.contribute(&campaign_id, &contributor, &token, &500);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_claim_blocked_when_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let deadline_offset: u64 = 100;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "pause claim test"),
+        );
+        client.contribute(&campaign_id, &contributor, &token, &1_000);
+        advance_time(&env, deadline_offset + 1);
+
+        client.set_paused(&admin, &true);
+        client.claim(&campaign_id, &creator);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_refund_blocked_when_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 500);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "pause refund test"),
+        );
+        client.contribute(&campaign_id, &contributor, &token, &500);
+        advance_time(&env, deadline_offset + 1);
+
+        client.set_paused(&admin, &true);
+        client.refund(&campaign_id, &contributor);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_cancel_campaign_blocked_when_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "pause cancel test"),
+        );
+
+        client.set_paused(&admin, &true);
+        client.cancel_campaign(&campaign_id, &creator);
+    }
+
+    #[test]
+    fn test_read_only_functions_work_when_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "read when paused"),
+        );
+        client.set_paused(&admin, &true);
+
+        // All reads must succeed even when paused
+        let _ = client.get_campaign(&campaign_id);
+        assert_eq!(client.get_campaign_count(), 1);
+        assert!(client.get_paused());
+        assert_eq!(client.get_admin(), admin);
+    }
+
+    #[test]
+    fn test_cancel_campaign_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "cancel test"),
+        );
+        client.cancel_campaign(&campaign_id, &creator);
+        assert!(client.get_campaign(&campaign_id).canceled);
+    }
+
     #[test]
     fn test_contributor_count_no_double_count_on_repeat_pledge() {
         let env = Env::default();
