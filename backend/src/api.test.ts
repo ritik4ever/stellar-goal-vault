@@ -41,7 +41,6 @@ beforeAll(async () => {
 
 afterAll(() => {
   server.close();
-  resetDbForTests();
   fs.rmSync(TEST_DB_PATH, { force: true });
 });
 
@@ -70,7 +69,9 @@ describe('Campaign Lifecycle API', () => {
     // 1. Create Campaign
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
-
+      title: 'Test Campaign',
+      description: 'This is a test campaign with sufficient description length',
+      acceptedTokens: ['USDC'],
       targetAmount: 100,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
@@ -115,7 +116,9 @@ describe('Campaign Lifecycle API', () => {
     // 1. Create Campaign
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
-
+      title: 'Test Campaign 2',
+      description: 'This is another test campaign with enough characters',
+      acceptedTokens: ['XLM'],
       targetAmount: 100,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
@@ -276,7 +279,7 @@ describe('Campaign Filters - createdAfter/createdBefore', () => {
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
       title: 'Recent Campaign',
-      description: 'Created just now',
+      description: 'Created just now with sufficient description',
       acceptedTokens: ['USDC'],
       targetAmount: 100,
       deadline: now + 3600,
@@ -298,7 +301,7 @@ describe('Campaign Filters - createdAfter/createdBefore', () => {
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
       title: 'Old Campaign',
-      description: 'Created earlier',
+      description: 'Created earlier with sufficient description text',
       acceptedTokens: ['XLM'],
       targetAmount: 100,
       deadline: now + 3600,
@@ -327,7 +330,7 @@ describe('Campaign Multi-Asset Filter', () => {
     const xlmRes = await post('/api/campaigns', {
       creator: CREATOR,
       title: 'XLM Campaign',
-      description: 'Campaign accepting XLM',
+      description: 'Campaign accepting XLM tokens only here',
       acceptedTokens: ['XLM'],
       targetAmount: 100,
       deadline: now + 3600,
@@ -337,7 +340,7 @@ describe('Campaign Multi-Asset Filter', () => {
     const usdcRes = await post('/api/campaigns', {
       creator: CREATOR,
       title: 'USDC Campaign',
-      description: 'Campaign accepting USDC',
+      description: 'Campaign accepting USDC tokens here now',
       acceptedTokens: ['USDC'],
       targetAmount: 100,
       deadline: now + 3600,
