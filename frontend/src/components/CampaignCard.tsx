@@ -1,4 +1,7 @@
-
+import { memo, useEffect, useRef, useState } from 'react';
+import { Campaign } from '../types/campaign';
+import AddressAvatar from './AddressAvatar';
+import CopyButton from './CopyButton';
 
 interface CampaignCardProps {
   campaign: Campaign;
@@ -6,7 +9,7 @@ interface CampaignCardProps {
   onSelect: (campaignId: string) => void;
 }
 
-
+function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignCardProps) {
   const prevPercentRef = useRef<number | null>(null);
   const [animate, setAnimate] = useState(false);
 
@@ -30,7 +33,14 @@ interface CampaignCardProps {
         <div className="campaign-card-header">
           <div>
             <strong className="campaign-title">{campaign.title}</strong>
-            <div className="muted">#{campaign.id}</div>
+            <div className="muted" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>#{campaign.id}</span>
+              <CopyButton
+                value={campaign.id}
+                ariaLabel="Copy campaign ID"
+                className="small"
+              />
+            </div>
           </div>
           <div
             className="campaign-creator mono"
@@ -80,6 +90,18 @@ interface CampaignCardProps {
         </button>
       </div>
     </article>
+  );
+}
+
+function areEqual(
+  prevProps: CampaignCardProps,
+  nextProps: CampaignCardProps,
+): boolean {
+  return (
+    prevProps.campaign.id === nextProps.campaign.id &&
+    prevProps.campaign.pledgedAmount === nextProps.campaign.pledgedAmount &&
+    prevProps.campaign.progress.percentFunded === nextProps.campaign.progress.percentFunded &&
+    prevProps.selectedCampaignId === nextProps.selectedCampaignId
   );
 }
 
