@@ -1,5 +1,13 @@
 
 
+import { FormEvent, useState, useEffect } from 'react';
+import { MousePointer2 } from 'lucide-react';
+import { Campaign, AppConfig } from '../types/campaign';
+import CopyButton from './CopyButton';
+import { EmptyState } from './EmptyState';
+import { ContributorSummary } from './ContributorSummary';
+import { CampaignImage } from './CampaignImage';
+
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
   appConfig?: AppConfig | null;
@@ -69,6 +77,7 @@ export function CampaignDetailPanel({
   const [refundContributor, setRefundContributor] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pledgeError, setPledgeError] = useState<string | null>(null);
+  const walletReady = appConfig?.walletIntegrationReady ?? false;
 
   useEffect(() => {
 
@@ -199,6 +208,13 @@ export function CampaignDetailPanel({
       </div>
 
       <div className="detail-grid">
+        <article className="detail-stat">
+          <span>Campaign ID</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <strong className="mono">{activeCampaign.id}</strong>
+            <CopyButton value={activeCampaign.id} ariaLabel="Copy campaign ID" />
+          </div>
+        </article>
         <article className="detail-stat">
           <span>Creator</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
