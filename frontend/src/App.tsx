@@ -46,6 +46,13 @@ import {
 } from "./types/campaign";
 
 const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
+
+function getNetworkName(passphrase: string | undefined): string | null {
+  if (!passphrase) return null;
+  if (passphrase.includes('Test SDF')) return 'Testnet';
+  if (passphrase.includes('Public Global Stellar')) return 'Mainnet';
+  return null;
+}
 const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
 const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
 const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
@@ -642,9 +649,11 @@ function App() {
               status={freighter.status}
               publicKey={freighter.publicKey}
               error={freighter.error}
+              network={getNetworkName(appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE)}
               onConnect={() => {
                 void handleConnectWallet();
               }}
+              onDisconnect={handleDisconnectWallet}
             />
             <button className="btn-ghost" type="button" onClick={handleThemeToggle}>
               {themeMode === "dark" ? "Light mode" : "Dark mode"}
