@@ -40,6 +40,9 @@ pub enum DataKey {
     Campaign(u64),
     Contribution(u64, Address, Address), // (campaign_id, contributor, token)
     CampaignTokenBalance(u64, Address),  // (campaign_id, token)
+    /// Maximum total contribution any single contributor may make to a
+    /// campaign across all tokens. Absent (or zero) means no cap.
+    ContributorCap(u64),               // campaign_id → i128
     Admin,
     Paused,
 }
@@ -194,6 +197,7 @@ impl StellarGoalVaultContract {
         target_amount: i128,
         deadline: u64,
         metadata: String,
+        max_per_contributor: i128,
     ) -> u64 {
         creator.require_auth();
 
@@ -224,6 +228,9 @@ impl StellarGoalVaultContract {
         if accepted_tokens.len() > MAX_ACCEPTED_TOKENS {
             panic!("too many accepted tokens");
         }
+        if max_per_contributor < 0 {
+            panic!("max_per_contributor must not be negative");
+        }
 
         let mut next_id: u64 = env
             .storage()
@@ -250,6 +257,14 @@ impl StellarGoalVaultContract {
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(next_id), &campaign);
+
+        // Store the per-contributor cap only when a positive limit is set.
+        // Absent key is equivalent to cap == 0 (no limit).
+        if max_per_contributor > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::ContributorCap(next_id), &max_per_contributor);
+        }
 
         // For backward compatibility, publish the first token in the event
         env.events().publish(

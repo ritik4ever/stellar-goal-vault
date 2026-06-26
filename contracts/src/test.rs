@@ -560,6 +560,120 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "creator mismatch")]
+    fn test_cancel_campaign_non_creator_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "cancel mismatch test"),
+        );
+        // attacker tries to cancel — must panic with "creator mismatch"
+        client.cancel_campaign(&campaign_id, &attacker);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign already claimed")]
+    fn test_cancel_campaign_already_claimed_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 500;
+        let deadline_offset: u64 = 100;
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "cancel claimed test"),
+        );
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        advance_time(&env, deadline_offset + 1);
+        client.claim(&campaign_id, &creator);
+
+        // campaign is now claimed — cancel must panic
+        client.cancel_campaign(&campaign_id, &creator);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign already canceled")]
+    fn test_cancel_campaign_double_cancel_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "double cancel test"),
+        );
+        client.cancel_campaign(&campaign_id, &creator);
+        // second cancel must panic
+        client.cancel_campaign(&campaign_id, &creator);
+    }
+
+    #[test]
+    fn test_refund_works_on_canceled_campaign_before_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let pledge_amount: i128 = 300;
+        let target: i128 = 1_000;
+        // Long deadline — we will NOT advance time past it
+        let deadline_offset: u64 = 10_000;
+        let token = deploy_token(&env, &admin, &contributor, pledge_amount);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "cancel refund test"),
+        );
+        client.contribute(&campaign_id, &contributor, &token, &pledge_amount);
+
+        // Cancel while deadline is still in the future
+        client.cancel_campaign(&campaign_id, &creator);
+
+        // Contributor must be able to refund immediately (no time-travel needed)
+        client.refund(&campaign_id, &contributor);
+
+        // Contribution should be zeroed out and pledged_amount reduced
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.pledged_amount, 0);
+        let remaining = client.get_contribution(&campaign_id, &contributor, &token);
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
     fn test_contributor_count_no_double_count_on_repeat_pledge() {
         let env = Env::default();
         env.mock_all_auths();
