@@ -40,6 +40,8 @@ pub enum DataKey {
     Campaign(u64),
     Contribution(u64, Address, Address), // (campaign_id, contributor, token)
     CampaignTokenBalance(u64, Address),  // (campaign_id, token)
+    Admin,
+    Paused,
 }
 
 #[contracttype]
@@ -94,6 +96,18 @@ pub struct CampaignCanceled {
     pub creator: Address,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractPaused {
+    pub contract_version: String,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractUnpaused {
+    pub contract_version: String,
+}
+
 #[contract]
 pub struct StellarGoalVaultContract;
 
@@ -101,6 +115,78 @@ const MAX_CAMPAIGN_DURATION_SECONDS: u64 = 60 * 60 * 24 * 180;
 
 #[contractimpl]
 impl StellarGoalVaultContract {
+    /// Sets the admin address once. Must be called by the designated admin.
+    /// Panics if already initialized.
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("already initialized");
+        }
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
+    }
+
+    /// Pauses or unpauses all state-mutating entry points. Admin only.
+    pub fn set_paused(env: Env, caller: Address, paused: bool) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"));
+        if caller != admin {
+            panic!("caller is not admin");
+        }
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        let version = String::from_str(&env, CONTRACT_VERSION);
+        if paused {
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Pause")),
+                ContractPaused { contract_version: version },
+            );
+        } else {
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Unpause")),
+                ContractUnpaused { contract_version: version },
+            );
+        }
+    }
+
+    pub fn get_paused(env: Env) -> bool {
+        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+    }
+
+    pub fn get_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"))
+    }
+
+    /// Creator can cancel an active campaign, allowing contributors to refund.
+    pub fn cancel_campaign(env: Env, campaign_id: u64, creator: Address) {
+        require_not_paused(&env);
+        creator.require_auth();
+        let mut campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign already canceled");
+        }
+        campaign.canceled = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Cancel")),
+            CampaignCanceled { campaign_id, creator },
+        );
+    }
+
     pub fn create_campaign(
         env: Env,
         creator: Address,
@@ -182,6 +268,7 @@ impl StellarGoalVaultContract {
     }
 
     pub fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, amount: i128) {
+        require_not_paused(&env);
         contributor.require_auth();
 
         if amount < MIN_CONTRIBUTION {
@@ -246,6 +333,7 @@ impl StellarGoalVaultContract {
     }
 
     pub fn claim(env: Env, campaign_id: u64, creator: Address) {
+        require_not_paused(&env);
         creator.require_auth();
 
         let mut campaign = read_campaign(&env, campaign_id);
@@ -298,6 +386,7 @@ impl StellarGoalVaultContract {
     }
 
     pub fn refund(env: Env, campaign_id: u64, contributor: Address) {
+        require_not_paused(&env);
         contributor.require_auth();
 
         let mut campaign = read_campaign(&env, campaign_id);
@@ -420,6 +509,17 @@ impl StellarGoalVaultContract {
             version,
             deployed_at,
         }
+    }
+}
+
+fn require_not_paused(env: &Env) {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        panic!("contract is paused");
     }
 }
 
