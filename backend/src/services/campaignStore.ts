@@ -278,12 +278,15 @@ export type SortOrder = 'asc' | 'desc';
 export interface ListCampaignsOptions {
   searchQuery?: string;
   assetCode?: string;
+  assetCodes?: string[];
   status?: CampaignStatus;
   includeDeleted?: boolean;
   page?: number;
   limit?: number;
   sort?: CampaignSortField;
   order?: SortOrder;
+  createdAfter?: number;
+  createdBefore?: number;
 }
 
 export interface ListCampaignsResult {
@@ -354,6 +357,14 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
     params.push(`%${options.assetCode.toUpperCase()}%`);
   }
 
+  if (options?.assetCodes && options.assetCodes.length > 0) {
+    const conditions = options.assetCodes.map(() => `campaigns.accepted_tokens_json LIKE ?`).join(' OR ');
+    whereClauses.push(`(${conditions})`);
+    options.assetCodes.forEach(code => {
+      params.push(`%${code.toUpperCase()}%`);
+    });
+  }
+
   if (options?.status) {
     const now = Math.floor(Date.now() / 1000);
     switch (options.status) {
@@ -374,6 +385,16 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
         params.push(now);
         break;
     }
+  }
+
+  if (options?.createdAfter !== undefined) {
+    whereClauses.push(`campaigns.created_at >= ?`);
+    params.push(options.createdAfter);
+  }
+
+  if (options?.createdBefore !== undefined) {
+    whereClauses.push(`campaigns.created_at <= ?`);
+    params.push(options.createdBefore);
   }
 
   if (!options?.includeDeleted) {

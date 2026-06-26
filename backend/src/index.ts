@@ -54,6 +54,8 @@ import {
   refundPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
+  parseCampaignListQuery,
+  normalizeQueryValue,
 } from './validation/schemas';
 import { logError, logInfo } from './logger';
 export const app = express();
@@ -177,15 +179,6 @@ function parseCampaignId(
   return { ok: true, value: parsed.data };
 }
 
-export function normalizeQueryValue(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed === '' ? undefined : trimmed;
-}
-
 export function normalizeAssetFilter(assetRaw: unknown): string | undefined {
   const asset = normalizeQueryValue(assetRaw)?.toUpperCase();
   if (!asset) {
@@ -270,51 +263,39 @@ app.get('/api/health', (_req: Request, res: Response) => {
 });
 
 app.get('/api/campaigns', (req: Request, res: Response) => {
-  const paginationResult = parseCampaignListPaginationQuery({
-    page: req.query.page,
-    limit: req.query.limit,
-  });
-  if (!paginationResult.ok) {
-    sendValidationError(paginationResult.issues);
+  const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
+  if (!queryResult.ok) {
+    sendValidationError(queryResult.issues);
   }
 
-  const filters = parseCampaignListFilters({
-    asset: req.query.asset,
-    status: req.query.status,
-    q: req.query.q,
-    search: req.query.search,
-    includeDeleted: req.query.includeDeleted,
-    sort: req.query.sort,
-    order: req.query.order,
-  });
+  const params = queryResult.data;
 
   const listOptions: ListCampaignsOptions = {
-    searchQuery: filters.searchQuery,
-    assetCode: filters.asset,
-    status: filters.status,
-    includeDeleted: filters.includeDeleted,
-    sort: filters.sort,
-    order: filters.order,
+    searchQuery: params.search || params.q,
+    assetCodes: params.asset,
+    status: params.status,
+    includeDeleted: params.includeDeleted,
+    sort: params.sort,
+    order: params.order,
+    createdAfter: params.createdAfter,
+    createdBefore: params.createdBefore,
   };
-  if (paginationResult.page !== undefined) {
-    listOptions.page = paginationResult.page;
-    listOptions.limit = paginationResult.limit;
+  if (params.page !== undefined) {
+    listOptions.page = params.page;
+    listOptions.limit = params.limit;
   }
 
   const { campaigns, totalCount, pledgeCounts } = listCampaigns(listOptions);
 
-  const data = filterCampaignList(
-    campaigns.map((campaign) => ({
-      ...campaign,
-      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
-    })),
-    filters,
-  );
+  const data = campaigns.map((campaign) => ({
+    ...campaign,
+    progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
+  }));
 
-  const page = paginationResult.page ?? 1;
-  const limit = paginationResult.limit ?? totalCount;
+  const page = params.page ?? 1;
+  const limit = params.limit ?? totalCount;
   const totalPages =
-    paginationResult.limit === undefined || limit <= 0
+    params.limit === undefined || limit <= 0
       ? 1
       : Math.max(1, Math.ceil(totalCount / limit));
 

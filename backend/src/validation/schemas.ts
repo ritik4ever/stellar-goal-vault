@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { config } from "../config";
+import type { CampaignStatus, CampaignSortField, SortOrder } from "../services/campaignStore";
 
 export const STELLAR_ACCOUNT_REGEX = /^G[A-Z2-7]{55}$/;
 export const ASSET_CODE_REGEX = /^[A-Za-z0-9]{1,12}$/;
@@ -292,6 +293,220 @@ export function parsePledgeListPaginationQuery(query: {
   };
 }
 
+function parseIso8601Timestamp(value: unknown): number | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  return Math.floor(timestamp / 1000);
+}
+
+function parseAssetCodes(value: unknown): string[] | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const codes = value.split(',').map(code => code.trim().toUpperCase()).filter(code => code.length > 0);
+  return codes.length > 0 ? codes : null;
+}
+
+export interface CampaignListQueryParams {
+  page?: number;
+  limit?: number;
+  q?: string;
+  search?: string;
+  asset?: string[];
+  status?: CampaignStatus;
+  sort?: CampaignSortField;
+  order?: SortOrder;
+  includeDeleted?: boolean;
+  createdAfter?: number;
+  createdBefore?: number;
+}
+
+export function parseCampaignListQuery(query: Record<string, unknown>):
+  { ok: true; data: CampaignListQueryParams } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const issues: z.core.$ZodIssue[] = [];
+
+  const pageStr = singleCampaignListQueryParam(query.page);
+  const limitStr = singleCampaignListQueryParam(query.limit);
+
+  let page: number | undefined;
+  let limit: number | undefined;
+
+  if (pageStr === undefined && limitStr === undefined) {
+    page = undefined;
+    limit = undefined;
+  } else if (pageStr === undefined || limitStr === undefined) {
+    issues.push({
+      code: "custom",
+      message: "Pagination requires both page and limit query parameters.",
+      path: pageStr === undefined ? ["page"] : ["limit"],
+    });
+  } else {
+    const pageNum = Number(pageStr);
+    const limitNum = Number(limitStr);
+
+    if (!Number.isFinite(pageNum) || !Number.isInteger(pageNum) || pageNum < 1) {
+      issues.push({
+        code: "custom",
+        message: "page must be a positive integer.",
+        path: ["page"],
+      });
+    } else {
+      page = pageNum;
+    }
+
+    if (!Number.isFinite(limitNum) || !Number.isInteger(limitNum) || limitNum < 1 || limitNum > 100) {
+      issues.push({
+        code: "custom",
+        message: "limit must be an integer from 1 to 100.",
+        path: ["limit"],
+      });
+    } else {
+      limit = limitNum;
+    }
+  }
+
+  const searchQuery = normalizeQueryValue(query.search) || normalizeQueryValue(query.q);
+
+  const assetCodes = parseAssetCodes(query.asset);
+  let assetList: string[] | undefined = undefined;
+  if (query.asset !== undefined && assetCodes === null) {
+    issues.push({
+      code: "custom",
+      message: "asset must be a comma-separated list of valid asset codes.",
+      path: ["asset"],
+    });
+  } else if (assetCodes) {
+    const validCodes = assetCodes.filter(code => config.allowedAssets.includes(code));
+    if (validCodes.length !== assetCodes.length) {
+      issues.push({
+        code: "custom",
+        message: `Invalid asset code(s). Supported assets: ${config.allowedAssets.join(", ")}`,
+        path: ["asset"],
+      });
+    } else {
+      assetList = validCodes;
+    }
+  }
+
+  const statusStr = normalizeQueryValue(query.status);
+  let status: CampaignStatus | undefined = undefined;
+  const VALID_STATUSES: CampaignStatus[] = ['open', 'funded', 'claimed', 'failed'];
+  if (statusStr !== undefined) {
+    const lowerStatus = statusStr.toLowerCase();
+    if (!VALID_STATUSES.includes(lowerStatus as CampaignStatus)) {
+      issues.push({
+        code: "custom",
+        message: `status must be one of: ${VALID_STATUSES.join(", ")}`,
+        path: ["status"],
+      });
+    } else {
+      status = lowerStatus as CampaignStatus;
+    }
+  }
+
+  const sortStr = normalizeQueryValue(query.sort);
+  let sort: CampaignSortField | undefined = undefined;
+  const VALID_SORTS: CampaignSortField[] = ['newest', 'deadline', 'percentFunded', 'totalPledged'];
+  if (sortStr !== undefined) {
+    if (!VALID_SORTS.includes(sortStr as CampaignSortField)) {
+      issues.push({
+        code: "custom",
+        message: `sort must be one of: ${VALID_SORTS.join(", ")}`,
+        path: ["sort"],
+      });
+    } else {
+      sort = sortStr as CampaignSortField;
+    }
+  }
+
+  const orderStr = normalizeQueryValue(query.order);
+  let order: SortOrder | undefined = undefined;
+  const VALID_ORDERS: SortOrder[] = ['asc', 'desc'];
+  if (orderStr !== undefined) {
+    if (!VALID_ORDERS.includes(orderStr as SortOrder)) {
+      issues.push({
+        code: "custom",
+        message: `order must be one of: ${VALID_ORDERS.join(", ")}`,
+        path: ["order"],
+      });
+    } else {
+      order = orderStr as SortOrder;
+    }
+  }
+
+  const includeDeletedStr = singleCampaignListQueryParam(query.includeDeleted);
+  let includeDeleted: boolean | undefined = undefined;
+  if (includeDeletedStr !== undefined) {
+    if (includeDeletedStr !== 'true' && includeDeletedStr !== 'false') {
+      issues.push({
+        code: "custom",
+        message: "includeDeleted must be 'true' or 'false'.",
+        path: ["includeDeleted"],
+      });
+    } else {
+      includeDeleted = includeDeletedStr === 'true';
+    }
+  }
+
+  const createdAfterStr = normalizeQueryValue(query.createdAfter);
+  let createdAfter: number | undefined = undefined;
+  if (createdAfterStr !== undefined) {
+    const timestamp = parseIso8601Timestamp(createdAfterStr);
+    if (timestamp === null) {
+      issues.push({
+        code: "custom",
+        message: "createdAfter must be a valid ISO 8601 timestamp.",
+        path: ["createdAfter"],
+      });
+    } else {
+      createdAfter = timestamp;
+    }
+  }
+
+  const createdBeforeStr = normalizeQueryValue(query.createdBefore);
+  let createdBefore: number | undefined = undefined;
+  if (createdBeforeStr !== undefined) {
+    const timestamp = parseIso8601Timestamp(createdBeforeStr);
+    if (timestamp === null) {
+      issues.push({
+        code: "custom",
+        message: "createdBefore must be a valid ISO 8601 timestamp.",
+        path: ["createdBefore"],
+      });
+    } else {
+      createdBefore = timestamp;
+    }
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return {
+    ok: true,
+    data: {
+      page,
+      limit,
+      q: query.q ? normalizeQueryValue(query.q) : undefined,
+      search: query.search ? normalizeQueryValue(query.search) : undefined,
+      asset: assetList,
+      status,
+      sort,
+      order,
+      includeDeleted,
+      createdAfter,
+      createdBefore,
+    },
+  };
+}
 
 export type ValidationIssue = {
   field: string;
@@ -309,4 +524,13 @@ export function zodIssuesToErrorMessage(issues: z.ZodIssue[]): string {
   return zodIssuesToValidationIssues(issues)
     .map(({ field, message }) => `${field}: ${message}`)
     .join("; ");
+}
+
+export function normalizeQueryValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
 }
