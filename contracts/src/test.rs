@@ -51,6 +51,7 @@ mod tests {
             &target,
             &deadline,
             &String::from_str(&env, "test campaign"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &target);
@@ -86,6 +87,7 @@ mod tests {
             &target,
             &deadline,
             &String::from_str(&env, "mismatch test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &target);
@@ -115,6 +117,7 @@ mod tests {
             &target,
             &deadline,
             &String::from_str(&env, "early claim test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &target);
@@ -144,6 +147,7 @@ mod tests {
             &target,
             &deadline,
             &String::from_str(&env, "underfunded test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &(target / 2));
@@ -174,6 +178,7 @@ mod tests {
             &target,
             &deadline,
             &String::from_str(&env, "double claim test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &target);
@@ -204,6 +209,7 @@ mod tests {
             &100_i128,
             &deadline,
             &meta("c1"),
+            &0_i128,
         );
         assert_eq!(client.get_campaign_count(), 1);
         assert_eq!(client.get_next_campaign_id(), 1);
@@ -214,6 +220,7 @@ mod tests {
             &200_i128,
             &deadline,
             &meta("c2"),
+            &0_i128,
         );
         client.create_campaign(
             &creator,
@@ -221,6 +228,7 @@ mod tests {
             &300_i128,
             &deadline,
             &meta("c3"),
+            &0_i128,
         );
     }
 
@@ -240,6 +248,7 @@ mod tests {
             &500_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "count zero test"),
+            &0_i128,
         );
 
         assert_eq!(client.get_contributor_count(&campaign_id), 0);
@@ -263,6 +272,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "single contributor test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &500);
@@ -295,6 +305,7 @@ mod tests {
             &600_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "multi contributor test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor1, &token_id, &200);
@@ -330,6 +341,7 @@ mod tests {
             &500_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "max tokens test"),
+            &0_i128,
         );
     }
 
@@ -354,6 +366,7 @@ mod tests {
             &500_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "exactly 10 tokens"),
+            &0_i128,
         );
 
         let campaign = client.get_campaign(&campaign_id);
@@ -429,6 +442,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "pause test"),
+            &0_i128,
         );
 
         client.set_paused(&admin, &true);
@@ -454,6 +468,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + deadline_offset),
             &String::from_str(&env, "pause claim test"),
+            &0_i128,
         );
         client.contribute(&campaign_id, &contributor, &token, &1_000);
         advance_time(&env, deadline_offset + 1);
@@ -481,6 +496,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + deadline_offset),
             &String::from_str(&env, "pause refund test"),
+            &0_i128,
         );
         client.contribute(&campaign_id, &contributor, &token, &500);
         advance_time(&env, deadline_offset + 1);
@@ -506,6 +522,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "pause cancel test"),
+            &0_i128,
         );
 
         client.set_paused(&admin, &true);
@@ -528,6 +545,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "read when paused"),
+            &0_i128,
         );
         client.set_paused(&admin, &true);
 
@@ -554,6 +572,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "cancel test"),
+            &0_i128,
         );
         client.cancel_campaign(&campaign_id, &creator);
         assert!(client.get_campaign(&campaign_id).canceled);
@@ -569,7 +588,7 @@ mod tests {
         let admin = Address::generate(&env);
         let token = deploy_token(&env, &admin, &creator, 1_000);
         let client = deploy_contract(&env);
-        client.initialize(&admin);
+        client.initialize(&admin, &100_i128);
 
         let campaign_id = client.create_campaign(
             &creator,
@@ -577,6 +596,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "cancel mismatch test"),
+            &0_i128,
         );
         // attacker tries to cancel — must panic with "creator mismatch"
         client.cancel_campaign(&campaign_id, &attacker);
@@ -595,7 +615,7 @@ mod tests {
         let deadline_offset: u64 = 100;
         let token = deploy_token(&env, &admin, &contributor, target);
         let client = deploy_contract(&env);
-        client.initialize(&admin);
+        client.initialize(&admin, &100_i128);
 
         let campaign_id = client.create_campaign(
             &creator,
@@ -603,6 +623,7 @@ mod tests {
             &target,
             &(env.ledger().timestamp() + deadline_offset),
             &String::from_str(&env, "cancel claimed test"),
+            &0_i128,
         );
         client.contribute(&campaign_id, &contributor, &token, &target);
         advance_time(&env, deadline_offset + 1);
@@ -621,7 +642,7 @@ mod tests {
         let admin = Address::generate(&env);
         let token = deploy_token(&env, &admin, &creator, 1_000);
         let client = deploy_contract(&env);
-        client.initialize(&admin);
+        client.initialize(&admin, &100_i128);
 
         let campaign_id = client.create_campaign(
             &creator,
@@ -629,6 +650,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "double cancel test"),
+            &0_i128,
         );
         client.cancel_campaign(&campaign_id, &creator);
         // second cancel must panic
@@ -649,7 +671,7 @@ mod tests {
         let deadline_offset: u64 = 10_000;
         let token = deploy_token(&env, &admin, &contributor, pledge_amount);
         let client = deploy_contract(&env);
-        client.initialize(&admin);
+        client.initialize(&admin, &100_i128);
 
         let campaign_id = client.create_campaign(
             &creator,
@@ -657,6 +679,7 @@ mod tests {
             &target,
             &(env.ledger().timestamp() + deadline_offset),
             &String::from_str(&env, "cancel refund test"),
+            &0_i128,
         );
         client.contribute(&campaign_id, &contributor, &token, &pledge_amount);
 
@@ -691,6 +714,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "repeat pledge test"),
+            &0_i128,
         );
 
         // Same contributor pledges twice — count must stay at 1
@@ -741,6 +765,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "boundary test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &99);
@@ -763,6 +788,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "boundary accept test"),
+            &0_i128,
         );
 
         // Exactly 100 must succeed
@@ -790,6 +816,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "custom min test"),
+            &0_i128,
         );
 
         // 499 is below the custom minimum of 500
@@ -814,6 +841,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "custom min accept test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &500);
@@ -838,6 +866,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "original metadata"),
+            &0_i128,
         );
 
         client.update_metadata(
@@ -868,6 +897,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "original metadata"),
+            &0_i128,
         );
 
         client.update_metadata(
@@ -895,6 +925,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + deadline_offset),
             &String::from_str(&env, "original metadata"),
+            &0_i128,
         );
 
         advance_time(&env, deadline_offset + 1);
@@ -923,6 +954,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "original metadata"),
+            &0_i128,
         );
 
         client.cancel_campaign(&campaign_id, &creator);
@@ -953,6 +985,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + deadline_offset),
             &String::from_str(&env, "extension test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &500);
@@ -985,6 +1018,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + deadline_offset),
             &String::from_str(&env, "extension test"),
+            &0_i128,
         );
 
         let new_deadline = env.ledger().timestamp() + deadline_offset + 500;
@@ -1009,6 +1043,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
             &String::from_str(&env, "extension max test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &500);
@@ -1042,6 +1077,7 @@ mod tests {
             &600_i128,
             &(env.ledger().timestamp() + deadline_offset),
             &String::from_str(&env, "majority test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor1, &token_id, &300);
@@ -1092,6 +1128,7 @@ mod tests {
             &600_i128,
             &(env.ledger().timestamp() + deadline_offset),
             &String::from_str(&env, "double vote test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor1, &token_id, &200);
@@ -1125,6 +1162,7 @@ mod tests {
             &1_000_i128,
             &(env.ledger().timestamp() + deadline_offset),
             &String::from_str(&env, "claimed extension test"),
+            &0_i128,
         );
 
         client.contribute(&campaign_id, &contributor, &token, &1_000);
@@ -1133,5 +1171,70 @@ mod tests {
 
         let new_deadline = env.ledger().timestamp() + 500;
         client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
+    }
+
+    #[test]
+    fn test_migrate_copies_campaigns_and_is_idempotent() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+
+        // Deploy "old" contract and seed a campaign
+        let old = deploy_contract(&env);
+        old.initialize(&admin, &100_i128);
+        let deadline = env.ledger().timestamp() + 1_000;
+        let token_admin = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract(token_admin.clone());
+        let old_campaign_id = old.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_id.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "old campaign"),
+            &0_i128,
+        );
+
+        // Deploy "new" contract
+        let new_contract = deploy_contract(&env);
+        new_contract.initialize(&admin, &100_i128);
+
+        // Verify old contract has the campaign
+        assert_eq!(old.get_campaign_count(), 1);
+        let old_campaign_data = old.get_campaign(&old_campaign_id);
+
+        // Admin pre-fetches the campaigns off-chain and passes them to migrate
+        let source_ids = soroban_sdk::vec![&env, old_campaign_id];
+        let campaigns_to_migrate = soroban_sdk::vec![&env, old_campaign_data.clone()];
+        let result = new_contract.try_migrate(&admin, &old.address, &source_ids.clone(), &campaigns_to_migrate.clone());
+        result.expect("migrate should not fail");
+
+        // The new contract should have one campaign
+        assert_eq!(new_contract.get_campaign_count(), 1);
+        let migrated = new_contract.get_campaign(&0u64);
+        assert_eq!(migrated.creator, creator);
+        assert_eq!(migrated.target_amount, 1_000_i128);
+
+        // Calling migrate again with the same source IDs should be idempotent
+        new_contract.migrate(&admin, &old.address, &source_ids, &campaigns_to_migrate);
+        assert_eq!(new_contract.get_campaign_count(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "only admin can call migrate")]
+    fn test_migrate_rejects_non_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let intruder = Address::generate(&env);
+
+        let old = deploy_contract(&env);
+        old.initialize(&admin, &100_i128);
+        let new_contract = deploy_contract(&env);
+        new_contract.initialize(&admin, &100_i128);
+
+        new_contract.migrate(&intruder, &old.address, &soroban_sdk::vec![&env], &soroban_sdk::vec![&env]);
     }
 }
