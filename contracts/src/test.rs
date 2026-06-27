@@ -1134,4 +1134,251 @@ mod tests {
         let new_deadline = env.ledger().timestamp() + 500;
         client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
     }
+
+    #[test]
+    fn test_refund_all_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        // Generate 10 contributors
+        let mut contributors = std::vec::Vec::new();
+        for _ in 0..10 {
+            let contributor = Address::generate(&env);
+            // Mint tokens to each contributor
+            let asset_client = StellarAssetClient::new(&env, &token);
+            asset_client.mint(&contributor, &200);
+            contributors.push(contributor);
+        }
+
+        let deadline_offset: u64 = 500;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &5_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "refund all success test"),
+        );
+
+        // All 10 contribute 200 each (total 2000, underfunded compared to 5000 target)
+        for c in contributors.iter() {
+            client.contribute(&campaign_id, c, &token, &200);
+        }
+
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 2_000);
+        assert_eq!(client.get_contributor_count(&campaign_id), 10);
+
+        // Advance time past the deadline so campaign fails
+        advance_time(&env, deadline_offset + 1);
+
+        // Check token balance of contract before refund
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&env.current_contract_address()), 2_000);
+
+        // Call refund_all (can be called by anyone, e.g. creator or a new random address)
+        client.refund_all(&campaign_id);
+
+        // Verify all 10 contributors got their 200 tokens back
+        for c in contributors.iter() {
+            assert_eq!(token_client.balance(c), 200);
+            assert_eq!(client.get_contribution(&campaign_id, c, &token), 0);
+        }
+
+        // Verify contract token balance is zeroed
+        assert_eq!(token_client.balance(&env.current_contract_address()), 0);
+
+        // Verify campaign pledged amount is zeroed
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.pledged_amount, 0);
+    }
+
+    #[test]
+    fn test_refund_all_skips_already_refunded() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        // Generate 3 contributors
+        let c1 = Address::generate(&env);
+        let c2 = Address::generate(&env);
+        let c3 = Address::generate(&env);
+
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&c1, &300);
+        asset_client.mint(&c2, &300);
+        asset_client.mint(&c3, &300);
+
+        let deadline_offset: u64 = 500;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &2_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "skips already refunded test"),
+        );
+
+        client.contribute(&campaign_id, &c1, &token, &300);
+        client.contribute(&campaign_id, &c2, &token, &300);
+        client.contribute(&campaign_id, &c3, &token, &300);
+
+        // Advance time past the deadline
+        advance_time(&env, deadline_offset + 1);
+
+        // Refund c1 individually first
+        client.refund(&campaign_id, &c1);
+
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&c1), 300);
+        assert_eq!(token_client.balance(&c2), 0);
+        assert_eq!(token_client.balance(&c3), 0);
+
+        // Call refund_all to refund the remaining c2 and c3
+        client.refund_all(&campaign_id);
+
+        // c1 should still have their 300, and c2, c3 should now also have 300
+        assert_eq!(token_client.balance(&c1), 300);
+        assert_eq!(token_client.balance(&c2), 300);
+        assert_eq!(token_client.balance(&c3), 300);
+
+        // Campaign pledged amount should be 0
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "nothing to refund")]
+    fn test_refund_all_panics_when_all_already_refunded() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let c1 = Address::generate(&env);
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&c1, &300);
+
+        let deadline_offset: u64 = 500;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &2_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "all refunded test"),
+        );
+
+        client.contribute(&campaign_id, &c1, &token, &300);
+        advance_time(&env, deadline_offset + 1);
+
+        client.refund(&campaign_id, &c1);
+
+        // Call refund_all when everyone is already refunded -> should panic
+        client.refund_all(&campaign_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign is still active")]
+    fn test_refund_all_fails_on_active_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let c1 = Address::generate(&env);
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&c1, &300);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &2_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "active refund_all test"),
+        );
+
+        client.contribute(&campaign_id, &c1, &token, &300);
+        // Call refund_all before deadline -> should panic
+        client.refund_all(&campaign_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "funded campaigns cannot be refunded")]
+    fn test_refund_all_fails_on_funded_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let c1 = Address::generate(&env);
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&c1, &1_000);
+
+        let deadline_offset: u64 = 500;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "funded refund_all test"),
+        );
+
+        client.contribute(&campaign_id, &c1, &token, &1_000);
+        advance_time(&env, deadline_offset + 1);
+
+        // Call refund_all on funded campaign -> should panic
+        client.refund_all(&campaign_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign already claimed")]
+    fn test_refund_all_fails_on_claimed_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin);
+
+        let c1 = Address::generate(&env);
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&c1, &1_000);
+
+        let deadline_offset: u64 = 500;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "claimed refund_all test"),
+        );
+
+        client.contribute(&campaign_id, &c1, &token, &1_000);
+        advance_time(&env, deadline_offset + 1);
+        client.claim(&campaign_id, &creator);
+
+        // Call refund_all on claimed campaign -> should panic
+        client.refund_all(&campaign_id);
+    }
 }
