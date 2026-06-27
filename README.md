@@ -57,10 +57,12 @@ Each campaign stores:
 - `creator`
 - `title`
 - `description`
-- `assetCode`
+- `acceptedTokens` — one or more Stellar asset codes the campaign accepts
+- `assetCode` — first accepted token (backward-compatibility alias)
 - `targetAmount`
 - `pledgedAmount`
 - `deadline`
+- `tokenBalances` — per-token pledge totals (`Record<assetCode, amount>`)
 
 Campaign states:
 
@@ -68,6 +70,71 @@ Campaign states:
 - `funded` when pledged amount is at least the target and funds have not been claimed
 - `claimed` when the creator has claimed a funded vault
 - `failed` when deadline has passed without reaching the target
+
+## Contract rules
+
+### Minimum contribution (issue #184)
+
+The Soroban contract enforces a minimum contribution per pledge. The default is **100 stroops**. This is configurable at deploy time via `initialize(admin, min_contribution)`.
+
+```bash
+# Deploy with a custom minimum (e.g. 500 stroops)
+stellar contract invoke --id $CONTRACT_ID -- initialize \
+  --admin $ADMIN_ADDRESS \
+  --min_contribution 500
+```
+
+Contributions below the minimum are rejected with `"contribution below minimum"`.
+
+### Metadata updates (issue #185)
+
+A campaign creator can update the campaign metadata before the deadline:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- update_metadata \
+  --campaign_id 1 \
+  --creator $CREATOR_ADDRESS \
+  --new_metadata "Updated description"
+```
+
+The contract emits a `MetadataUpdated` event containing both the old and new metadata values. The backend event indexer processes this event and updates local state automatically.
+
+### Multi-token campaigns (issue #191)
+
+Campaigns can accept more than one Stellar asset code. When `acceptedTokens` contains multiple entries the frontend renders a per-token progress bar beneath the main progress bar, and the pledge form shows a token selector so contributors can choose which asset to pledge.
+
+The backend tracks per-token pledge totals in the `tokenBalances` field (a `Record<assetCode, amount>` map built from the `pledges` table grouped by `asset_code`). This is returned on every `GET /api/campaigns/:id` response and on the campaign list.
+
+**Contract side:** The Soroban contract stores `accepted_tokens: Vec<String>` on each campaign. `contribute()` validates that the pledged asset is in the list before recording the pledge.
+
+**Frontend side:** `CampaignCard` renders individual `<div class="progress-bar">` elements for each accepted token when `tokenBalances` is present. `CampaignDetailPanel` conditionally shows a `<select>` token picker above the amount field when `acceptedTokens.length > 1`.
+
+**Backend side:** `getCampaignTokenBalances(campaignId)` queries the `pledges` table grouped by `asset_code` and returns the map. `getCampaign()` populates `campaign.tokenBalances` on every read.
+
+### Deadline extension governance (issue #192)
+
+Any existing contributor can request a deadline extension:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- request_deadline_extension \
+  --campaign_id 1 \
+  --caller $CONTRIBUTOR_ADDRESS \
+  --new_deadline <unix_timestamp>
+```
+
+Other contributors can vote to approve:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- approve_extension \
+  --campaign_id 1 \
+  --caller $OTHER_CONTRIBUTOR
+```
+
+The extension is applied once **more than 50%** of unique contributors have approved. Constraints:
+
+- New deadline must be later than the current deadline
+- New deadline cannot exceed `MAX_CAMPAIGN_DURATION_SECONDS` (180 days) from the campaign creation timestamp
+- Reverts on claimed or canceled campaigns
 
 ## Mutation testing
 
@@ -148,6 +215,26 @@ Base URL:
 - `status` is `ok` when the API and database probe succeed, otherwise `degraded`
 - `database.status` is `up` or `down` based on a lightweight SQLite reachability check
 
+### `GET /api/stats`
+
+- Returns aggregate metrics and totals computed from campaigns and pledges.
+- Cached with a 30-second TTL.
+- Response:
+
+```json
+{
+  "data": {
+    "totalCampaigns": 10,
+    "openCampaigns": 5,
+    "fundedCampaigns": 3,
+    "claimedCampaigns": 1,
+    "failedCampaigns": 1,
+    "totalPledgeVolume": 50000,
+    "uniqueContributors": 42
+  }
+}
+```
+
 ### `GET /api/campaigns`
 
 - Returns all campaigns with computed progress
@@ -159,6 +246,27 @@ Base URL:
 ### `GET /api/campaigns/:id`
 
 - Returns one campaign with pledges and event history
+
+### `GET /api/campaigns/:id/pledges`
+
+- Returns only pledge information together with pagination metadata.
+
+**Query Parameters:**
+- `page` (optional): Page number (e.g., `?page=1`)
+- `limit` (optional): Results per page (e.g., `?limit=20`)
+
+**Response Schema:**
+```json
+{
+  "data": [],
+  "pagination": {
+    "total": 0,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1
+  }
+}
+```
 
 ### `POST /api/campaigns`
 

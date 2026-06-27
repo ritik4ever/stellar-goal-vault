@@ -48,6 +48,7 @@ export interface CampaignRecord {
     externalLink?: string;
   };
   maxPerContributor?: number;
+  tokenBalances?: Record<string, number>;
 }
 
 export interface CampaignProgress {
@@ -278,12 +279,15 @@ export type SortOrder = 'asc' | 'desc';
 export interface ListCampaignsOptions {
   searchQuery?: string;
   assetCode?: string;
+  assetCodes?: string[];
   status?: CampaignStatus;
   includeDeleted?: boolean;
   page?: number;
   limit?: number;
   sort?: CampaignSortField;
   order?: SortOrder;
+  createdAfter?: number;
+  createdBefore?: number;
 }
 
 export interface ListCampaignsResult {
@@ -354,6 +358,14 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
     params.push(`%${options.assetCode.toUpperCase()}%`);
   }
 
+  if (options?.assetCodes && options.assetCodes.length > 0) {
+    const conditions = options.assetCodes.map(() => `campaigns.accepted_tokens_json LIKE ?`).join(' OR ');
+    whereClauses.push(`(${conditions})`);
+    options.assetCodes.forEach(code => {
+      params.push(`%${code.toUpperCase()}%`);
+    });
+  }
+
   if (options?.status) {
     const now = Math.floor(Date.now() / 1000);
     switch (options.status) {
@@ -374,6 +386,16 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
         params.push(now);
         break;
     }
+  }
+
+  if (options?.createdAfter !== undefined) {
+    whereClauses.push(`campaigns.created_at >= ?`);
+    params.push(options.createdAfter);
+  }
+
+  if (options?.createdBefore !== undefined) {
+    whereClauses.push(`campaigns.created_at <= ?`);
+    params.push(options.createdBefore);
   }
 
   if (!options?.includeDeleted) {
@@ -458,7 +480,9 @@ export function getCampaign(campaignId: string): CampaignRecord | undefined {
         row.failed_at = row.deadline;
         db.prepare(`UPDATE campaigns SET failed_at = ? WHERE id = ?`).run(row.deadline, row.id);
     }
-    return rowToCampaign(row);
+    const campaign = rowToCampaign(row);
+    campaign.tokenBalances = getCampaignTokenBalances(campaignId);
+    return campaign;
   }
   return undefined;
 }
@@ -1076,6 +1100,83 @@ export function refundContributor(
  * @param limit - Maximum number of top contributors to return (default: 10).
  * @returns An array of {@link LeaderboardEntry} objects sorted by total pledged amount (descending).
  */
+/**
+ * Returns per-token pledged balances for a campaign (non-refunded only).
+ * Maps asset_code → total pledged amount for that token.
+ */
+export function getCampaignTokenBalances(campaignId: string): Record<string, number> {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT asset_code, COALESCE(SUM(amount), 0) AS balance
+       FROM pledges
+       WHERE campaign_id = ? AND refunded_at IS NULL
+       GROUP BY asset_code`,
+    )
+    .all(campaignId) as Array<{ asset_code: string; balance: number }>;
+
+  const result: Record<string, number> = {};
+  for (const row of rows) {
+    result[row.asset_code] = round(row.balance);
+  }
+  return result;
+}
+
+/**
+ * Partially updates a campaign record (title, description, metadata).
+ * Used internally and by the event indexer to apply on-chain metadata changes.
+ */
+export function updateCampaign(
+  campaignId: string,
+  patch: Partial<Pick<CampaignRecord, 'title' | 'description' | 'metadata'>>,
+): CampaignRecord {
+  const db = getDb();
+  const campaign = getCampaign(campaignId);
+  if (!campaign) {
+    throw Object.assign(new Error(`Campaign ${campaignId} not found`), { code: 'CAMPAIGN_NOT_FOUND' });
+  }
+
+  const updates: string[] = [];
+  const params: unknown[] = [];
+
+  if (patch.title !== undefined) {
+    updates.push('title = ?');
+    params.push(patch.title);
+  }
+  if (patch.description !== undefined) {
+    updates.push('description = ?');
+    params.push(patch.description);
+  }
+  if (patch.metadata !== undefined) {
+    updates.push('metadata_json = ?');
+    params.push(JSON.stringify(patch.metadata));
+  }
+
+  if (updates.length > 0) {
+    params.push(campaignId);
+    db.prepare(`UPDATE campaigns SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  }
+
+  return getCampaign(campaignId)!;
+}
+
+/**
+ * Updates the campaign's metadata string as recorded on-chain.
+ * Called by the event indexer when a MetadataUpdated event is received.
+ */
+export function updateCampaignMetadata(campaignId: string, newMetadata: string): void {
+  const db = getDb();
+  const campaign = getCampaign(campaignId);
+  if (!campaign) return;
+
+  const existing = campaign.metadata ?? {};
+  const updated = { ...existing, onChainMetadata: newMetadata };
+  db.prepare(`UPDATE campaigns SET metadata_json = ? WHERE id = ?`).run(
+    JSON.stringify(updated),
+    campaignId,
+  );
+}
+
 export function getTopContributors(limit: number = 10): LeaderboardEntry[] {
   const db = getDb();
   const rows = db

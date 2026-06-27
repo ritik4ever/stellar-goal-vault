@@ -127,7 +127,7 @@
                   "u64": 1000
                 },
                 {
-                  "string": "multi contributor test"
+                  "string": "double vote test"
                 }
               ]
             }
@@ -191,7 +191,6 @@
         }
       ]
     ],
-    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
@@ -247,7 +246,6 @@
         }
       ]
     ],
-    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
@@ -300,6 +298,32 @@
               "sub_invocations": []
             }
           ]
+        }
+      ]
+    ],
+    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+              "function_name": "request_deadline_extension",
+              "args": [
+                {
+                  "u64": 1
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "u64": 1500
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
         }
       ]
     ],
@@ -431,6 +455,39 @@
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 4270020994084947596
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 5806905060045992000
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 5806905060045992000
                   }
                 },
                 "durability": "temporary",
@@ -709,7 +766,7 @@
                         "symbol": "metadata"
                       },
                       "val": {
-                        "string": "multi contributor test"
+                        "string": "double vote test"
                       }
                     },
                     {
@@ -969,6 +1026,127 @@
                     "hi": 0,
                     "lo": 200
                   }
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "ExtensionRequest"
+                },
+                {
+                  "u64": 1
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "ExtensionRequest"
+                    },
+                    {
+                      "u64": 1
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "approval_count"
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "new_deadline"
+                      },
+                      "val": {
+                        "u64": 1500
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "requested_by"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "ExtensionVote"
+                },
+                {
+                  "u64": 1
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "ExtensionVote"
+                    },
+                    {
+                      "u64": 1
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "bool": true
                 }
               }
             },
@@ -1903,7 +2081,7 @@
                   "u64": 1000
                 },
                 {
-                  "string": "multi contributor test"
+                  "string": "double vote test"
                 }
               ]
             }
@@ -1958,7 +2136,7 @@
                     "symbol": "metadata"
                   },
                   "val": {
-                    "string": "multi contributor test"
+                    "string": "double vote test"
                   }
                 },
                 {
@@ -2239,55 +2417,6 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000007"
               },
               {
-                "symbol": "get_contributor_count"
-              }
-            ],
-            "data": {
-              "u64": 1
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000007",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "get_contributor_count"
-              }
-            ],
-            "data": {
-              "u32": 1
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000007"
-              },
-              {
                 "symbol": "contribute"
               }
             ],
@@ -2482,55 +2611,6 @@
               }
             ],
             "data": "void"
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000007"
-              },
-              {
-                "symbol": "get_contributor_count"
-              }
-            ],
-            "data": {
-              "u64": 1
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000007",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "get_contributor_count"
-              }
-            ],
-            "data": {
-              "u32": 2
-            }
           }
         }
       },
@@ -2765,7 +2845,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000007"
               },
               {
-                "symbol": "get_contributor_count"
+                "symbol": "get_campaign"
               }
             ],
             "data": {
@@ -2788,11 +2868,362 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "get_contributor_count"
+                "symbol": "get_campaign"
               }
             ],
             "data": {
-              "u32": 3
+              "map": [
+                {
+                  "key": {
+                    "symbol": "accepted_tokens"
+                  },
+                  "val": {
+                    "vec": [
+                      {
+                        "address": "CACMVW2KK4H5FZDFF2AUCAKQTEJMZZWJUIZF23XMRVYQBSXYLHZ6BKWN"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "canceled"
+                  },
+                  "val": {
+                    "bool": false
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "claimed"
+                  },
+                  "val": {
+                    "bool": false
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "contributor_count"
+                  },
+                  "val": {
+                    "u32": 3
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "created_at"
+                  },
+                  "val": {
+                    "u64": 0
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "creator"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "deadline"
+                  },
+                  "val": {
+                    "u64": 1000
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "metadata"
+                  },
+                  "val": {
+                    "string": "double vote test"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "pledged_amount"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 600
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "target_amount"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 600
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000007"
+              },
+              {
+                "symbol": "request_deadline_extension"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u64": 1
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "u64": 1500
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000007",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "Goal"
+              },
+              {
+                "symbol": "ExtReq"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "campaign_id"
+                  },
+                  "val": {
+                    "u64": 1
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "new_deadline"
+                  },
+                  "val": {
+                    "u64": 1500
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "requested_by"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000007",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "request_deadline_extension"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000007"
+              },
+              {
+                "symbol": "approve_extension"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u64": 1
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000007",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "log"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "string": "caught panic 'already voted' from contract function 'Symbol(obj#853)'"
+                },
+                {
+                  "u64": 1
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000007",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "wasm_vm": "invalid_action"
+                }
+              }
+            ],
+            "data": {
+              "string": "caught error from function"
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "wasm_vm": "invalid_action"
+                }
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "string": "contract call failed"
+                },
+                {
+                  "symbol": "approve_extension"
+                },
+                {
+                  "vec": [
+                    {
+                      "u64": 1
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "wasm_vm": "invalid_action"
+                }
+              }
+            ],
+            "data": {
+              "string": "escalating error to panic"
             }
           }
         }

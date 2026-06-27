@@ -54,8 +54,16 @@ import {
   refundPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
+  parseCampaignListQuery,
+  normalizeQueryValue,
 } from './validation/schemas';
 import { logError, logInfo } from './logger';
+import {
+  buildCampaignCacheKey,
+  getCampaignCacheEntry,
+  invalidateCampaignCache,
+  setCampaignCacheEntry,
+} from './services/campaignCache';
 export const app = express();
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
@@ -177,15 +185,6 @@ function parseCampaignId(
   return { ok: true, value: parsed.data };
 }
 
-export function normalizeQueryValue(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed === '' ? undefined : trimmed;
-}
-
 export function normalizeAssetFilter(assetRaw: unknown): string | undefined {
   const asset = normalizeQueryValue(assetRaw)?.toUpperCase();
   if (!asset) {
@@ -270,55 +269,59 @@ app.get('/api/health', (_req: Request, res: Response) => {
 });
 
 app.get('/api/campaigns', (req: Request, res: Response) => {
-  const paginationResult = parseCampaignListPaginationQuery({
-    page: req.query.page,
-    limit: req.query.limit,
-  });
-  if (!paginationResult.ok) {
-    sendValidationError(paginationResult.issues);
+  const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
+  if (!queryResult.ok) {
+    sendValidationError(queryResult.issues);
   }
 
-  const filters = parseCampaignListFilters({
-    asset: req.query.asset,
-    status: req.query.status,
-    q: req.query.q,
-    search: req.query.search,
-    includeDeleted: req.query.includeDeleted,
-    sort: req.query.sort,
-    order: req.query.order,
-  });
+  const params = queryResult.data;
+
+  // Build a stable cache key from the sorted query string
+  const qs = Object.keys(req.query as Record<string, unknown>)
+    .sort()
+    .map((k) => `${k}=${(req.query as Record<string, unknown>)[k]}`)
+    .join('&');
+  const cacheKey = buildCampaignCacheKey(qs);
+
+  const cached = getCampaignCacheEntry(cacheKey);
+  if (cached) {
+    res.setHeader('Cache-Control', 'max-age=5');
+    res.setHeader('X-Cache', 'HIT');
+    res.setHeader('Content-Type', 'application/json');
+    res.send(cached);
+    return;
+  }
 
   const listOptions: ListCampaignsOptions = {
-    searchQuery: filters.searchQuery,
-    assetCode: filters.asset,
-    status: filters.status,
-    includeDeleted: filters.includeDeleted,
-    sort: filters.sort,
-    order: filters.order,
+    searchQuery: params.search || params.q,
+    assetCodes: params.asset,
+    status: params.status,
+    includeDeleted: params.includeDeleted,
+    sort: params.sort,
+    order: params.order,
+    createdAfter: params.createdAfter,
+    createdBefore: params.createdBefore,
   };
-  if (paginationResult.page !== undefined) {
-    listOptions.page = paginationResult.page;
-    listOptions.limit = paginationResult.limit;
+  if (params.page !== undefined) {
+    listOptions.page = params.page;
+    listOptions.limit = params.limit;
   }
 
   const { campaigns, totalCount, pledgeCounts } = listCampaigns(listOptions);
 
-  const data = filterCampaignList(
-    campaigns.map((campaign) => ({
-      ...campaign,
-      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
-    })),
-    filters,
-  );
+  const data = campaigns.map((campaign) => ({
+    ...campaign,
+    progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
+  }));
 
-  const page = paginationResult.page ?? 1;
-  const limit = paginationResult.limit ?? totalCount;
+  const page = params.page ?? 1;
+  const limit = params.limit ?? totalCount;
   const totalPages =
-    paginationResult.limit === undefined || limit <= 0
+    params.limit === undefined || limit <= 0
       ? 1
       : Math.max(1, Math.ceil(totalCount / limit));
 
-  res.json({
+  const responseBody = JSON.stringify({
     data,
     pagination: {
       total: totalCount,
@@ -327,6 +330,13 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
       totalPages,
     },
   });
+
+  setCampaignCacheEntry(cacheKey, responseBody);
+
+  res.setHeader('Cache-Control', 'max-age=5');
+  res.setHeader('X-Cache', 'MISS');
+  res.setHeader('Content-Type', 'application/json');
+  res.send(responseBody);
 });
 
 app.get('/api/campaigns/:id', (req: Request, res: Response) => {
@@ -401,6 +411,7 @@ app.post('/api/campaigns', (req: Request, res: Response) => {
   };
 
   const campaign = createCampaign(campaignInput);
+  invalidateCampaignCache();
   res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
 });
 
@@ -419,6 +430,7 @@ app.post(
     }
 
     const campaign = addPledge(parsedId.value, parsedBody.data);
+    invalidateCampaignCache();
     res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
   },
 );
@@ -438,6 +450,7 @@ app.post(
     }
 
     const campaign = reconcileOnChainPledge(parsedId.value, parsedBody.data);
+    invalidateCampaignCache();
     res.status(201).json({
       data: {
         campaign: { ...campaign, progress: calculateProgress(campaign) },
@@ -466,6 +479,7 @@ app.post(
       transactionHash: parsedBody.data.transactionHash,
       confirmedAt: parsedBody.data.confirmedAt,
     });
+    invalidateCampaignCache();
     res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
   },
 );
@@ -495,6 +509,7 @@ app.post(
         latestLedger: verified.latestLedger ?? parsedBody.data.soroban.latestLedger,
         source: 'soroban-contract',
       });
+      invalidateCampaignCache();
 
       res.json({
         data: {
@@ -573,9 +588,19 @@ app.get('/api/config', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/api/stats', (_req: Request, res: Response) => {
+app.get('/api/stats', cacheMiddleware(30), (_req: Request, res: Response) => {
   const stats = getGlobalStats();
-  res.json({ data: stats });
+  res.json({
+    data: {
+      totalCampaigns: stats.totalCampaigns,
+      openCampaigns: stats.campaignCountByStatus.open,
+      fundedCampaigns: stats.campaignCountByStatus.funded,
+      claimedCampaigns: stats.campaignCountByStatus.claimed,
+      failedCampaigns: stats.campaignCountByStatus.failed,
+      totalPledgeVolume: stats.totalPledgedAmount,
+      uniqueContributors: stats.totalContributors,
+    }
+  });
 });
 
 app.get('/api/leaderboard', (req: Request, res: Response) => {

@@ -1,5 +1,13 @@
 
 
+import { FormEvent, useState, useEffect } from 'react';
+import { MousePointer2 } from 'lucide-react';
+import { Campaign, AppConfig } from '../types/campaign';
+import CopyButton from './CopyButton';
+import { EmptyState } from './EmptyState';
+import { ContributorSummary } from './ContributorSummary';
+import { CampaignImage } from './CampaignImage';
+
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
   appConfig?: AppConfig | null;
@@ -66,9 +74,11 @@ export function CampaignDetailPanel({
   onClose,
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState('25');
+  const [pledgeToken, setPledgeToken] = useState('');
   const [refundContributor, setRefundContributor] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pledgeError, setPledgeError] = useState<string | null>(null);
+  const walletReady = appConfig?.walletIntegrationReady ?? false;
 
   useEffect(() => {
 
@@ -116,11 +126,13 @@ export function CampaignDetailPanel({
   // Simulation is run (and the network fee estimated) before the preview modal
   // opens. If that simulation fails, surface a retry-able error next to the
   // pledge button instead of only relying on the toast.
+  const selectedToken = pledgeToken || activeCampaign.assetCode;
+
   async function submitPledge() {
     setPledgeError(null);
     setIsSubmitting(true);
     try {
-      await onPledge(activeCampaign.id, Number(pledgeAmount), activeCampaign.assetCode);
+      await onPledge(activeCampaign.id, Number(pledgeAmount), selectedToken);
     } catch (error) {
       setPledgeError(describePledgeError(error));
     } finally {
@@ -200,6 +212,13 @@ export function CampaignDetailPanel({
 
       <div className="detail-grid">
         <article className="detail-stat">
+          <span>Campaign ID</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <strong className="mono">{activeCampaign.id}</strong>
+            <CopyButton value={activeCampaign.id} ariaLabel="Copy campaign ID" />
+          </div>
+        </article>
+        <article className="detail-stat">
           <span>Creator</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
@@ -244,6 +263,23 @@ export function CampaignDetailPanel({
             readOnly
           />
         </label>
+
+        {activeCampaign.acceptedTokens?.length > 1 && (
+          <label className="field-group">
+            <span>Token</span>
+            <select
+              value={selectedToken}
+              onChange={(e) => setPledgeToken(e.target.value)}
+              required
+            >
+              {activeCampaign.acceptedTokens.map((token) => (
+                <option key={token} value={token}>
+                  {token}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <label className="field-group">
           <span>Pledge amount</span>
