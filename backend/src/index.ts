@@ -588,9 +588,19 @@ app.get('/api/config', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/api/stats', (_req: Request, res: Response) => {
+app.get('/api/stats', cacheMiddleware(30), (_req: Request, res: Response) => {
   const stats = getGlobalStats();
-  res.json({ data: stats });
+  res.json({
+    data: {
+      totalCampaigns: stats.totalCampaigns,
+      openCampaigns: stats.campaignCountByStatus.open,
+      fundedCampaigns: stats.campaignCountByStatus.funded,
+      claimedCampaigns: stats.campaignCountByStatus.claimed,
+      failedCampaigns: stats.campaignCountByStatus.failed,
+      totalPledgeVolume: stats.totalPledgedAmount,
+      uniqueContributors: stats.totalContributors,
+    }
+  });
 });
 
 app.get('/api/leaderboard', (req: Request, res: Response) => {
