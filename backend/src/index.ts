@@ -58,6 +58,12 @@ import {
   normalizeQueryValue,
 } from './validation/schemas';
 import { logError, logInfo } from './logger';
+import {
+  buildCampaignCacheKey,
+  getCampaignCacheEntry,
+  invalidateCampaignCache,
+  setCampaignCacheEntry,
+} from './services/campaignCache';
 export const app = express();
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
@@ -270,6 +276,22 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
 
   const params = queryResult.data;
 
+  // Build a stable cache key from the sorted query string
+  const qs = Object.keys(req.query as Record<string, unknown>)
+    .sort()
+    .map((k) => `${k}=${(req.query as Record<string, unknown>)[k]}`)
+    .join('&');
+  const cacheKey = buildCampaignCacheKey(qs);
+
+  const cached = getCampaignCacheEntry(cacheKey);
+  if (cached) {
+    res.setHeader('Cache-Control', 'max-age=5');
+    res.setHeader('X-Cache', 'HIT');
+    res.setHeader('Content-Type', 'application/json');
+    res.send(cached);
+    return;
+  }
+
   const listOptions: ListCampaignsOptions = {
     searchQuery: params.search || params.q,
     assetCodes: params.asset,
@@ -299,7 +321,7 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
       ? 1
       : Math.max(1, Math.ceil(totalCount / limit));
 
-  res.json({
+  const responseBody = JSON.stringify({
     data,
     pagination: {
       total: totalCount,
@@ -308,6 +330,13 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
       totalPages,
     },
   });
+
+  setCampaignCacheEntry(cacheKey, responseBody);
+
+  res.setHeader('Cache-Control', 'max-age=5');
+  res.setHeader('X-Cache', 'MISS');
+  res.setHeader('Content-Type', 'application/json');
+  res.send(responseBody);
 });
 
 app.get('/api/campaigns/:id', (req: Request, res: Response) => {
@@ -382,6 +411,7 @@ app.post('/api/campaigns', (req: Request, res: Response) => {
   };
 
   const campaign = createCampaign(campaignInput);
+  invalidateCampaignCache();
   res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
 });
 
@@ -400,6 +430,7 @@ app.post(
     }
 
     const campaign = addPledge(parsedId.value, parsedBody.data);
+    invalidateCampaignCache();
     res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
   },
 );
@@ -419,6 +450,7 @@ app.post(
     }
 
     const campaign = reconcileOnChainPledge(parsedId.value, parsedBody.data);
+    invalidateCampaignCache();
     res.status(201).json({
       data: {
         campaign: { ...campaign, progress: calculateProgress(campaign) },
@@ -447,6 +479,7 @@ app.post(
       transactionHash: parsedBody.data.transactionHash,
       confirmedAt: parsedBody.data.confirmedAt,
     });
+    invalidateCampaignCache();
     res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
   },
 );
@@ -476,6 +509,7 @@ app.post(
         latestLedger: verified.latestLedger ?? parsedBody.data.soroban.latestLedger,
         source: 'soroban-contract',
       });
+      invalidateCampaignCache();
 
       res.json({
         data: {
@@ -554,19 +588,19 @@ app.get('/api/config', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/api/stats', async (_req: Request, res: Response) => {
-  try {
-    const stats = getGlobalStats();
-    // Fetch on-chain campaign count if available
-    const { getCampaignCountFromContract } = await import('./services/sorobanRpc');
-    const onChainCount = await getCampaignCountFromContract();
-    stats.onChainCampaignCount = onChainCount;
-    res.json({ data: stats });
-  } catch (error) {
-    // If contract call fails, still return stats (graceful degradation)
-    const stats = getGlobalStats();
-    res.json({ data: stats });
-  }
+app.get('/api/stats', cacheMiddleware(30), (_req: Request, res: Response) => {
+  const stats = getGlobalStats();
+  res.json({
+    data: {
+      totalCampaigns: stats.totalCampaigns,
+      openCampaigns: stats.campaignCountByStatus.open,
+      fundedCampaigns: stats.campaignCountByStatus.funded,
+      claimedCampaigns: stats.campaignCountByStatus.claimed,
+      failedCampaigns: stats.campaignCountByStatus.failed,
+      totalPledgeVolume: stats.totalPledgedAmount,
+      uniqueContributors: stats.totalContributors,
+    }
+  });
 });
 
 app.get('/api/leaderboard', (req: Request, res: Response) => {
