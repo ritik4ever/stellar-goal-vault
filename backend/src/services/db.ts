@@ -169,12 +169,39 @@ function migrate(database: SQLiteDatabase): void {
     campaignColumns.some((column) => column.name === 'asset_code') &&
     !campaignColumns.some((column) => column.name === 'accepted_tokens_json')
   ) {
-    database.exec(
-      `ALTER TABLE campaigns ADD COLUMN accepted_tokens_json TEXT NOT NULL DEFAULT '[]'`,
-    );
-    // Migrate existing asset_code to accepted_tokens_json
-    database.exec(`UPDATE campaigns SET accepted_tokens_json = json_array(asset_code)`);
-    // Optionally drop asset_code column (SQLite doesn't support DROP COLUMN directly)
+    // 1. Create the FTS5 virtual table
+database.exec(`
+  CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
+    id,
+    title,
+    description
+  );
+`);
+
+// 2. Add the Triggers to keep data synchronized automatically
+database.exec(`
+  -- Triggers for handling future changes
+  CREATE TRIGGER IF NOT EXISTS after_campaigns_insert AFTER INSERT ON campaigns BEGIN
+    INSERT INTO campaigns_fts(id, title, description) VALUES (new.id, new.title, new.description);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS after_campaigns_update AFTER UPDATE ON campaigns BEGIN
+    UPDATE campaigns_fts SET title = new.title, description = new.description WHERE id = old.id;
+  END;
+
+  -- Fixes CodeRabbit: Delete trigger to prevent stale/corrupt terms
+  CREATE TRIGGER IF NOT EXISTS after_campaigns_delete AFTER DELETE ON campaigns BEGIN
+    DELETE FROM campaigns_fts WHERE id = old.id;
+  END;
+`);
+
+// 3. Fixes CodeRabbit: Backfill any pre-existing campaigns into the FTS table
+database.exec(`
+  INSERT INTO campaigns_fts (id, title, description)
+  SELECT id, title, description FROM campaigns
+  WHERE id NOT IN (SELECT id FROM campaigns_fts);
+`);
+
   }
 
   database.exec(`
