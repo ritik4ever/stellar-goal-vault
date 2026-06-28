@@ -215,6 +215,26 @@ Base URL:
 - `status` is `ok` when the API and database probe succeed, otherwise `degraded`
 - `database.status` is `up` or `down` based on a lightweight SQLite reachability check
 
+### `GET /api/stats`
+
+- Returns aggregate metrics and totals computed from campaigns and pledges.
+- Cached with a 30-second TTL.
+- Response:
+
+```json
+{
+  "data": {
+    "totalCampaigns": 10,
+    "openCampaigns": 5,
+    "fundedCampaigns": 3,
+    "claimedCampaigns": 1,
+    "failedCampaigns": 1,
+    "totalPledgeVolume": 50000,
+    "uniqueContributors": 42
+  }
+}
+```
+
 ### `GET /api/campaigns`
 
 - Returns all campaigns with computed progress

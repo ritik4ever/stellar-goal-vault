@@ -51,7 +51,8 @@ pub enum DataKey {
     MinContribution,
     ExtensionRequest(u64),
     ExtensionVote(u64, Address),
-    Contributors(u64),
+    /// Tracks which (old_contract_id, campaign_id) pairs have already been migrated.
+    MigratedId(Address, u64),
 }
 
 #[contracttype]
@@ -735,6 +736,67 @@ impl StellarGoalVaultContract {
                     .set(&DataKey::ContractVersion, &version);
                 version
             }
+        }
+    }
+
+    /// Migrate campaign records from an old contract instance to this one.
+    ///
+    /// Only the admin may call this. Already-migrated source IDs (tracked per
+    /// `old_contract_id`) are silently skipped (idempotent). A `Migrated`
+    /// event is emitted for each campaign that is newly imported.
+    ///
+    /// `source_ids`  – original campaign IDs from the old contract (used as
+    ///                 dedup keys; must have the same length as `campaigns`).
+    /// `campaigns`   – the campaign structs pre-fetched from the old contract
+    ///                 by the admin off-chain before calling this function.
+    pub fn migrate(
+        env: Env,
+        admin: Address,
+        old_contract_id: Address,
+        source_ids: Vec<u64>,
+        campaigns: Vec<Campaign>,
+    ) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        assert!(admin == stored_admin, "only admin can call migrate");
+        assert!(
+            source_ids.len() == campaigns.len(),
+            "source_ids and campaigns must have the same length"
+        );
+
+        for i in 0..source_ids.len() {
+            let source_id = source_ids.get(i).unwrap();
+            let migration_key = DataKey::MigratedId(old_contract_id.clone(), source_id);
+
+            if env.storage().persistent().has(&migration_key) {
+                continue; // already migrated — skip
+            }
+
+            let campaign = campaigns.get(i).unwrap();
+
+            let next_id: u64 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::NextCampaignId)
+                .unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Campaign(next_id), &campaign);
+            env.storage()
+                .persistent()
+                .set(&DataKey::NextCampaignId, &(next_id + 1));
+
+            // Mark as migrated so this call is idempotent
+            env.storage().persistent().set(&migration_key, &true);
+
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Migrated")),
+                (old_contract_id.clone(), source_id, next_id),
+            );
         }
     }
 
