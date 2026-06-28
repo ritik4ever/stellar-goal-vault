@@ -99,6 +99,18 @@ stellar contract invoke --id $CONTRACT_ID -- update_metadata \
 
 The contract emits a `MetadataUpdated` event containing both the old and new metadata values. The backend event indexer processes this event and updates local state automatically.
 
+### Multi-token campaigns (issue #191)
+
+Campaigns can accept more than one Stellar asset code. When `acceptedTokens` contains multiple entries the frontend renders a per-token progress bar beneath the main progress bar, and the pledge form shows a token selector so contributors can choose which asset to pledge.
+
+The backend tracks per-token pledge totals in the `tokenBalances` field (a `Record<assetCode, amount>` map built from the `pledges` table grouped by `asset_code`). This is returned on every `GET /api/campaigns/:id` response and on the campaign list.
+
+**Contract side:** The Soroban contract stores `accepted_tokens: Vec<String>` on each campaign. `contribute()` validates that the pledged asset is in the list before recording the pledge.
+
+**Frontend side:** `CampaignCard` renders individual `<div class="progress-bar">` elements for each accepted token when `tokenBalances` is present. `CampaignDetailPanel` conditionally shows a `<select>` token picker above the amount field when `acceptedTokens.length > 1`.
+
+**Backend side:** `getCampaignTokenBalances(campaignId)` queries the `pledges` table grouped by `asset_code` and returns the map. `getCampaign()` populates `campaign.tokenBalances` on every read.
+
 ### Deadline extension governance (issue #192)
 
 Any existing contributor can request a deadline extension:
@@ -202,6 +214,26 @@ Base URL:
 
 - `status` is `ok` when the API and database probe succeed, otherwise `degraded`
 - `database.status` is `up` or `down` based on a lightweight SQLite reachability check
+
+### `GET /api/stats`
+
+- Returns aggregate metrics and totals computed from campaigns and pledges.
+- Cached with a 30-second TTL.
+- Response:
+
+```json
+{
+  "data": {
+    "totalCampaigns": 10,
+    "openCampaigns": 5,
+    "fundedCampaigns": 3,
+    "claimedCampaigns": 1,
+    "failedCampaigns": 1,
+    "totalPledgeVolume": 50000,
+    "uniqueContributors": 42
+  }
+}
+```
 
 ### `GET /api/campaigns`
 

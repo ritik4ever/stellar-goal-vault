@@ -420,3 +420,19 @@ describe('Campaign maxPerContributor Field', () => {
     expect(detailRes.data.data.maxPerContributor).toBe(75);
   });
 });
+
+describe('GET /api/stats', () => {
+  it('returns aggregate metrics in the correct format', async () => {
+    const res = await get('/api/stats');
+    expect(res.status).toBe(200);
+    expect(res.data.data).toMatchObject({
+      totalCampaigns: expect.any(Number),
+      openCampaigns: expect.any(Number),
+      fundedCampaigns: expect.any(Number),
+      claimedCampaigns: expect.any(Number),
+      failedCampaigns: expect.any(Number),
+      totalPledgeVolume: expect.any(Number),
+      uniqueContributors: expect.any(Number),
+    });
+  });
+});
