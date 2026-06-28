@@ -96,8 +96,17 @@ export function CampaignsTable({
     onSortChange?.(newSort, newOrder);
   }
 
+  function handleSearchChange(value: string) {
+    setSearchQuery(value);
+    if (value === '') {
+      onSearchChange?.('');
+    }
+  }
+
   useEffect(() => {
-    onSearchChange?.(debouncedSearchQuery);
+    if (debouncedSearchQuery !== '') {
+      onSearchChange?.(debouncedSearchQuery);
+    }
   }, [debouncedSearchQuery, onSearchChange]);
 
   useEffect(() => {
@@ -203,7 +212,7 @@ export function CampaignsTable({
       <div className="board-controls">
         <SearchInput
           value={searchQuery}
-          onChange={setSearchQuery}
+          onChange={handleSearchChange}
           disabled={isLoading}
         />
         <label className="field-group" style={{ minWidth: 180 }}>
