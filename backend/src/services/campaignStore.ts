@@ -342,13 +342,23 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const whereClauses: string[] = [];
   const params: any[] = [];
 
-  if (options?.searchQuery && options.searchQuery.trim()) {
-    const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
+if (options?.searchQuery && options.searchQuery.trim()) {
+    const cleanQuery = options.searchQuery.trim().replace(/['"“”]/g, '');
+    // The asterisk (*) makes it match partial words (like "Stell" matches "Stellar")
+    const ftsMatchTerm = `${cleanQuery}*`;
     const exactTerm = options.searchQuery.trim();
-    whereClauses.push(`(LOWER(campaigns.title) LIKE ? OR LOWER(campaigns.creator) LIKE ? OR campaigns.id = ?)`);
-    params.push(searchTerm, searchTerm, exactTerm);
-  }
+    const creatorSearchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
 
+    // ⚡ We join our cheat-sheet table (campaigns_fts) directly into the query matching process!
+    whereClauses.push(`(
+      campaigns.id IN (SELECT id FROM campaigns_fts WHERE campaigns_fts MATCH ?) 
+      OR LOWER(campaigns.creator) LIKE ? 
+      OR campaigns.id = ?
+    )`);
+    
+    params.push(ftsMatchTerm, creatorSearchTerm, exactTerm);
+  }
+  
   if (options?.assetCode) {
     whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);

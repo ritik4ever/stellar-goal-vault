@@ -88,14 +88,34 @@ function migrate(database: SQLiteDatabase): void {
       max_per_contributor   INTEGER
     );
 
+    -- 🌟 1. Create our new cheat-sheet search index table
+    CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
+      id UNINDEXED,
+      title,
+      description
+    );
+
+    -- 🔄 2. Automatically copy new campaigns into the cheat-sheet
+    CREATE TRIGGER IF NOT EXISTS after_campaigns_insert AFTER INSERT ON campaigns BEGIN
+      INSERT INTO campaigns_fts(id, title, description) 
+      VALUES (new.id, new.title, new.description);
+    END;
+
+    -- 🔄 3. Automatically update the cheat-sheet if a campaign changes
+    CREATE TRIGGER IF NOT EXISTS after_campaigns_update AFTER UPDATE ON campaigns BEGIN
+      UPDATE campaigns_fts 
+      SET title = new.title, description = new.description 
+      WHERE id = old.id;
+    END;
+
     CREATE TABLE IF NOT EXISTS pledges (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
       campaign_id       TEXT NOT NULL,
-      contributor      TEXT NOT NULL,
-      amount           REAL NOT NULL,
-      asset_code       TEXT NOT NULL,
-      created_at       INTEGER NOT NULL,
-      refunded_at      INTEGER,
+      contributor       TEXT NOT NULL,
+      amount            REAL NOT NULL,
+      asset_code        TEXT NOT NULL,
+      created_at        INTEGER NOT NULL,
+      refunded_at       INTEGER,
       transaction_hash TEXT,
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
     );
