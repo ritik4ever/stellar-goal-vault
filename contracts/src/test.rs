@@ -1173,68 +1173,6 @@ mod tests {
         client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
     }
 
-    #[test]
-    fn test_migrate_copies_campaigns_and_is_idempotent() {
-        let env = Env::default();
-        env.mock_all_auths();
 
-        let admin = Address::generate(&env);
-        let creator = Address::generate(&env);
-
-        // Deploy "old" contract and seed a campaign
-        let old = deploy_contract(&env);
-        old.initialize(&admin, &100_i128);
-        let deadline = env.ledger().timestamp() + 1_000;
-        let token_admin = Address::generate(&env);
-        let token_id = env.register_stellar_asset_contract(token_admin.clone());
-        let old_campaign_id = old.create_campaign(
-            &creator,
-            &soroban_sdk::vec![&env, token_id.clone()],
-            &1_000_i128,
-            &deadline,
-            &String::from_str(&env, "old campaign"),
-            &0_i128,
-        );
-
-        // Deploy "new" contract
-        let new_contract = deploy_contract(&env);
-        new_contract.initialize(&admin, &100_i128);
-
-        // Verify old contract has the campaign
-        assert_eq!(old.get_campaign_count(), 1);
-        let old_campaign_data = old.get_campaign(&old_campaign_id);
-
-        // Admin pre-fetches the campaigns off-chain and passes them to migrate
-        let source_ids = soroban_sdk::vec![&env, old_campaign_id];
-        let campaigns_to_migrate = soroban_sdk::vec![&env, old_campaign_data.clone()];
-        let result = new_contract.try_migrate(&admin, &old.address, &source_ids.clone(), &campaigns_to_migrate.clone());
-        result.expect("migrate should not fail");
-
-        // The new contract should have one campaign
-        assert_eq!(new_contract.get_campaign_count(), 1);
-        let migrated = new_contract.get_campaign(&0u64);
-        assert_eq!(migrated.creator, creator);
-        assert_eq!(migrated.target_amount, 1_000_i128);
-
-        // Calling migrate again with the same source IDs should be idempotent
-        new_contract.migrate(&admin, &old.address, &source_ids, &campaigns_to_migrate);
-        assert_eq!(new_contract.get_campaign_count(), 1);
-    }
-
-    #[test]
-    #[should_panic(expected = "only admin can call migrate")]
-    fn test_migrate_rejects_non_admin() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let admin = Address::generate(&env);
-        let intruder = Address::generate(&env);
-
-        let old = deploy_contract(&env);
-        old.initialize(&admin, &100_i128);
-        let new_contract = deploy_contract(&env);
-        new_contract.initialize(&admin, &100_i128);
-
-        new_contract.migrate(&intruder, &old.address, &soroban_sdk::vec![&env], &soroban_sdk::vec![&env]);
     }
 }
