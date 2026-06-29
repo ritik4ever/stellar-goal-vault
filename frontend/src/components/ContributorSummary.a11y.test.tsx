@@ -24,6 +24,17 @@ const samplePledges: Pledge[] = [
   },
 ];
 
+const pendingPledges: Pledge[] = [
+  {
+    id: -1,
+    campaignId: '1',
+    contributor: 'GHIJK1234567890123456789012345678901234567890',
+    amount: 15,
+    assetCode: 'USDC',
+    createdAt: Math.floor(Date.now() / 1000),
+  },
+];
+
 describe.each(THEMES)('ContributorSummary Accessibility (%s theme)', (theme: ThemeMode) => {
   it('has no accessibility violations with contributor data', async () => {
     const { container } = render(
@@ -37,6 +48,15 @@ describe.each(THEMES)('ContributorSummary Accessibility (%s theme)', (theme: The
   it('has no accessibility violations in empty state', async () => {
     const { container } = render(
       <ContributorSummary pledges={[]} assetCode="USDC" campaignId="1" />,
+    );
+
+    const results = await runAxeAudit(container, theme);
+    expect(results).toHaveNoViolations();
+  });
+
+  it('has no accessibility violations with pending pledge badge', async () => {
+    const { container } = render(
+      <ContributorSummary pledges={pendingPledges} assetCode="USDC" campaignId="1" />,
     );
 
     const results = await runAxeAudit(container, theme);

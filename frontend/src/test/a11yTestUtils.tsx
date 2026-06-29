@@ -11,20 +11,34 @@ export function setTheme(mode: ThemeMode): void {
   document.documentElement.setAttribute('data-theme', mode);
 }
 
-export function setupDesktopViewport(): void {
+export function setupDesktopViewport(width = 1280): void {
+  Object.defineProperty(window, 'innerWidth', {
+    writable: true,
+    configurable: true,
+    value: width,
+  });
+
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     configurable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
+    value: vi.fn().mockImplementation((query: string) => {
+      const minWidth = query.match(/\(min-width:\s*(\d+)px\)/);
+      const maxWidth = query.match(/\(max-width:\s*(\d+)px\)/);
+      const matches =
+        (!minWidth || width >= Number(minWidth[1])) &&
+        (!maxWidth || width <= Number(maxWidth[1]));
+
+      return {
+        matches,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      };
+    }),
   });
 }
 
