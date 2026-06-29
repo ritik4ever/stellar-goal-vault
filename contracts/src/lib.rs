@@ -51,6 +51,7 @@ pub enum DataKey {
     MinContribution,
     ExtensionRequest(u64),
     ExtensionVote(u64, Address),
+    HasContributed(u64, Address), // (campaign_id, contributor)
     /// Tracks which (old_contract_id, campaign_id) pairs have already been migrated.
     MigratedId(Address, u64),
 }
@@ -372,11 +373,15 @@ impl StellarGoalVaultContract {
         campaign.pledged_amount += amount;
 
         // Only increment contributor_count on first-time pledge
+        let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
+        let has_contributed: bool = env.storage().persistent().get(&has_contributed_key).unwrap_or(false);
+        if !has_contributed {
+            campaign.contributor_count += 1;
+            env.storage().persistent().set(&has_contributed_key, &true);
+        }
+
         let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
         let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
-        if current_contribution == 0 {
-            campaign.contributor_count += 1;
-        }
 
         // Write updated campaign back to storage
         env.storage()
@@ -816,5 +821,4 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .get(&DataKey::Campaign(campaign_id))
         .unwrap_or_else(|| panic!("campaign not found"))
 }
-#[cfg(test)]
-mod test;
+

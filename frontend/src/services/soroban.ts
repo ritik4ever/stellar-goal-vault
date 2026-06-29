@@ -9,6 +9,7 @@ import {
 } from '@stellar/stellar-sdk';
 import { getAppConfig } from './api';
 import { SorobanRefundMetadata } from '../types/campaign';
+import { GoalVaultContract } from '../generated';
 
 function stringifyErrorDetails(value: unknown): string {
   if (typeof value === 'string' && value.trim().length > 0) {
@@ -132,3 +133,9 @@ export async function submitRefundTransaction(
 }
 
 export const executeSorobanRefund = submitRefundTransaction;
+
+/**
+ * Typed contract client instance for interacting with the Soroban GoalVaultContract
+ */
+export const contractClient = new GoalVaultContract();
+

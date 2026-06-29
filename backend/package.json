@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^8.5.0",
+    "@stellar/stellar-sdk": "^14.5.0",
     "@types/swagger-ui-express": "^4.1.8",
     "axios": "^1.15.2",
     "better-sqlite3": "^12.6.2",
