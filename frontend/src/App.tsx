@@ -46,6 +46,7 @@ import {
 } from "./types/campaign";
 
 const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
+const MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
 const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
 const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
 const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
@@ -111,6 +112,16 @@ function getSystemTheme(): ThemeMode {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+/**
+ * Returns a Stellar Expert deep-link for a confirmed transaction hash.
+ * Uses testnet explorer for the testnet passphrase, mainnet otherwise.
+ */
+function stellarExpertTxUrl(txHash: string, networkPassphrase: string | undefined): string {
+  const network =
+    networkPassphrase === MAINNET_PASSPHRASE ? "public" : "testnet";
+  return `https://stellar.expert/explorer/${network}/tx/${txHash}`;
+}
+
 function App() {
   const { id: paramId } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -126,10 +137,11 @@ function App() {
   const activeSortRef = useRef<string>('newest');
   const activeOrderRef = useRef<string>('desc');
   const [searchParams] = useSearchParams();
+  const campaignParam = searchParams.get('campaign');
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(paramId ?? null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(paramId ?? campaignParam ?? null);
   const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(
     null,
   );
@@ -165,8 +177,8 @@ function App() {
   }, [themeMode]);
 
   useEffect(() => {
-    setSelectedCampaignId(paramId ?? null);
-  }, [paramId]);
+    setSelectedCampaignId(paramId ?? campaignParam ?? null);
+  }, [paramId, campaignParam]);
 
   async function fetchCampaignPage(
     page: number,
@@ -434,7 +446,9 @@ function App() {
       navigate('/campaigns/' + campaign.id);
       addToast(`Campaign #${campaign.id} is live and ready for pledges.`, "success");
     } catch (error) {
-      setCreateError(toApiError(error));
+      const apiError = toApiError(error);
+      setCreateError(apiError);
+      addToast(apiError.message, "error");
     }
   }
 
@@ -515,7 +529,17 @@ function App() {
       }
 
       await refreshSelectedData(campaignId);
-      addToast("Pledge confirmed on-chain and reconciled.", "success");
+      addToast(
+        `Pledge confirmed on-chain. Tx: ${transactionResult.transactionHash.slice(0, 12)}…`,
+        "success",
+        {
+          href: stellarExpertTxUrl(
+            transactionResult.transactionHash,
+            appConfig?.networkPassphrase,
+          ),
+          label: "View on Stellar Expert",
+        },
+      );
     } catch (error) {
       if (error && typeof error === "object" && (error as { code?: string }).code === "USER_CANCELLED") {
         return;
@@ -596,10 +620,12 @@ function App() {
       await refundCampaign(campaignId, contributor, sorobanReceipt);
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
-      setActionMessage("Contributor refunded successfully.");
+      setActionMessage(null);
+      addToast("Contributor refunded successfully.", "success");
     } catch (error) {
       setActionError(toApiError(error));
       setActionMessage(null);
+      addToast(getErrorMessage(error), "error");
     }
   }
 

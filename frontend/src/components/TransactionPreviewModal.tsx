@@ -4,6 +4,8 @@ import './TransactionPreviewModal.css';
 export interface TransactionPreviewData {
   operation: string;
   amount?: number;
+  /** Asset code displayed alongside the amount (e.g. "USDC", "XLM"). */
+  assetCode?: string;
   contract: string;
   xdr: string;
   estimatedFee?: {
@@ -41,7 +43,10 @@ export function TransactionPreviewModal({
           {preview.amount !== undefined && (
             <article className="detail-stat">
               <span>Amount</span>
-              <strong>{preview.amount}</strong>
+              <strong>
+                {preview.amount}
+                {preview.assetCode ? ` ${preview.assetCode}` : ''}
+              </strong>
             </article>
           )}
           <article className="detail-stat" style={{ gridColumn: '1 / -1' }}>
