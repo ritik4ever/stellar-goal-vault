@@ -19,14 +19,18 @@ export interface ValidationErrorResponse {
  * the validated shape. On failure, the middleware short-circuits with a
  * 400 response of the form `{ error: 'Validation failed', details: [...] }`.
  *
+ * Uses `safeParseAsync` so the middleware works with schemas that include
+ * async refinements or transforms; plain synchronous schemas resolve in a
+ * single microtask with no observable cost.
+ *
  * Designed for POST and PATCH routes that accept a JSON payload; URL
  * parameter validation is intentionally out of scope. Use one of the
  * existing schemas from `src/validation/schemas.ts` (for example
  * `createCampaignPayloadSchema`) or any other Zod schema as the argument.
  */
 export function validateBody<TSchema extends ZodType>(schema: TSchema): RequestHandler {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const parsed = schema.safeParse(req.body);
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const parsed = await schema.safeParseAsync(req.body);
     if (!parsed.success) {
       const body: ValidationErrorResponse = {
         error: 'Validation failed',

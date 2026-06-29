@@ -29,6 +29,28 @@ describe('validateBody', () => {
     expect(response.body).toEqual({ data: { name: 'goal', age: 1 } });
   });
 
+  it('replaces req.body with parsed.data so coercion and stripping are visible to downstream handlers', async () => {
+    // Schema coerces a string into a number and transforms the name to upper
+    // case. The downstream handler reads req.body, so if the middleware
+    // stopped assigning req.body = parsed.data the response would echo back
+    // the raw input instead of the parsed form.
+    const coercingSchema = z.object({
+      name: z.string().transform((value) => value.toUpperCase()),
+      age: z.coerce.number().int(),
+    });
+
+    const app = express();
+    app.use(express.json());
+    app.post('/coerce', validateBody(coercingSchema), (req, res) => {
+      res.json({ data: req.body });
+    });
+
+    const response = await request(app).post('/coerce').send({ name: 'goal', age: '7' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: { name: 'GOAL', age: 7 } });
+  });
+
   it('returns 400 with the Validation failed shape when a required field is missing', async () => {
     const response = await request(buildApp()).post('/echo').send({ age: 1 });
 
