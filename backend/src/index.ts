@@ -140,6 +140,11 @@ export function applyRateLimit(limitOverride?: number) {
     }
     rateLimitedReq.rateLimitedProcessed = true;
 
+    // Skip rate limiting when client IP is unavailable (common in test environments)
+    if (!req.ip) {
+      return next();
+    }
+
     const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
     const maxRequests = limitOverride ?? (isWrite ? WRITE_RATE_LIMIT_MAX_REQUESTS : RATE_LIMIT_MAX_REQUESTS);
 
