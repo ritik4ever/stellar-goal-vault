@@ -59,35 +59,35 @@ jobs:
         id: check-thresholds
         run: |
           python3 << 'EOF'
-import json, os
+          import json, os
 
-with open("backend/load-test-output.txt") as f:
-    content = f.read()
+          with open("backend/load-test-output.txt") as f:
+              content = f.read()
 
-start = content.index("---JSON-START---") + len("---JSON-START---")
-end = content.index("---JSON-END---")
-summary = json.loads(content[start:end].strip())
+          start = content.index("---JSON-START---") + len("---JSON-START---")
+          end = content.index("---JSON-END---")
+          summary = json.loads(content[start:end].strip())
 
-p99 = summary["latency"]["p99"]
-error_rate = summary["requests"]["errorRate"]
-passed = summary["passed"]
+          p99 = summary["latency"]["p99"]
+          error_rate = summary["requests"]["errorRate"]
+          passed = summary["passed"]
 
-with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-    out.write(f"summary={json.dumps(summary)}\n")
-    out.write(f"p99={p99}\n")
-    out.write(f"error-rate={error_rate}\n")
-    out.write(f"passed={passed}\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"summary={json.dumps(summary)}\n")
+              out.write(f"p99={p99}\n")
+              out.write(f"error-rate={error_rate}\n")
+              out.write(f"passed={passed}\n")
 
-print(f"p99: {p99}ms")
-print(f"Error rate: {error_rate}%")
-print(f"Passed: {passed}")
+          print(f"p99: {p99}ms")
+          print(f"Error rate: {error_rate}%")
+          print(f"Passed: {passed}")
 
-if not passed:
-    print("❌ Thresholds exceeded!")
-    exit(1)
-else:
-    print("✅ All thresholds passed!")
-EOF
+          if not passed:
+              print("❌ Thresholds exceeded!")
+              exit(1)
+          else:
+              print("✅ All thresholds passed!")
+          EOF
 
       - name: Upload load test results
         if: always()

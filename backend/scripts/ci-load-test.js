@@ -172,7 +172,7 @@ async function seedCampaigns(config) {
       creator: createStellarLikeAccount(`LOADCREATOR${index}`),
       title: `Load Test Campaign ${suffix}`,
       description: "Synthetic campaign used by the CI load test script.",
-      assetCode: config.assetCode,
+      acceptedTokens: [config.assetCode],
       targetAmount: config.targetAmount,
       deadline,
     };
