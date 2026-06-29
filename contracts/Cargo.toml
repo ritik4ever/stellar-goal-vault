@@ -16,10 +16,10 @@ crate-type = ["cdylib"]
 testutils = ["soroban-sdk/testutils"]
 
 [dependencies]
-soroban-sdk = "21.0.0"
+soroban-sdk = "26.1.0"
 
 [dev-dependencies]
-soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+soroban-sdk = { version = "26.1.0", features = ["testutils"] }
 proptest = "1.4"
 
 [profile.release]
