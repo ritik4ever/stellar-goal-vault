@@ -4,6 +4,7 @@ import { FormEvent, useState, useEffect } from 'react';
 import { MousePointer2 } from 'lucide-react';
 import { Campaign, AppConfig } from '../types/campaign';
 import CopyButton from './CopyButton';
+import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
 import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
@@ -182,9 +183,12 @@ export function CampaignDetailPanel({
         <div className="wallet-connected">
           {connectedWallet ? (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <strong className="mono">{connectedWallet.slice(0, 16)}...</strong>
-                <CopyButton value={connectedWallet} ariaLabel="Copy connected wallet address" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <AddressAvatar address={connectedWallet} size={28} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <strong className="mono">{connectedWallet.slice(0, 16)}...</strong>
+                  <CopyButton value={connectedWallet} ariaLabel="Copy connected wallet address" />
+                </div>
               </div>
               <button
                 className="btn-ghost"
@@ -220,9 +224,12 @@ export function CampaignDetailPanel({
         </article>
         <article className="detail-stat">
           <span>Creator</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
-            <CopyButton value={activeCampaign.creator} ariaLabel="Copy creator address" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <AddressAvatar address={activeCampaign.creator} size={28} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
+              <CopyButton value={activeCampaign.creator} ariaLabel="Copy creator address" />
+            </div>
           </div>
         </article>
         <article className="detail-stat">
