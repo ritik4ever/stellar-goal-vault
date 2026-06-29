@@ -1,5 +1,23 @@
 @import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap");
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .skeleton,
+  .campaign-image-skeleton,
+  .skeleton-line {
+    background: var(--bg-input) !important;
+    animation: none !important;
+  }
+}
+
 :root {
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --radius-xl: 24px;
@@ -377,10 +395,16 @@ select {
   border-radius: 999px;
   opacity: 0;
   will-change: transform, opacity;
-  animation: funded-confetti-fall 1.4s ease-out forwards;
 }
 
-@keyframes funded-confetti-fall {
+@media (prefers-reduced-motion: no-preference) {
+  .funded-confetti-piece {
+    animation: funded-confetti-fall 1.4s ease-out forwards;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes funded-confetti-fall {
   0% {
     opacity: 0;
     transform: translate3d(0, -18vh, 0) rotate(0deg);
@@ -842,7 +866,8 @@ tbody tr:hover td {
 }
 
 /* Animations */
-@keyframes fadeInUp {
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes fadeInUp {
   from {
     opacity: 0;
     transform: translateY(20px) scale(0.98);
@@ -852,6 +877,7 @@ tbody tr:hover td {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
 }
 
 .animate-fade-in {
@@ -1348,12 +1374,14 @@ tbody tr:hover td {
   border-radius: 999px;
 }
 
-@keyframes shimmer {
-  from {
-    background-position: 200% 0;
-  }
-  to {
-    background-position: -200% 0;
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
   }
 }
 
@@ -1502,15 +1530,17 @@ tbody tr:hover td {
   color: var(--text-main);
 }
 
-@keyframes toastIn {
-  from {
-    opacity: 0;
-    transform: translateX(20px) scale(0.96);
-  }
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes toastIn {
+    from {
+      opacity: 0;
+      transform: translateX(20px) scale(0.96);
+    }
 
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
+    to {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+    }
   }
 }
 

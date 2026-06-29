@@ -1,9 +1,13 @@
-import { CSSProperties, useEffect } from 'react';
+import { CSSProperties, useEffect, useRef } from 'react';
 
 interface FundedConfettiProps {
   campaignTitle: string;
   onComplete: () => void;
 }
+
+const prefersReducedMotion = window.matchMedia(
+  "(prefers-reduced-motion: reduce)"
+).matches;
 
 const COLORS = ['#f59e0b', '#10b981', '#38bdf8', '#f43f5e', '#8b5cf6', '#fde047'];
 const DURATION_MS = 1400;
@@ -18,12 +22,24 @@ const PIECES = Array.from({ length: 24 }, (_, index) => ({
 }));
 
 export function FundedConfetti({ campaignTitle, onComplete }: FundedConfettiProps) {
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
   useEffect(() => {
-    const timeoutId = window.setTimeout(onComplete, DURATION_MS);
+    if (prefersReducedMotion) {
+      onCompleteRef.current();
+      return;
+    }
+
+    const timeoutId = window.setTimeout(onCompleteRef.current, DURATION_MS);
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [onComplete]);
+  }, []);
+
+  if (prefersReducedMotion) {
+    return null;
+  }
 
   return (
     <div
