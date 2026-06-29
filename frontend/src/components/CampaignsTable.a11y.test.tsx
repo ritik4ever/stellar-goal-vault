@@ -1,42 +1,60 @@
 import { render } from '@testing-library/react';
-import { axe } from 'vitest-axe';
+import { MemoryRouter } from 'react-router-dom';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { CampaignsTable } from './CampaignsTable';
+import { runAxeAudit, setupDesktopViewport, THEMES, type ThemeMode } from '../test/a11yTestUtils';
 
-describe('CampaignsTable Accessibility', () => {
-  it('should have no critical accessibility violations in an empty state', async () => {
+const mockCampaign = {
+  id: '1',
+  creator: 'GABCD1234567890123456789012345678901234567890',
+  title: 'Test Campaign',
+  description: 'Test description for accessibility coverage.',
+  assetCode: 'USDC',
+  acceptedTokens: ['USDC'],
+  targetAmount: 1000,
+  pledgedAmount: 500,
+  deadline: Math.floor(Date.now() / 1000) + 3600,
+  createdAt: Math.floor(Date.now() / 1000),
+  progress: {
+    status: 'open' as const,
+    percentFunded: 50,
+    remainingAmount: 500,
+    hoursLeft: 1,
+    pledgeCount: 2,
+    canPledge: true,
+    canClaim: false,
+    canRefund: false,
+  },
+};
+
+describe.each(THEMES)('CampaignsTable Accessibility (%s theme)', (theme: ThemeMode) => {
+  beforeEach(() => {
+    setupDesktopViewport();
+  });
+
+  it('has no accessibility violations in an empty state', async () => {
     const { container } = render(
-      <CampaignsTable campaigns={[]} selectedCampaignId={null} onSelect={() => {}} />,
+      <MemoryRouter>
+        <CampaignsTable campaigns={[]} selectedCampaignId={null} onSelect={() => {}} />
+      </MemoryRouter>,
     );
 
-    const results = await axe(container);
+    const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
   });
 
-  it('should have no critical accessibility violations with data', async () => {
-    const mockCampaigns = [
-      {
-        id: '1',
-        creator: 'GABCD123456789',
-        title: 'Test Campaign',
-        description: 'Test description',
-        assetCode: 'USDC',
-        targetAmount: 1000,
-        pledgedAmount: 500,
-        deadline: Math.floor(Date.now() / 1000) + 3600,
-        progress: { status: 'open', percentFunded: 50, hoursLeft: 1 },
-      },
-    ];
-
+  it('has no accessibility violations with campaign data', async () => {
     const { container } = render(
-      <CampaignsTable
-        // @ts-ignore - bypassing full mock type strictness for testing DOM structure
-        campaigns={mockCampaigns}
-        selectedCampaignId={null}
-        onSelect={() => {}}
-      />,
+      <MemoryRouter>
+        <CampaignsTable
+          campaigns={[mockCampaign]}
+          selectedCampaignId={null}
+          onSelect={() => {}}
+        />
+      </MemoryRouter>,
     );
 
-    const results = await axe(container);
+    const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
   });
 });
