@@ -14,39 +14,32 @@ const DEFAULTS = {
   deadlineHours: 24,
 };
 
-function parseNumber(value, fallback, flagName) {
-  if (value === undefined) {
-    return fallback;
-  }
+const P99_THRESHOLD_MS = 500;
+const ERROR_RATE_THRESHOLD_PCT = 1;
 
+function parseNumber(value, fallback, flagName) {
+  if (value === undefined) return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error(`Invalid value for ${flagName}: "${value}"`);
   }
-
   return parsed;
 }
 
 function parseNonNegativeNumber(value, fallback, flagName) {
-  if (value === undefined) {
-    return fallback;
-  }
-
+  if (value === undefined) return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new Error(`Invalid value for ${flagName}: "${value}"`);
   }
-
   return parsed;
 }
 
 function parseArgs(argv) {
   const config = { ...DEFAULTS };
-
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const nextValue = argv[index + 1];
-
     switch (arg) {
       case "--base-url":
         config.baseUrl = nextValue;
@@ -100,33 +93,15 @@ function parseArgs(argv) {
         throw new Error(`Unknown argument: ${arg}`);
     }
   }
-
   if (config.readWeight < 1 && config.pledgeWeight < 1) {
     throw new Error("At least one of --read-weight or --pledge-weight must be greater than zero.");
   }
-
   return config;
-}
-
-function createStellarLikeAccount(seed) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const normalizedSeed = String(seed)
-    .toUpperCase()
-    .split("")
-    .filter((character) => alphabet.includes(character))
-    .join("");
-  let body = normalizedSeed;
-
-  while (body.length < 55) {
-    body += alphabet[body.length % alphabet.length];
-  }
-
-  return `G${body.slice(0, 55)}`;
 }
 
 function printHelp() {
   console.log(`
-Load test the local Stellar Goal Vault API.
+CI load test with threshold enforcement.
 
 Options:
   --base-url <url>          Backend URL (default: ${DEFAULTS.baseUrl})
@@ -141,7 +116,25 @@ Options:
   --asset-code <code>       Asset code for seed campaigns (default: ${DEFAULTS.assetCode})
   --deadline-hours <hours>  Deadline offset for seed campaigns (default: ${DEFAULTS.deadlineHours})
   --help                    Show this message
+
+Thresholds (hardcoded for CI):
+  p99 latency < ${P99_THRESHOLD_MS}ms
+  Error rate < ${ERROR_RATE_THRESHOLD_PCT}%
 `);
+}
+
+function createStellarLikeAccount(seed) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const normalizedSeed = String(seed)
+    .toUpperCase()
+    .split("")
+    .filter((character) => alphabet.includes(character))
+    .join("");
+  let body = normalizedSeed;
+  while (body.length < 55) {
+    body += alphabet[body.length % alphabet.length];
+  }
+  return `G${body.slice(0, 55)}`;
 }
 
 async function requestJson(baseUrl, path, init = {}) {
@@ -152,12 +145,10 @@ async function requestJson(baseUrl, path, init = {}) {
       ...(init.headers || {}),
     },
   });
-
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`${init.method || "GET"} ${path} failed with ${response.status}: ${body}`);
   }
-
   return response.json();
 }
 
@@ -166,7 +157,7 @@ async function waitForHealthyBackend(baseUrl) {
     await requestJson(baseUrl, "/api/health");
   } catch (error) {
     throw new Error(
-      `Backend is not reachable at ${baseUrl}. Start it with "npm run dev:backend" before running the load test.\n${error.message}`,
+      `Backend is not reachable at ${baseUrl}. Start it before running the CI load test.\n${error.message}`,
     );
   }
 }
@@ -175,64 +166,50 @@ async function seedCampaigns(config) {
   const createdAt = new Date();
   const deadline = Math.floor(createdAt.getTime() / 1000) + Math.floor(config.deadlineHours * 3600);
   const campaigns = [];
-
   for (let index = 0; index < config.campaigns; index += 1) {
     const suffix = `${createdAt.getTime()}-${index}`;
     const payload = {
       creator: createStellarLikeAccount(`LOADCREATOR${index}`),
       title: `Load Test Campaign ${suffix}`,
-      description: "Synthetic campaign used by the API load test script.",
+      description: "Synthetic campaign used by the CI load test script.",
       acceptedTokens: [config.assetCode],
       targetAmount: config.targetAmount,
       deadline,
     };
-
     const response = await requestJson(config.baseUrl, "/api/campaigns", {
       method: "POST",
       body: JSON.stringify(payload),
     });
-
     campaigns.push(response.data);
   }
-
   return campaigns;
 }
 
 function buildRequests(config, campaigns) {
   const requests = [];
   let pledgeCounter = 0;
-
   for (let index = 0; index < config.readWeight; index += 1) {
     requests.push({
       method: "GET",
       path: `/api/campaigns?page=1&limit=${Math.max(10, campaigns.length)}&asset=${encodeURIComponent(config.assetCode)}`,
     });
-
     const campaign = campaigns[index % campaigns.length];
     requests.push({
       method: "GET",
       path: `/api/campaigns/${campaign.id}`,
     });
   }
-
   for (let index = 0; index < config.pledgeWeight; index += 1) {
     const campaign = campaigns[index % campaigns.length];
     const contributor = createStellarLikeAccount(`LOADPLEDGER${pledgeCounter}`);
     pledgeCounter += 1;
-
     requests.push({
       method: "POST",
       path: `/api/campaigns/${campaign.id}/pledges`,
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        contributor,
-        amount: config.pledgeAmount,
-      }),
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contributor, amount: config.pledgeAmount }),
     });
   }
-
   return requests;
 }
 
@@ -252,11 +229,9 @@ function runAutocannon(config, requests) {
           reject(error);
           return;
         }
-
         resolve(result);
       },
     );
-
     autocannon.track(instance, {
       renderProgressBar: true,
       renderLatencyTable: true,
@@ -275,6 +250,8 @@ function printSummary(config, campaigns, result) {
   const totalRequests = successfulRequests + failedRequests;
   const errorRate = totalRequests === 0 ? 0 : (failedRequests / totalRequests) * 100;
 
+  const p99 = result.latency.p99;
+
   console.log("\nLoad test configuration");
   console.log(`- Base URL: ${config.baseUrl}`);
   console.log(`- Connections: ${config.connections}`);
@@ -286,7 +263,7 @@ function printSummary(config, campaigns, result) {
   console.log(`- p50: ${formatFixed(result.latency.p50)}`);
   console.log(`- p90: ${formatFixed(result.latency.p90)}`);
   console.log(`- p97.5: ${formatFixed(result.latency.p97_5)}`);
-  console.log(`- p99: ${formatFixed(result.latency.p99)}`);
+  console.log(`- p99: ${formatFixed(p99)}`);
   console.log(`- max: ${formatFixed(result.latency.max)}`);
 
   console.log("\nRequest summary");
@@ -298,6 +275,24 @@ function printSummary(config, campaigns, result) {
   console.log(`- Error rate: ${formatFixed(errorRate)}%`);
   console.log(`- Avg req/sec: ${formatFixed(result.requests.average)}`);
   console.log(`- Avg throughput: ${formatFixed(result.throughput.average / 1024)} KiB/s`);
+
+  console.log("\nThreshold check");
+  const p99Pass = p99 <= P99_THRESHOLD_MS;
+  const errorRatePass = errorRate <= ERROR_RATE_THRESHOLD_PCT;
+  console.log(`- p99 latency: ${formatFixed(p99)}ms ${p99Pass ? "✅" : "❌"} (threshold: ${P99_THRESHOLD_MS}ms)`);
+  console.log(`- Error rate: ${formatFixed(errorRate)}% ${errorRatePass ? "✅" : "❌"} (threshold: ${ERROR_RATE_THRESHOLD_PCT}%)`);
+  console.log(`- Overall: ${p99Pass && errorRatePass ? "PASS ✅" : "FAIL ❌"}`);
+
+  const summary = {
+    thresholds: { p99: { value: p99, threshold: P99_THRESHOLD_MS, pass: p99Pass }, errorRate: { value: errorRate, threshold: ERROR_RATE_THRESHOLD_PCT, pass: errorRatePass } },
+    config,
+    campaigns: campaigns.length,
+    latency: { p50: result.latency.p50, p90: result.latency.p90, p97_5: result.latency.p97_5, p99, max: result.latency.max },
+    requests: { total: totalRequests, "2xx": successfulRequests, non2xx: result.non2xx || 0, errors: result.errors || 0, timeouts: result.timeouts || 0, errorRate, avgReqSec: result.requests.average, avgThroughputKiBs: result.throughput.average / 1024 },
+    passed: p99Pass && errorRatePass,
+  };
+
+  console.log(`\n---JSON-START---\n${JSON.stringify(summary)}\n---JSON-END---`);
 }
 
 async function main() {
@@ -310,6 +305,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`\nLoad test failed: ${error.message}`);
+  console.error(`\nCI load test failed: ${error.message}`);
   process.exitCode = 1;
 });
