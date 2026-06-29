@@ -64,6 +64,15 @@ async function post(apiPath: string, body: any) {
   return { status: response.status, data };
 }
 
+async function get(apiPath: string) {
+  const response = await fetch(`${baseUrl}${apiPath}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const data = await response.json().catch(() => null);
+  return { status: response.status, data };
+}
+
 describe('Campaign Lifecycle API', () => {
   it('covers create, pledge, claim end-to-end', async () => {
     // 1. Create Campaign

@@ -222,6 +222,8 @@ mod tests {
             &meta("c2"),
             &0_i128,
         );
+        assert_eq!(client.get_campaign_count(), 2);
+
         client.create_campaign(
             &creator,
             &soroban_sdk::vec![&env, token.clone()],
