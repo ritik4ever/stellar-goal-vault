@@ -10,9 +10,11 @@ process.env.CONTRACT_ID = '';
 type IndexModule = typeof import('./index');
 type CampaignStoreModule = typeof import('./services/campaignStore');
 type DbModule = typeof import('./services/db');
+type ValidationModule = typeof import('./validation/schemas');
 
 let listCampaigns: CampaignStoreModule['listCampaigns'];
 let parseCampaignListFilters: IndexModule['parseCampaignListFilters'];
+let parseCampaignListQuery: ValidationModule['parseCampaignListQuery'];
 let createCampaign: CampaignStoreModule['createCampaign'];
 let addPledge: CampaignStoreModule['addPledge'];
 let calculateProgress: CampaignStoreModule['calculateProgress'];
@@ -26,6 +28,7 @@ beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
   ({ parseCampaignListFilters } = await import('./index'));
   ({ getDb } = await import('./services/db'));
+  ({ parseCampaignListQuery } = await import('./validation/schemas'));
   ({ initCampaignStore, listCampaigns, createCampaign, addPledge, calculateProgress } =
     await import('./services/campaignStore'));
   initCampaignStore();
@@ -175,5 +178,206 @@ describe('campaign list filters and pagination', () => {
     expect(filtered).toHaveLength(1);
     expect(filtered[0].id).toBe(fixtures.fundedUsdc.id);
     expect(filtered[0].assetCode).toBe('USDC');
+  });
+
+  it('filters campaigns by multiple asset codes (createdAfter/createdBefore)', () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    const campaign1 = createCampaign({
+      creator: CREATOR,
+      title: 'Campaign 1',
+      description: 'Created earlier',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+
+    // Simulate campaign created at earlier time by directly updating DB
+    getDb()
+      .prepare(`UPDATE campaigns SET created_at = ? WHERE id = ?`)
+      .run(now - 86400, campaign1.id);
+
+    const campaign2 = createCampaign({
+      creator: CREATOR,
+      title: 'Campaign 2',
+      description: 'Created now',
+      acceptedTokens: ['USDC', 'XLM'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+
+    // Test createdAfter filter
+    const afterFilter = listCampaigns({
+      createdAfter: now - 3600,
+      page: 1,
+      limit: 10,
+    });
+    expect(afterFilter.campaigns.map(c => c.id)).toContain(campaign2.id);
+    expect(afterFilter.campaigns.map(c => c.id)).not.toContain(campaign1.id);
+
+    // Test createdBefore filter
+    const beforeFilter = listCampaigns({
+      createdBefore: now - 43200,
+      page: 1,
+      limit: 10,
+    });
+    expect(beforeFilter.campaigns.map(c => c.id)).toContain(campaign1.id);
+    expect(beforeFilter.campaigns.map(c => c.id)).not.toContain(campaign2.id);
+  });
+
+  it('filters campaigns by multiple asset codes', () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    const xlmCampaign = createCampaign({
+      creator: CREATOR,
+      title: 'XLM Campaign',
+      description: 'Test',
+      acceptedTokens: ['XLM'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+
+    const usdcCampaign = createCampaign({
+      creator: CREATOR,
+      title: 'USDC Campaign',
+      description: 'Test',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+
+    const multiCampaign = createCampaign({
+      creator: CREATOR,
+      title: 'Multi Token Campaign',
+      description: 'Test',
+      acceptedTokens: ['USDC', 'XLM'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+
+    // Filter by multiple asset codes (XLM OR USDC)
+    const filtered = listCampaigns({
+      assetCodes: ['XLM', 'USDC'],
+      page: 1,
+      limit: 10,
+    });
+
+    const ids = filtered.campaigns.map(c => c.id);
+    expect(ids).toContain(xlmCampaign.id);
+    expect(ids).toContain(usdcCampaign.id);
+    expect(ids).toContain(multiCampaign.id);
+    expect(filtered.campaigns).toHaveLength(3);
+  });
+});
+
+describe('Query parameter validation', () => {
+  it('validates invalid page parameter', () => {
+    const result = parseCampaignListQuery({ page: 'invalid', limit: '10' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some(issue => issue.path.includes('page'))).toBe(true);
+    }
+  });
+
+  it('validates invalid limit parameter', () => {
+    const result = parseCampaignListQuery({ page: '1', limit: '999' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some(issue => issue.path.includes('limit'))).toBe(true);
+    }
+  });
+
+  it('validates invalid asset parameter', () => {
+    const result = parseCampaignListQuery({ asset: 'INVALID' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some(issue => issue.path.includes('asset'))).toBe(true);
+    }
+  });
+
+  it('validates invalid status parameter', () => {
+    const result = parseCampaignListQuery({ status: 'invalid' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some(issue => issue.path.includes('status'))).toBe(true);
+    }
+  });
+
+  it('validates invalid createdAfter parameter', () => {
+    const result = parseCampaignListQuery({ createdAfter: 'not-a-date' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some(issue => issue.path.includes('createdAfter'))).toBe(true);
+    }
+  });
+
+  it('accepts valid ISO 8601 timestamps for createdAfter/createdBefore', () => {
+    const result = parseCampaignListQuery({
+      createdAfter: '2024-01-01T00:00:00Z',
+      createdBefore: '2024-12-31T23:59:59Z',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.createdAfter).toBeDefined();
+      expect(result.data.createdBefore).toBeDefined();
+    }
+  });
+
+  it('accepts multi-value asset parameter', () => {
+    const result = parseCampaignListQuery({ asset: 'XLM,USDC' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.asset).toEqual(['XLM', 'USDC']);
+    }
+  });
+
+  it('requires both page and limit for pagination', () => {
+    const resultPageOnly = parseCampaignListQuery({ page: '1' });
+    expect(resultPageOnly.ok).toBe(false);
+
+    const resultLimitOnly = parseCampaignListQuery({ limit: '10' });
+    expect(resultLimitOnly.ok).toBe(false);
+  });
+});
+
+describe('maxPerContributor in response', () => {
+  it('includes maxPerContributor field in campaign records', () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Campaign with maxPerContributor',
+      description: 'Test campaign with max per contributor limit',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: now + 3600,
+      maxPerContributor: 50,
+    });
+
+    const { campaigns } = listCampaigns({ page: 1, limit: 10 });
+    const found = campaigns.find(c => c.id === campaign.id);
+
+    expect(found).toBeDefined();
+    expect(found?.maxPerContributor).toBe(50);
+  });
+
+  it('includes maxPerContributor in response even when not set', () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Campaign without maxPerContributor',
+      description: 'Test campaign without max per contributor limit',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+
+    const { campaigns } = listCampaigns({ page: 1, limit: 10 });
+    const found = campaigns.find(c => c.id === campaign.id);
+
+    expect(found).toBeDefined();
+    // maxPerContributor should be undefined but the field should be present in the type
+    expect(found?.maxPerContributor).toBeUndefined();
   });
 });
