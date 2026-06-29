@@ -32,6 +32,7 @@ export function CreateCampaignForm({
   const [validationErrors, setValidationErrors] = useState<FormErrors>(
     validateForm({ ...INITIAL_VALUES, acceptedTokens: assetOptions.slice(0, 1) }),
   );
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -51,7 +52,16 @@ export function CreateCampaignForm({
   function update(field: keyof typeof INITIAL_VALUES, value: any) {
     const nextValues = { ...values, [field]: value };
     setValues(nextValues);
-    setValidationErrors(validateForm(nextValues));
+    if (touchedFields.has(field)) {
+      setValidationErrors(validateForm(nextValues));
+    }
+  }
+
+  function handleFieldBlur(field: string) {
+    const newTouched = new Set(touchedFields);
+    newTouched.add(field);
+    setTouchedFields(newTouched);
+    setValidationErrors(validateForm(values));
   }
 
   function toggleToken(token: string) {
@@ -115,11 +125,12 @@ export function CreateCampaignForm({
             type="text"
             value={values.creator}
             onChange={(event) => update('creator', event.target.value)}
+            onBlur={() => handleFieldBlur('creator')}
             placeholder="G... creator public key"
-            className={validationErrors.creator ? 'input-error' : ''}
+            className={validationErrors.creator && touchedFields.has('creator') ? 'input-error' : ''}
             required
           />
-          {validationErrors.creator ? (
+          {validationErrors.creator && touchedFields.has('creator') ? (
             <span className="field-error">{validationErrors.creator}</span>
           ) : null}
         </label>
@@ -130,13 +141,14 @@ export function CreateCampaignForm({
             type="text"
             value={values.title}
             onChange={(event) => update('title', event.target.value)}
+            onBlur={() => handleFieldBlur('title')}
             placeholder="Stellar community design sprint"
             minLength={4}
             maxLength={80}
-            className={validationErrors.title ? 'input-error' : ''}
+            className={validationErrors.title && touchedFields.has('title') ? 'input-error' : ''}
             required
           />
-          {validationErrors.title ? (
+          {validationErrors.title && touchedFields.has('title') ? (
             <span className="field-error">{validationErrors.title}</span>
           ) : null}
         </label>
@@ -146,14 +158,15 @@ export function CreateCampaignForm({
           <textarea
             value={values.description}
             onChange={(event) => update('description', event.target.value)}
+            onBlur={() => handleFieldBlur('description')}
             placeholder="Describe what the campaign funds, who benefits, and the delivery plan."
             rows={5}
             minLength={20}
             maxLength={500}
-            className={validationErrors.description ? 'input-error' : ''}
+            className={validationErrors.description && touchedFields.has('description') ? 'input-error' : ''}
             required
           />
-          {validationErrors.description ? (
+          {validationErrors.description && touchedFields.has('description') ? (
             <span className="field-error">{validationErrors.description}</span>
           ) : null}
         </label>
@@ -167,12 +180,13 @@ export function CreateCampaignForm({
                   type="checkbox"
                   checked={values.acceptedTokens.includes(asset)}
                   onChange={() => toggleToken(asset)}
+                  onBlur={() => handleFieldBlur('acceptedTokens')}
                 />
                 {asset}
               </label>
             ))}
           </div>
-          {validationErrors.acceptedTokens ? (
+          {validationErrors.acceptedTokens && touchedFields.has('acceptedTokens') ? (
             <span className="field-error">{validationErrors.acceptedTokens}</span>
           ) : null}
         </div>
@@ -185,10 +199,11 @@ export function CreateCampaignForm({
             step="0.01"
             value={values.targetAmount}
             onChange={(event) => update('targetAmount', event.target.value)}
-            className={validationErrors.targetAmount ? 'input-error' : ''}
+            onBlur={() => handleFieldBlur('targetAmount')}
+            className={validationErrors.targetAmount && touchedFields.has('targetAmount') ? 'input-error' : ''}
             required
           />
-          {validationErrors.targetAmount ? (
+          {validationErrors.targetAmount && touchedFields.has('targetAmount') ? (
             <span className="field-error">{validationErrors.targetAmount}</span>
           ) : null}
         </label>
@@ -201,10 +216,11 @@ export function CreateCampaignForm({
             step="0.0001"
             value={values.deadlineHours}
             onChange={(event) => update('deadlineHours', event.target.value)}
-            className={validationErrors.deadlineHours ? 'input-error' : ''}
+            onBlur={() => handleFieldBlur('deadlineHours')}
+            className={validationErrors.deadlineHours && touchedFields.has('deadlineHours') ? 'input-error' : ''}
             required
           />
-          {validationErrors.deadlineHours ? (
+          {validationErrors.deadlineHours && touchedFields.has('deadlineHours') ? (
             <span className="field-error">{validationErrors.deadlineHours}</span>
           ) : null}
         </label>
