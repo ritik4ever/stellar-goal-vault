@@ -513,7 +513,8 @@ describe("Campaign Lifecycle - Authorization & Validation", () => {
       deadline: nowInSeconds() + 86400,
     });
     expect(res.status).toBe(400);
-    expect(res.data.error.code).toBe("VALIDATION_ERROR");
+    expect(res.data.error).toBe("Validation failed");
+    expect(Array.isArray(res.data.details)).toBe(true);
 
     // Missing title
     res = await apiClient.post("/api/campaigns", {
