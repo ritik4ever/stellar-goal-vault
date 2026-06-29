@@ -1,6 +1,10 @@
+const prefersReducedMotion = window.matchMedia(
+  "(prefers-reduced-motion: reduce)"
+).matches;
+
 export function SkeletonCard() {
   return (
-    <article className="campaign-card animate-pulse">
+    <article className={`campaign-card ${prefersReducedMotion ? "" : "animate-pulse"}`}>
       <div className="campaign-card-main">
         <div className="campaign-card-header">
           <div className="h-6 bg-gray-300 rounded w-3/4 mb-2"></div>
