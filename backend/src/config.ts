@@ -22,6 +22,7 @@ const parseInteger = (value: string | undefined, fallback: number): number => {
 export const config = {
   port: Number(process.env.PORT ?? 3001),
   logLevel: normalizeLogLevel(process.env.LOG_LEVEL),
+  corsAllowedOrigins: parseOrigins(process.env.CORS_ALLOWED_ORIGINS ?? ''),
   allowedAssets: (process.env.ALLOWED_ASSETS ?? 'USDC,XLM')
     .split(',')
     .map((value) => value.trim().toUpperCase())

@@ -1,5 +1,8 @@
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import { config } from "../config";
+
+extendZodWithOpenApi(z);
 import type { CampaignStatus, CampaignSortField, SortOrder } from "../services/campaignStore";
 
 export const STELLAR_ACCOUNT_REGEX = /^G[A-Z2-7]{55}$/;
@@ -414,7 +417,7 @@ export function parseCampaignListQuery(query: Record<string, unknown>):
 
   const sortStr = normalizeQueryValue(query.sort);
   let sort: CampaignSortField | undefined = undefined;
-  const VALID_SORTS: CampaignSortField[] = ['newest', 'deadline', 'percentFunded', 'totalPledged'];
+  const VALID_SORTS: CampaignSortField[] = ['createdAt', 'deadline', 'pledgedAmount', 'targetAmount'];
   if (sortStr !== undefined) {
     if (!VALID_SORTS.includes(sortStr as CampaignSortField)) {
       issues.push({

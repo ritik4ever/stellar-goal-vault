@@ -16,6 +16,8 @@ import { requestIdMiddleware } from "./middleware/requestId";
 import type { RequestWithId } from "./middleware/types";
 import { initRedisCache } from "./services/cache";
 
+import swaggerUi from 'swagger-ui-express';
+
 import {
   addPledge,
   calculateProgress,
@@ -37,7 +39,6 @@ import {
   reconcileOnChainPledge,
   refundContributor,
   SortOrder,
-  updateCampaign,
 } from './services/campaignStore';
 import { checkDbHealth } from './services/db';
 import { listCampaignHistory } from './services/eventHistory';
@@ -60,6 +61,7 @@ import {
   parseCampaignListQuery,
   normalizeQueryValue,
 } from './validation/schemas';
+import { generateOpenApiDocument } from './openapi';
 import { logError, logInfo } from './logger';
 import {
   buildCampaignCacheKey,
@@ -110,6 +112,14 @@ app.use(compression({ threshold: 1024 }));
 
 const bodySizeLimit = process.env.MAX_BODY_SIZE || "16kb";
 app.use(express.json({ limit: bodySizeLimit }));
+
+// OpenAPI documentation endpoints (public, not rate-limited or cached)
+const openApiDocument = generateOpenApiDocument();
+app.get('/api/docs', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.json(openApiDocument);
+});
+app.use('/api/docs/ui', swaggerUi.serve, swaggerUi.setup(openApiDocument, { explorer: true }));
 
 // Add API key authentication middleware (production only)
 if (process.env.NODE_ENV === "production") {
@@ -385,7 +395,7 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
 
   const data = campaigns.map((campaign) => ({
     ...campaign,
-    progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
+    progress: calculateProgress(campaign),
   }));
 
   const page = params.page ?? 1;
