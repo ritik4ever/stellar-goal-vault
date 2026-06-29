@@ -2,6 +2,9 @@ import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
+import helmet from "helmet";
+import http, { Server } from "http";
+import { createServer } from "http";
 
 import { validateEnv } from "./validateEnv";
 import { z } from "zod";
@@ -74,6 +77,14 @@ const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60000);
 const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_READ_LIMIT ?? process.env.RATE_LIMIT_MAX_REQUESTS ?? 120);
 const WRITE_RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_WRITE_LIMIT ?? process.env.WRITE_RATE_LIMIT_MAX_REQUESTS ?? 20);
 const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+    },
+  },
+}));
 
 app.use(
   cors({
@@ -266,6 +277,61 @@ app.get('/api/health', (_req: Request, res: Response) => {
     uptimeSeconds: Number(process.uptime().toFixed(3)),
     database,
   });
+});
+
+app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Response) => {
+  try {
+    const database = checkDbHealth();
+    const hasContractId = !!config.contractId;
+    let sorobanHealthy = false;
+
+    try {
+      if (config.sorobanRpcUrl) {
+        const response = await fetch(config.sorobanRpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'getHealth',
+            id: 1,
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+        sorobanHealthy = response.ok || response.status < 500;
+      }
+    } catch {
+      sorobanHealthy = false;
+    }
+
+    const allHealthy = database.reachable && hasContractId && sorobanHealthy;
+
+    res.status(allHealthy ? 200 : 503).json({
+      overall: allHealthy ? 'up' : 'down',
+      timestamp: new Date().toISOString(),
+      uptimeSeconds: Number(process.uptime().toFixed(3)),
+      components: {
+        db: {
+          status: database.reachable ? 'up' : 'down',
+          details: database.reachable ? 'SQLite database reachable' : database.error,
+        },
+        soroban: {
+          status: sorobanHealthy ? 'up' : 'down',
+          details: config.sorobanRpcUrl ? 'Soroban RPC reachable' : 'Soroban RPC URL not configured',
+        },
+        contract: {
+          status: hasContractId ? 'up' : 'down',
+          details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
+        },
+      },
+    });
+  } catch (error) {
+    res.status(503).json({
+      overall: 'down',
+      timestamp: new Date().toISOString(),
+      error: 'Deep health check failed',
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 app.get('/api/campaigns', (req: Request, res: Response) => {
@@ -717,6 +783,8 @@ export function configureHttpServer(server: Server): Server {
   return server;
 }
 
+let isShuttingDown = false;
+
 function startServer() {
   validateEnv();
   printStartupBanner();
@@ -730,7 +798,53 @@ function startServer() {
     });
   }
 
+  // Reject new requests during shutdown
+  app.use((req, res, next) => {
+    if (isShuttingDown) {
+      res.status(503).json({
+        success: false,
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Server is shutting down',
+        },
+      });
+      return;
+    }
+    next();
+  });
+
   const server = configureHttpServer(createServer(app));
+
+  const gracefulShutdown = (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    logInfo('server_shutting_down', { signal }, config.logLevel);
+
+    // Stop accepting new connections
+    server.close(() => {
+      logInfo('server_closed', { message: 'Server closed' }, config.logLevel);
+      process.exit(0);
+    });
+
+    // Force shutdown after grace period
+    const gracePeriodSeconds = 10;
+    const gracePeriodTimer = setTimeout(() => {
+      logError(
+        new Error('Graceful shutdown timeout exceeded'),
+        { event: 'graceful_shutdown_timeout', gracePeriodSeconds },
+        config.logLevel,
+      );
+      process.exit(1);
+    }, gracePeriodSeconds * 1000);
+
+    // Close the database connection when shutting down
+    gracePeriodTimer.unref();
+  };
+
+  // Handle graceful shutdown
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
   server.listen(config.port, () => {
     logInfo(
@@ -744,6 +858,8 @@ function startServer() {
       config.logLevel,
     );
   });
+
+  return server;
 }
 
 if (require.main === module) {
