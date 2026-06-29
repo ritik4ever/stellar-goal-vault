@@ -1172,7 +1172,4 @@ mod tests {
         let new_deadline = env.ledger().timestamp() + 500;
         client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
     }
-
-
-    }
 }

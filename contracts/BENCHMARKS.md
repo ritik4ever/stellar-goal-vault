@@ -4,6 +4,43 @@
 > Run `cargo test --release` for baseline, and `scripts/benchmark.sh` for
 > `stellar contract invoke --cost` metrics against a local testnet.
 
+## WASM Binary Size
+
+Recorded: 2026-06-29
+Soroban SDK version: 21.7.7
+Rust toolchain: 1.96.0
+
+### Release Profile Settings (`Cargo.toml`)
+
+```toml
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = 0
+```
+
+### Size Results
+
+| Step | File | Size (bytes) | Reduction |
+|------|------|-------------:|----------:|
+| Baseline (`cargo build --release`) | `stellar_goal_vault.wasm` | 20 543 | — |
+| After `wasm-opt -Oz` | `stellar_goal_vault_opt.wasm` | 17 805 | −2 738 (−13.3%) |
+
+### Post-Build wasm-opt Step
+
+```bash
+wasm-opt -Oz --enable-bulk-memory \
+  target/wasm32-unknown-unknown/release/stellar_goal_vault.wasm \
+  -o target/wasm32-unknown-unknown/release/stellar_goal_vault_opt.wasm
+```
+
+Use `stellar_goal_vault_opt.wasm` for deployment to minimise on-chain storage fees.
+
+---
+
 ## Methodology
 
 1.  Build the WASM binary:

@@ -78,6 +78,12 @@
                 },
                 {
                   "string": "original metadata"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }
@@ -891,6 +897,12 @@
                 },
                 {
                   "string": "original metadata"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }
