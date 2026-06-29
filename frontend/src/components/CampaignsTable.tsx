@@ -13,6 +13,7 @@ import {
 import { SearchInput } from "./SearchInput";
 import { SortDropdown, SortOption } from "./SortDropdown";
 import { AddressAvatar } from "./AddressAvatar";
+import { SkeletonCard } from "./SkeletonCard";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 
@@ -74,11 +75,11 @@ export function CampaignsTable({
   invalidUrlCampaignId = null,
 }: CampaignsTableProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const urlSort = (searchParams.get('sort') as SortOption | null) ?? 'newest';
+  const urlSort = (searchParams.get('sort') as SortOption | null) ?? 'createdAt';
   const urlOrder = (searchParams.get('order') as 'asc' | 'desc' | null) ?? 'desc';
   const urlStatus = (searchParams.get('status') as StatusFilterValue | null) ?? '';
-  const VALID_SORTS: SortOption[] = ['newest', 'deadline', 'percentFunded', 'totalPledged'];
-  const sortBy: SortOption = VALID_SORTS.includes(urlSort) ? urlSort : 'newest';
+  const VALID_SORTS: SortOption[] = ['createdAt', 'deadline', 'pledgedAmount', 'targetAmount'];
+  const sortBy: SortOption = VALID_SORTS.includes(urlSort) ? urlSort : 'createdAt';
   const [assetCode, setAssetCode] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>(urlStatus);
   const [searchQuery, setSearchQuery] = useState("");
@@ -147,6 +148,7 @@ export function CampaignsTable({
   }, [hasMore, onLoadMore]);
 
   const isEmpty = campaigns.length === 0;
+  const SKELETON_COUNT = 6;
 
   const assetOptions = useMemo(
     () => getDistinctAssetCodes(campaigns),
@@ -195,6 +197,11 @@ export function CampaignsTable({
         <div className="section-heading">
           <h2>Campaign board</h2>
           <p className="muted">Loading campaigns...</p>
+        </div>
+        <div className="cards-only" aria-busy="true" aria-label="Loading campaigns">
+          {Array.from({ length: SKELETON_COUNT }).map((_, index) => (
+            <SkeletonCard key={`skeleton-${index}`} />
+          ))}
         </div>
       </section>
     );

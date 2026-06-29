@@ -102,6 +102,7 @@ app.use(
       }
     },
     credentials: true,
+    exposedHeaders: ['X-Total-Count', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Retry-After'],
   }),
 );
 
@@ -234,10 +235,15 @@ export function parseCampaignListFilters(query: {
   sort?: CampaignSortField;
   order?: SortOrder;
 } {
-  const VALID_SORT_FIELDS: CampaignSortField[] = ['newest', 'deadline', 'percentFunded', 'totalPledged'];
+  const VALID_SORT_FIELDS: CampaignSortField[] = ['createdAt', 'deadline', 'pledgedAmount', 'targetAmount'];
   const VALID_ORDERS: SortOrder[] = ['asc', 'desc'];
   const rawSort = normalizeQueryValue(query.sort);
   const rawOrder = normalizeQueryValue(query.order);
+
+  if (rawSort && !VALID_SORT_FIELDS.includes(rawSort as CampaignSortField)) {
+    throw new AppError(`Invalid sort field: ${rawSort}. Supported fields: ${VALID_SORT_FIELDS.join(', ')}`, 400, 'INVALID_SORT_FIELD');
+  }
+
   return {
     asset: normalizeAssetFilter(query.asset),
     status: normalizeStatusFilter(query.status),
@@ -351,8 +357,10 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
 
   const cached = getCampaignCacheEntry(cacheKey);
   if (cached) {
+    const cachedData = JSON.parse(cached);
     res.setHeader('Cache-Control', 'max-age=5');
     res.setHeader('X-Cache', 'HIT');
+    res.setHeader('X-Total-Count', String(cachedData.pagination.total));
     res.setHeader('Content-Type', 'application/json');
     res.send(cached);
     return;
@@ -401,6 +409,7 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
 
   res.setHeader('Cache-Control', 'max-age=5');
   res.setHeader('X-Cache', 'MISS');
+  res.setHeader('X-Total-Count', String(totalCount));
   res.setHeader('Content-Type', 'application/json');
   res.send(responseBody);
 });
@@ -447,6 +456,7 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
     Math.ceil(totalCount / paginationResult.limit),
   );
 
+  res.setHeader('X-Total-Count', String(totalCount));
   res.json({
     data: pledges,
     pagination: {
@@ -763,17 +773,12 @@ function printStartupBanner(): void {
   const dbPath = process.env.DB_PATH || path.join(__dirname, '..', '..', 'data', 'campaigns.db');
   const nodeEnv = process.env.NODE_ENV || 'development';
 
-  /* eslint-disable no-console */
-  console.log('');
-  console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║         Stellar Goal Vault Backend - Starting Up          ║');
-  console.log('╠════════════════════════════════════════════════════════════╣');
-  console.log(`║  Port:           ${config.port.toString().padEnd(42)}║`);
-  console.log(`║  Environment:    ${nodeEnv.padEnd(42)}║`);
-  console.log(`║  Database Path:  ${dbPath.padEnd(42)}║`);
-  console.log('╚════════════════════════════════════════════════════════════╝');
-  console.log('');
-  /* eslint-enable no-console */
+  logInfo('startup_banner', {
+    message: 'Stellar Goal Vault Backend - Starting Up',
+    port: config.port,
+    environment: nodeEnv,
+    databasePath: dbPath,
+  }, config.logLevel);
 }
 
 export function configureHttpServer(server: Server): Server {
