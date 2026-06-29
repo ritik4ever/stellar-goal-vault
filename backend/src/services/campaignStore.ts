@@ -273,7 +273,7 @@ export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds())
   };
 }
 
-export type CampaignSortField = 'newest' | 'deadline' | 'percentFunded' | 'totalPledged';
+export type CampaignSortField = 'createdAt' | 'deadline' | 'pledgedAmount' | 'targetAmount';
 export type SortOrder = 'asc' | 'desc';
 
 export interface ListCampaignsOptions {
@@ -411,21 +411,21 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const totalCount = (db.prepare(countQuery).get(...params) as { total: number }).total;
 
   // Build ORDER BY clause from sort options
-  const sortField = options?.sort ?? 'newest';
+  const sortField = options?.sort ?? 'createdAt';
   const sortOrder = options?.order ?? 'desc';
   const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
   let orderByClause: string;
   switch (sortField) {
     case 'deadline':
-      orderByClause = `campaigns.deadline ${sortOrder === 'desc' ? 'DESC' : 'ASC'}`;
+      orderByClause = `campaigns.deadline ${orderDir}`;
       break;
-    case 'percentFunded':
-      orderByClause = `(CAST(campaigns.pledged_amount AS REAL) / CAST(campaigns.target_amount AS REAL)) ${orderDir}`;
-      break;
-    case 'totalPledged':
+    case 'pledgedAmount':
       orderByClause = `campaigns.pledged_amount ${orderDir}`;
       break;
-    case 'newest':
+    case 'targetAmount':
+      orderByClause = `campaigns.target_amount ${orderDir}`;
+      break;
+    case 'createdAt':
     default:
       orderByClause = `campaigns.created_at ${orderDir}`;
       break;

@@ -1,4 +1,4 @@
-export type SortOption = 'newest' | 'deadline' | 'percentFunded' | 'totalPledged';
+export type SortOption = 'createdAt' | 'deadline' | 'pledgedAmount' | 'targetAmount';
 
 export interface SortDropdownProps {
   value: SortOption;
@@ -16,10 +16,10 @@ export function SortDropdown({ value, onChange, disabled = false }: SortDropdown
       className="control-select"
       style={{ cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.55 : 1 }}
     >
-      <option value="newest">Newest</option>
+      <option value="createdAt">Created At</option>
       <option value="deadline">Deadline</option>
-      <option value="percentFunded">Percent Funded</option>
-      <option value="totalPledged">Total Pledged</option>
+      <option value="pledgedAmount">Pledged Amount</option>
+      <option value="targetAmount">Target Amount</option>
     </select>
   );
 }
