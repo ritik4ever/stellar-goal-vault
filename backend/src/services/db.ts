@@ -54,6 +54,7 @@ export function resetDbForTests(): void {
 export function checkDbHealth(): {
   status: DbHealthStatus;
   reachable: boolean;
+  error?: string;
 } {
   try {
     const database = getDb();
@@ -63,10 +64,11 @@ export function checkDbHealth(): {
       status: 'up',
       reachable: true,
     };
-  } catch {
+  } catch (error) {
     return {
       status: 'down',
       reachable: false,
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
