@@ -158,7 +158,8 @@ describe('on-chain pledge reconciliation', () => {
       confirmedAt: futureDeadline - 100,
     });
 
-    expect(secondResult.pledgedAmount).toBe(10);
+    expect(secondResult.campaign.pledgedAmount).toBe(10);
+    expect(secondResult.existing).toBe(true);
     expect(getPledges(campaign.id)).toHaveLength(1);
     expect(
       getCampaignHistory(campaign.id).filter((event) => event.eventType === 'pledged'),

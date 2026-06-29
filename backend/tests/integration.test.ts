@@ -883,7 +883,7 @@ describe("Pledge Reconcile Flow - Integration", () => {
       },
     );
 
-    expect(secondReconcileRes.status).toBe(201);
+    expect(secondReconcileRes.status).toBe(200);
     expect(secondReconcileRes.data.data.campaign.pledgedAmount).toBe(750); // Still 750, not 1200
 
     // Verify no duplicate event was created

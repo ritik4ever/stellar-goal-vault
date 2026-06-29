@@ -525,11 +525,11 @@ app.post(
       sendValidationError(parsedBody.error.issues);
     }
 
-    const campaign = reconcileOnChainPledge(parsedId.value, parsedBody.data);
+    const result = reconcileOnChainPledge(parsedId.value, parsedBody.data);
     invalidateCampaignCache();
-    res.status(201).json({
+    res.status(result.existing ? 200 : 201).json({
       data: {
-        campaign: { ...campaign, progress: calculateProgress(campaign) },
+        campaign: { ...result.campaign, progress: calculateProgress(result.campaign) },
         transactionHash: parsedBody.data.transactionHash,
       },
     });
