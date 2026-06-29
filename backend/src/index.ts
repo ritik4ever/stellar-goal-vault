@@ -3,7 +3,7 @@ import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
 import helmet from "helmet";
-import http, { Server } from "http";
+import { Server } from "http";
 import { createServer } from "http";
 
 import { validateEnv } from "./validateEnv";
@@ -51,7 +51,6 @@ import {
   claimCampaignPayloadSchema,
   createCampaignPayloadSchema,
   createPledgePayloadSchema,
-  parseCampaignListPaginationQuery,
   parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
@@ -135,10 +134,11 @@ const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
 export function applyRateLimit(limitOverride?: number) {
   return (req: Request, res: Response, next: express.NextFunction) => {
-    if ((req as any).rateLimitedProcessed) {
+    const rateLimitedReq = req as Request & { rateLimitedProcessed?: boolean };
+    if (rateLimitedReq.rateLimitedProcessed) {
       return next();
     }
-    (req as any).rateLimitedProcessed = true;
+    rateLimitedReq.rateLimitedProcessed = true;
 
     const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
     const maxRequests = limitOverride ?? (isWrite ? WRITE_RATE_LIMIT_MAX_REQUESTS : RATE_LIMIT_MAX_REQUESTS);
@@ -391,7 +391,7 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
     listOptions.limit = params.limit;
   }
 
-  const { campaigns, totalCount, pledgeCounts } = listCampaigns(listOptions);
+  const { campaigns, totalCount } = listCampaigns(listOptions);
 
   const data = campaigns.map((campaign) => ({
     ...campaign,
@@ -718,8 +718,17 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
   }
 });
 
-app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => {
-  if (err.type === 'entity.too.large') {
+function isErrorWithMessage(error: unknown): error is { message: string; [key: string]: unknown } {
+  return typeof error === 'object' && error !== null && 'message' in error && typeof (error as { message: unknown }).message === 'string';
+}
+
+function isErrorWithType(error: unknown, type: string): boolean {
+  return typeof error === 'object' && error !== null && (error as { type?: string }).type === type;
+}
+
+app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) => {
+  void next;
+  if (isErrorWithType(err, 'entity.too.large')) {
     return res.status(413).json({
       success: false,
       error: {
@@ -730,7 +739,7 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     });
   }
 
-  if (err.message === 'Not allowed by CORS') {
+  if (isErrorWithMessage(err) && err.message === 'Not allowed by CORS') {
     return res.status(403).json({
       success: false,
       error: {
@@ -741,21 +750,25 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     });
   }
 
-  const statusCode = err instanceof AppError ? err.statusCode : (err.statusCode ?? 500);
-  const code = err instanceof AppError ? err.code : (err.code ?? 'INTERNAL_SERVER_ERROR');
+  const errorWithCode = err as { statusCode?: number; code?: string };
+  const statusCode = err instanceof AppError ? err.statusCode : (errorWithCode.statusCode ?? 500);
+  const code = err instanceof AppError ? err.code : (errorWithCode.code ?? 'INTERNAL_SERVER_ERROR');
   const response: ApiErrorResponse = {
     success: false,
     error: {
       code,
-      message: err.message || 'An unexpected error occurred',
+      message: isErrorWithMessage(err) ? err.message : 'An unexpected error occurred',
       requestId: (req as RequestWithId).requestId,
     },
   };
 
   if (err instanceof AppError && err.details) {
     response.error.details = err.details;
-  } else if (err.details) {
-    response.error.details = err.details;
+  } else {
+    const errorWithDetails = err as { details?: ApiErrorResponse['error']['details'] };
+    if (errorWithDetails.details) {
+      response.error.details = errorWithDetails.details;
+    }
   }
 
   logError(

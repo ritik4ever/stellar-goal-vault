@@ -499,7 +499,7 @@ export function parseCampaignListQuery(query: Record<string, unknown>):
       page,
       limit,
       q: query.q ? normalizeQueryValue(query.q) : undefined,
-      search: query.search ? normalizeQueryValue(query.search) : undefined,
+      search: searchQuery,
       asset: assetList,
       status,
       sort,

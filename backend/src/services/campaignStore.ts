@@ -345,7 +345,7 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const offset = paginate ? (page - 1) * limit : 0;
 
   const whereClauses: string[] = [];
-  const params: any[] = [];
+  const params: (string | number)[] = [];
 
   if (options?.searchQuery && options.searchQuery.trim()) {
     const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
@@ -445,8 +445,9 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const pledgeCounts: Record<string, number> = {};
   const campaigns = rows.map((row) => {
     pledgeCounts[row.id] = row.pledge_count;
-    const { pledge_count, ...campaignRow } = row;
-    
+    const { pledge_count: _pledgeCount, ...campaignRow } = row;
+    void _pledgeCount;
+
     const now = Math.floor(Date.now() / 1000);
     if (campaignRow.claimed_at === null && campaignRow.pledged_amount < campaignRow.target_amount && now >= campaignRow.deadline && campaignRow.failed_at === null) {
         campaignRow.failed_at = campaignRow.deadline;

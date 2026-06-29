@@ -3,13 +3,12 @@ import { config } from '../config';
 import { AppError } from '../types/errors';
 import dotenv from 'dotenv';
 import {
-  Address,
+  Account,
   BASE_FEE,
   Contract,
   rpc,
   TransactionBuilder,
   Networks,
-  nativeToScVal,
 } from '@stellar/stellar-sdk';
 
 dotenv.config();
@@ -203,12 +202,12 @@ export async function getCampaignCountFromContract(): Promise<number> {
 
     // Create a minimal transaction for simulation (using a placeholder account)
     // Read-only operations don't require a real account, so we use a dummy address
-    const dummyAccount = {
-      accountId: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-      sequence: '0',
-    };
+    const dummyAccount = new Account(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      '0',
+    );
 
-    const transaction = new TransactionBuilder(dummyAccount as any, {
+    const transaction = new TransactionBuilder(dummyAccount, {
       fee: BASE_FEE,
       networkPassphrase: Networks.TESTNET,
     })
