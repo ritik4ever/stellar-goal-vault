@@ -668,9 +668,11 @@ function App() {
               status={freighter.status}
               publicKey={freighter.publicKey}
               error={freighter.error}
+              network={getNetworkName(appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE)}
               onConnect={() => {
                 void handleConnectWallet();
               }}
+              onDisconnect={handleDisconnectWallet}
             />
             <button className="btn-ghost" type="button" onClick={handleThemeToggle}>
               {themeMode === "dark" ? "Light mode" : "Dark mode"}
