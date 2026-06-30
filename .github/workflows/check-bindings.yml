@@ -1,0 +1,45 @@
+name: Check ABI Drift
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/src/**'
+      - 'frontend/src/generated/**'
+      - '.github/workflows/check-bindings.yml'
+
+jobs:
+  check-bindings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Stellar CLI
+        run: |
+          curl -L https://github.com/stellar/js-stellar-sdk/releases/download/v14.0.0/stellar-cli-linux-x86_64.tar.gz -o stellar-cli.tar.gz
+          tar -xzf stellar-cli.tar.gz
+          chmod +x stellar
+
+      - name: Regenerate bindings
+        run: npm run gen:bindings
+        env:
+          CONTRACT_ID: ${{ secrets.CONTRACT_ID }}
+          RPC_URL: https://soroban-testnet.stellar.org
+          NETWORK_PASSPHRASE: 'Test SDF Network ; September 2015'
+
+      - name: Check for ABI drift
+        run: |
+          if ! git diff --exit-code frontend/src/generated/; then
+            echo "❌ ABI drift detected!"
+            echo "Contract ABI changed but bindings were not regenerated."
+            echo "Run 'npm run gen:bindings' and commit the changes."
+            exit 1
+          fi
+          echo "✅ Bindings are up to date"

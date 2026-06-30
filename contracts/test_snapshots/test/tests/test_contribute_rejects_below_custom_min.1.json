@@ -103,6 +103,12 @@
                 },
                 {
                   "string": "custom min test"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }
@@ -1046,6 +1052,12 @@
                 },
                 {
                   "string": "custom min test"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }

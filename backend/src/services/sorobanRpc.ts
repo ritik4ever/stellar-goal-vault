@@ -1,6 +1,17 @@
 import axios from 'axios';
 import { config } from '../config';
 import { AppError } from '../types/errors';
+import dotenv from 'dotenv';
+import {
+  Account,
+  BASE_FEE,
+  Contract,
+  rpc,
+  TransactionBuilder,
+  Networks,
+} from '@stellar/stellar-sdk';
+
+dotenv.config();
 
 export interface VerifiedSorobanTransaction {
   txHash: string;
@@ -17,6 +28,9 @@ interface RpcTransactionResponse {
   ledger?: number;
   createdAt?: number;
 }
+
+const SOROBAN_RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org:443';
+const CONTRACT_ID = process.env.CONTRACT_ID || '';
 
 /**
  * Ensure the backend has the minimal Soroban configuration required to perform refund
@@ -155,5 +169,80 @@ export async function verifyRefundTransaction(txHash: string): Promise<VerifiedS
       502,
       'SOROBAN_RPC_UNAVAILABLE',
     );
+  }
+}
+
+/**
+ * Fetch the campaign count from the Soroban contract.
+ *
+ * Calls the `get_campaign_count` read-only function on the deployed contract.
+ * This represents the total number of campaigns created on-chain.
+ *
+ * @returns The campaign count as a number, or 0 if the contract is not configured
+ *          or if the call fails.
+ */
+export async function getCampaignCountFromContract(): Promise<number> {
+  // If contract is not configured, return 0 gracefully (stats endpoint remains functional)
+  if (!CONTRACT_ID || !SOROBAN_RPC_URL) {
+    return 0;
+  }
+
+  try {
+    // Create an RPC server instance
+    const server = new rpc.Server(SOROBAN_RPC_URL, {
+      allowHttp: SOROBAN_RPC_URL.startsWith('http://'),
+    });
+
+    // Create a contract client wrapper
+    const contract = new Contract(CONTRACT_ID);
+
+    // Build a read-only invocation to get_campaign_count
+    // Note: This creates a simulated transaction; no account needed for read-only calls
+    const operation = contract.call('get_campaign_count');
+
+    // Create a minimal transaction for simulation (using a placeholder account)
+    // Read-only operations don't require a real account, so we use a dummy address
+    const dummyAccount = new Account(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      '0',
+    );
+
+    const transaction = new TransactionBuilder(dummyAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(operation)
+      .setTimeout(60)
+      .build();
+
+    // Simulate the transaction to get the result
+    const simulated = await server.simulateTransaction(transaction);
+
+    // Check if simulation was successful
+    if (rpc.Api.isSimulationError(simulated)) {
+      return 0;
+    }
+
+    // Extract the result from the simulation
+    // The result contains XDR-encoded return values
+    if (!rpc.Api.isSimulationSuccess(simulated) || !simulated.result) {
+      return 0;
+    }
+
+    // Parse the u64 value from the XDR result
+    // Using scValToNative to decode Soroban's ScVal format
+    const { scValToNative } = await import('@stellar/stellar-sdk');
+    const decoded = scValToNative(simulated.result.retval);
+
+    // The result should be a number (u64)
+    if (typeof decoded === 'number' || typeof decoded === 'bigint') {
+      return Number(decoded);
+    }
+
+    return 0;
+  } catch (error) {
+    // Log and gracefully return 0 so stats endpoint remains functional
+    // even if contract call fails
+    return 0;
   }
 }

@@ -145,6 +145,13 @@ async function refundTestContributor(
 ): Promise<ApiResponse<any>> {
   return apiClient.post(`/api/campaigns/${campaignId}/refund`, {
     contributor,
+    soroban: {
+      txHash: generateTxHash(),
+      contractId: process.env.CONTRACT_ID || "C" + "A".repeat(55),
+      networkPassphrase: "Test SDF Network ; September 2015",
+      rpcUrl: process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org:443",
+      walletAddress: contributor,
+    },
   });
 }
 
@@ -249,7 +256,7 @@ describe("Campaign Lifecycle - Happy Path", () => {
     const campaignId = campaign.id;
 
     expect(campaign.creator).toBe(CREATOR_1);
-    expect(campaign.status).toBe("open");
+    expect(campaign.progress.status).toBe("open");
     expect(campaign.pledgedAmount).toBe(0);
     expect(campaign.claimedAt).toBeUndefined();
 

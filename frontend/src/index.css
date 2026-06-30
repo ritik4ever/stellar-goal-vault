@@ -804,6 +804,68 @@ tbody tr:hover td {
   overflow: hidden;
 }
 
+/* Timeline milestone progress bar */
+.timeline-progress-wrap {
+  margin-bottom: 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.timeline-progress-bar {
+  position: relative;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+}
+
+.timeline-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--primary), #22c55e);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.timeline-milestone-tick {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 1px;
+  transform: translateX(-50%);
+  cursor: default;
+}
+
+.timeline-milestone-tick:hover .timeline-milestone-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+.timeline-milestone-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  white-space: nowrap;
+  background: var(--bg-surface, rgba(15, 23, 42, 0.95));
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+.timeline-progress-label {
+  font-size: 0.85rem;
+}
+
 .badge {
   padding: 6px 14px;
   font-weight: 700;
@@ -1180,6 +1242,50 @@ tbody tr:hover td {
   min-height: 38px;
   padding: 0 16px;
   font-size: 0.875rem;
+}
+
+/* Connected pill */
+.wallet-widget--pill {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass);
+  gap: 8px;
+  position: relative;
+}
+
+.wallet-widget__address {
+  font-size: 0.8rem;
+}
+
+.wallet-widget__network-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(20, 184, 166, 0.15);
+  color: #2dd4bf;
+  border: 1px solid rgba(20, 184, 166, 0.3);
+}
+
+.wallet-widget__network-badge--mainnet {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border-color: rgba(244, 63, 94, 0.3);
+}
+
+.wallet-widget__disconnect {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.wallet-widget--pill:hover .wallet-widget__disconnect,
+.wallet-widget__disconnect:focus {
+  opacity: 1;
 }
 
 /* Hero row: title + wallet widget side by side */

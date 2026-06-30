@@ -32,7 +32,7 @@ beforeAll(async () => {
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => {
-      const address = server.address() as any;
+      const address = server.address() as { port: number };
       baseUrl = `http://localhost:${address.port}`;
       resolve();
     });
@@ -54,11 +54,20 @@ beforeEach(() => {
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR = `G${'B'.repeat(55)}`;
 
-async function post(apiPath: string, body: any) {
+async function post(apiPath: string, body: unknown) {
   const response = await fetch(`${baseUrl}${apiPath}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => null);
+  return { status: response.status, data };
+}
+
+async function get(apiPath: string) {
+  const response = await fetch(`${baseUrl}${apiPath}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
   });
   const data = await response.json().catch(() => null);
   return { status: response.status, data };
@@ -291,7 +300,7 @@ describe('Campaign Filters - createdAfter/createdBefore', () => {
     const futureTimestamp = new Date(Date.now() - 60000).toISOString(); // 1 minute ago
     const res = await get(`/api/campaigns?createdAfter=${encodeURIComponent(futureTimestamp)}`);
     expect(res.status).toBe(200);
-    expect(res.data.data.some((c: any) => c.id === campaignId)).toBe(true);
+    expect(res.data.data.some((c: { id: string }) => c.id === campaignId)).toBe(true);
   });
 
   it('filters campaigns by createdBefore date', async () => {
@@ -367,7 +376,7 @@ describe('Campaign maxPerContributor Field', () => {
     return { status: response.status, data };
   }
 
-  async function post(apiPath: string, body: any) {
+  async function post(apiPath: string, body: unknown) {
     const response = await fetch(`${baseUrl}${apiPath}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -395,7 +404,7 @@ describe('Campaign maxPerContributor Field', () => {
     const listRes = await get('/api/campaigns?page=1&limit=10');
     expect(listRes.status).toBe(200);
 
-    const campaign = listRes.data.data.find((c: any) => c.id === campaignId);
+    const campaign = listRes.data.data.find((c: { id: string; maxPerContributor?: number }) => c.id === campaignId);
     expect(campaign).toBeDefined();
     expect(campaign.maxPerContributor).toBe(50);
   });

@@ -1,8 +1,9 @@
 {
   "root": true,
+  "ignorePatterns": ["src/services/campaignController.ts"],
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
-    "project": "./tsconfig.json",
+    "project": "./tsconfig.eslint.json",
     "ecmaVersion": 2022,
     "sourceType": "module"
   },

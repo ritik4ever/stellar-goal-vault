@@ -128,6 +128,12 @@
                 },
                 {
                   "string": "double vote test"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }
@@ -2082,6 +2088,12 @@
                 },
                 {
                   "string": "double vote test"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }

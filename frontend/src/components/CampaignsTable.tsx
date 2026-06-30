@@ -8,6 +8,7 @@ import { AssetFilterDropdown } from "./AssetFilterDropdown";
 import {
   applyFilters,
   getDistinctAssetCodes,
+  searchCampaigns,
   sortCampaigns,
 } from "./campaignsTableUtils";
 import { SearchInput } from "./SearchInput";
@@ -118,6 +119,14 @@ export function CampaignsTable({
     }
   }
 
+  /** Resets every filter axis back to its default, restoring the full list. */
+  function handleClearFilters() {
+    setSearchQuery('');
+    setAssetCode('');
+    handleStatusFilterChange('');
+    onSearchChange?.('');
+  }
+
   useEffect(() => {
     if (debouncedSearchQuery !== '') {
       onSearchChange?.(debouncedSearchQuery);
@@ -172,16 +181,20 @@ export function CampaignsTable({
     };
   }, [campaigns]);
 
+  // Derive which filter axes are active — used for context-sensitive EmptyState.
+  const hasSearchQuery = debouncedSearchQuery.trim() !== '';
+  const hasAssetFilter = assetCode !== '';
+  const hasStatusFilter = statusFilter !== '';
+  const isFiltered = hasSearchQuery || hasAssetFilter || hasStatusFilter;
+
   const filteredCampaigns = useMemo(() => {
-    const filtered = applyFilters(
-      campaigns,
-      assetCode,
-      statusFilter,
-      "", // server-side search, no client search
-    );
-    // Server already sorted; only apply client-side sort as a tie-break fallback
-    return sortCampaigns(filtered, sortBy);
-  }, [campaigns, assetCode, statusFilter, sortBy]);
+    // Apply asset + status filters first (pure client-side).
+    const assetStatusFiltered = applyFilters(campaigns, assetCode, statusFilter);
+    // Then apply search query client-side (title / creator / id).
+    const searched = searchCampaigns(assetStatusFiltered, debouncedSearchQuery);
+    // Server already sorted; client sort acts as a stable tie-break.
+    return sortCampaigns(searched, sortBy);
+  }, [campaigns, assetCode, statusFilter, debouncedSearchQuery, sortBy]);
 
   const isMobile = useMediaQuery("(max-width: 767px)");
 
@@ -289,11 +302,21 @@ export function CampaignsTable({
         </label>
       </div>
 
-      {filteredCampaigns.length === 0 ? (
+      {filteredCampaigns.length === 0 && isFiltered ? (
         <EmptyState
           variant="inline"
-          title="No campaigns found"
-          message="Try adjusting your search or filters."
+          title={hasSearchQuery && !hasAssetFilter && !hasStatusFilter
+            ? 'No campaigns match your search.'
+            : 'No campaigns match the selected filters.'}
+          message={hasSearchQuery && !hasAssetFilter && !hasStatusFilter
+            ? 'Try a different search term or clear your search to see all campaigns.'
+            : 'Try adjusting or clearing your filters to see all campaigns.'}
+          action={{
+            label: hasSearchQuery && !hasAssetFilter && !hasStatusFilter
+              ? 'Clear Search'
+              : 'Clear Filters',
+            onClick: handleClearFilters,
+          }}
         />
       ) : (
         <>
