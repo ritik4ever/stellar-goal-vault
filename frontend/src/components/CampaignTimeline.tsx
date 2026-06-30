@@ -2,9 +2,13 @@ import { History } from 'lucide-react';
 import { CampaignEvent } from '../types/campaign';
 import { EmptyState } from './EmptyState';
 
+const MILESTONES = [25, 50, 75] as const;
+
 interface CampaignTimelineProps {
   history: CampaignEvent[];
   isLoading?: boolean;
+  targetAmount?: number;
+  pledgedAmount?: number;
 }
 
 function formatTimestamp(unixSeconds: number): string {
@@ -81,7 +85,18 @@ function getMetadataLines(event: CampaignEvent): string[] {
   return lines;
 }
 
-export function CampaignTimeline({ history, isLoading = false }: CampaignTimelineProps) {
+export function CampaignTimeline({
+  history,
+  isLoading = false,
+  targetAmount,
+  pledgedAmount,
+}: CampaignTimelineProps) {
+  const percentFunded =
+    targetAmount && targetAmount > 0
+      ? Math.min((pledgedAmount ?? 0) / targetAmount, 1) * 100
+      : 0;
+
+  const showProgress = typeof targetAmount === 'number' && targetAmount > 0;
   if (isLoading) {
     return (
       <section className="card">
@@ -113,6 +128,47 @@ export function CampaignTimeline({ history, isLoading = false }: CampaignTimelin
           refund metadata.
         </p>
       </div>
+
+      {showProgress && (
+        <div className="timeline-progress-wrap">
+          <div
+            className="timeline-progress-bar"
+            role="progressbar"
+            aria-valuenow={Math.round(percentFunded)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`Campaign funded ${Math.round(percentFunded)}%`}
+          >
+            <div
+              className="timeline-progress-fill"
+              style={{ width: `${percentFunded}%` }}
+            />
+            {MILESTONES.map((pct) => {
+              const milestoneAmount = (targetAmount! * pct) / 100;
+              const isExceeded = (pledgedAmount ?? 0) >= milestoneAmount;
+              if (isExceeded) return null;
+              return (
+                <div
+                  key={pct}
+                  className="timeline-milestone-tick"
+                  style={{ left: `${pct}%` }}
+                  aria-label={`${pct}% milestone: ${milestoneAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} target`}
+                  role="img"
+                >
+                  <span className="timeline-milestone-tooltip">
+                    {pct}%&nbsp;&mdash;&nbsp;
+                    {milestoneAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <span className="timeline-progress-label muted">
+            {Math.round(percentFunded)}% funded
+          </span>
+        </div>
+      )}
+
 
       <div className="timeline">
         {history.map((event) => {

@@ -53,7 +53,7 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
               <button
                 type="button"
                 onClick={handleShareCampaign}
-                ariaLabel="Copy campaign share link"
+                aria-label="Copy campaign share link"
                 className="small"
                 style={{
                   background: 'none',

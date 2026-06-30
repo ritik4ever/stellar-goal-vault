@@ -473,9 +473,6 @@ describe('CampaignsTable Search Integration', () => {
       vi.advanceTimersByTime(350);
 
       // Should show no results message
-      const emptyStateText =
-        screen.queryByText(/No campaigns found/i) ||
-        screen.queryByText(/Try adjusting your search/i);
       // Note: Exact message depends on component implementation
       expect(screen.queryByText('Build a Rocket Ship')).not.toBeInTheDocument();
     });

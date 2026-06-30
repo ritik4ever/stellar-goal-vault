@@ -185,7 +185,7 @@ function getActivePledgeCount(campaignId: string): number {
   return row.count;
 }
 
-function getPledgeByTransactionHash(transactionHash: string): PledgeRecord | undefined {
+export function getPledgeByTransactionHash(transactionHash: string): PledgeRecord | undefined {
   const db = getDb();
   const row = db
     .prepare(`SELECT * FROM pledges WHERE transaction_hash = ?`)
@@ -240,7 +240,11 @@ function checkContributorLimit(
  * @param pledgeCountOverride - Optional pledge count to use instead of querying database.
  * @returns A {@link CampaignProgress} object with status, funding percentages, and action flags.
  */
-export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds()): CampaignProgress {
+export function calculateProgress(
+  campaign: CampaignRecord,
+  at = nowInSeconds(),
+  pledgeCount?: number,
+): CampaignProgress {
   const deadlineReached = at >= campaign.deadline;
   const canClaim =
     campaign.claimedAt === undefined &&
@@ -265,7 +269,7 @@ export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds())
     status,
     percentFunded: round((campaign.pledgedAmount / campaign.targetAmount) * 100),
     remainingAmount: round(Math.max(0, campaign.targetAmount - campaign.pledgedAmount)),
-    pledgeCount: getActivePledgeCount(campaign.id),
+    pledgeCount: pledgeCount ?? getActivePledgeCount(campaign.id),
     hoursLeft: round(Math.max(0, campaign.deadline - at) / 3600),
     canPledge,
     canClaim,
@@ -345,15 +349,32 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const offset = paginate ? (page - 1) * limit : 0;
 
   const whereClauses: string[] = [];
-  const params: any[] = [];
+  const params: (string | number)[] = [];
 
-  if (options?.searchQuery && options.searchQuery.trim()) {
-    const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
-    const exactTerm = options.searchQuery.trim();
-    whereClauses.push(`(LOWER(campaigns.title) LIKE ? OR LOWER(campaigns.creator) LIKE ? OR campaigns.id = ?)`);
-    params.push(searchTerm, searchTerm, exactTerm);
+if (options?.searchQuery && options.searchQuery.trim()) {
+  const rawQuery = options.searchQuery.trim();
+  
+  // Fixes CodeRabbit: Sanitize/escape special characters so FTS5 MATCH doesn't syntax crash
+  const cleanQuery = rawQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
+  const ftsMatchTerm = cleanQuery ? `${cleanQuery}*` : '';
+
+  // Fixes CodeRabbit: Use exact matching for creator public key instead of a slow LIKE scan
+  const creatorExactTerm = rawQuery; 
+  const exactTerm = rawQuery;
+
+  if (ftsMatchTerm) {
+    whereClauses.push(`(
+      campaigns.id IN (SELECT id FROM campaigns_fts WHERE campaigns_fts MATCH ?)
+      OR LOWER(campaigns.creator) = LOWER(?)
+      OR campaigns.id = ?
+    )`);
+    params.push(ftsMatchTerm, creatorExactTerm, exactTerm);
+  } else {
+    // Fallback if cleaning the query stripped all characters
+    whereClauses.push(`(LOWER(campaigns.creator) = LOWER(?) OR campaigns.id = ?)`);
+    params.push(creatorExactTerm, exactTerm);
   }
-
+}
   if (options?.assetCode) {
     whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);
@@ -445,8 +466,9 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const pledgeCounts: Record<string, number> = {};
   const campaigns = rows.map((row) => {
     pledgeCounts[row.id] = row.pledge_count;
-    const { pledge_count, ...campaignRow } = row;
-    
+    const { pledge_count: _pledgeCount, ...campaignRow } = row;
+    void _pledgeCount;
+
     const now = Math.floor(Date.now() / 1000);
     if (campaignRow.claimed_at === null && campaignRow.pledged_amount < campaignRow.target_amount && now >= campaignRow.deadline && campaignRow.failed_at === null) {
         campaignRow.failed_at = campaignRow.deadline;
@@ -796,10 +818,15 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
  * @throws {ServiceError} 400 `MAX_PER_CONTRIBUTOR_EXCEEDED` if the contributor limit is breached.
  * @throws {ServiceError} 400 `CAMPAIGN_FUNDING_CAP_EXCEEDED` if the pledge would exceed the target amount.
  */
+export interface ReconcileOnChainPledgeResult {
+  campaign: CampaignRecord;
+  existing: boolean;
+}
+
 export function reconcileOnChainPledge(
   campaignId: string,
   input: ReconciledPledgeInput,
-): CampaignRecord {
+): ReconcileOnChainPledgeResult {
   const existingPledge = getPledgeByTransactionHash(input.transactionHash);
   if (existingPledge) {
     if (existingPledge.campaignId !== campaignId) {
@@ -810,7 +837,7 @@ export function reconcileOnChainPledge(
       );
     }
 
-    return getCampaign(campaignId)!;
+    return { campaign: getCampaign(campaignId)!, existing: true };
   }
 
   const campaign = getCampaign(campaignId);
@@ -839,19 +866,42 @@ export function reconcileOnChainPledge(
     );
   }
 
-  const reconcile = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO pledges (
-        campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash
-      ) VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(
-      campaignId,
-      input.contributor,
-      roundedAmount,
-      assetCode,
-      createdAt,
-      input.transactionHash,
-    );
+  const insertedNewPledge = db.transaction(() => {
+    const result = db
+      .prepare(
+        `INSERT OR IGNORE INTO pledges (
+          campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+      )
+      .run(
+        campaignId,
+        input.contributor,
+        roundedAmount,
+        assetCode,
+        createdAt,
+        input.transactionHash,
+      );
+
+    if (result.changes === 0) {
+      const duplicatePledge = getPledgeByTransactionHash(input.transactionHash);
+      if (!duplicatePledge) {
+        throw toServiceError(
+          'Failed to reconcile pledge due to database conflict.',
+          500,
+          'DB_CONFLICT',
+        );
+      }
+
+      if (duplicatePledge.campaignId !== campaignId) {
+        throw toServiceError(
+          'transactionHash already belongs to a different campaign.',
+          409,
+          'TRANSACTION_HASH_CONFLICT',
+        );
+      }
+
+      return false;
+    }
 
     db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`).run(
       roundedAmount,
@@ -875,10 +925,14 @@ export function reconcileOnChainPledge(
         txHash: input.transactionHash,
       } as BlockchainMetadata,
     );
-  });
 
-  reconcile();
-  return getCampaign(campaignId)!;
+    return true;
+  })();
+
+  return {
+    campaign: getCampaign(campaignId)!,
+    existing: !insertedNewPledge,
+  };
 }
 
 /**

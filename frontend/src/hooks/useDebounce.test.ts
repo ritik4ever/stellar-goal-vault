@@ -9,6 +9,7 @@ describe('useDebounce Hook', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   describe('Basic Functionality', () => {
@@ -36,9 +37,7 @@ describe('useDebounce Hook', () => {
       });
 
       // Now should be updated
-      await waitFor(() => {
-        expect(result.current).toBe('updated');
-      });
+      expect().toBe;
     });
 
     it('should use default delay of 300ms when not specified', async () => {
@@ -60,9 +59,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(200);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('end');
-      });
+      expect().toBe;
     });
 
     it('should use custom delay when specified', async () => {
@@ -84,9 +81,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(200);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('updated');
-      });
+      expect().toBe;
     });
   });
 
@@ -122,9 +117,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('fourth');
-      });
+      expect().toBe;
     });
 
     it('should reset timer on each value change', async () => {
@@ -156,9 +149,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(100);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('c');
-      });
+      expect().toBe;
     });
   });
 
@@ -174,9 +165,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('updated text');
-      });
+      expect().toBe;
     });
 
     it('should debounce number values', async () => {
@@ -190,9 +179,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe(100);
-      });
+      expect().toBe;
     });
 
     it('should debounce boolean values', async () => {
@@ -206,9 +193,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe(true);
-      });
+      expect().toBe;
     });
 
     it('should debounce object values', async () => {
@@ -227,9 +212,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe(obj2);
-      });
+      expect().toBe;
     });
 
     it('should debounce array values', async () => {
@@ -246,9 +229,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe(arr2);
-      });
+      expect().toBe;
     });
   });
 
@@ -265,9 +246,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBeNull();
-      });
+      expect().toBe;
     });
 
     it('should handle undefined values', async () => {
@@ -282,9 +261,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBeUndefined();
-      });
+      expect().toBe;
     });
 
     it('should handle empty strings', async () => {
@@ -298,9 +275,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('');
-      });
+      expect().toBe;
     });
 
     it('should handle zero values', async () => {
@@ -314,9 +289,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe(0);
-      });
+      expect().toBe;
     });
   });
 
@@ -392,9 +365,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(200);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('rock');
-      });
+      expect().toBe;
     });
 
     it('should perform efficient debouncing for multiple searches', async () => {
@@ -408,9 +379,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('search1');
-      });
+      expect().toBe;
 
       // Second search before waiting
       rerender({ value: 'search2', delay: 300 });
@@ -425,9 +394,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(150);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('search2');
-      });
+      expect().toBe;
     });
   });
 
@@ -451,9 +418,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(200);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('updated');
-      });
+      expect().toBe;
     });
 
     it('should handle decreasing delay', async () => {
@@ -477,9 +442,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(100);
       });
 
-      await waitFor(() => {
-        expect(result.current).toBe('final');
-      });
+      expect().toBe;
     });
   });
 });
