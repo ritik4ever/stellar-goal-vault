@@ -240,7 +240,11 @@ function checkContributorLimit(
  * @param pledgeCountOverride - Optional pledge count to use instead of querying database.
  * @returns A {@link CampaignProgress} object with status, funding percentages, and action flags.
  */
-export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds()): CampaignProgress {
+export function calculateProgress(
+  campaign: CampaignRecord,
+  at = nowInSeconds(),
+  pledgeCount?: number,
+): CampaignProgress {
   const deadlineReached = at >= campaign.deadline;
   const canClaim =
     campaign.claimedAt === undefined &&
@@ -265,7 +269,7 @@ export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds())
     status,
     percentFunded: round((campaign.pledgedAmount / campaign.targetAmount) * 100),
     remainingAmount: round(Math.max(0, campaign.targetAmount - campaign.pledgedAmount)),
-    pledgeCount: getActivePledgeCount(campaign.id),
+    pledgeCount: pledgeCount ?? getActivePledgeCount(campaign.id),
     hoursLeft: round(Math.max(0, campaign.deadline - at) / 3600),
     canPledge,
     canClaim,

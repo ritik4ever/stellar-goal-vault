@@ -45,8 +45,7 @@ export const config = {
   ),
   keepAliveTimeoutMs: parseInteger(process.env.KEEP_ALIVE_TIMEOUT_MS, 65_000),
   headersTimeoutMs: parseInteger(process.env.HEADERS_TIMEOUT_MS, 66_000),
-  contractId: process.env.CONTRACT_ID ?? "",
-  sorobanRpcUrl: process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org:443",
+
 };
 
 export const walletIntegrationReady = Boolean(
