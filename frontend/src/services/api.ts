@@ -184,3 +184,11 @@ export async function listOpenIssues(): Promise<OpenIssue[]> {
   });
   return body.data;
 }
+
+export async function getDistinctAssetCodes(): Promise<string[]> {
+  const body = await apiRequest<{ data: string[] }>({
+    url: '/campaigns/assets',
+    method: 'GET',
+  });
+  return body.data;
+}

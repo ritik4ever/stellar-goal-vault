@@ -13,6 +13,7 @@ import {
 import { SearchInput } from "./SearchInput";
 import { SortDropdown, SortOption } from "./SortDropdown";
 import { AddressAvatar } from "./AddressAvatar";
+import { SkeletonCard } from "./SkeletonCard";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 
@@ -74,12 +75,13 @@ export function CampaignsTable({
   invalidUrlCampaignId = null,
 }: CampaignsTableProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const urlSort = (searchParams.get('sort') as SortOption | null) ?? 'newest';
+  const urlSort = (searchParams.get('sort') as SortOption | null) ?? 'createdAt';
   const urlOrder = (searchParams.get('order') as 'asc' | 'desc' | null) ?? 'desc';
-  const VALID_SORTS: SortOption[] = ['newest', 'deadline', 'percentFunded', 'totalPledged'];
-  const sortBy: SortOption = VALID_SORTS.includes(urlSort) ? urlSort : 'newest';
+  const urlStatus = (searchParams.get('status') as StatusFilterValue | null) ?? '';
+  const VALID_SORTS: SortOption[] = ['createdAt', 'deadline', 'pledgedAmount', 'targetAmount'];
+  const sortBy: SortOption = VALID_SORTS.includes(urlSort) ? urlSort : 'createdAt';
   const [assetCode, setAssetCode] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>(urlStatus);
   const [searchQuery, setSearchQuery] = useState("");
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
@@ -96,9 +98,35 @@ export function CampaignsTable({
     onSortChange?.(newSort, newOrder);
   }
 
+  function handleStatusFilterChange(value: StatusFilterValue) {
+    setStatusFilter(value);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value === '') {
+        next.delete('status');
+      } else {
+        next.set('status', value);
+      }
+      return next;
+    }, { replace: true });
+  }
+
+  function handleSearchChange(value: string) {
+    setSearchQuery(value);
+    if (value === '') {
+      onSearchChange?.('');
+    }
+  }
+
   useEffect(() => {
-    onSearchChange?.(debouncedSearchQuery);
+    if (debouncedSearchQuery !== '') {
+      onSearchChange?.(debouncedSearchQuery);
+    }
   }, [debouncedSearchQuery, onSearchChange]);
+
+  useEffect(() => {
+    setStatusFilter(urlStatus);
+  }, [urlStatus]);
 
   useEffect(() => {
     const sentinel = loadMoreRef.current;
@@ -120,6 +148,7 @@ export function CampaignsTable({
   }, [hasMore, onLoadMore]);
 
   const isEmpty = campaigns.length === 0;
+  const SKELETON_COUNT = 6;
 
   const assetOptions = useMemo(
     () => getDistinctAssetCodes(campaigns),
@@ -169,6 +198,11 @@ export function CampaignsTable({
           <h2>Campaign board</h2>
           <p className="muted">Loading campaigns...</p>
         </div>
+        <div className="cards-only" aria-busy="true" aria-label="Loading campaigns">
+          {Array.from({ length: SKELETON_COUNT }).map((_, index) => (
+            <SkeletonCard key={`skeleton-${index}`} />
+          ))}
+        </div>
       </section>
     );
   }
@@ -203,7 +237,7 @@ export function CampaignsTable({
       <div className="board-controls">
         <SearchInput
           value={searchQuery}
-          onChange={setSearchQuery}
+          onChange={handleSearchChange}
           disabled={isLoading}
         />
         <label className="field-group" style={{ minWidth: 180 }}>
@@ -234,7 +268,7 @@ export function CampaignsTable({
                   key={filter.label}
                   type="button"
                   className={`status-filter-tab ${isActive ? "status-filter-tab-active" : ""}`}
-                  onClick={() => setStatusFilter(filter.value)}
+                  onClick={() => handleStatusFilterChange(filter.value)}
                   aria-pressed={isActive}
                   disabled={isLoading}
                 >

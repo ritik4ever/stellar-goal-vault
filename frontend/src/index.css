@@ -1455,6 +1455,35 @@ tbody tr:hover td {
   color: var(--text-main);
 }
 
+.toast-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.toast-body .toast-message {
+  flex: none;
+}
+
+.toast-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent-primary, #818cf8);
+  text-decoration: none;
+  opacity: 0.9;
+  transition: opacity 0.15s;
+}
+
+.toast-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
 .toast-close {
   flex-shrink: 0;
   background: none;

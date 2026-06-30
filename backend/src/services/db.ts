@@ -38,6 +38,7 @@ export function initDb(): void {
   // This is the chosen journal mode to prevent unnecessary lock contention,
   // allowing reads and writes to occur concurrently without blocking each other.
   db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
   db.pragma('foreign_keys = ON');
 
   migrate(db);
@@ -53,6 +54,7 @@ export function resetDbForTests(): void {
 export function checkDbHealth(): {
   status: DbHealthStatus;
   reachable: boolean;
+  error?: string;
 } {
   try {
     const database = getDb();
@@ -62,10 +64,11 @@ export function checkDbHealth(): {
       status: 'up',
       reachable: true,
     };
-  } catch {
+  } catch (error) {
     return {
       status: 'down',
       reachable: false,
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
