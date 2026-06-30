@@ -240,7 +240,11 @@ function checkContributorLimit(
  * @param pledgeCountOverride - Optional pledge count to use instead of querying database.
  * @returns A {@link CampaignProgress} object with status, funding percentages, and action flags.
  */
-export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds()): CampaignProgress {
+export function calculateProgress(
+  campaign: CampaignRecord,
+  at = nowInSeconds(),
+  pledgeCount?: number,
+): CampaignProgress {
   const deadlineReached = at >= campaign.deadline;
   const canClaim =
     campaign.claimedAt === undefined &&
@@ -265,7 +269,7 @@ export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds())
     status,
     percentFunded: round((campaign.pledgedAmount / campaign.targetAmount) * 100),
     remainingAmount: round(Math.max(0, campaign.targetAmount - campaign.pledgedAmount)),
-    pledgeCount: getActivePledgeCount(campaign.id),
+    pledgeCount: pledgeCount ?? getActivePledgeCount(campaign.id),
     hoursLeft: round(Math.max(0, campaign.deadline - at) / 3600),
     canPledge,
     canClaim,
@@ -273,7 +277,7 @@ export function calculateProgress(campaign: CampaignRecord, at = nowInSeconds())
   };
 }
 
-export type CampaignSortField = 'newest' | 'deadline' | 'percentFunded' | 'totalPledged';
+export type CampaignSortField = 'createdAt' | 'deadline' | 'pledgedAmount' | 'targetAmount';
 export type SortOrder = 'asc' | 'desc';
 
 export interface ListCampaignsOptions {
@@ -318,6 +322,7 @@ export interface GlobalStats {
   campaignCountByStatus: Record<CampaignStatus, number>;
   totalPledgedAmount: number;
   totalContributors: number;
+  onChainCampaignCount?: number; // Total campaigns from contract
 }
 
 export interface LeaderboardEntry {
@@ -346,13 +351,30 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const whereClauses: string[] = [];
   const params: any[] = [];
 
-  if (options?.searchQuery && options.searchQuery.trim()) {
-    const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
-    const exactTerm = options.searchQuery.trim();
-    whereClauses.push(`(LOWER(campaigns.title) LIKE ? OR LOWER(campaigns.creator) LIKE ? OR campaigns.id = ?)`);
-    params.push(searchTerm, searchTerm, exactTerm);
-  }
+if (options?.searchQuery && options.searchQuery.trim()) {
+  const rawQuery = options.searchQuery.trim();
+  
+  // Fixes CodeRabbit: Sanitize/escape special characters so FTS5 MATCH doesn't syntax crash
+  const cleanQuery = rawQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
+  const ftsMatchTerm = cleanQuery ? `${cleanQuery}*` : '';
 
+  // Fixes CodeRabbit: Use exact matching for creator public key instead of a slow LIKE scan
+  const creatorExactTerm = rawQuery; 
+  const exactTerm = rawQuery;
+
+  if (ftsMatchTerm) {
+    whereClauses.push(`(
+      campaigns.id IN (SELECT id FROM campaigns_fts WHERE campaigns_fts MATCH ?)
+      OR LOWER(campaigns.creator) = LOWER(?)
+      OR campaigns.id = ?
+    )`);
+    params.push(ftsMatchTerm, creatorExactTerm, exactTerm);
+  } else {
+    // Fallback if cleaning the query stripped all characters
+    whereClauses.push(`(LOWER(campaigns.creator) = LOWER(?) OR campaigns.id = ?)`);
+    params.push(creatorExactTerm, exactTerm);
+  }
+}
   if (options?.assetCode) {
     whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);
@@ -411,21 +433,21 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const totalCount = (db.prepare(countQuery).get(...params) as { total: number }).total;
 
   // Build ORDER BY clause from sort options
-  const sortField = options?.sort ?? 'newest';
+  const sortField = options?.sort ?? 'createdAt';
   const sortOrder = options?.order ?? 'desc';
   const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
   let orderByClause: string;
   switch (sortField) {
     case 'deadline':
-      orderByClause = `campaigns.deadline ${sortOrder === 'desc' ? 'DESC' : 'ASC'}`;
+      orderByClause = `campaigns.deadline ${orderDir}`;
       break;
-    case 'percentFunded':
-      orderByClause = `(CAST(campaigns.pledged_amount AS REAL) / CAST(campaigns.target_amount AS REAL)) ${orderDir}`;
-      break;
-    case 'totalPledged':
+    case 'pledgedAmount':
       orderByClause = `campaigns.pledged_amount ${orderDir}`;
       break;
-    case 'newest':
+    case 'targetAmount':
+      orderByClause = `campaigns.target_amount ${orderDir}`;
+      break;
+    case 'createdAt':
     default:
       orderByClause = `campaigns.created_at ${orderDir}`;
       break;

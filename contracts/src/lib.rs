@@ -51,6 +51,7 @@ pub enum DataKey {
     MinContribution,
     ExtensionRequest(u64),
     ExtensionVote(u64, Address),
+    HasContributed(u64, Address), // (campaign_id, contributor)
     /// Tracks which (old_contract_id, campaign_id) pairs have already been migrated.
     MigratedId(Address, u64),
 }
@@ -372,24 +373,14 @@ impl StellarGoalVaultContract {
         campaign.pledged_amount += amount;
 
         // Only increment contributor_count on first-time pledge
-        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-        let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
-        if current_contribution == 0 {
+        let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
+        let has_contributed: bool = env.storage().persistent().get(&has_contributed_key).unwrap_or(false);
+        if !has_contributed {
             campaign.contributor_count += 1;
+            env.storage().persistent().set(&has_contributed_key, &true);
         }
 
-        let contributors_key = DataKey::Contributors(campaign_id);
-        let mut contributors: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&contributors_key)
-            .unwrap_or_else(|| Vec::new(&env));
-        if !contributors.iter().any(|c| c == contributor) {
-            contributors.push_back(contributor.clone());
-            env.storage()
-                .persistent()
-                .set(&contributors_key, &contributors);
-        }
+
 
         // Write updated campaign back to storage
         env.storage()
@@ -835,49 +826,3 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .unwrap_or_else(|| panic!("campaign not found"))
 }
 
-fn refund_contributor(
-    env: &Env,
-    campaign: &mut Campaign,
-    campaign_id: u64,
-    contributor: &Address,
-) -> i128 {
-    let contract_address = env.current_contract_address();
-    let mut total_refunded = 0;
-
-    for token in campaign.accepted_tokens.iter() {
-        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-        let contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
-
-        if contribution > 0 {
-            // Transfer back to contributor
-            let token_client = TokenClient::new(env, &token);
-            token_client.transfer(&contract_address, contributor, &contribution);
-
-            // Update campaign and per-token balances
-            campaign.pledged_amount -= contribution;
-            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
-            let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
-            env.storage().persistent().set(&balance_key, &(balance - contribution));
-
-            // Reset user contribution for this token
-            env.storage().persistent().set(&contribution_key, &0_i128);
-
-            total_refunded += contribution;
-
-            env.events().publish(
-                (symbol_short!("Goal"), symbol_short!("Refund")),
-                CampaignRefunded {
-                    campaign_id,
-                    contributor: contributor.clone(),
-                    token: token.clone(),
-                    amount: contribution,
-                },
-            );
-        }
-    }
-
-    total_refunded
-}
-
-#[cfg(test)]
-mod test;

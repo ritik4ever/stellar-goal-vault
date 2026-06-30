@@ -75,7 +75,7 @@ export function applyFilters(
  * This ensures the selected campaign state is preserved during sorting.
  *
  * @param campaigns - Array of campaigns to sort
- * @param sortBy - Sort option (newest, deadline, percentFunded, totalPledged)
+ * @param sortBy - Sort option (createdAt, deadline, pledgedAmount, targetAmount)
  * @returns Sorted array of campaigns
  */
 export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption): Campaign[] {
@@ -86,7 +86,7 @@ export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption): Campai
     let comparison = 0;
 
     switch (sortBy) {
-      case 'newest':
+      case 'createdAt':
         // Sort by createdAt descending (newest first)
         comparison = b.createdAt - a.createdAt;
         break;
@@ -96,14 +96,14 @@ export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption): Campai
         comparison = a.deadline - b.deadline;
         break;
 
-      case 'percentFunded':
-        // Sort by percentFunded descending (highest first)
-        comparison = b.progress.percentFunded - a.progress.percentFunded;
-        break;
-
-      case 'totalPledged':
+      case 'pledgedAmount':
         // Sort by pledgedAmount descending (largest first)
         comparison = b.pledgedAmount - a.pledgedAmount;
+        break;
+
+      case 'targetAmount':
+        // Sort by targetAmount descending (largest first)
+        comparison = b.targetAmount - a.targetAmount;
         break;
 
       default:

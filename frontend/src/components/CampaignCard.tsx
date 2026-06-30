@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
+import { Link } from 'lucide-react';
 import { Campaign } from '../types/campaign';
 import AddressAvatar from './AddressAvatar';
 import CopyButton from './CopyButton';
@@ -25,6 +26,15 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
 
   const formatTimestamp = (unixSeconds: number) => new Date(unixSeconds * 1000).toLocaleString();
 
+  const handleShareCampaign = () => {
+    const deepLinkUrl = `${window.location.origin}${window.location.pathname}?campaign=${campaign.id}`;
+    navigator.clipboard.writeText(deepLinkUrl).then(() => {
+      // Share action complete
+    }).catch(() => {
+      // Copy failed
+    });
+  };
+
   return (
     <article
       className={`campaign-card ${selectedCampaignId === campaign.id ? 'campaign-card-selected' : ''}`}
@@ -40,6 +50,31 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
                 ariaLabel="Copy campaign ID"
                 className="small"
               />
+              <button
+                type="button"
+                onClick={handleShareCampaign}
+                ariaLabel="Copy campaign share link"
+                className="small"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '2px 4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: 0.6,
+                  transition: 'opacity 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.opacity = '1';
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.opacity = '0.6';
+                }}
+              >
+                <Link size={16} />
+              </button>
             </div>
           </div>
           <div

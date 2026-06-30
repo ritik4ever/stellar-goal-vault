@@ -137,10 +137,11 @@ function App() {
   const activeSortRef = useRef<string>('newest');
   const activeOrderRef = useRef<string>('desc');
   const [searchParams] = useSearchParams();
+  const campaignParam = searchParams.get('campaign');
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(paramId ?? null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(paramId ?? campaignParam ?? null);
   const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(
     null,
   );
@@ -176,8 +177,8 @@ function App() {
   }, [themeMode]);
 
   useEffect(() => {
-    setSelectedCampaignId(paramId ?? null);
-  }, [paramId]);
+    setSelectedCampaignId(paramId ?? campaignParam ?? null);
+  }, [paramId, campaignParam]);
 
   async function fetchCampaignPage(
     page: number,
@@ -445,7 +446,9 @@ function App() {
       navigate('/campaigns/' + campaign.id);
       addToast(`Campaign #${campaign.id} is live and ready for pledges.`, "success");
     } catch (error) {
-      setCreateError(toApiError(error));
+      const apiError = toApiError(error);
+      setCreateError(apiError);
+      addToast(apiError.message, "error");
     }
   }
 
@@ -617,10 +620,12 @@ function App() {
       await refundCampaign(campaignId, contributor, sorobanReceipt);
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
-      setActionMessage("Contributor refunded successfully.");
+      setActionMessage(null);
+      addToast("Contributor refunded successfully.", "success");
     } catch (error) {
       setActionError(toApiError(error));
       setActionMessage(null);
+      addToast(getErrorMessage(error), "error");
     }
   }
 

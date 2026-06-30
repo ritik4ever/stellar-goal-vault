@@ -3,6 +3,7 @@ import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
 
+
 import { validateEnv } from "./validateEnv";
 import { z } from "zod";
 import path from "path";
@@ -34,7 +35,6 @@ import {
   reconcileOnChainPledge,
   refundContributor,
   SortOrder,
-  updateCampaign,
 } from './services/campaignStore';
 import { checkDbHealth } from './services/db';
 import { listCampaignHistory } from './services/eventHistory';
@@ -75,6 +75,14 @@ const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_READ_LIMIT ?? proc
 const WRITE_RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_WRITE_LIMIT ?? process.env.WRITE_RATE_LIMIT_MAX_REQUESTS ?? 20);
 const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+    },
+  },
+}));
+
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -91,6 +99,7 @@ app.use(
       }
     },
     credentials: true,
+    exposedHeaders: ['X-Total-Count', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Retry-After'],
   }),
 );
 
@@ -223,10 +232,15 @@ export function parseCampaignListFilters(query: {
   sort?: CampaignSortField;
   order?: SortOrder;
 } {
-  const VALID_SORT_FIELDS: CampaignSortField[] = ['newest', 'deadline', 'percentFunded', 'totalPledged'];
+  const VALID_SORT_FIELDS: CampaignSortField[] = ['createdAt', 'deadline', 'pledgedAmount', 'targetAmount'];
   const VALID_ORDERS: SortOrder[] = ['asc', 'desc'];
   const rawSort = normalizeQueryValue(query.sort);
   const rawOrder = normalizeQueryValue(query.order);
+
+  if (rawSort && !VALID_SORT_FIELDS.includes(rawSort as CampaignSortField)) {
+    throw new AppError(`Invalid sort field: ${rawSort}. Supported fields: ${VALID_SORT_FIELDS.join(', ')}`, 400, 'INVALID_SORT_FIELD');
+  }
+
   return {
     asset: normalizeAssetFilter(query.asset),
     status: normalizeStatusFilter(query.status),
@@ -268,6 +282,61 @@ app.get('/api/health', (_req: Request, res: Response) => {
   });
 });
 
+app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Response) => {
+  try {
+    const database = checkDbHealth();
+    const hasContractId = !!config.contractId;
+    let sorobanHealthy = false;
+
+    try {
+      if (config.sorobanRpcUrl) {
+        const response = await fetch(config.sorobanRpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'getHealth',
+            id: 1,
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+        sorobanHealthy = response.ok || response.status < 500;
+      }
+    } catch {
+      sorobanHealthy = false;
+    }
+
+    const allHealthy = database.reachable && hasContractId && sorobanHealthy;
+
+    res.status(allHealthy ? 200 : 503).json({
+      overall: allHealthy ? 'up' : 'down',
+      timestamp: new Date().toISOString(),
+      uptimeSeconds: Number(process.uptime().toFixed(3)),
+      components: {
+        db: {
+          status: database.reachable ? 'up' : 'down',
+          details: database.reachable ? 'SQLite database reachable' : database.error,
+        },
+        soroban: {
+          status: sorobanHealthy ? 'up' : 'down',
+          details: config.sorobanRpcUrl ? 'Soroban RPC reachable' : 'Soroban RPC URL not configured',
+        },
+        contract: {
+          status: hasContractId ? 'up' : 'down',
+          details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
+        },
+      },
+    });
+  } catch (error) {
+    res.status(503).json({
+      overall: 'down',
+      timestamp: new Date().toISOString(),
+      error: 'Deep health check failed',
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
 app.get('/api/campaigns', (req: Request, res: Response) => {
   const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
   if (!queryResult.ok) {
@@ -285,8 +354,10 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
 
   const cached = getCampaignCacheEntry(cacheKey);
   if (cached) {
+    const cachedData = JSON.parse(cached);
     res.setHeader('Cache-Control', 'max-age=5');
     res.setHeader('X-Cache', 'HIT');
+    res.setHeader('X-Total-Count', String(cachedData.pagination.total));
     res.setHeader('Content-Type', 'application/json');
     res.send(cached);
     return;
@@ -335,6 +406,7 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
 
   res.setHeader('Cache-Control', 'max-age=5');
   res.setHeader('X-Cache', 'MISS');
+  res.setHeader('X-Total-Count', String(totalCount));
   res.setHeader('Content-Type', 'application/json');
   res.send(responseBody);
 });
@@ -381,6 +453,7 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
     Math.ceil(totalCount / paginationResult.limit),
   );
 
+  res.setHeader('X-Total-Count', String(totalCount));
   res.json({
     data: pledges,
     pagination: {
@@ -697,17 +770,12 @@ function printStartupBanner(): void {
   const dbPath = process.env.DB_PATH || path.join(__dirname, '..', '..', 'data', 'campaigns.db');
   const nodeEnv = process.env.NODE_ENV || 'development';
 
-  /* eslint-disable no-console */
-  console.log('');
-  console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║         Stellar Goal Vault Backend - Starting Up          ║');
-  console.log('╠════════════════════════════════════════════════════════════╣');
-  console.log(`║  Port:           ${config.port.toString().padEnd(42)}║`);
-  console.log(`║  Environment:    ${nodeEnv.padEnd(42)}║`);
-  console.log(`║  Database Path:  ${dbPath.padEnd(42)}║`);
-  console.log('╚════════════════════════════════════════════════════════════╝');
-  console.log('');
-  /* eslint-enable no-console */
+  logInfo('startup_banner', {
+    message: 'Stellar Goal Vault Backend - Starting Up',
+    port: config.port,
+    environment: nodeEnv,
+    databasePath: dbPath,
+  }, config.logLevel);
 }
 
 export function configureHttpServer(server: Server): Server {
@@ -716,6 +784,8 @@ export function configureHttpServer(server: Server): Server {
 
   return server;
 }
+
+let isShuttingDown = false;
 
 function startServer() {
   validateEnv();
@@ -730,7 +800,53 @@ function startServer() {
     });
   }
 
+  // Reject new requests during shutdown
+  app.use((req, res, next) => {
+    if (isShuttingDown) {
+      res.status(503).json({
+        success: false,
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Server is shutting down',
+        },
+      });
+      return;
+    }
+    next();
+  });
+
   const server = configureHttpServer(createServer(app));
+
+  const gracefulShutdown = (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    logInfo('server_shutting_down', { signal }, config.logLevel);
+
+    // Stop accepting new connections
+    server.close(() => {
+      logInfo('server_closed', { message: 'Server closed' }, config.logLevel);
+      process.exit(0);
+    });
+
+    // Force shutdown after grace period
+    const gracePeriodSeconds = 10;
+    const gracePeriodTimer = setTimeout(() => {
+      logError(
+        new Error('Graceful shutdown timeout exceeded'),
+        { event: 'graceful_shutdown_timeout', gracePeriodSeconds },
+        config.logLevel,
+      );
+      process.exit(1);
+    }, gracePeriodSeconds * 1000);
+
+    // Close the database connection when shutting down
+    gracePeriodTimer.unref();
+  };
+
+  // Handle graceful shutdown
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
   server.listen(config.port, () => {
     logInfo(
@@ -744,6 +860,8 @@ function startServer() {
       config.logLevel,
     );
   });
+
+  return server;
 }
 
 if (require.main === module) {
