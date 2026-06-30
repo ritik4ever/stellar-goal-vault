@@ -351,13 +351,30 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const whereClauses: string[] = [];
   const params: any[] = [];
 
-  if (options?.searchQuery && options.searchQuery.trim()) {
-    const searchTerm = `%${options.searchQuery.trim().toLowerCase()}%`;
-    const exactTerm = options.searchQuery.trim();
-    whereClauses.push(`(LOWER(campaigns.title) LIKE ? OR LOWER(campaigns.creator) LIKE ? OR campaigns.id = ?)`);
-    params.push(searchTerm, searchTerm, exactTerm);
-  }
+if (options?.searchQuery && options.searchQuery.trim()) {
+  const rawQuery = options.searchQuery.trim();
+  
+  // Fixes CodeRabbit: Sanitize/escape special characters so FTS5 MATCH doesn't syntax crash
+  const cleanQuery = rawQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
+  const ftsMatchTerm = cleanQuery ? `${cleanQuery}*` : '';
 
+  // Fixes CodeRabbit: Use exact matching for creator public key instead of a slow LIKE scan
+  const creatorExactTerm = rawQuery; 
+  const exactTerm = rawQuery;
+
+  if (ftsMatchTerm) {
+    whereClauses.push(`(
+      campaigns.id IN (SELECT id FROM campaigns_fts WHERE campaigns_fts MATCH ?)
+      OR LOWER(campaigns.creator) = LOWER(?)
+      OR campaigns.id = ?
+    )`);
+    params.push(ftsMatchTerm, creatorExactTerm, exactTerm);
+  } else {
+    // Fallback if cleaning the query stripped all characters
+    whereClauses.push(`(LOWER(campaigns.creator) = LOWER(?) OR campaigns.id = ?)`);
+    params.push(creatorExactTerm, exactTerm);
+  }
+}
   if (options?.assetCode) {
     whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);
