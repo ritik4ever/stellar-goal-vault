@@ -765,6 +765,68 @@ tbody tr:hover td {
   overflow: hidden;
 }
 
+/* Timeline milestone progress bar */
+.timeline-progress-wrap {
+  margin-bottom: 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.timeline-progress-bar {
+  position: relative;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+}
+
+.timeline-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--primary), #22c55e);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.timeline-milestone-tick {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 1px;
+  transform: translateX(-50%);
+  cursor: default;
+}
+
+.timeline-milestone-tick:hover .timeline-milestone-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+.timeline-milestone-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  white-space: nowrap;
+  background: var(--bg-surface, rgba(15, 23, 42, 0.95));
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+.timeline-progress-label {
+  font-size: 0.85rem;
+}
+
 .badge {
   padding: 6px 14px;
   font-weight: 700;
