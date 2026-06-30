@@ -222,6 +222,8 @@ mod tests {
             &meta("c2"),
             &0_i128,
         );
+        assert_eq!(client.get_campaign_count(), 2);
+
         client.create_campaign(
             &creator,
             &soroban_sdk::vec![&env, token.clone()],
@@ -725,6 +727,38 @@ mod tests {
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
     }
 
+
+    #[test]
+    fn test_contributor_count_no_double_count_multiple_tokens() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token1 = deploy_token(&env, &admin, &contributor, 1_000);
+        let token2 = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token1.clone(), token2.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "multiple tokens pledge test"),
+            &0_i128,
+        );
+
+        // Contributor pledges with token1
+        client.contribute(&campaign_id, &contributor, &token1, &400);
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+
+        // Contributor pledges with token2 - count should remain 1
+        client.contribute(&campaign_id, &contributor, &token2, &300);
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+    }
+
     // ── #184: minimum contribution tests ──────────────────────────────────────
 
     #[test]
@@ -1172,4 +1206,5 @@ mod tests {
         let new_deadline = env.ledger().timestamp() + 500;
         client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
     }
+
 }

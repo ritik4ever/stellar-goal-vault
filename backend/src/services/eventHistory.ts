@@ -1,6 +1,6 @@
 import { getDb } from './db';
 
-export type CampaignEventType = 'created' | 'pledged' | 'claimed' | 'refunded' | 'updated' | 'metadata_updated';
+
 
 export interface BlockchainMetadata {
   txHash?: string;

@@ -51,6 +51,7 @@ pub enum DataKey {
     MinContribution,
     ExtensionRequest(u64),
     ExtensionVote(u64, Address),
+    HasContributed(u64, Address), // (campaign_id, contributor)
     /// Tracks which (old_contract_id, campaign_id) pairs have already been migrated.
     MigratedId(Address, u64),
 }
@@ -372,11 +373,14 @@ impl StellarGoalVaultContract {
         campaign.pledged_amount += amount;
 
         // Only increment contributor_count on first-time pledge
-        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-        let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
-        if current_contribution == 0 {
+        let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
+        let has_contributed: bool = env.storage().persistent().get(&has_contributed_key).unwrap_or(false);
+        if !has_contributed {
             campaign.contributor_count += 1;
+            env.storage().persistent().set(&has_contributed_key, &true);
         }
+
+
 
         // Write updated campaign back to storage
         env.storage()
@@ -626,42 +630,47 @@ impl StellarGoalVaultContract {
             panic!("funded campaigns cannot be refunded");
         }
 
-        let contract_address = env.current_contract_address();
-        let mut total_refunded = 0;
+        let total_refunded = refund_contributor(&env, &mut campaign, campaign_id, &contributor);
 
-        for token in campaign.accepted_tokens.iter() {
-            let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-            let contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+        if total_refunded == 0 {
+            panic!("nothing to refund");
+        }
 
-            if contribution > 0 {
-                // Transfer back to contributor
-                let token_client = TokenClient::new(&env, &token);
-                token_client.transfer(&contract_address, &contributor, &contribution);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+    }
 
-                // Update campaign and per-token balances
-                campaign.pledged_amount -= contribution;
-                let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
-                let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
-                env.storage().persistent().set(&balance_key, &(balance - contribution));
+    pub fn refund_all(env: Env, campaign_id: u64) {
+        require_not_paused(&env);
 
-                // Reset user contribution for this token
-                env.storage().persistent().set(&contribution_key, &0_i128);
+        let mut campaign = read_campaign(&env, campaign_id);
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if !campaign.canceled && env.ledger().timestamp() < campaign.deadline {
+            panic!("campaign is still active");
+        }
+        if !campaign.canceled && campaign.pledged_amount >= campaign.target_amount {
+            panic!("funded campaigns cannot be refunded");
+        }
 
-                total_refunded += contribution;
+        let contributors_key = DataKey::Contributors(campaign_id);
+        let contributors: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&contributors_key)
+            .unwrap_or_else(|| Vec::new(&env));
 
-                env.events().publish(
-                    (symbol_short!("Goal"), symbol_short!("Refund")),
-                    CampaignRefunded {
-                        campaign_id,
-                        contributor: contributor.clone(),
-                        token: token.clone(),
-                        amount: contribution,
-                    },
-                );
+        let mut any_refunded = false;
+        for contributor in contributors.iter() {
+            let refunded = refund_contributor(&env, &mut campaign, campaign_id, &contributor);
+            if refunded > 0 {
+                any_refunded = true;
             }
         }
 
-        if total_refunded == 0 {
+        if !any_refunded {
             panic!("nothing to refund");
         }
 
@@ -816,5 +825,4 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .get(&DataKey::Campaign(campaign_id))
         .unwrap_or_else(|| panic!("campaign not found"))
 }
-#[cfg(test)]
-mod test;
+

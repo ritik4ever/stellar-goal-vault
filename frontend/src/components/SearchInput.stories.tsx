@@ -27,7 +27,7 @@ export const Disabled: Story = {
 };
 
 export const Interactive: Story = {
-  render: (args) => {
+  render: (args: any) => {
     const [value, setValue] = useState('');
     return <SearchInput {...args} value={value} onChange={setValue} />;
   },
