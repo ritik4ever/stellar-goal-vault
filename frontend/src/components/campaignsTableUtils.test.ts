@@ -1,7 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { searchCampaigns, sortCampaigns } from './campaignsTableUtils';
 import type { Campaign } from '../types/campaign';
-import type { SortOption } from './SortDropdown';
 
 // Mock campaign data
 const mockCampaigns: Campaign[] = [

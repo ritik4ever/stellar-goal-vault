@@ -1,6 +1,4 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { vi } from 'vitest';
 import { CampaignDetailPanel } from './CampaignDetailPanel';
 import { AppConfig, Campaign } from '../types/campaign';
 
@@ -17,9 +15,7 @@ const mockConfig: AppConfig = {
   networkPassphrase: 'Test SDF Network ; September 2015',
   contractAmountDecimals: 2,
   walletIntegrationReady: true,
-  assetAddresses: {
-
-  },
+  assetAddresses: {},
 };
 
 const mockCampaign: Campaign = {
@@ -47,16 +43,14 @@ const mockCampaign: Campaign = {
   metadata: {},
 };
 
-
-
+describe('CampaignDetailPanel', () => {
+  it('renders a fallback when no campaign is provided', () => {
+    render(<CampaignDetailPanel campaign={null} appConfig={mockConfig} />);
     expect(screen.getByText(/pick a campaign/i)).toBeInTheDocument();
   });
 
-
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-
-    render(
-
+  it('renders the campaign when provided', () => {
+    render(<CampaignDetailPanel campaign={mockCampaign} appConfig={mockConfig} />);
+    expect(screen.getByText('Test Campaign')).toBeInTheDocument();
   });
 });
