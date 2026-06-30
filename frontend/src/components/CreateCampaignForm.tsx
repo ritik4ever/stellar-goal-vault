@@ -49,7 +49,7 @@ export function CreateCampaignForm({
     });
   }, [assetOptions]);
 
-  function update(field: keyof typeof INITIAL_VALUES, value: any) {
+  function update(field: keyof typeof INITIAL_VALUES, value: unknown) {
     const nextValues = { ...values, [field]: value };
     setValues(nextValues);
     if (touchedFields.has(field)) {
