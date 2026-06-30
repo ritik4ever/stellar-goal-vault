@@ -45,22 +45,20 @@ export function searchCampaigns(campaigns: Campaign[], searchQuery: string): Cam
 }
 
 /**
- * Pure function that applies asset code, search, and status predicates to a campaign list.
+ * Pure function that applies asset code and status predicates to a campaign list.
  * Pass "" as assetCode or status to skip that filter.
- * Pass "" as searchQuery to skip search.
  *
  * Filter composition (AND logic):
- * - Must match search query (if provided)
- * - AND must match asset code (if provided)
+ * - Must match asset code (if provided)
  * - AND must match status (if provided)
+ *
+ * For search filtering, use {@link searchCampaigns} separately.
  */
 export function applyFilters(
   campaigns: Campaign[],
   assetCode: string,
   status: string,
-  searchQuery: string = '',
 ): Campaign[] {
-  // Client-side filters (asset/status only, search is server-side)
   return campaigns.filter((c) => {
     const matchesAsset = assetCode === '' || c.assetCode === assetCode;
     const matchesStatus = status === '' || c.progress.status === status;

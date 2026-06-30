@@ -146,14 +146,14 @@ function App() {
     null,
   );
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
-  const [isIssuesLoading, setIsIssuesLoading] = useState(false);
+  const [isIssuesLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [themeMode, setThemeMode] = useLocalStorage<ThemeMode>(THEME_STORAGE_KEY, getSystemTheme());
-  const [, setSortOrder] = useLocalStorage<string>(SORT_ORDER_KEY, 'default');
-  const [, setFilterState] = useLocalStorage<string[]>(FILTER_STATE_KEY, []);
+  useLocalStorage<string>(SORT_ORDER_KEY, 'default');
+  useLocalStorage<string[]>(FILTER_STATE_KEY, []);
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);

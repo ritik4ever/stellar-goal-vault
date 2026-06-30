@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * AUTO-GENERATED — do not edit manually
  * Regenerate with: npm run gen:bindings

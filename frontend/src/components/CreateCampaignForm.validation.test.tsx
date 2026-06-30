@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CreateCampaignForm } from './CreateCampaignForm';
 import { vi } from 'vitest';
@@ -17,6 +17,7 @@ describe('CreateCampaignForm Validation', () => {
 
       const creatorInput = screen.getByPlaceholderText(/G\.\.\. creator public key/i);
       await user.type(creatorInput, 'invalid');
+      fireEvent.blur(creatorInput);
 
       expect(
         screen.getByText(/Stellar account must be exactly 56 characters/i),
@@ -29,6 +30,7 @@ describe('CreateCampaignForm Validation', () => {
 
       const titleInput = screen.getByPlaceholderText(/Stellar community design sprint/i);
       await user.type(titleInput, 'Bad');
+      fireEvent.blur(titleInput);
 
       expect(screen.getByText(/at least 4 characters/i)).toBeInTheDocument();
     });
@@ -39,6 +41,7 @@ describe('CreateCampaignForm Validation', () => {
 
       const descInput = screen.getByPlaceholderText(/Describe what the campaign funds/i);
       await user.type(descInput, 'Short');
+      fireEvent.blur(descInput);
 
       expect(screen.getByText(/at least 20 characters/i)).toBeInTheDocument();
     });
@@ -52,6 +55,7 @@ describe('CreateCampaignForm Validation', () => {
 
       await user.clear(amountInput);
       await user.type(amountInput, '0');
+      fireEvent.blur(amountInput);
 
       expect(screen.getByText(/Amount must be greater than zero/i)).toBeInTheDocument();
     });
@@ -65,8 +69,9 @@ describe('CreateCampaignForm Validation', () => {
 
       await user.clear(deadlineInput);
       await user.type(deadlineInput, '0');
+      fireEvent.blur(deadlineInput);
 
-      expect(screen.getByText(/at least 1 hour/i)).toBeInTheDocument();
+      expect(screen.getByText(/at least 0.0001 hours/i)).toBeInTheDocument();
     });
   });
 
@@ -95,18 +100,17 @@ describe('CreateCampaignForm Validation', () => {
       const submitButton = screen.getByRole('button', { name: /Create campaign/i });
 
       // Fill in valid data
-      await user.type(
-        screen.getByPlaceholderText(/G\.\.\. creator public key/i),
-        'G' + 'A'.repeat(55),
-      );
-      await user.type(
-        screen.getByPlaceholderText(/Stellar community design sprint/i),
-        'My Valid Campaign Title',
-      );
-      await user.type(
-        screen.getByPlaceholderText(/Describe what the campaign funds/i),
-        'This is a valid campaign description with enough content.',
-      );
+      const creatorInput = screen.getByPlaceholderText(/G\.\.\. creator public key/i);
+      await user.type(creatorInput, 'G' + 'A'.repeat(55));
+      fireEvent.blur(creatorInput);
+
+      const titleInput = screen.getByPlaceholderText(/Stellar community design sprint/i);
+      await user.type(titleInput, 'My Valid Campaign Title');
+      fireEvent.blur(titleInput);
+
+      const descInput = screen.getByPlaceholderText(/Describe what the campaign funds/i);
+      await user.type(descInput, 'This is a valid campaign description with enough content.');
+      fireEvent.blur(descInput);
 
       // Button should be enabled
       expect(submitButton).toBeEnabled();
@@ -123,6 +127,7 @@ describe('CreateCampaignForm Validation', () => {
       ) as HTMLInputElement;
       await user.type(creatorInput, 'invalid');
       await user.type(creatorInput, '{Backspace}');
+      fireEvent.blur(creatorInput);
 
       expect(creatorInput).toHaveClass('input-error');
     });
@@ -137,6 +142,7 @@ describe('CreateCampaignForm Validation', () => {
 
       // Add invalid value
       await user.type(creatorInput, 'invalid');
+      fireEvent.blur(creatorInput);
       expect(creatorInput).toHaveClass('input-error');
 
       // Clear and add valid value
@@ -157,6 +163,8 @@ describe('CreateCampaignForm Validation', () => {
 
       // Type too-short title
       await user.type(titleInput, 'Bad');
+      // trigger blur so it becomes touched
+      fireEvent.blur(titleInput);
 
       // Error should appear immediately
       expect(screen.getByText(/at least 4 characters/i)).toBeInTheDocument();

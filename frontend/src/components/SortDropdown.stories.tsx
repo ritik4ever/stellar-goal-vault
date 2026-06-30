@@ -7,7 +7,7 @@ const meta: Meta<typeof SortDropdown> = {
   component: SortDropdown,
   parameters: { layout: 'centered' },
   args: {
-    value: 'newest',
+    value: 'createdAt',
     onChange: () => {},
   },
 };
@@ -22,7 +22,7 @@ export const ByDeadline: Story = {
 };
 
 export const ByPercentFunded: Story = {
-  args: { value: 'percentFunded' },
+  args: { value: 'pledgedAmount' },
 };
 
 export const Disabled: Story = {
@@ -30,8 +30,8 @@ export const Disabled: Story = {
 };
 
 export const Interactive: Story = {
-  render: (args) => {
-    const [value, setValue] = useState<SortOption>('newest');
+  render: (args: any) => {
+    const [value, setValue] = useState<SortOption>('createdAt');
     return <SortDropdown {...args} value={value} onChange={setValue} />;
   },
 };

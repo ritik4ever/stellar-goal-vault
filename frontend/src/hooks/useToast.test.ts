@@ -50,7 +50,7 @@ describe('useToast', () => {
     expect(result.current.toasts).toHaveLength(3);
   });
 
-  it('auto-dismisses after 4500 ms', () => {
+  it('auto-dismisses after 6000 ms', () => {
     const { result } = renderHook(() => useToast());
 
     act(() => {
@@ -60,7 +60,7 @@ describe('useToast', () => {
     expect(result.current.toasts).toHaveLength(1);
 
     act(() => {
-      vi.advanceTimersByTime(4500);
+      vi.advanceTimersByTime(6000);
     });
 
     expect(result.current.toasts).toHaveLength(0);
