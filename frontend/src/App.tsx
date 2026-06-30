@@ -779,7 +779,12 @@ function App() {
           />
         </ErrorBoundary>
 
-        <CampaignTimeline history={history} isLoading={isSelectedLoading || initialLoad} />
+        <CampaignTimeline
+          history={history}
+          isLoading={isSelectedLoading || initialLoad}
+          targetAmount={selectedCampaign?.targetAmount}
+          pledgedAmount={selectedCampaign?.pledgedAmount}
+        />
       </section>
 
       <section className="section-margin">
