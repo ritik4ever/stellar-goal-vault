@@ -1,37 +1,83 @@
-import { useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Users } from 'lucide-react';
 import { CopyButton } from './CopyButton';
 import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
-import { Pledge } from '../types/campaign';
+import { ContributorSummary as ContributorSummaryData } from '../types/campaign';
+import { apiRequest } from '../services/httpClient';
 import { buildContributorCsv, downloadCsv } from '../utils/exportCsv';
 
-function round2(value: number): number {
-  return Number(value.toFixed(2));
-}
-
-interface AggregatedContributor {
-  contributor: string;
-  activeTotal: number;
-  activePledgeCount: number;
-  refundedTotal: number;
-  refundedPledgeCount: number;
-  hasPending: boolean;
-}
+const POLL_INTERVAL_MS = 30_000;
 
 interface ContributorSummaryProps {
-  pledges?: Pledge[];
-  assetCode: string;
   campaignId?: string;
+  assetCode: string;
   isLoading?: boolean;
 }
+
+interface ContributorsApiResponse {
+  data: ContributorSummaryData[];
+}
+
 export function ContributorSummary({
-  pledges,
-  assetCode,
   campaignId,
-  isLoading,
+  assetCode,
+  isLoading: externalLoading,
 }: ContributorSummaryProps) {
-  if (isLoading || pledges === undefined) {
+  const [contributors, setContributors] = useState<ContributorSummaryData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchContributors = useCallback(async () => {
+    if (!campaignId) return;
+
+    try {
+      const response = await apiRequest<ContributorsApiResponse>({
+        method: 'GET',
+        url: `/campaigns/${campaignId}/contributors`,
+      });
+
+      // Sort by totalPledged descending (primary), then by contributor address (stable tiebreak)
+      const sorted = [...response.data].sort((a, b) => {
+        if (b.totalPledged !== a.totalPledged) {
+          return b.totalPledged - a.totalPledged;
+        }
+        return a.contributor.localeCompare(b.contributor);
+      });
+
+      setContributors(sorted);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load contributors');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [campaignId]);
+
+  useEffect(() => {
+    if (!campaignId) {
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    void fetchContributors();
+
+    // Poll every 30 seconds
+    timerRef.current = setInterval(() => {
+      void fetchContributors();
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [campaignId, fetchContributors]);
+
+  if (externalLoading || (isLoading && contributors.length === 0)) {
     return (
       <section
         className="contributor-summary contributor-summary-loading"
@@ -53,94 +99,20 @@ export function ContributorSummary({
     );
   }
 
-  const { rows, uniqueAddresses, activeAddresses, activeGrandTotal, refundedGrandTotal } =
-    useMemo(() => {
-      const list = pledges ?? [];
-      const byContributor = new Map<
-        string,
-        {
-          activeTotal: number;
-          activePledgeCount: number;
-          refundedTotal: number;
-          refundedPledgeCount: number;
-          hasPending: boolean;
-        }
-      >();
-
-      for (const pledge of list) {
-        let bucket = byContributor.get(pledge.contributor);
-        if (!bucket) {
-          bucket = {
-            activeTotal: 0,
-            activePledgeCount: 0,
-            refundedTotal: 0,
-            refundedPledgeCount: 0,
-            hasPending: false,
-          };
-          byContributor.set(pledge.contributor, bucket);
-        }
-
-        if (pledge.refundedAt !== undefined) {
-          bucket.refundedTotal += pledge.amount;
-          bucket.refundedPledgeCount += 1;
-        } else {
-          bucket.activeTotal += pledge.amount;
-          bucket.activePledgeCount += 1;
-        }
-
-        if (pledge.id < 0) {
-          bucket.hasPending = true;
-        }
-      }
-
-      const aggregated: AggregatedContributor[] = [...byContributor.entries()].map(
-        ([contributor, bucket]) => ({
-          contributor,
-          activeTotal: round2(bucket.activeTotal),
-          activePledgeCount: bucket.activePledgeCount,
-          refundedTotal: round2(bucket.refundedTotal),
-          refundedPledgeCount: bucket.refundedPledgeCount,
-          hasPending: bucket.hasPending,
-        }),
-      );
-
-      aggregated.sort((a, b) => {
-        if (b.activeTotal !== a.activeTotal) {
-          return b.activeTotal - a.activeTotal;
-        }
-        if (b.refundedTotal !== a.refundedTotal) {
-          return b.refundedTotal - a.refundedTotal;
-        }
-        return a.contributor.localeCompare(b.contributor);
-      });
-
-      const activeAddresses = aggregated.filter((row) => row.activePledgeCount > 0).length;
-      const activeGrandTotal = round2(aggregated.reduce((sum, row) => sum + row.activeTotal, 0));
-      const refundedGrandTotal = round2(
-        aggregated.reduce((sum, row) => sum + row.refundedTotal, 0),
-      );
-
-      return {
-        rows: aggregated,
-        uniqueAddresses: byContributor.size,
-        activeAddresses,
-        activeGrandTotal,
-        refundedGrandTotal,
-      };
-    }, [pledges]);
-
-  function handleExportCsv() {
-    const summaries = rows.map((row) => ({
-      contributor: row.contributor,
-      totalPledged: row.activeTotal + row.refundedTotal,
-      refundedAmount: row.refundedTotal,
-      isFullyRefunded: row.activePledgeCount === 0 && row.refundedPledgeCount > 0,
-    }));
-    const filename = `contributors-${campaignId ?? 'export'}.csv`;
-    downloadCsv(filename, buildContributorCsv(summaries));
+  if (error) {
+    return (
+      <section className="contributor-summary" aria-label="Contributor summary">
+        <div className="contributor-summary-heading">
+          <h3 className="contributor-summary-title">Contributor summary</h3>
+        </div>
+        <div className="form-error" role="alert">
+          {error}
+        </div>
+      </section>
+    );
   }
 
-  if (!pledges?.length) {
+  if (contributors.length === 0) {
     return (
       <section className="contributor-summary" aria-label="Contributor summary">
         <div className="contributor-summary-heading">
@@ -149,11 +121,26 @@ export function ContributorSummary({
         <EmptyState
           variant="inline"
           icon={Users}
-          title="No pledges yet"
+          title="No contributors yet"
           message="No pledges have been made to this campaign yet. Be the first to pledge!"
         />
       </section>
     );
+  }
+
+  // Compute stats from the API data
+  const uniqueAddresses = contributors.length;
+  const activeAddresses = contributors.filter((c) => !c.isFullyRefunded).length;
+  const activeGrandTotal = Number(
+    contributors.reduce((sum, c) => sum + c.totalPledged, 0).toFixed(2),
+  );
+  const refundedGrandTotal = Number(
+    contributors.reduce((sum, c) => sum + c.refundedAmount, 0).toFixed(2),
+  );
+
+  function handleExportCsv() {
+    const filename = `contributors-${campaignId ?? 'export'}.csv`;
+    downloadCsv(filename, buildContributorCsv(contributors));
   }
 
   return (
@@ -207,12 +194,12 @@ export function ContributorSummary({
         <div className="contributor-table contributor-table-head" role="rowgroup">
           <div role="row" className="contributor-table-row">
             <span role="columnheader">Contributor</span>
-            <span role="columnheader">Active</span>
-            <span role="columnheader">Refunded</span>
+            <span role="columnheader">Active pledge</span>
+            <span role="columnheader">Refund status</span>
           </div>
         </div>
         <div className="contributor-table contributor-table-body" role="rowgroup">
-          {rows.map((row) => (
+          {contributors.map((row) => (
             <div key={row.contributor} role="row" className="contributor-table-row">
               <div
                 role="cell"
@@ -226,33 +213,30 @@ export function ContributorSummary({
                   ariaLabel={`Copy contributor ${row.contributor}`}
                   className="small"
                 />
-                {row.hasPending ? (
-                  <span className="badge badge-neutral contributor-pending-badge">Pending</span>
-                ) : null}
               </div>
               <div role="cell" className="contributor-amounts">
-                {row.activePledgeCount > 0 ? (
-                  <span>
-                    <strong>
-                      {row.activeTotal} {assetCode}
-                    </strong>
-                    <span className="muted">
-                      {' '}
-                      ({row.activePledgeCount} pledge
-                      {row.activePledgeCount === 1 ? '' : 's'})
-                    </span>
-                  </span>
+                {row.totalPledged > 0 ? (
+                  <strong>
+                    {row.totalPledged} {assetCode}
+                  </strong>
                 ) : (
                   <span className="muted">—</span>
                 )}
               </div>
               <div role="cell" className="contributor-amounts">
-                {row.refundedPledgeCount > 0 ? (
+                {row.isFullyRefunded ? (
                   <span className="contributor-refunded">
                     <strong>
-                      {row.refundedTotal} {assetCode}
+                      {row.refundedAmount} {assetCode}
                     </strong>
-                    <span className="muted"> ({row.refundedPledgeCount} refunded)</span>
+                    <span className="muted"> (fully refunded)</span>
+                  </span>
+                ) : row.refundedAmount > 0 ? (
+                  <span className="contributor-refunded">
+                    <strong>
+                      {row.refundedAmount} {assetCode}
+                    </strong>
+                    <span className="muted"> (partial refund)</span>
                   </span>
                 ) : (
                   <span className="muted">—</span>
