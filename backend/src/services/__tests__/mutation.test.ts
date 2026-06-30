@@ -731,12 +731,13 @@ describe('reconcileOnChainPledge – deduplication and conflict', () => {
       amount: 20,
       transactionHash: TX_HASH,
     });
-    reconcileOnChainPledge(c.id, {
+    const secondResult = reconcileOnChainPledge(c.id, {
       contributor: CONTRIBUTOR,
       amount: 20,
       transactionHash: TX_HASH,
     });
-    expect(getCampaign(c.id)!.pledgedAmount).toBe(20);
+    expect(secondResult.campaign.pledgedAmount).toBe(20);
+    expect(secondResult.existing).toBe(true);
     expect(getPledges(c.id)).toHaveLength(1);
   });
 

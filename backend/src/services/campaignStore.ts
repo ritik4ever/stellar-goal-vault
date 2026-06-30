@@ -185,7 +185,7 @@ function getActivePledgeCount(campaignId: string): number {
   return row.count;
 }
 
-function getPledgeByTransactionHash(transactionHash: string): PledgeRecord | undefined {
+export function getPledgeByTransactionHash(transactionHash: string): PledgeRecord | undefined {
   const db = getDb();
   const row = db
     .prepare(`SELECT * FROM pledges WHERE transaction_hash = ?`)
@@ -818,10 +818,15 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
  * @throws {ServiceError} 400 `MAX_PER_CONTRIBUTOR_EXCEEDED` if the contributor limit is breached.
  * @throws {ServiceError} 400 `CAMPAIGN_FUNDING_CAP_EXCEEDED` if the pledge would exceed the target amount.
  */
+export interface ReconcileOnChainPledgeResult {
+  campaign: CampaignRecord;
+  existing: boolean;
+}
+
 export function reconcileOnChainPledge(
   campaignId: string,
   input: ReconciledPledgeInput,
-): CampaignRecord {
+): ReconcileOnChainPledgeResult {
   const existingPledge = getPledgeByTransactionHash(input.transactionHash);
   if (existingPledge) {
     if (existingPledge.campaignId !== campaignId) {
@@ -832,7 +837,7 @@ export function reconcileOnChainPledge(
       );
     }
 
-    return getCampaign(campaignId)!;
+    return { campaign: getCampaign(campaignId)!, existing: true };
   }
 
   const campaign = getCampaign(campaignId);
@@ -861,19 +866,42 @@ export function reconcileOnChainPledge(
     );
   }
 
-  const reconcile = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO pledges (
-        campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash
-      ) VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(
-      campaignId,
-      input.contributor,
-      roundedAmount,
-      assetCode,
-      createdAt,
-      input.transactionHash,
-    );
+  const insertedNewPledge = db.transaction(() => {
+    const result = db
+      .prepare(
+        `INSERT OR IGNORE INTO pledges (
+          campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+      )
+      .run(
+        campaignId,
+        input.contributor,
+        roundedAmount,
+        assetCode,
+        createdAt,
+        input.transactionHash,
+      );
+
+    if (result.changes === 0) {
+      const duplicatePledge = getPledgeByTransactionHash(input.transactionHash);
+      if (!duplicatePledge) {
+        throw toServiceError(
+          'Failed to reconcile pledge due to database conflict.',
+          500,
+          'DB_CONFLICT',
+        );
+      }
+
+      if (duplicatePledge.campaignId !== campaignId) {
+        throw toServiceError(
+          'transactionHash already belongs to a different campaign.',
+          409,
+          'TRANSACTION_HASH_CONFLICT',
+        );
+      }
+
+      return false;
+    }
 
     db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`).run(
       roundedAmount,
@@ -897,10 +925,14 @@ export function reconcileOnChainPledge(
         txHash: input.transactionHash,
       } as BlockchainMetadata,
     );
-  });
 
-  reconcile();
-  return getCampaign(campaignId)!;
+    return true;
+  })();
+
+  return {
+    campaign: getCampaign(campaignId)!,
+    existing: !insertedNewPledge,
+  };
 }
 
 /**

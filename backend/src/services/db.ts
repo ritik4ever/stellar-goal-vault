@@ -208,6 +208,30 @@ database.exec(`
   }
 
   database.exec(`
+    DELETE FROM pledges
+    WHERE id NOT IN (
+      SELECT MIN(id)
+      FROM pledges
+      WHERE transaction_hash IS NOT NULL
+      GROUP BY transaction_hash
+    )
+    AND transaction_hash IS NOT NULL;
+  `);
+
+  database.exec(`
+    UPDATE campaigns
+    SET pledged_amount = COALESCE(
+      (
+        SELECT SUM(amount)
+        FROM pledges
+        WHERE pledges.campaign_id = campaigns.id
+          AND refunded_at IS NULL
+      ),
+      0
+    );
+  `);
+
+  database.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pledges_transaction_hash
     ON pledges(transaction_hash)
     WHERE transaction_hash IS NOT NULL
