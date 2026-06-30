@@ -266,7 +266,7 @@ export function CampaignsTable({
           <span>Status:</span>
           <div
             className="status-filter-tabs"
-            role="tablist"
+            role="group"
             aria-label="Filter campaigns by status"
           >
             {STATUS_FILTERS.map((filter) => {
