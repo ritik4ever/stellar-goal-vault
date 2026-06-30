@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { initDb, resetDbForTests, getDb } from "./db";
+import { initDb, resetDbForTests } from "./db";
 import {
   initCampaignStore,
   createCampaign,

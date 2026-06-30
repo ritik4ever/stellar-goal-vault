@@ -22,13 +22,14 @@ const parseInteger = (value: string | undefined, fallback: number): number => {
 export const config = {
   port: Number(process.env.PORT ?? 3001),
   logLevel: normalizeLogLevel(process.env.LOG_LEVEL),
+  corsAllowedOrigins: parseOrigins(process.env.CORS_ALLOWED_ORIGINS ?? ''),
   allowedAssets: (process.env.ALLOWED_ASSETS ?? 'USDC,XLM')
     .split(',')
     .map((value) => value.trim().toUpperCase())
     .filter(Boolean),
 
   sorobanNetworkPassphrase:
-    process.env.SOROBAN_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015",
+    process.env.SOROBAN_NETWORK_PASSPHRASE ?? DEFAULT_NETWORK_PASSPHRASE,
   assetAddresses: (
     process.env.ASSET_ADDRESSES ??
     "XLM:CDLZFC3SYJYDZT7K3SSTH3YCUY6AFMCO3Y6S3G7FEYZNVNREK7Y6CYN5,USDC:CA6WSTPZ7RRCUC6H37CQFODG763XG2HXP2G6F367VCOGGVDP32P7665E"

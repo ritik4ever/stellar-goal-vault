@@ -1,4 +1,5 @@
 import { createClient, RedisClientType } from "redis";
+import { config } from "../config";
 import { logInfo, logError } from "../logger";
 import { config } from "../config";
 
@@ -16,11 +17,7 @@ export async function initRedisCache(): Promise<void> {
   const nodeEnv = process.env.NODE_ENV;
 
   if (!redisUrl || nodeEnv !== "production") {
-    logInfo(
-      "redis_cache_disabled",
-      { message: "Redis cache disabled (not in production or REDIS_URL not set)" },
-      config.logLevel,
-    );
+
     return;
   }
 
@@ -28,20 +25,18 @@ export async function initRedisCache(): Promise<void> {
     redisClient = createClient({ url: redisUrl });
 
     redisClient.on("error", (err) => {
-      logError(err, { event: "redis_client_error" }, config.logLevel);
+
       isConnected = false;
     });
 
     redisClient.on("connect", () => {
-      logInfo("redis_cache_connected", {}, config.logLevel);
+
       isConnected = true;
     });
 
     await redisClient.connect();
     isConnected = true;
-    logInfo("redis_cache_initialized", {}, config.logLevel);
-  } catch (error) {
-    logError(error, { event: "redis_cache_init_failed" }, config.logLevel);
+
     redisClient = null;
     isConnected = false;
   }
@@ -59,7 +54,7 @@ export async function getCacheValue(key: string): Promise<string | null> {
   try {
     return await redisClient.get(key);
   } catch (error) {
-    logError(error, { event: "cache_get_error", key }, config.logLevel);
+
     return null;
   }
 }
@@ -85,7 +80,7 @@ export async function setCacheValue(
     }
     return true;
   } catch (error) {
-    logError(error, { event: "cache_set_error", key }, config.logLevel);
+
     return false;
   }
 }
@@ -103,7 +98,7 @@ export async function deleteCacheValue(key: string): Promise<boolean> {
     const result = await redisClient.del(key);
     return result > 0;
   } catch (error) {
-    logError(error, { event: "cache_delete_error", key }, config.logLevel);
+
     return false;
   }
 }
@@ -124,7 +119,7 @@ export async function clearCachePattern(pattern: string): Promise<number> {
     }
     return await redisClient.del(keys);
   } catch (error) {
-    logError(error, { event: "cache_pattern_clear_error", pattern }, config.logLevel);
+
     return 0;
   }
 }
@@ -137,9 +132,7 @@ export async function closeRedisCache(): Promise<void> {
     try {
       await redisClient.quit();
       isConnected = false;
-      logInfo("redis_cache_connection_closed", {}, config.logLevel);
-    } catch (error) {
-      logError(error, { event: "redis_close_error" }, config.logLevel);
+
     }
   }
 }
