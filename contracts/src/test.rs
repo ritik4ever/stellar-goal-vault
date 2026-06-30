@@ -1207,6 +1207,4 @@ mod tests {
         client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
     }
 
-
-    }
 }

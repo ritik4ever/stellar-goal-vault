@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { getDb } from './db';
 import { recordEvent, BlockchainMetadata, CampaignEventType } from './eventHistory';
-import { reconcileOnChainPledge, createCampaign, getCampaign, updateCampaignMetadata } from './campaignStore';
+import { reconcileOnChainPledge, getCampaign, updateCampaignMetadata } from './campaignStore';
 import dotenv from 'dotenv';
 import { config } from '../config';
 import { logError, logInfo } from '../logger';
@@ -65,52 +65,46 @@ function setLastProcessedLedger(ledger: number): void {
 // Soroban RPC helpers
 // ---------------------------------------------------------------------------
 
-async function fetchSorobanEvents(startLedger: number): Promise<any[]> {
-  if (!CONTRACT_ID) return [];
-  try {
-    const res = await axios.post(
-      SOROBAN_RPC_URL,
-      {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'getEvents',
-        params: {
-          contractIds: [CONTRACT_ID],
-          startLedger,
-          filters: [],
-          limit: 200,
-        },
-      },
-      { headers: { 'Content-Type': 'application/json' }, timeout: 10_000 },
-    );
-    if (res.data?.result?.events && Array.isArray(res.data.result.events)) {
-      return res.data.result.events;
-    }
-    return [];
-  } catch (err) {
-    // Re-throw so the caller can apply backoff
-    throw err;
-  }
+interface SorobanEvent {
+  type?: string;
+  contract_id?: string;
+  txHash?: string;
+  ledger?: number;
+  ledgerCloseTime?: number;
+  event_index?: number;
+  topic?: unknown[];
+  value?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
-async function fetchLatestLedger(): Promise<number> {
-  try {
-    const res = await axios.post(
-      SOROBAN_RPC_URL,
-      { jsonrpc: '2.0', id: 1, method: 'getLatestLedger', params: {} },
-      { headers: { 'Content-Type': 'application/json' }, timeout: 5_000 },
-    );
-    return res.data?.result?.sequence ?? 0;
-  } catch {
-    return 0;
+async function fetchSorobanEvents(startLedger: number): Promise<SorobanEvent[]> {
+  if (!CONTRACT_ID) return [];
+  const res = await axios.post(
+    SOROBAN_RPC_URL,
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getEvents',
+      params: {
+        contractIds: [CONTRACT_ID],
+        startLedger,
+        filters: [],
+        limit: 200,
+      },
+    },
+    { headers: { 'Content-Type': 'application/json' }, timeout: 10_000 },
+  );
+  if (res.data?.result?.events && Array.isArray(res.data.result.events)) {
+    return res.data.result.events as SorobanEvent[];
   }
+  return [];
 }
 
 // ---------------------------------------------------------------------------
 // Deduplication
 // ---------------------------------------------------------------------------
 
-function isDuplicateEvent(db: ReturnType<typeof getDb>, event: any): boolean {
+function isDuplicateEvent(db: ReturnType<typeof getDb>, event: SorobanEvent): boolean {
   // Primary: deduplicate by transaction hash
   if (event.txHash) {
     const row = db
@@ -170,13 +164,13 @@ interface ParsedEvent {
   ledger: number;
 }
 
-function parseSorobanEvent(event: any): ParsedEvent | null {
+function parseSorobanEvent(event: SorobanEvent): ParsedEvent | null {
   if (!event?.type || !event?.contract_id) return null;
   if (event.type !== 'contract' || event.contract_id !== CONTRACT_ID) return null;
 
   // Determine event type from topics
   const topics: string[] = Array.isArray(event.topic)
-    ? event.topic.map((t: any) => String(t))
+    ? event.topic.map((t) => String(t))
     : [];
 
   let eventType: CampaignEventType | undefined;
@@ -250,7 +244,7 @@ function parseSorobanEvent(event: any): ParsedEvent | null {
 function handleParsedEvent(parsed: ParsedEvent): void {
   try {
     if (parsed.eventType === 'metadata_updated') {
-      const newMetadata = String((parsed.metadata as any)?.new_metadata ?? '');
+      const newMetadata = String((parsed.metadata as { new_metadata?: unknown })?.new_metadata ?? '');
       if (newMetadata && parsed.campaignId) {
         try {
           updateCampaignMetadata(parsed.campaignId, newMetadata);
@@ -285,9 +279,10 @@ function handleParsedEvent(parsed: ParsedEvent): void {
             transactionHash: parsed.blockchainMetadata.txHash,
             confirmedAt: parsed.timestamp,
           });
-        } catch (reconcileErr: any) {
+        } catch (reconcileErr: unknown) {
           // TRANSACTION_HASH_CONFLICT means already reconciled — that's fine
-          if (reconcileErr?.code !== 'TRANSACTION_HASH_CONFLICT') {
+          const errorWithCode = reconcileErr as { code?: string };
+          if (errorWithCode?.code !== 'TRANSACTION_HASH_CONFLICT') {
             logError(reconcileErr, { event: 'soroban_reconcile_error', campaignId: parsed.campaignId }, config.logLevel);
           }
           return; // Don't double-record the event

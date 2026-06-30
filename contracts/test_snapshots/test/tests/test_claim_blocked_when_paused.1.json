@@ -103,6 +103,12 @@
                 },
                 {
                   "string": "pause claim test"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }
@@ -1376,6 +1382,12 @@
                 },
                 {
                   "string": "pause claim test"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }

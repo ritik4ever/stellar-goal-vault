@@ -3,12 +3,12 @@ import { config } from '../config';
 import { AppError } from '../types/errors';
 import dotenv from 'dotenv';
 import {
-  Address,
+  Account,
+  BASE_FEE,
   Contract,
-  SorobanRpc,
+  rpc,
   TransactionBuilder,
   Networks,
-  nativeToScVal,
 } from '@stellar/stellar-sdk';
 
 dotenv.config();
@@ -189,7 +189,7 @@ export async function getCampaignCountFromContract(): Promise<number> {
 
   try {
     // Create an RPC server instance
-    const server = new SorobanRpc.Server(SOROBAN_RPC_URL, {
+    const server = new rpc.Server(SOROBAN_RPC_URL, {
       allowHttp: SOROBAN_RPC_URL.startsWith('http://'),
     });
 
@@ -202,14 +202,14 @@ export async function getCampaignCountFromContract(): Promise<number> {
 
     // Create a minimal transaction for simulation (using a placeholder account)
     // Read-only operations don't require a real account, so we use a dummy address
-    const dummyAccount = {
-      accountId: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-      sequence: '0',
-    };
+    const dummyAccount = new Account(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      '0',
+    );
 
-    const transaction = new TransactionBuilder(dummyAccount as any, {
-      fee: SorobanRpc.MAX_INCLUSIVE_FEE,
-      networkPassphrase: Networks.TESTNET_NETWORK_PASSPHRASE,
+    const transaction = new TransactionBuilder(dummyAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.TESTNET,
     })
       .addOperation(operation)
       .setTimeout(60)
@@ -219,25 +219,20 @@ export async function getCampaignCountFromContract(): Promise<number> {
     const simulated = await server.simulateTransaction(transaction);
 
     // Check if simulation was successful
-    if (simulated.error) {
+    if (rpc.Api.isSimulationError(simulated)) {
       return 0;
     }
 
     // Extract the result from the simulation
     // The result contains XDR-encoded return values
-    if (!simulated.results || simulated.results.length === 0) {
-      return 0;
-    }
-
-    const result = simulated.results[0];
-    if (!result.xdr) {
+    if (!rpc.Api.isSimulationSuccess(simulated) || !simulated.result) {
       return 0;
     }
 
     // Parse the u64 value from the XDR result
     // Using scValToNative to decode Soroban's ScVal format
     const { scValToNative } = await import('@stellar/stellar-sdk');
-    const decoded = scValToNative(result.xdr);
+    const decoded = scValToNative(simulated.result.retval);
 
     // The result should be a number (u64)
     if (typeof decoded === 'number' || typeof decoded === 'bigint') {

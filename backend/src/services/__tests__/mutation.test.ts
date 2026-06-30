@@ -28,6 +28,7 @@ process.env.CONTRACT_ID = '';
 
 // ── Type imports ──────────────────────────────────────────────────────────────
 type CampaignStoreModule = typeof import('../campaignStore');
+type CampaignInput = import('../campaignStore').CampaignInput;
 type DbModule = typeof import('../db');
 type EventHistoryModule = typeof import('../eventHistory');
 
@@ -43,7 +44,6 @@ let claimCampaign: CampaignStoreModule['claimCampaign'];
 let reconcileOnChainPledge: CampaignStoreModule['reconcileOnChainPledge'];
 let getGlobalStats: CampaignStoreModule['getGlobalStats'];
 let getContributorSummary: CampaignStoreModule['getContributorSummary'];
-let updateCampaign: CampaignStoreModule['updateCampaign'];
 let softDeleteCampaign: CampaignStoreModule['softDeleteCampaign'];
 let listCampaigns: CampaignStoreModule['listCampaigns'];
 let getDb: DbModule['getDb'];
@@ -82,7 +82,6 @@ beforeAll(async () => {
     reconcileOnChainPledge,
     getGlobalStats,
     getContributorSummary,
-    updateCampaign,
     softDeleteCampaign,
     listCampaigns,
   } = await import('../campaignStore'));
@@ -133,7 +132,7 @@ describe('calculateProgress – boundary conditions', () => {
       description: 'desc',
       assetCode: 'USDC',
       targetAmount: 100,
-      deadline: future(),
+      deadline: now,
     });
     // Evaluate exactly AT the deadline
     const progress = calculateProgress(campaign, campaign.deadline);
@@ -320,7 +319,7 @@ describe('createCampaign – validation edge cases', () => {
         description: 'desc',
         targetAmount: 100,
         deadline: future(),
-      } as any),
+      } as CampaignInput),
     ).toThrow('At least one accepted token is required');
   });
 

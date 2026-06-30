@@ -78,6 +78,12 @@
                 },
                 {
                   "string": "boundary accept test"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }
@@ -1166,6 +1172,12 @@
                 },
                 {
                   "string": "boundary accept test"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }

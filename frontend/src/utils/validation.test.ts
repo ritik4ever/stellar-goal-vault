@@ -34,7 +34,7 @@ describe('Frontend Validation Utilities', () => {
     });
 
     it('should reject account with invalid characters', () => {
-      const result = validateStellarAccount('G' + 'Z'.repeat(55));
+      const result = validateStellarAccount('G' + '1'.repeat(55));
       expect(result).toBeTruthy();
       expect(result).toContain('Invalid Stellar account format');
     });
@@ -165,13 +165,13 @@ describe('Frontend Validation Utilities', () => {
     it('should reject non-numeric deadline', () => {
       const result = validateDeadlineHours('abc');
       expect(result).toBeTruthy();
-      expect(result).toContain('whole number');
+      expect(result).toContain('valid number');
     });
 
-    it('should reject deadline less than 1 hour', () => {
-      const result = validateDeadlineHours('0.5');
+    it('should reject deadline less than minimum', () => {
+      const result = validateDeadlineHours('0.00001');
       expect(result).toBeTruthy();
-      expect(result).toContain('at least 1 hour');
+      expect(result).toContain('at least 0.0001 hours');
     });
 
     it('should reject deadline exceeding 365 days (8760 hours)', () => {
