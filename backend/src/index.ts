@@ -11,6 +11,7 @@ import { config, walletIntegrationReady } from "./config";
 import { apiKeyAuthMiddleware } from "./middleware/apiKeyAuth";
 import { cacheMiddleware } from "./middleware/cacheMiddleware";
 import { requestIdMiddleware } from "./middleware/requestId";
+import { validateBody } from "./middleware/validateBody";
 import type { RequestWithId } from "./middleware/types";
 import { initRedisCache } from "./services/cache";
 
@@ -481,44 +482,41 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/campaigns', (req: Request, res: Response) => {
-  const parsedBody = createCampaignPayloadSchema.safeParse(req.body);
-  if (!parsedBody.success) {
-    sendValidationError(parsedBody.error.issues);
-    return;
-  }
+app.post(
+  '/api/campaigns',
+  validateBody(createCampaignPayloadSchema),
+  (req: Request, res: Response) => {
+    const body = req.body as z.infer<typeof createCampaignPayloadSchema>;
 
-  if (parsedBody.data.deadline <= Math.floor(Date.now() / 1000)) {
-    throw new AppError('deadline must be in the future.', 400, 'INVALID_DEADLINE');
-  }
+    if (body.deadline <= Math.floor(Date.now() / 1000)) {
+      throw new AppError('deadline must be in the future.', 400, 'INVALID_DEADLINE');
+    }
 
-  const campaignInput = {
-    ...parsedBody.data,
-    maxPerContributor:
-      parsedBody.data.maxPerContributor ??
-      (config.defaultMaxPerContributor > 0 ? config.defaultMaxPerContributor : undefined),
-  };
+    const campaignInput = {
+      ...body,
+      maxPerContributor:
+        body.maxPerContributor ??
+        (config.defaultMaxPerContributor > 0 ? config.defaultMaxPerContributor : undefined),
+    };
 
-  const campaign = createCampaign(campaignInput);
-  invalidateCampaignCache();
-  res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
-});
+    const campaign = createCampaign(campaignInput);
+    invalidateCampaignCache();
+    res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+  },
+);
 
 app.post(
   '/api/campaigns/:id/pledges',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(createPledgePayloadSchema),
   (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
     }
 
-    const parsedBody = createPledgePayloadSchema.safeParse(req.body);
-    if (!parsedBody.success) {
-      sendValidationError(parsedBody.error.issues);
-    }
-
-    const campaign = addPledge(parsedId.value, parsedBody.data);
+    const body = req.body as z.infer<typeof createPledgePayloadSchema>;
+    const campaign = addPledge(parsedId.value, body);
     invalidateCampaignCache();
     res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
   },
@@ -527,23 +525,18 @@ app.post(
 app.post(
   '/api/campaigns/:id/pledges/reconcile',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(reconcilePledgePayloadSchema),
   (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
     }
 
-    const parsedBody = reconcilePledgePayloadSchema.safeParse(req.body);
-    if (!parsedBody.success) {
-      sendValidationError(parsedBody.error.issues);
-    }
 
-    const result = reconcileOnChainPledge(parsedId.value, parsedBody.data);
     invalidateCampaignCache();
     res.status(result.existing ? 200 : 201).json({
       data: {
-        campaign: { ...result.campaign, progress: calculateProgress(result.campaign) },
-        transactionHash: parsedBody.data.transactionHash,
+
       },
     });
   },
@@ -552,21 +545,18 @@ app.post(
 app.post(
   '/api/campaigns/:id/claim',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(claimCampaignPayloadSchema),
   (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
     }
 
-    const parsedBody = claimCampaignPayloadSchema.safeParse(req.body);
-    if (!parsedBody.success) {
-      sendValidationError(parsedBody.error.issues);
-    }
-
+    const body = req.body as z.infer<typeof claimCampaignPayloadSchema>;
     const campaign = claimCampaign(parsedId.value, {
-      creator: parsedBody.data.creator,
-      transactionHash: parsedBody.data.transactionHash,
-      confirmedAt: parsedBody.data.confirmedAt,
+      creator: body.creator,
+      transactionHash: body.transactionHash,
+      confirmedAt: body.confirmedAt,
     });
     invalidateCampaignCache();
     res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
@@ -576,6 +566,7 @@ app.post(
 app.post(
   '/api/campaigns/:id/refund',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(refundPayloadSchema),
   async (req: Request, res: Response, next: express.NextFunction) => {
     try {
       const parsedId = parseCampaignId(req.params.id);
@@ -583,19 +574,15 @@ app.post(
         sendValidationError(parsedId.issues);
       }
 
-      const parsedBody = refundPayloadSchema.safeParse(req.body);
-      if (!parsedBody.success) {
-        sendValidationError(parsedBody.error.issues);
-      }
-
+      const body = req.body as z.infer<typeof refundPayloadSchema>;
       ensureSorobanRefundConfig();
-      const verified = await verifyRefundTransaction(parsedBody.data.soroban.txHash);
-      const result = refundContributor(parsedId.value, parsedBody.data.contributor, {
-        ...parsedBody.data.soroban,
+      const verified = await verifyRefundTransaction(body.soroban.txHash);
+      const result = refundContributor(parsedId.value, body.contributor, {
+        ...body.soroban,
         txHash: verified.txHash,
-        ledger: verified.ledger ?? parsedBody.data.soroban.ledger,
-        createdAt: verified.createdAt ?? parsedBody.data.soroban.createdAt,
-        latestLedger: verified.latestLedger ?? parsedBody.data.soroban.latestLedger,
+        ledger: verified.ledger ?? body.soroban.ledger,
+        createdAt: verified.createdAt ?? body.soroban.createdAt,
+        latestLedger: verified.latestLedger ?? body.soroban.latestLedger,
         source: 'soroban-contract',
       });
       invalidateCampaignCache();
