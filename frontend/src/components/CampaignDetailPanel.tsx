@@ -245,9 +245,8 @@ export function CampaignDetailPanel({
       </div>
 
       <ContributorSummary
-        pledges={activeCampaign.pledges}
-        assetCode={activeCampaign.assetCode}
         campaignId={activeCampaign.id}
+        assetCode={activeCampaign.assetCode}
         isLoading={isLoading}
       />
 
