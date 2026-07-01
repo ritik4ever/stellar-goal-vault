@@ -1,168 +1,424 @@
-import axios from "axios";
-import { getDb } from "./db";
-import { recordEvent, BlockchainMetadata } from "./eventHistory";
-import dotenv from "dotenv";
-import { config } from "../config";
-import { logError, logInfo } from "../logger";
+import axios from 'axios';
+import { getDb } from './db';
+import { recordEvent, BlockchainMetadata, CampaignEventType } from './eventHistory';
+import { reconcileOnChainPledge, getCampaign, updateCampaignMetadata } from './campaignStore';
+import dotenv from 'dotenv';
+import { config } from '../config';
+import { logError, logInfo } from '../logger';
 
 dotenv.config();
 
-const SOROBAN_RPC_URL = process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org:443";
-const CONTRACT_ID = process.env.CONTRACT_ID || "";
+const SOROBAN_RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org:443';
+const CONTRACT_ID = process.env.CONTRACT_ID || '';
 
-// Poll interval in ms
-const POLL_INTERVAL = 10000;
+/**
+ * Poll interval in milliseconds. Defaults to 15 seconds per the issue spec.
+ * Configurable via SOROBAN_POLL_INTERVAL_MS environment variable.
+ */
+const POLL_INTERVAL_MS = Number(process.env.SOROBAN_POLL_INTERVAL_MS ?? 15_000);
 
-// Track last ingested event (by Soroban event sequence or timestamp)
-let lastIngestedTimestamp = 0;
+/** Maximum backoff delay in milliseconds (5 minutes). */
+const MAX_BACKOFF_MS = 5 * 60 * 1000;
 
+/** Key used to store the last-processed ledger in the kv_store table. */
+const LAST_LEDGER_KEY = 'soroban_indexer_last_ledger';
 
-// Fetch events from Soroban RPC
-async function fetchSorobanEvents() {
-  if (!CONTRACT_ID) return [];
-  try {
-    const res = await axios.post(
-      SOROBAN_RPC_URL,
-      {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getEvents",
-        params: {
-          contractIds: [CONTRACT_ID],
-          startLedger: 0, // TODO: Use last processed ledger for efficiency
-          filters: [],
-          limit: 100,
-        },
-      },
-      { headers: { "Content-Type": "application/json" } }
+// ---------------------------------------------------------------------------
+// KV store helpers (persists indexer state across restarts)
+// ---------------------------------------------------------------------------
+
+function ensureKvStore(): void {
+  const db = getDb();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS kv_store (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     );
-    if (res.data && res.data.result && Array.isArray(res.data.result.events)) {
-      return res.data.result.events;
-    }
-    return [];
-  } catch (err) {
-    logError(err, { event: "soroban_event_fetch_error" }, config.logLevel);
-    return [];
+  `);
+}
+
+function getLastProcessedLedger(): number {
+  try {
+    const db = getDb();
+    const row = db.prepare(`SELECT value FROM kv_store WHERE key = ?`).get(LAST_LEDGER_KEY) as
+      | { value: string }
+      | undefined;
+    return row ? Number(row.value) : 0;
+  } catch {
+    return 0;
   }
 }
 
+function setLastProcessedLedger(ledger: number): void {
+  try {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO kv_store (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(LAST_LEDGER_KEY, String(ledger));
+  } catch (err) {
+    logError(err, { event: 'kv_store_write_error' }, config.logLevel);
+  }
+}
 
-function isDuplicateEvent(db: any, event: any): boolean {
-  // Use transaction hash for better deduplication if available
+// ---------------------------------------------------------------------------
+// Soroban RPC helpers
+// ---------------------------------------------------------------------------
+
+interface SorobanEvent {
+  type?: string;
+  contract_id?: string;
+  txHash?: string;
+  ledger?: number;
+  ledgerCloseTime?: number;
+  event_index?: number;
+  topic?: unknown[];
+  value?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+async function fetchSorobanEvents(startLedger: number): Promise<SorobanEvent[]> {
+  if (!CONTRACT_ID) return [];
+  const res = await axios.post(
+    SOROBAN_RPC_URL,
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getEvents',
+      params: {
+        contractIds: [CONTRACT_ID],
+        startLedger,
+        filters: [],
+        limit: 200,
+      },
+    },
+    { headers: { 'Content-Type': 'application/json' }, timeout: 10_000 },
+  );
+  if (res.data?.result?.events && Array.isArray(res.data.result.events)) {
+    return res.data.result.events as SorobanEvent[];
+  }
+  return [];
+}
+
+// ---------------------------------------------------------------------------
+// Deduplication
+// ---------------------------------------------------------------------------
+
+function isDuplicateEvent(db: ReturnType<typeof getDb>, event: SorobanEvent): boolean {
+  // Primary: deduplicate by transaction hash
   if (event.txHash) {
-    const row = db.prepare(
-      `SELECT 1 FROM campaign_events WHERE json_extract(blockchain_metadata, '$.txHash') = ? LIMIT 1`
-    ).get(event.txHash);
+    const row = db
+      .prepare(
+        `SELECT 1 FROM campaign_events
+         WHERE json_extract(blockchain_metadata, '$.txHash') = ? LIMIT 1`,
+      )
+      .get(event.txHash);
     if (row) return true;
   }
-  
-  // Fallback to ledger + event index for idempotency
-  if (!event.ledger || event.event_index === undefined) return false;
-  const row = db.prepare(
-    `SELECT 1 FROM campaign_events WHERE 
-     json_extract(blockchain_metadata, '$.ledgerNumber') = ? AND 
-     json_extract(blockchain_metadata, '$.eventIndex') = ? LIMIT 1`
-  ).get(event.ledger, event.event_index);
-  return !!row;
+
+  // Fallback: deduplicate by ledger + event index
+  if (event.ledger != null && event.event_index != null) {
+    const row = db
+      .prepare(
+        `SELECT 1 FROM campaign_events
+         WHERE json_extract(blockchain_metadata, '$.ledgerNumber') = ?
+           AND json_extract(blockchain_metadata, '$.eventIndex') = ? LIMIT 1`,
+      )
+      .get(event.ledger, event.event_index);
+    if (row) return true;
+  }
+
+  return false;
 }
 
+// ---------------------------------------------------------------------------
+// Event parsing
+// ---------------------------------------------------------------------------
 
-function parseSorobanEvent(event: any) {
-  // Example event: { ledger, event_index, type, contract_id, txHash, ledgerCloseTime, ...data }
-  // Map to local event schema
-  if (!event || !event.type || !event.contract_id) return null;
-  // Only process contract events
-  if (event.type !== "contract" || event.contract_id !== CONTRACT_ID) return null;
-  
-  // Parse event topic and data
-  const topic = event.topic && Array.isArray(event.topic) ? event.topic.map((t: any) => t.toString()).join(":") : "";
-  let eventType: any = undefined;
-  if (topic.includes("Goal:Create")) eventType = "created";
-  else if (topic.includes("Goal:Pledge")) eventType = "pledged";
-  else if (topic.includes("Goal:Claim")) eventType = "claimed";
-  else if (topic.includes("Goal:Refund")) eventType = "refunded";
-  if (!eventType) return null;
-  
-  // Extract campaignId, actor, amount, etc. from event.value or event.data
-  let campaignId = "";
-  let actor = undefined;
-  let amount = undefined;
-  let metadata = { ...event };
-  
-  try {
-    if (event.value) {
-      if (event.value.campaign_id !== undefined) campaignId = String(event.value.campaign_id);
-      if (event.value.creator) actor = event.value.creator;
-      if (event.value.contributor) actor = event.value.contributor;
-      if (event.value.amount !== undefined) amount = Number(event.value.amount);
-      metadata = { ...event, ...event.value };
+/**
+ * Maps Soroban topic strings to internal event types.
+ * Topics follow the pattern: ['CampaignCreated', campaignId, …]
+ */
+const TOPIC_TO_EVENT: Record<string, CampaignEventType> = {
+  CampaignCreated: 'created',
+  CampaignPledged: 'pledged',
+  CampaignClaimed: 'claimed',
+  CampaignRefunded: 'refunded',
+  MetadataUpdated: 'metadata_updated',
+  // Alternative spellings from some contract versions
+  'Goal:Create': 'created',
+  'Goal:Pledge': 'pledged',
+  'Goal:Claim': 'claimed',
+  'Goal:Refund': 'refunded',
+  'Goal:MetaUpd': 'metadata_updated',
+};
+
+interface ParsedEvent {
+  campaignId: string;
+  eventType: CampaignEventType;
+  timestamp: number;
+  actor?: string;
+  amount?: number;
+  metadata: Record<string, unknown>;
+  blockchainMetadata: BlockchainMetadata;
+  ledger: number;
+}
+
+function parseSorobanEvent(event: SorobanEvent): ParsedEvent | null {
+  if (!event?.type || !event?.contract_id) return null;
+  if (event.type !== 'contract' || event.contract_id !== CONTRACT_ID) return null;
+
+  // Determine event type from topics
+  const topics: string[] = Array.isArray(event.topic)
+    ? event.topic.map((t) => String(t))
+    : [];
+
+  let eventType: CampaignEventType | undefined;
+  for (const topic of topics) {
+    const match = TOPIC_TO_EVENT[topic];
+    if (match) {
+      eventType = match;
+      break;
     }
-  } catch {}
+    // Also try partial match
+    for (const [key, val] of Object.entries(TOPIC_TO_EVENT)) {
+      if (topic.includes(key)) {
+        eventType = val;
+        break;
+      }
+    }
+    if (eventType) break;
+  }
+  if (!eventType) return null;
 
-  // Create blockchain metadata
+  // Extract fields from event value
+  let campaignId = '';
+  let actor: string | undefined;
+  let amount: number | undefined;
+  const metadata: Record<string, unknown> = { ...event };
+
+  try {
+    const val = event.value ?? {};
+    if (val.campaign_id != null) campaignId = String(val.campaign_id);
+    // Also check topic index 1 which often carries campaignId
+    if (!campaignId && topics[1]) campaignId = topics[1];
+    if (val.creator) actor = String(val.creator);
+    if (val.contributor) actor = String(val.contributor);
+    if (val.amount != null) amount = Number(val.amount);
+    Object.assign(metadata, val);
+  } catch {
+    // ignore parse errors
+  }
+
+  if (!campaignId) return null;
+
   const blockchainMetadata: BlockchainMetadata = {
     txHash: event.txHash,
     ledgerNumber: event.ledger,
     ledgerCloseTime: event.ledgerCloseTime,
     eventIndex: event.event_index,
     contractId: event.contract_id,
-    source: 'soroban'
+    source: 'soroban',
   };
-  
-  return { 
-    campaignId, 
-    eventType, 
-    timestamp: event.timestamp || Date.now() / 1000, 
-    actor, 
-    amount, 
+
+  const timestamp = event.ledgerCloseTime
+    ? Number(event.ledgerCloseTime)
+    : Math.floor(Date.now() / 1000);
+
+  return {
+    campaignId,
+    eventType,
+    timestamp,
+    actor,
+    amount,
     metadata,
-    blockchainMetadata
+    blockchainMetadata,
+    ledger: Number(event.ledger ?? 0),
   };
 }
 
-async function indexSorobanEvents() {
-  const db = getDb();
+// ---------------------------------------------------------------------------
+// Record upserts — idempotently create/update campaign/pledge records
+// ---------------------------------------------------------------------------
+
+function handleParsedEvent(parsed: ParsedEvent): void {
   try {
-    const events = await fetchSorobanEvents();
-    for (const event of events) {
-      if (isDuplicateEvent(db, event)) continue;
-      const parsed = parseSorobanEvent(event);
-      if (!parsed || !parsed.campaignId || !parsed.eventType) continue;
-      recordEvent(
-        parsed.campaignId,
-        parsed.eventType,
-        Math.floor(parsed.timestamp),
-        parsed.actor,
-        parsed.amount,
-        parsed.metadata,
-        parsed.blockchainMetadata
-      );
-      lastIngestedTimestamp = Math.max(lastIngestedTimestamp, Math.floor(parsed.timestamp));
-      logInfo(
-        "soroban_event_ingested",
-        {
-          message: `Indexed ${parsed.eventType} event for campaign ${parsed.campaignId}`,
-          campaignId: parsed.campaignId,
-          eventType: parsed.eventType,
-          actor: parsed.actor,
-          amount: parsed.amount,
-        },
-        config.logLevel,
-      );
+    if (parsed.eventType === 'metadata_updated') {
+      const newMetadata = String((parsed.metadata as { new_metadata?: unknown })?.new_metadata ?? '');
+      if (newMetadata && parsed.campaignId) {
+        try {
+          updateCampaignMetadata(parsed.campaignId, newMetadata);
+        } catch (err) {
+          logError(err, { event: 'soroban_metadata_update_error', campaignId: parsed.campaignId }, config.logLevel);
+        }
+      }
     }
+
+    if (parsed.eventType === 'pledged' && parsed.actor && parsed.amount != null) {
+      // Check if campaign exists before reconciling
+      const exists = getCampaign(parsed.campaignId);
+      if (!exists) {
+        // Campaign not in local DB — skip reconciliation; it will be created when
+        // the 'created' event is processed.
+        logInfo(
+          'soroban_pledge_skipped_no_campaign',
+          {
+            message: `Skipping pledge for unknown campaign ${parsed.campaignId}`,
+            campaignId: parsed.campaignId,
+          },
+          config.logLevel,
+        );
+        return;
+      }
+
+      if (parsed.blockchainMetadata.txHash) {
+        try {
+          reconcileOnChainPledge(parsed.campaignId, {
+            contributor: parsed.actor!,
+            amount: parsed.amount!,
+            transactionHash: parsed.blockchainMetadata.txHash,
+            confirmedAt: parsed.timestamp,
+          });
+        } catch (reconcileErr: unknown) {
+          // TRANSACTION_HASH_CONFLICT means already reconciled — that's fine
+          const errorWithCode = reconcileErr as { code?: string };
+          if (errorWithCode?.code !== 'TRANSACTION_HASH_CONFLICT') {
+            logError(reconcileErr, { event: 'soroban_reconcile_error', campaignId: parsed.campaignId }, config.logLevel);
+          }
+          return; // Don't double-record the event
+        }
+      }
+    }
+
+    // Record to event history (deduplication already checked before we get here)
+    recordEvent(
+      parsed.campaignId,
+      parsed.eventType,
+      Math.floor(parsed.timestamp),
+      parsed.actor,
+      parsed.amount,
+      parsed.metadata,
+      parsed.blockchainMetadata,
+    );
+
+    logInfo(
+      'soroban_event_ingested',
+      {
+        message: `Indexed ${parsed.eventType} event for campaign ${parsed.campaignId}`,
+        campaignId: parsed.campaignId,
+        eventType: parsed.eventType,
+        actor: parsed.actor,
+        amount: parsed.amount,
+        ledger: parsed.ledger,
+      },
+      config.logLevel,
+    );
   } catch (err) {
-    logError(err, { event: "soroban_event_index_error" }, config.logLevel);
+    logError(
+      err,
+      { event: 'soroban_event_handle_error', campaignId: parsed.campaignId, eventType: parsed.eventType },
+      config.logLevel,
+    );
   }
 }
 
-export function startEventIndexer() {
-  setInterval(indexSorobanEvents, POLL_INTERVAL);
+// ---------------------------------------------------------------------------
+// Main poll cycle
+// ---------------------------------------------------------------------------
+
+async function indexSorobanEvents(): Promise<void> {
+  if (!CONTRACT_ID) return;
+
+  const db = getDb();
+  const startLedger = getLastProcessedLedger();
+
+  const events = await fetchSorobanEvents(startLedger);
+  if (events.length === 0) return;
+
+  let maxLedger = startLedger;
+
+  for (const event of events) {
+    if (isDuplicateEvent(db, event)) continue;
+
+    const parsed = parseSorobanEvent(event);
+    if (!parsed) continue;
+
+    handleParsedEvent(parsed);
+
+    if (parsed.ledger > maxLedger) {
+      maxLedger = parsed.ledger;
+    }
+  }
+
+  // Persist the highest ledger we processed so we don't re-fetch it next poll
+  if (maxLedger > startLedger) {
+    setLastProcessedLedger(maxLedger + 1); // +1 so next poll starts after this ledger
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler with exponential backoff on RPC failures
+// ---------------------------------------------------------------------------
+
+let pollerTimer: ReturnType<typeof setTimeout> | null = null;
+let consecutiveFailures = 0;
+
+function scheduleNextPoll(delayMs: number): void {
+  pollerTimer = setTimeout(async () => {
+    try {
+      await indexSorobanEvents();
+      consecutiveFailures = 0;
+      scheduleNextPoll(POLL_INTERVAL_MS);
+    } catch (err) {
+      consecutiveFailures += 1;
+      const backoffMs = Math.min(
+        POLL_INTERVAL_MS * Math.pow(2, consecutiveFailures),
+        MAX_BACKOFF_MS,
+      );
+      logError(
+        err,
+        {
+          event: 'soroban_event_index_error',
+          consecutiveFailures,
+          nextRetryMs: backoffMs,
+        },
+        config.logLevel,
+      );
+      logInfo(
+        'soroban_indexer_backoff',
+        {
+          message: `RPC failure #${consecutiveFailures}. Retrying in ${backoffMs / 1000}s.`,
+          backoffMs,
+        },
+        config.logLevel,
+      );
+      scheduleNextPoll(backoffMs);
+    }
+  }, delayMs);
+}
+
+export function startEventIndexer(): void {
+  ensureKvStore();
+
+  const lastLedger = getLastProcessedLedger();
   logInfo(
-    "soroban_event_indexer_started",
+    'soroban_event_indexer_started',
     {
-      message: `Soroban event indexer started. Polling every ${POLL_INTERVAL / 1000}s.`,
-      pollIntervalSeconds: POLL_INTERVAL / 1000,
+      message: `Soroban event indexer started. Polling every ${POLL_INTERVAL_MS / 1000}s. Resuming from ledger ${lastLedger}.`,
+      pollIntervalSeconds: POLL_INTERVAL_MS / 1000,
+      resumingFromLedger: lastLedger,
+      contractId: CONTRACT_ID || '(not configured)',
     },
     config.logLevel,
   );
+
+  // Start the first poll immediately, then schedule subsequent polls
+  scheduleNextPoll(0);
+}
+
+export function stopEventIndexer(): void {
+  if (pollerTimer !== null) {
+    clearTimeout(pollerTimer);
+    pollerTimer = null;
+  }
 }

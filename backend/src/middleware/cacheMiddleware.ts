@@ -38,12 +38,13 @@ export function cacheMiddleware(ttlSeconds: number = 300) {
     if (cachedResponse) {
       res.setHeader("X-Cache", "HIT");
       res.setHeader("Content-Type", "application/json");
-      return res.send(cachedResponse);
+      res.send(cachedResponse);
+      return;
     }
 
     // Intercept response to cache it
     const originalSend = res.send.bind(res);
-    res.send = function (data: any) {
+    res.send = function (data: unknown) {
       // Only cache successful responses (2xx status codes)
       if (res.statusCode >= 200 && res.statusCode < 300) {
         const responseData =

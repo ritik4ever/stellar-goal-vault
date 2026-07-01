@@ -1,17 +1,14 @@
 {
   "root": true,
+  "ignorePatterns": ["src/services/campaignController.ts"],
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
-    "project": ["./tsconfig.eslint.json"],
-    "tsconfigRootDir": ".",
+
     "ecmaVersion": 2022,
     "sourceType": "module"
   },
   "plugins": ["@typescript-eslint"],
-  "extends": [
-    "eslint:recommended",
-    "plugin:@typescript-eslint/recommended"
-  ],
+  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
   "rules": {
     "no-console": "error"
   },

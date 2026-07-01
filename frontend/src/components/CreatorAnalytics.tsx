@@ -1,4 +1,16 @@
 import React, { useMemo } from 'react';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 import { Campaign } from '../types/campaign';
 
 interface CreatorAnalyticsProps {
@@ -12,31 +24,59 @@ export const CreatorAnalytics: React.FC<CreatorAnalyticsProps> = ({
   campaigns,
   isLoading = false,
 }) => {
-  const metrics = useMemo(() => {
+  const { metrics, statusData, pledgeData } = useMemo(() => {
     if (!creatorAddress || !campaigns.length) {
       return {
-        campaignsCreated: 0,
-        fundedCampaigns: 0,
-        claimedVaults: 0,
+        metrics: {
+          campaignsCreated: 0,
+          fundedCampaigns: 0,
+          claimedVaults: 0,
+        },
+        statusData: [],
+        pledgeData: [],
       };
     }
 
     const creatorCampaigns = campaigns.filter(
-      (c) => c.creator.toLowerCase() === creatorAddress.toLowerCase()
+      (c) => c.creator.toLowerCase() === creatorAddress.toLowerCase(),
     );
 
-    const fundedCampaigns = creatorCampaigns.filter(
-      (c) => c.progress.status === 'funded'
-    ).length;
+    const fundedCampaigns = creatorCampaigns.filter((c) => c.progress.status === 'funded').length;
+    const claimedVaults = creatorCampaigns.filter((c) => c.progress.status === 'claimed').length;
+    const openCampaigns = creatorCampaigns.filter((c) => c.progress.status === 'open').length;
+    const failedCampaigns = creatorCampaigns.filter((c) => c.progress.status === 'failed').length;
 
-    const claimedVaults = creatorCampaigns.filter(
-      (c) => c.progress.status === 'claimed'
-    ).length;
+    const statusChartData = [
+      { status: 'Open', count: openCampaigns },
+      { status: 'Funded', count: fundedCampaigns },
+      { status: 'Claimed', count: claimedVaults },
+      { status: 'Failed', count: failedCampaigns },
+    ];
+
+    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
+    const pledgesByDay: Record<string, number> = {};
+
+    creatorCampaigns.forEach((campaign) => {
+      campaign.pledges?.forEach((pledge) => {
+        if (pledge.createdAt >= thirtyDaysAgo) {
+          const date = new Date(pledge.createdAt * 1000).toLocaleDateString();
+          pledgesByDay[date] = (pledgesByDay[date] || 0) + pledge.amount;
+        }
+      });
+    });
+
+    const pledgeChartData = Object.entries(pledgesByDay)
+      .map(([date, amount]) => ({ date, volume: amount }))
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     return {
-      campaignsCreated: creatorCampaigns.length,
-      fundedCampaigns,
-      claimedVaults,
+      metrics: {
+        campaignsCreated: creatorCampaigns.length,
+        fundedCampaigns,
+        claimedVaults,
+      },
+      statusData: statusChartData,
+      pledgeData: pledgeChartData,
     };
   }, [creatorAddress, campaigns]);
 
@@ -62,6 +102,8 @@ export const CreatorAnalytics: React.FC<CreatorAnalyticsProps> = ({
     );
   }
 
+  const hasChartData = pledgeData.length > 0;
+
   return (
     <div className="creator-metrics-container">
       <h3 className="creator-metrics-title">
@@ -81,6 +123,58 @@ export const CreatorAnalytics: React.FC<CreatorAnalyticsProps> = ({
           <strong>{metrics.claimedVaults}</strong>
         </div>
       </div>
+
+      {metrics.campaignsCreated > 0 && (
+        <div style={{ marginTop: 32 }}>
+          <h4 style={{ marginBottom: 16 }}>Campaign Status Distribution</h4>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={statusData} aria-label="Bar chart showing campaign count per status">
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                dataKey="status"
+                aria-hidden="true"
+              />
+              <YAxis aria-hidden="true" />
+              <Tooltip />
+              <Legend />
+              <Bar
+                dataKey="count"
+                fill="#8884d8"
+                name="Campaign Count"
+                aria-label="Campaign count"
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {hasChartData && (
+        <div style={{ marginTop: 32 }}>
+          <h4 style={{ marginBottom: 16 }}>Pledge Volume (Last 30 Days)</h4>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart
+              data={pledgeData}
+              aria-label="Line chart showing pledge volume over the last 30 days"
+            >
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                dataKey="date"
+                aria-hidden="true"
+              />
+              <YAxis aria-hidden="true" />
+              <Tooltip />
+              <Legend />
+              <Line
+                type="monotone"
+                dataKey="volume"
+                stroke="#82ca9d"
+                name="Pledge Volume"
+                aria-label="Pledge volume"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 };

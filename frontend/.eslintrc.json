@@ -7,16 +7,16 @@
     "sourceType": "module"
   },
   "plugins": ["@typescript-eslint"],
-  "extends": [
-    "eslint:recommended",
-    "plugin:@typescript-eslint/recommended"
-  ],
+  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
   "rules": {
     "no-console": "error"
   },
   "overrides": [
     {
       "files": ["**/*.test.ts", "**/*.test.tsx", "src/test-setup.ts"],
+      "parserOptions": {
+        "project": "./tsconfig.test.json"
+      },
       "rules": {
         "no-console": "off"
       }

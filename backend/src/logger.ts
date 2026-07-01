@@ -1,4 +1,4 @@
-export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
@@ -13,7 +13,7 @@ const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
 
 export function normalizeLogLevel(rawLevel: string | undefined): LogLevel {
   const normalized = rawLevel?.trim().toLowerCase();
-  return LOG_LEVELS.includes(normalized as LogLevel) ? (normalized as LogLevel) : "info";
+  return LOG_LEVELS.includes(normalized as LogLevel) ? (normalized as LogLevel) : 'info';
 }
 
 export function shouldLog(level: LogLevel, configuredLevel: LogLevel): boolean {
@@ -35,20 +35,32 @@ export function createLogLine(
 }
 
 /* eslint-disable no-console */
-function getConsoleMethod(level: LogLevel): (message?: unknown, ...optionalParams: unknown[]) => void {
+function getConsoleMethod(
+  level: LogLevel,
+): (message?: unknown, ...optionalParams: unknown[]) => void {
   switch (level) {
-    case "debug":
+    case 'debug':
       return console.debug;
-    case "warn":
+    case 'warn':
       return console.warn;
-    case "error":
+    case 'error':
       return console.error;
-    case "info":
+    case 'info':
     default:
       return console.info;
   }
 }
 /* eslint-enable no-console */
+
+import { getRequestId } from './requestContext';
+
+function withRequestContext(fields: LogFields): LogFields {
+  const requestId = getRequestId();
+  if (requestId && fields.requestId === undefined) {
+    return { requestId, ...fields };
+  }
+  return fields;
+}
 
 export function logLine(
   level: LogLevel,
@@ -60,11 +72,11 @@ export function logLine(
     return;
   }
 
-  getConsoleMethod(level)(createLogLine(level, event, fields));
+  getConsoleMethod(level)(createLogLine(level, event, withRequestContext(fields)));
 }
 
 export function logInfo(event: string, fields: LogFields, configuredLevel: LogLevel): void {
-  logLine("info", event, fields, configuredLevel);
+  logLine('info', event, fields, configuredLevel);
 }
 
 export function logRequest(
@@ -80,7 +92,7 @@ export function logRequest(
   const durationMs = Number(request.durationMs.toFixed(2));
 
   logInfo(
-    "http_request",
+    'http_request',
     {
       message: `${request.method} ${request.path} ${request.status} ${durationMs}ms`,
       requestId: request.requestId,
@@ -106,13 +118,11 @@ export function logError(
   configuredLevel: LogLevel,
 ): void {
   const normalizedError =
-    error instanceof Error
-      ? error
-      : new Error(typeof error === "string" ? error : "Unknown error");
+    error instanceof Error ? error : new Error(typeof error === 'string' ? error : 'Unknown error');
 
   logLine(
-    "error",
-    typeof context.event === "string" ? context.event : "error",
+    'error',
+    typeof context.event === 'string' ? context.event : 'error',
     {
       ...context,
       message: normalizedError.message,

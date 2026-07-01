@@ -1,19 +1,20 @@
-import Database from "better-sqlite3";
-import path from "path";
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
 
 type SQLiteDatabase = ReturnType<typeof Database>;
 
 let db: SQLiteDatabase | null = null;
 
 function resolveDbPath(): string {
-  return process.env.DB_PATH || path.join(__dirname, "..", "..", "data", "campaigns.db");
+  return process.env.DB_PATH || path.join(__dirname, '..', '..', 'data', 'campaigns.db');
 }
 
-export type DbHealthStatus = "up" | "down";
+export type DbHealthStatus = 'up' | 'down';
 
 export function getDb(): SQLiteDatabase {
   if (!db) {
-    throw new Error("Database not initialized. Call initDb() first.");
+    throw new Error('Database not initialized. Call initDb() first.');
   }
 
   return db;
@@ -24,21 +25,21 @@ export function initDb(): void {
     return;
   }
 
-  const fs = require("fs") as typeof import("fs");
   const dbPath = resolveDbPath();
   const dir = path.dirname(dbPath);
 
-  if (dbPath !== ":memory:" && !fs.existsSync(dir)) {
+  if (dbPath !== ':memory:' && !fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
   db = new Database(dbPath);
-  
+
   // Enable Write-Ahead Logging (WAL) mode.
   // This is the chosen journal mode to prevent unnecessary lock contention,
   // allowing reads and writes to occur concurrently without blocking each other.
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('foreign_keys = ON');
 
   migrate(db);
 }
@@ -53,19 +54,21 @@ export function resetDbForTests(): void {
 export function checkDbHealth(): {
   status: DbHealthStatus;
   reachable: boolean;
+  error?: string;
 } {
   try {
     const database = getDb();
-    database.prepare("SELECT 1 AS ok").get();
+    database.prepare('SELECT 1 AS ok').get();
 
     return {
-      status: "up",
+      status: 'up',
       reachable: true,
     };
-  } catch {
+  } catch (error) {
     return {
-      status: "down",
+      status: 'down',
       reachable: false,
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -83,18 +86,39 @@ function migrate(database: SQLiteDatabase): void {
       deadline              INTEGER NOT NULL,
       created_at            INTEGER NOT NULL,
       claimed_at            INTEGER,
+      failed_at             INTEGER,
       metadata_json         TEXT,
       max_per_contributor   INTEGER
     );
 
+    -- 🌟 1. Create our new cheat-sheet search index table
+    CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
+      id UNINDEXED,
+      title,
+      description
+    );
+
+    -- 🔄 2. Automatically copy new campaigns into the cheat-sheet
+    CREATE TRIGGER IF NOT EXISTS after_campaigns_insert AFTER INSERT ON campaigns BEGIN
+      INSERT INTO campaigns_fts(id, title, description) 
+      VALUES (new.id, new.title, new.description);
+    END;
+
+    -- 🔄 3. Automatically update the cheat-sheet if a campaign changes
+    CREATE TRIGGER IF NOT EXISTS after_campaigns_update AFTER UPDATE ON campaigns BEGIN
+      UPDATE campaigns_fts 
+      SET title = new.title, description = new.description 
+      WHERE id = old.id;
+    END;
+
     CREATE TABLE IF NOT EXISTS pledges (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
       campaign_id       TEXT NOT NULL,
-      contributor      TEXT NOT NULL,
-      amount           REAL NOT NULL,
-      asset_code       TEXT NOT NULL,
-      created_at       INTEGER NOT NULL,
-      refunded_at      INTEGER,
+      contributor       TEXT NOT NULL,
+      amount            REAL NOT NULL,
+      asset_code        TEXT NOT NULL,
+      created_at        INTEGER NOT NULL,
+      refunded_at       INTEGER,
       transaction_hash TEXT,
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
     );
@@ -116,37 +140,97 @@ function migrate(database: SQLiteDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
   `);
 
-  const pledgeColumns = database
-    .prepare(`PRAGMA table_info(pledges)`)
-    .all() as Array<{ name: string }>;
+  const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
+    name: string;
+  }>;
 
-  const hasTransactionHash = pledgeColumns.some((column) => column.name === "transaction_hash");
+  const hasTransactionHash = pledgeColumns.some((column) => column.name === 'transaction_hash');
   if (!hasTransactionHash) {
     database.exec(`ALTER TABLE pledges ADD COLUMN transaction_hash TEXT`);
   }
 
-  const hasAssetCode = pledgeColumns.some((column) => column.name === "asset_code");
+  const hasAssetCode = pledgeColumns.some((column) => column.name === 'asset_code');
   if (!hasAssetCode) {
     database.exec(`ALTER TABLE pledges ADD COLUMN asset_code TEXT NOT NULL DEFAULT 'XLM'`);
   }
 
   // Add deleted_at column if not exists
-  const campaignColumns = database
-    .prepare(`PRAGMA table_info(campaigns)`)
-    .all() as Array<{ name: string }>;
-  if (!campaignColumns.some((column) => column.name === "deleted_at")) {
+  const campaignColumns = database.prepare(`PRAGMA table_info(campaigns)`).all() as Array<{
+    name: string;
+  }>;
+  if (!campaignColumns.some((column) => column.name === 'deleted_at')) {
     database.exec(`ALTER TABLE campaigns ADD COLUMN deleted_at INTEGER`);
   }
 
-  // Migrate asset_code to accepted_tokens_json if needed
-  if (campaignColumns.some((column) => column.name === "asset_code") &&
-      !campaignColumns.some((column) => column.name === "accepted_tokens_json")) {
-    database.exec(`ALTER TABLE campaigns ADD COLUMN accepted_tokens_json TEXT NOT NULL DEFAULT '[]'`);
-    // Migrate existing asset_code to accepted_tokens_json
-    database.exec(`UPDATE campaigns SET accepted_tokens_json = json_array(asset_code)`);
-    // Optionally drop asset_code column (SQLite doesn't support DROP COLUMN directly)
+  // Add failed_at column if not exists
+  if (!campaignColumns.some((column) => column.name === 'failed_at')) {
+    database.exec(`ALTER TABLE campaigns ADD COLUMN failed_at INTEGER`);
   }
-  
+
+  // Migrate asset_code to accepted_tokens_json if needed
+  if (
+    campaignColumns.some((column) => column.name === 'asset_code') &&
+    !campaignColumns.some((column) => column.name === 'accepted_tokens_json')
+  ) {
+    // 1. Create the FTS5 virtual table
+database.exec(`
+  CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
+    id,
+    title,
+    description
+  );
+`);
+
+// 2. Add the Triggers to keep data synchronized automatically
+database.exec(`
+  -- Triggers for handling future changes
+  CREATE TRIGGER IF NOT EXISTS after_campaigns_insert AFTER INSERT ON campaigns BEGIN
+    INSERT INTO campaigns_fts(id, title, description) VALUES (new.id, new.title, new.description);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS after_campaigns_update AFTER UPDATE ON campaigns BEGIN
+    UPDATE campaigns_fts SET title = new.title, description = new.description WHERE id = old.id;
+  END;
+
+  -- Fixes CodeRabbit: Delete trigger to prevent stale/corrupt terms
+  CREATE TRIGGER IF NOT EXISTS after_campaigns_delete AFTER DELETE ON campaigns BEGIN
+    DELETE FROM campaigns_fts WHERE id = old.id;
+  END;
+`);
+
+// 3. Fixes CodeRabbit: Backfill any pre-existing campaigns into the FTS table
+database.exec(`
+  INSERT INTO campaigns_fts (id, title, description)
+  SELECT id, title, description FROM campaigns
+  WHERE id NOT IN (SELECT id FROM campaigns_fts);
+`);
+
+  }
+
+  database.exec(`
+    DELETE FROM pledges
+    WHERE id NOT IN (
+      SELECT MIN(id)
+      FROM pledges
+      WHERE transaction_hash IS NOT NULL
+      GROUP BY transaction_hash
+    )
+    AND transaction_hash IS NOT NULL;
+  `);
+
+  database.exec(`
+    UPDATE campaigns
+    SET pledged_amount = COALESCE(
+      (
+        SELECT SUM(amount)
+        FROM pledges
+        WHERE pledges.campaign_id = campaigns.id
+          AND refunded_at IS NULL
+      ),
+      0
+    );
+  `);
+
   database.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pledges_transaction_hash
     ON pledges(transaction_hash)
@@ -160,7 +244,7 @@ function migrate(database: SQLiteDatabase): void {
   }
 
   const hasMaxPerContributor = campaignColumns.some(
-    (column) => column.name === "max_per_contributor",
+    (column) => column.name === 'max_per_contributor',
   );
   if (!hasMaxPerContributor) {
     database.exec(`ALTER TABLE campaigns ADD COLUMN max_per_contributor INTEGER`);

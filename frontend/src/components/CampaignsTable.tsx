@@ -1,17 +1,20 @@
 import { LayoutGrid } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebounce } from "../hooks/useDebounce";
+import { useSearchParams } from "react-router-dom";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
 import { AssetFilterDropdown } from "./AssetFilterDropdown";
 import {
   applyFilters,
   getDistinctAssetCodes,
+  searchCampaigns,
   sortCampaigns,
 } from "./campaignsTableUtils";
 import { SearchInput } from "./SearchInput";
 import { SortDropdown, SortOption } from "./SortDropdown";
 import { AddressAvatar } from "./AddressAvatar";
+import { SkeletonCard } from "./SkeletonCard";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 
@@ -30,6 +33,10 @@ interface CampaignsTableProps {
   selectedCampaignId: string | null;
   onSelect: (campaignId: string) => void;
   onSearchChange?: (query: string) => void;
+  onSortChange?: (sort: SortOption, order: 'asc' | 'desc') => void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
   isLoading?: boolean;
   invalidUrlCampaignId?: string | null;
 }
@@ -60,20 +67,97 @@ export function CampaignsTable({
   campaigns,
   selectedCampaignId,
   onSelect,
+  onSearchChange,
+  onSortChange,
+  onLoadMore,
+  hasMore = false,
+  isLoadingMore = false,
   isLoading = false,
   invalidUrlCampaignId = null,
 }: CampaignsTableProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSort = (searchParams.get('sort') as SortOption | null) ?? 'createdAt';
+  const urlOrder = (searchParams.get('order') as 'asc' | 'desc' | null) ?? 'desc';
+  const urlStatus = (searchParams.get('status') as StatusFilterValue | null) ?? '';
+  const VALID_SORTS: SortOption[] = ['createdAt', 'deadline', 'pledgedAmount', 'targetAmount'];
+  const sortBy: SortOption = VALID_SORTS.includes(urlSort) ? urlSort : 'createdAt';
   const [assetCode, setAssetCode] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("");
-  const [sortBy, setSortBy] = useState<SortOption>("newest");
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>(urlStatus);
   const [searchQuery, setSearchQuery] = useState("");
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
+  function handleSortChange(newSort: SortOption) {
+    // Toggle order if clicking same field, else default to desc
+    const newOrder = newSort === sortBy && urlOrder === 'desc' ? 'asc' : 'desc';
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('sort', newSort);
+      next.set('order', newOrder);
+      return next;
+    }, { replace: true });
+    onSortChange?.(newSort, newOrder);
+  }
+
+  function handleStatusFilterChange(value: StatusFilterValue) {
+    setStatusFilter(value);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value === '') {
+        next.delete('status');
+      } else {
+        next.set('status', value);
+      }
+      return next;
+    }, { replace: true });
+  }
+
+  function handleSearchChange(value: string) {
+    setSearchQuery(value);
+    if (value === '') {
+      onSearchChange?.('');
+    }
+  }
+
+  /** Resets every filter axis back to its default, restoring the full list. */
+  function handleClearFilters() {
+    setSearchQuery('');
+    setAssetCode('');
+    handleStatusFilterChange('');
+    onSearchChange?.('');
+  }
+
   useEffect(() => {
-    onSearchChange?.(debouncedSearchQuery);
+    if (debouncedSearchQuery !== '') {
+      onSearchChange?.(debouncedSearchQuery);
+    }
   }, [debouncedSearchQuery, onSearchChange]);
 
+  useEffect(() => {
+    setStatusFilter(urlStatus);
+  }, [urlStatus]);
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel || !onLoadMore || !hasMore) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          onLoadMore();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, onLoadMore]);
+
   const isEmpty = campaigns.length === 0;
+  const SKELETON_COUNT = 6;
 
   const assetOptions = useMemo(
     () => getDistinctAssetCodes(campaigns),
@@ -97,15 +181,20 @@ export function CampaignsTable({
     };
   }, [campaigns]);
 
+  // Derive which filter axes are active — used for context-sensitive EmptyState.
+  const hasSearchQuery = debouncedSearchQuery.trim() !== '';
+  const hasAssetFilter = assetCode !== '';
+  const hasStatusFilter = statusFilter !== '';
+  const isFiltered = hasSearchQuery || hasAssetFilter || hasStatusFilter;
+
   const filteredCampaigns = useMemo(() => {
-    const filtered = applyFilters(
-      campaigns,
-      assetCode,
-      statusFilter,
-      "", // server-side search, no client search
-    );
-    return sortCampaigns(filtered, sortBy);
-  }, [campaigns, assetCode, statusFilter, sortBy]);
+    // Apply asset + status filters first (pure client-side).
+    const assetStatusFiltered = applyFilters(campaigns, assetCode, statusFilter);
+    // Then apply search query client-side (title / creator / id).
+    const searched = searchCampaigns(assetStatusFiltered, debouncedSearchQuery);
+    // Server already sorted; client sort acts as a stable tie-break.
+    return sortCampaigns(searched, sortBy);
+  }, [campaigns, assetCode, statusFilter, debouncedSearchQuery, sortBy]);
 
   const isMobile = useMediaQuery("(max-width: 767px)");
 
@@ -121,6 +210,11 @@ export function CampaignsTable({
         <div className="section-heading">
           <h2>Campaign board</h2>
           <p className="muted">Loading campaigns...</p>
+        </div>
+        <div className="cards-only" aria-busy="true" aria-label="Loading campaigns">
+          {Array.from({ length: SKELETON_COUNT }).map((_, index) => (
+            <SkeletonCard key={`skeleton-${index}`} />
+          ))}
         </div>
       </section>
     );
@@ -156,7 +250,7 @@ export function CampaignsTable({
       <div className="board-controls">
         <SearchInput
           value={searchQuery}
-          onChange={setSearchQuery}
+          onChange={handleSearchChange}
           disabled={isLoading}
         />
         <label className="field-group" style={{ minWidth: 180 }}>
@@ -172,7 +266,7 @@ export function CampaignsTable({
           <span>Status:</span>
           <div
             className="status-filter-tabs"
-            role="tablist"
+            role="group"
             aria-label="Filter campaigns by status"
           >
             {STATUS_FILTERS.map((filter) => {
@@ -187,7 +281,7 @@ export function CampaignsTable({
                   key={filter.label}
                   type="button"
                   className={`status-filter-tab ${isActive ? "status-filter-tab-active" : ""}`}
-                  onClick={() => setStatusFilter(filter.value)}
+                  onClick={() => handleStatusFilterChange(filter.value)}
                   aria-pressed={isActive}
                   disabled={isLoading}
                 >
@@ -202,17 +296,27 @@ export function CampaignsTable({
           <span>Sort:</span>
           <SortDropdown
             value={sortBy}
-            onChange={setSortBy}
+            onChange={handleSortChange}
             disabled={isLoading}
           />
         </label>
       </div>
 
-      {filteredCampaigns.length === 0 ? (
+      {filteredCampaigns.length === 0 && isFiltered ? (
         <EmptyState
           variant="inline"
-          title="No campaigns found"
-          message="Try adjusting your search or filters."
+          title={hasSearchQuery && !hasAssetFilter && !hasStatusFilter
+            ? 'No campaigns match your search.'
+            : 'No campaigns match the selected filters.'}
+          message={hasSearchQuery && !hasAssetFilter && !hasStatusFilter
+            ? 'Try a different search term or clear your search to see all campaigns.'
+            : 'Try adjusting or clearing your filters to see all campaigns.'}
+          action={{
+            label: hasSearchQuery && !hasAssetFilter && !hasStatusFilter
+              ? 'Clear Search'
+              : 'Clear Filters',
+            onClick: handleClearFilters,
+          }}
         />
       ) : (
         <>
@@ -404,6 +508,14 @@ export function CampaignsTable({
               )}
             </div>
           )}
+
+          <div ref={loadMoreRef} aria-hidden="true" />
+          {isLoadingMore ? (
+            <p className="muted campaigns-load-more">Loading more campaigns...</p>
+          ) : null}
+          {!hasMore && filteredCampaigns.length > 0 ? (
+            <p className="muted campaigns-end-of-list">You have reached the end of the campaign list.</p>
+          ) : null}
         </>
       )}
     </section>

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { initDb, resetDbForTests, getDb } from "./db";
+import { initDb, resetDbForTests } from "./db";
 import {
   initCampaignStore,
   createCampaign,
@@ -27,7 +27,7 @@ describe("Concurrent Pledge Race Condition Tests", () => {
 
   it("should handle concurrent pledges without race conditions", async () => {
     // Create a campaign with a target of 1000
-    const campaignId = createCampaign({
+    const { id: campaignId } = createCampaign({
       creator: CREATOR,
       title: "Concurrent Test Campaign",
       description: "Testing concurrent pledge handling with race conditions",
@@ -84,7 +84,7 @@ describe("Concurrent Pledge Race Condition Tests", () => {
 
   it("should prevent over-pledging when concurrent pledges exceed target", async () => {
     // Create a campaign with a target of 500
-    const campaignId = createCampaign({
+    const { id: campaignId } = createCampaign({
       creator: CREATOR,
       title: "Over-pledge Test Campaign",
       description: "Testing over-pledge prevention with concurrent requests",
@@ -127,7 +127,7 @@ describe("Concurrent Pledge Race Condition Tests", () => {
 
   it("should enforce per-contributor limits with concurrent pledges", async () => {
     // Create a campaign with max 200 per contributor
-    const campaignId = createCampaign({
+    const { id: campaignId } = createCampaign({
       creator: CREATOR,
       title: "Per-Contributor Limit Test",
       description: "Testing per-contributor limits with concurrent pledges",
@@ -165,7 +165,7 @@ describe("Concurrent Pledge Race Condition Tests", () => {
 
   it("should maintain data consistency under high concurrent load", async () => {
     // Create a campaign
-    const campaignId = createCampaign({
+    const { id: campaignId } = createCampaign({
       creator: CREATOR,
       title: "High Load Test Campaign",
       description: "Testing data consistency under high concurrent load",
@@ -209,7 +209,7 @@ describe("Concurrent Pledge Race Condition Tests", () => {
 
   it("should handle concurrent claim and pledge operations safely", async () => {
     // Create a campaign with target 500
-    const campaignId = createCampaign({
+    const { id: campaignId } = createCampaign({
       creator: CREATOR,
       title: "Concurrent Claim Test",
       description: "Testing concurrent claim and pledge operations",
@@ -254,7 +254,7 @@ describe("Concurrent Pledge Race Condition Tests", () => {
   });
 
   it("should detect and handle duplicate concurrent pledges from same contributor", async () => {
-    const campaignId = createCampaign({
+    const { id: campaignId } = createCampaign({
       creator: CREATOR,
       title: "Duplicate Pledge Test",
       description: "Testing duplicate pledge detection",

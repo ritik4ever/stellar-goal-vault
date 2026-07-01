@@ -1,22 +1,14 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
+import { CreatorAnalytics } from "./components/CreatorAnalytics";
 import { IssueBacklog } from "./components/IssueBacklog";
-
-const CampaignDetailPanel = lazy(() =>
-  import("./components/CampaignDetailPanel").then((mod) => ({
-    default: mod.CampaignDetailPanel,
-  })),
-);
-const CreatorAnalytics = lazy(() =>
-  import("./components/CreatorAnalytics").then((mod) => ({
-    default: mod.CreatorAnalytics,
-  })),
-);
 import {
   TransactionPreviewModal,
   TransactionPreviewData,
@@ -54,9 +46,18 @@ import {
 } from "./types/campaign";
 
 const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
+const MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
 const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
 const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
 const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
+const LIST_STATE_KEY = "sgv-list-state";
+const CAMPAIGN_PAGE_SIZE = 20;
+
+type SavedListState = {
+  scrollY: number;
+  pages: number;
+  search: string;
+};
 
 type ThemeMode = "light" | "dark";
 
@@ -70,42 +71,8 @@ type ConfettiBurst = {
   campaignTitle: string;
 };
 
-function useOnlineStatus(): boolean {
-  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
-
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  return isOnline;
-}
-
 function round(value: number): number {
   return Number(value.toFixed(2));
-}
-
-function getCampaignIdFromUrl(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("campaign");
-}
-
-function setCampaignIdInUrl(campaignId: string | null): void {
-  const url = new URL(window.location.href);
-  if (campaignId) {
-    url.searchParams.set("campaign", campaignId);
-  } else {
-    url.searchParams.delete("campaign");
-  }
-  window.history.replaceState(null, "", url.toString());
 }
 
 function getErrorMessage(error: unknown): string {
@@ -145,31 +112,48 @@ function getSystemTheme(): ThemeMode {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+/**
+ * Returns a Stellar Expert deep-link for a confirmed transaction hash.
+ * Uses testnet explorer for the testnet passphrase, mainnet otherwise.
+ */
+function stellarExpertTxUrl(txHash: string, networkPassphrase: string | undefined): string {
+  const network =
+    networkPassphrase === MAINNET_PASSPHRASE ? "public" : "testnet";
+  return `https://stellar.expert/explorer/${network}/tx/${txHash}`;
+}
+
 function App() {
+  const { id: paramId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const freighter = useFreighter();
   const { toasts, addToast, dismiss } = useToast();
   const connectedWallet = freighter.publicKey;
-  const isOnline = useOnlineStatus();
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaignPage, setCampaignPage] = useState(1);
+  const [hasMoreCampaigns, setHasMoreCampaigns] = useState(false);
+  const [isLoadingMoreCampaigns, setIsLoadingMoreCampaigns] = useState(false);
+  const activeSearchRef = useRef("");
+  const activeSortRef = useRef<string>('newest');
+  const activeOrderRef = useRef<string>('desc');
+  const [searchParams] = useSearchParams();
+  const campaignParam = searchParams.get('campaign');
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(() =>
-    getCampaignIdFromUrl(),
-  );
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(paramId ?? campaignParam ?? null);
   const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(
     null,
   );
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
-  const [isIssuesLoading, setIsIssuesLoading] = useState(false);
+  const [isIssuesLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [themeMode, setThemeMode] = useLocalStorage<ThemeMode>(THEME_STORAGE_KEY, getSystemTheme());
-  const [, setSortOrder] = useLocalStorage<string>(SORT_ORDER_KEY, 'default');
-  const [, setFilterState] = useLocalStorage<string[]>(FILTER_STATE_KEY, []);
+  useLocalStorage<string>(SORT_ORDER_KEY, 'default');
+  useLocalStorage<string[]>(FILTER_STATE_KEY, []);
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -193,8 +177,70 @@ function App() {
   }, [themeMode]);
 
   useEffect(() => {
-    setCampaignIdInUrl(selectedCampaignId);
-  }, [selectedCampaignId]);
+    setSelectedCampaignId(paramId ?? campaignParam ?? null);
+  }, [paramId, campaignParam]);
+
+  async function fetchCampaignPage(
+    page: number,
+    searchQuery = "",
+    append = false,
+    sort = activeSortRef.current,
+    order = activeOrderRef.current,
+  ): Promise<Awaited<ReturnType<typeof listCampaigns>>> {
+    const response = await listCampaigns({
+      search: searchQuery,
+      page,
+      limit: CAMPAIGN_PAGE_SIZE,
+      sort,
+      order,
+    });
+
+    setCampaigns((current) => (append ? [...current, ...response.data] : response.data));
+    setCampaignPage(page);
+    setHasMoreCampaigns(page < response.pagination.totalPages);
+
+    return response;
+  }
+
+  async function loadInitialCampaignPages(
+    searchQuery: string,
+    pagesToLoad: number,
+  ): Promise<Campaign[]> {
+    let combined: Campaign[] = [];
+    let lastResponse: Awaited<ReturnType<typeof listCampaigns>> | null = null;
+
+    for (let page = 1; page <= pagesToLoad; page += 1) {
+      lastResponse = await listCampaigns({
+        search: searchQuery,
+        page,
+        limit: CAMPAIGN_PAGE_SIZE,
+      });
+      combined = [...combined, ...lastResponse.data];
+    }
+
+    setCampaigns(combined);
+    if (lastResponse) {
+      setCampaignPage(pagesToLoad);
+      setHasMoreCampaigns(pagesToLoad < lastResponse.pagination.totalPages);
+    }
+
+    return combined;
+  }
+
+  async function loadMoreCampaigns() {
+    if (!hasMoreCampaigns || isLoadingMoreCampaigns || isCampaignsLoading) {
+      return;
+    }
+
+    setIsLoadingMoreCampaigns(true);
+    try {
+      await fetchCampaignPage(campaignPage + 1, activeSearchRef.current, true);
+    } catch (error) {
+      addToast(getErrorMessage(error), "error");
+    } finally {
+      setIsLoadingMoreCampaigns(false);
+    }
+  }
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -220,9 +266,10 @@ function App() {
 
   async function refreshCampaigns(searchQuery: string = '', nextSelectedId?: string | null): Promise<Campaign[]> {
     setIsCampaignsLoading(true);
+    activeSearchRef.current = searchQuery;
     try {
-      const data = await listCampaigns({ search: searchQuery });
-      setCampaigns(data);
+      const response = await fetchCampaignPage(1, searchQuery, false);
+      const data = response.data;
 
       const requestedId = nextSelectedId ?? selectedCampaignId;
       const nextId = requestedId ?? data[0]?.id ?? null;
@@ -272,18 +319,48 @@ function App() {
     await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
   }
 
+  const initialParamIdRef = useRef(paramId);
+
   useEffect(() => {
     let cancelled = false;
 
     async function bootstrap() {
-      const requestedCampaignId = getCampaignIdFromUrl();
+      const requestedCampaignId = initialParamIdRef.current ?? null;
       setInitialLoad(true);
 
-      const [configResult, issuesResult, campaignsResult] = await Promise.allSettled([
+      const restoredRaw = sessionStorage.getItem(LIST_STATE_KEY);
+      sessionStorage.removeItem(LIST_STATE_KEY);
+      let restoredState: SavedListState | null = null;
+      if (restoredRaw) {
+        try {
+          restoredState = JSON.parse(restoredRaw) as SavedListState;
+        } catch {
+          restoredState = null;
+        }
+      }
+
+      const [configResult, issuesResult] = await Promise.allSettled([
         getAppConfig(),
         listOpenIssues(),
-        listCampaigns({ search: '' }),
       ]);
+
+      let data: Campaign[] = [];
+      try {
+        if (restoredState && !requestedCampaignId) {
+          data = await loadInitialCampaignPages(
+            restoredState.search,
+            Math.max(1, restoredState.pages),
+          );
+          requestAnimationFrame(() => {
+            window.scrollTo(0, restoredState?.scrollY ?? 0);
+          });
+        } else {
+          const response = await fetchCampaignPage(1, "", false);
+          data = response.data;
+        }
+      } catch (error) {
+        addToast(getErrorMessage(error), "error");
+      }
 
       if (cancelled) {
         return;
@@ -299,19 +376,15 @@ function App() {
         setIssues(issuesResult.value);
       }
 
-      if (campaignsResult.status === "fulfilled") {
-        const data = campaignsResult.value;
-        setCampaigns(data);
+      const nextId = requestedCampaignId ?? data[0]?.id ?? null;
+      const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
+      const resolvedId = exists ? nextId : data[0]?.id ?? null;
 
-        const nextId = requestedCampaignId ?? data[0]?.id ?? null;
-        const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
-        const resolvedId = exists ? nextId : data[0]?.id ?? null;
-
-        setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
-        setSelectedCampaignId(resolvedId);
-      } else {
-        addToast(getErrorMessage(campaignsResult.reason), "error");
+      if (requestedCampaignId && !exists) {
+        navigate('/not-found', { replace: true });
       }
+      setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
+      setSelectedCampaignId(resolvedId);
 
       setInitialLoad(false);
     }
@@ -321,7 +394,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [addToast]);
+  }, [addToast, navigate]);
 
   useEffect(() => {
     void refreshSelectedData(selectedCampaignId).catch((error) => {
@@ -370,9 +443,12 @@ function App() {
       const campaign = await createCampaign(payload);
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
+      navigate('/campaigns/' + campaign.id);
       addToast(`Campaign #${campaign.id} is live and ready for pledges.`, "success");
     } catch (error) {
-      setCreateError(toApiError(error));
+      const apiError = toApiError(error);
+      setCreateError(apiError);
+      addToast(apiError.message, "error");
     }
   }
 
@@ -453,7 +529,17 @@ function App() {
       }
 
       await refreshSelectedData(campaignId);
-      addToast("Pledge confirmed on-chain and reconciled.", "success");
+      addToast(
+        `Pledge confirmed on-chain. Tx: ${transactionResult.transactionHash.slice(0, 12)}…`,
+        "success",
+        {
+          href: stellarExpertTxUrl(
+            transactionResult.transactionHash,
+            appConfig?.networkPassphrase,
+          ),
+          label: "View on Stellar Expert",
+        },
+      );
     } catch (error) {
       if (error && typeof error === "object" && (error as { code?: string }).code === "USER_CANCELLED") {
         return;
@@ -517,6 +603,7 @@ function App() {
     try {
       await softDeleteCampaign(campaignId);
       await refreshCampaigns();
+      navigate('/');
       setActionMessage("Campaign soft deleted.");
     } catch (error) {
       setActionError(toApiError(error));
@@ -533,16 +620,27 @@ function App() {
       await refundCampaign(campaignId, contributor, sorobanReceipt);
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
-      setActionMessage("Contributor refunded successfully.");
+      setActionMessage(null);
+      addToast("Contributor refunded successfully.", "success");
     } catch (error) {
       setActionError(toApiError(error));
       setActionMessage(null);
+      addToast(getErrorMessage(error), "error");
     }
   }
 
   function handleSelect(campaignId: string) {
+    sessionStorage.setItem(
+      LIST_STATE_KEY,
+      JSON.stringify({
+        scrollY: window.scrollY,
+        pages: campaignPage,
+        search: activeSearchRef.current,
+      } satisfies SavedListState),
+    );
     setInvalidUrlCampaignId(null);
     setSelectedCampaignId(campaignId);
+    navigate('/campaigns/' + campaignId);
   }
 
   function handleThemeToggle() {
@@ -551,20 +649,6 @@ function App() {
 
   return (
     <div className="app-shell">
-      {!isOnline && (
-        <div
-          className="form-error"
-          style={{
-            margin: '0 0 1rem 0',
-            padding: '0.75rem',
-            textAlign: 'center',
-            borderRadius: '4px',
-          }}
-        >
-          You are offline. Using cached data. Connection will be restored automatically.
-        </div>
-      )}
-
       {confettiBurst ? (
         <FundedConfetti
           key={confettiBurst.id}
@@ -584,9 +668,11 @@ function App() {
               status={freighter.status}
               publicKey={freighter.publicKey}
               error={freighter.error}
+              network={getNetworkName(appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE)}
               onConnect={() => {
                 void handleConnectWallet();
               }}
+              onDisconnect={handleDisconnectWallet}
             />
             <button className="btn-ghost" type="button" onClick={handleThemeToggle}>
               {themeMode === "dark" ? "Light mode" : "Dark mode"}
@@ -633,20 +719,11 @@ function App() {
           style={{ animationDelay: "0.1s" }}
         >
           <ErrorBoundary componentName="CreatorAnalytics">
-            <Suspense
-              fallback={
-                <div
-                  className="skeleton-placeholder"
-                  style={{ height: "200px", borderRadius: "8px" }}
-                />
-              }
-            >
-              <CreatorAnalytics
-                creatorAddress={selectedCampaign.creator}
-                campaigns={campaigns}
-                isLoading={isCampaignsLoading || initialLoad}
-              />
-            </Suspense>
+            <CreatorAnalytics
+              creatorAddress={selectedCampaign.creator}
+              campaigns={campaigns}
+              isLoading={isCampaignsLoading || initialLoad}
+            />
           </ErrorBoundary>
         </section>
       )}
@@ -661,29 +738,20 @@ function App() {
           allowedAssets={appConfig?.allowedAssets ?? []}
         />
         <ErrorBoundary componentName="CampaignDetailPanel">
-          <Suspense
-            fallback={
-              <div
-                className="skeleton-placeholder"
-                style={{ height: "400px", borderRadius: "8px" }}
-              />
-            }
-          >
-            <CampaignDetailPanel
-              campaign={selectedCampaign}
-              appConfig={appConfig}
-              connectedWallet={connectedWallet}
-              isConnectingWallet={isConnectingWallet}
-              isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
-              isLoading={isSelectedLoading || initialLoad}
-              onConnectWallet={handleConnectWallet}
-              onDisconnectWallet={handleDisconnectWallet}
-              onPledge={handlePledge}
-              onClaim={handleClaim}
-              onSoftDelete={handleSoftDelete}
-              onRefund={handleRefund}
-            />
-          </Suspense>
+          <CampaignDetailPanel
+            campaign={selectedCampaign}
+            appConfig={appConfig}
+            connectedWallet={connectedWallet}
+            isConnectingWallet={isConnectingWallet}
+            isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+            isLoading={isSelectedLoading || initialLoad}
+            onConnectWallet={handleConnectWallet}
+            onDisconnectWallet={handleDisconnectWallet}
+            onPledge={handlePledge}
+            onClaim={handleClaim}
+            onSoftDelete={handleSoftDelete}
+            onRefund={handleRefund}
+          />
         </ErrorBoundary>
       </section>
 
@@ -696,12 +764,27 @@ function App() {
             onSearchChange={(query) => {
               void refreshCampaigns(query);
             }}
+            onSortChange={(sort, order) => {
+              activeSortRef.current = sort;
+              activeOrderRef.current = order;
+              void refreshCampaigns(activeSearchRef.current);
+            }}
+            onLoadMore={() => {
+              void loadMoreCampaigns();
+            }}
+            hasMore={hasMoreCampaigns}
+            isLoadingMore={isLoadingMoreCampaigns}
             isLoading={isCampaignsLoading || initialLoad}
             invalidUrlCampaignId={invalidUrlCampaignId}
           />
         </ErrorBoundary>
 
-        <CampaignTimeline history={history} isLoading={isSelectedLoading || initialLoad} />
+        <CampaignTimeline
+          history={history}
+          isLoading={isSelectedLoading || initialLoad}
+          targetAmount={selectedCampaign?.targetAmount}
+          pledgedAmount={selectedCampaign?.pledgedAmount}
+        />
       </section>
 
       <section className="section-margin">

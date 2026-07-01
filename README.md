@@ -45,9 +45,43 @@ Contract (`contracts`)
 Architecture decision records
 
 - Key architecture choices are documented in `adr/`.
+- Mermaid architecture diagrams are documented in `docs/architecture.md`.
 - See `adr/0001-sqlite-off-chain-mvp.md` for the SQLite off-chain MVP decision.
 - See `adr/0002-react-express-mvp.md` for the React + Express + Soroban MVP architecture decision.
 - See `adr/0003-freighter-wallet-integration.md` for the Freighter wallet signing approach.
+
+## TypeScript Bindings
+
+Type-safe bindings are auto-generated from the Soroban contract ABI and committed to `frontend/src/generated/`.
+
+### Regenerating Bindings
+
+After making changes to the contract, regenerate bindings:
+
+```bash
+# Set your contract ID
+export CONTRACT_ID=YOUR_DEPLOYED_CONTRACT_ID
+
+# Generate bindings
+npm run gen:bindings
+```
+
+### How It Works
+
+1. `npm run gen:bindings` calls `stellar contract bindings typescript` (or uses manual templates during development)
+2. Generated types are output to `frontend/src/generated/`
+3. `frontend/src/services/soroban.ts` imports from generated bindings via `GoalVaultContract` client
+4. CI checks for ABI drift on every PR that touches contracts
+
+### Mainnet
+
+```bash
+NETWORK=mainnet \
+CONTRACT_ID=YOUR_MAINNET_CONTRACT_ID \
+RPC_URL=https://soroban-mainnet.stellar.org \
+NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015" \
+npm run gen:bindings
+```
 
 ## Core campaign model
 
@@ -56,10 +90,12 @@ Each campaign stores:
 - `creator`
 - `title`
 - `description`
-- `assetCode`
+- `acceptedTokens` — one or more Stellar asset codes the campaign accepts
+- `assetCode` — first accepted token (backward-compatibility alias)
 - `targetAmount`
 - `pledgedAmount`
 - `deadline`
+- `tokenBalances` — per-token pledge totals (`Record<assetCode, amount>`)
 
 Campaign states:
 
@@ -67,6 +103,122 @@ Campaign states:
 - `funded` when pledged amount is at least the target and funds have not been claimed
 - `claimed` when the creator has claimed a funded vault
 - `failed` when deadline has passed without reaching the target
+
+## Contract rules
+
+### Minimum contribution (issue #184)
+
+The Soroban contract enforces a minimum contribution per pledge. The default is **100 stroops**. This is configurable at deploy time via `initialize(admin, min_contribution)`.
+
+```bash
+# Deploy with a custom minimum (e.g. 500 stroops)
+stellar contract invoke --id $CONTRACT_ID -- initialize \
+  --admin $ADMIN_ADDRESS \
+  --min_contribution 500
+```
+
+Contributions below the minimum are rejected with `"contribution below minimum"`.
+
+### Metadata updates (issue #185)
+
+A campaign creator can update the campaign metadata before the deadline:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- update_metadata \
+  --campaign_id 1 \
+  --creator $CREATOR_ADDRESS \
+  --new_metadata "Updated description"
+```
+
+The contract emits a `MetadataUpdated` event containing both the old and new metadata values. The backend event indexer processes this event and updates local state automatically.
+
+### Multi-token campaigns (issue #191)
+
+Campaigns can accept more than one Stellar asset code. When `acceptedTokens` contains multiple entries the frontend renders a per-token progress bar beneath the main progress bar, and the pledge form shows a token selector so contributors can choose which asset to pledge.
+
+The backend tracks per-token pledge totals in the `tokenBalances` field (a `Record<assetCode, amount>` map built from the `pledges` table grouped by `asset_code`). This is returned on every `GET /api/campaigns/:id` response and on the campaign list.
+
+**Contract side:** The Soroban contract stores `accepted_tokens: Vec<String>` on each campaign. `contribute()` validates that the pledged asset is in the list before recording the pledge.
+
+**Frontend side:** `CampaignCard` renders individual `<div class="progress-bar">` elements for each accepted token when `tokenBalances` is present. `CampaignDetailPanel` conditionally shows a `<select>` token picker above the amount field when `acceptedTokens.length > 1`.
+
+**Backend side:** `getCampaignTokenBalances(campaignId)` queries the `pledges` table grouped by `asset_code` and returns the map. `getCampaign()` populates `campaign.tokenBalances` on every read.
+
+### Deadline extension governance (issue #192)
+
+Any existing contributor can request a deadline extension:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- request_deadline_extension \
+  --campaign_id 1 \
+  --caller $CONTRIBUTOR_ADDRESS \
+  --new_deadline <unix_timestamp>
+```
+
+Other contributors can vote to approve:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- approve_extension \
+  --campaign_id 1 \
+  --caller $OTHER_CONTRIBUTOR
+```
+
+The extension is applied once **more than 50%** of unique contributors have approved. Constraints:
+
+- New deadline must be later than the current deadline
+- New deadline cannot exceed `MAX_CAMPAIGN_DURATION_SECONDS` (180 days) from the campaign creation timestamp
+- Reverts on claimed or canceled campaigns
+
+## Mutation testing
+
+Mutation testing is used to verify that the test suite is effective at catching real bugs, not just achieving line coverage.
+
+The backend uses [Stryker Mutator](https://stryker-mutator.io/) targeting the two most critical service files:
+
+- `backend/src/services/campaignStore.ts`
+- `backend/src/services/eventHistory.ts`
+
+### Running mutation tests
+
+```bash
+cd backend
+npm run mutation
+```
+
+This will:
+
+1. Introduce small code mutations (e.g. flipped comparisons, removed conditions, changed operators) into the source files
+2. Run the Vitest test suite against each mutant
+3. Report the **mutation score** — the percentage of mutants killed by failing tests
+
+An HTML report is generated at `backend/reports/mutation/mutation.html` and a JSON report at `backend/reports/mutation/mutation.json`.
+
+### Thresholds
+
+| Level | Score |
+|-------|-------|
+| High  | ≥ 80% |
+| Low   | ≥ 70% |
+| Break | < 65% (CI fails) |
+
+### CI usage
+
+```bash
+cd backend
+npm run mutation:ci
+```
+
+Outputs a compact text summary suitable for CI logs without generating the HTML report.
+
+### Mutation-killing tests
+
+Tests that specifically target surviving mutants live in:
+
+```
+backend/src/services/__tests__/mutation.test.ts
+```
+
+These tests exercise boundary conditions missed by standard coverage — exact equality on deadlines, arithmetic accumulation, boolean flag transitions, and null-coalescing paths.
 
 ## API reference
 
@@ -96,6 +248,26 @@ Base URL:
 - `status` is `ok` when the API and database probe succeed, otherwise `degraded`
 - `database.status` is `up` or `down` based on a lightweight SQLite reachability check
 
+### `GET /api/stats`
+
+- Returns aggregate metrics and totals computed from campaigns and pledges.
+- Cached with a 30-second TTL.
+- Response:
+
+```json
+{
+  "data": {
+    "totalCampaigns": 10,
+    "openCampaigns": 5,
+    "fundedCampaigns": 3,
+    "claimedCampaigns": 1,
+    "failedCampaigns": 1,
+    "totalPledgeVolume": 50000,
+    "uniqueContributors": 42
+  }
+}
+```
+
 ### `GET /api/campaigns`
 
 - Returns all campaigns with computed progress
@@ -107,6 +279,27 @@ Base URL:
 ### `GET /api/campaigns/:id`
 
 - Returns one campaign with pledges and event history
+
+### `GET /api/campaigns/:id/pledges`
+
+- Returns only pledge information together with pagination metadata.
+
+**Query Parameters:**
+- `page` (optional): Page number (e.g., `?page=1`)
+- `limit` (optional): Results per page (e.g., `?limit=20`)
+
+**Response Schema:**
+```json
+{
+  "data": [],
+  "pagination": {
+    "total": 0,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1
+  }
+}
+```
 
 ### `POST /api/campaigns`
 
@@ -199,6 +392,11 @@ Prerequisites:
 
 - Node.js 18+
 - npm 9+
+
+## Testing & Coverage
+
+- **Coverage target:** Both `backend` and `frontend` enforce an 80% lines coverage threshold.
+- CI will fail with a clear message if coverage drops below this threshold and uploads the HTML report as a build artifact.
 - Optional for contract work: Rust + Soroban toolchain
 
 From repo root:
@@ -351,6 +549,7 @@ Please see [SECURITY.md](./SECURITY.md) for our responsible disclosure policy, s
 ## Contributing
 
 Please see the [Contributing Guide](./CONTRIBUTING.md) for setup and contribution guidelines.
+See also [CHANGELOG.md](./CHANGELOG.md) for a full history of notable changes across releases.
 
 ## Known limitations
 

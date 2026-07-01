@@ -29,7 +29,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - VITE_API_URL=http://backend:3001/api
+      - VITE_API_URL=/api
     depends_on:
       # Wait until the backend passes its health check before starting frontend.
       backend:
@@ -43,3 +43,39 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: stellar-goal-vault-nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx-certs:/etc/nginx/certs
+    command: >
+      /bin/sh -c "
+      if [ ! -f /etc/nginx/certs/dev.crt ]; then
+        apk add --no-cache openssl >/dev/null &&
+        openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+          -keyout /etc/nginx/certs/dev.key \
+          -out /etc/nginx/certs/dev.crt \
+          -subj '/CN=localhost';
+      fi;
+      nginx -g 'daemon off;'
+      "
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-check-certificate", "-q", "--spider", "https://localhost/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  nginx-certs:

@@ -1,20 +1,26 @@
-import { Wallet } from "lucide-react";
-import { FreighterStatus } from "../hooks/useFreighter";
-import { CopyButton } from "./CopyButton";
+import { Wallet } from 'lucide-react';
+import { FreighterStatus } from '../hooks/useFreighter';
+import { CopyButton } from './CopyButton';
 
 interface WalletWidgetProps {
   status: FreighterStatus;
   publicKey: string | null;
   error: string | null;
+  network: string | null;
   onConnect: () => void;
+  onDisconnect: () => void;
 }
 
-export function WalletWidget({ status, publicKey, error, onConnect }: WalletWidgetProps) {
-  if (status === "checking") {
+function truncateAddress(key: string): string {
+  return `${key.slice(0, 4)}…${key.slice(-4)}`;
+}
+
+export function WalletWidget({ status, publicKey, error, network, onConnect, onDisconnect }: WalletWidgetProps) {
+  if (status === 'checking') {
     return <div className="wallet-widget wallet-widget--checking">Detecting wallet…</div>;
   }
 
-  if (status === "unavailable") {
+  if (status === 'unavailable') {
     return (
       <div className="wallet-widget wallet-widget--unavailable">
         <Wallet size={16} />
@@ -31,12 +37,30 @@ export function WalletWidget({ status, publicKey, error, onConnect }: WalletWidg
     );
   }
 
-  if (status === "connected" && publicKey) {
+  if (status === 'connected' && publicKey) {
+    const isMainnet = network?.toLowerCase() === 'mainnet';
     return (
-      <div className="wallet-widget wallet-widget--connected">
+      <div className="wallet-widget wallet-widget--connected wallet-widget--pill">
         <span className="wallet-widget__dot" aria-hidden="true" />
-        <span className="mono">{publicKey.slice(0, 8)}…{publicKey.slice(-4)}</span>
+        <span className="mono wallet-widget__address" title={publicKey}>
+          {truncateAddress(publicKey)}
+        </span>
+        {network && (
+          <span
+            className={`wallet-widget__network-badge${isMainnet ? ' wallet-widget__network-badge--mainnet' : ''}`}
+          >
+            {network}
+          </span>
+        )}
         <CopyButton value={publicKey} ariaLabel="Copy wallet address" />
+        <button
+          className="wallet-widget__disconnect btn-ghost"
+          type="button"
+          onClick={onDisconnect}
+          aria-label="Disconnect wallet"
+        >
+          Disconnect
+        </button>
       </div>
     );
   }

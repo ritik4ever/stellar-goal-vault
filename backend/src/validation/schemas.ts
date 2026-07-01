@@ -1,6 +1,7 @@
-import { z } from 'zod';
-import { config } from '../config';
-import { httpsOnlyUrlSchema } from './urlSafety';
+
+
+extendZodWithOpenApi(z);
+import type { CampaignStatus, CampaignSortField, SortOrder } from "../services/campaignStore";
 
 export const STELLAR_ACCOUNT_REGEX = /^G[A-Z2-7]{55}$/;
 export const ASSET_CODE_REGEX = /^[A-Za-z0-9]{1,12}$/;
@@ -51,18 +52,22 @@ export const unixTimestampSchema = z.coerce
   .int('deadline must be a valid UNIX timestamp in seconds.')
   .positive('deadline must be a valid UNIX timestamp in seconds.');
 
+function sanitizeInput(val: string): string {
+  return val
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\//g, "&sol;");
+}
+
+const containsSqlComment = (val: string) => /--|\/\*|\*\//.test(val);
+const containsScriptTag = (val: string) => /<script/i.test(val);
+
 export const createCampaignPayloadSchema = z.object({
   creator: stellarAccountIdSchema,
   title: z
     .string()
     .trim()
-    .min(4, 'Title must be at least 4 characters.')
-    .max(80),
-  description: z
-    .string()
-    .trim()
-    .min(20, 'Description must be at least 20 characters.')
-    .max(500),
+
   acceptedTokens: z
     .array(assetCodeSchema)
     .min(1, 'At least one accepted token is required.'),
@@ -142,7 +147,7 @@ function singleCampaignListQueryParam(value: unknown): string | undefined {
 
 function parsePositiveIntegerQueryParam(
   value: unknown,
-  field: 'page' | 'limit',
+
   max?: number,
 ): { ok: true; value?: number } | { ok: false; issues: z.core.$ZodIssue[] } {
   const raw = singleCampaignListQueryParam(value);
@@ -235,6 +240,32 @@ export function parseCampaignListPaginationQuery(query: {
   return { ok: true, page: pageNum, limit: limitNum };
 }
 
+export function parseHistoryPaginationQuery(query: {
+  page?: unknown;
+  pageSize?: unknown;
+}): { ok: true; page: number; pageSize: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const parsedPage = parsePositiveIntegerQueryParam(query.page, "page");
+  const parsedPageSize = parsePositiveIntegerQueryParam(query.pageSize, "pageSize", 100);
+  const issues: z.core.$ZodIssue[] = [];
+
+  if (!parsedPage.ok) {
+    issues.push(...parsedPage.issues);
+  }
+  if (!parsedPageSize.ok) {
+    issues.push(...parsedPageSize.issues);
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return {
+    ok: true,
+    page: parsedPage.ok ? (parsedPage.value ?? 1) : 1,
+    pageSize: parsedPageSize.ok ? (parsedPageSize.value ?? 20) : 20,
+  };
+}
+
 export function parsePledgeListPaginationQuery(query: {
   page?: unknown;
   limit?: unknown;
@@ -263,6 +294,7 @@ export function parsePledgeListPaginationQuery(query: {
   };
 }
 
+
 export type ValidationIssue = {
   field: string;
   message: string;
@@ -281,4 +313,13 @@ export function zodIssuesToErrorMessage(issues: z.ZodIssue[]): string {
   return zodIssuesToValidationIssues(issues)
     .map(({ field, message }) => `${field}: ${message}`)
     .join('; ');
+}
+
+export function normalizeQueryValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
 }

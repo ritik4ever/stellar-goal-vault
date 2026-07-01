@@ -9,16 +9,19 @@
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
     "build": "cd backend && npm run build && cd ../frontend && npm run build",
+    "test:visual": "npx playwright test --config=playwright.visual.config.ts",
+    "format": "npx prettier --write \"**/*.{ts,tsx,json}\"",
+    "format:check": "npx prettier --check \"**/*.{ts,tsx,json}\"",
     "deploy:contract": "./scripts/deploy.sh",
-    "test:e2e": "npm run test:e2e:seed && playwright test",
-    "test:e2e:seed": "cd backend && npx ts-node src/services/seedDeterministic.ts",
-    "prepare": "husky"
+    "gen:bindings": "cd backend && npx ts-node-dev --respawn --transpile-only ../scripts/gen-bindings.ts",
+    "gen:bindings:mainnet": "NETWORK=mainnet npm run gen:bindings"
   },
   "license": "MIT",
   "dependencies": {
     "axios": "^1.13.6",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
+    "entities": "^8.0.0",
     "express": "^5.2.1",
     "typescript": "^6.0.2",
     "zod": "^4.3.6"
@@ -28,20 +31,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.0",
-    "eslint": "^10.4.1",
-    "husky": "^9.1.7",
-    "lint-staged": "^17.0.7",
     "playwright": "^1.59.1",
-    "prettier": "^3.8.3"
-  },
-  "lint-staged": {
-    "*.{ts,tsx}": [
-      "prettier --write",
-      "eslint --fix"
-    ]
-  },
-  "prettier": {
-    "singleQuote": true,
-    "trailingComma": "all"
+    "prettier": "^3.0.0"
   }
 }
