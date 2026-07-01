@@ -14,6 +14,9 @@
   "overrides": [
     {
       "files": ["**/*.test.ts", "**/*.test.tsx", "src/test-setup.ts"],
+      "parserOptions": {
+        "project": "./tsconfig.test.json"
+      },
       "rules": {
         "no-console": "off"
       }

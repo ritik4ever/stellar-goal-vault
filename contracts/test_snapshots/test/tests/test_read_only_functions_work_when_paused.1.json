@@ -103,6 +103,12 @@
                 },
                 {
                   "string": "read when paused"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }
@@ -1104,6 +1110,12 @@
                 },
                 {
                   "string": "read when paused"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
                 }
               ]
             }

@@ -17,10 +17,8 @@ let initCampaignStore: CampaignStoreModule['initCampaignStore'];
 let listCampaigns: CampaignStoreModule['listCampaigns'];
 let listCampaignPledges: CampaignStoreModule['listCampaignPledges'];
 let reconcileOnChainPledge: CampaignStoreModule['reconcileOnChainPledge'];
-let updateCampaign: CampaignStoreModule['updateCampaign'];
 let getCampaign: CampaignStoreModule['getCampaign'];
 let getPledges: CampaignStoreModule['getPledges'];
-let getGlobalStats: CampaignStoreModule['getGlobalStats'];
 let getDb: DbModule['getDb'];
 let getCampaignHistory: EventHistoryModule['getCampaignHistory'];
 let addPledge: CampaignStoreModule['addPledge'];
@@ -40,7 +38,6 @@ beforeAll(async () => {
     listCampaigns,
     listCampaignPledges,
     reconcileOnChainPledge,
-    updateCampaign,
     getCampaign,
     getPledges,
     addPledge,
@@ -158,7 +155,8 @@ describe('on-chain pledge reconciliation', () => {
       confirmedAt: futureDeadline - 100,
     });
 
-    expect(secondResult.pledgedAmount).toBe(10);
+    expect(secondResult.campaign.pledgedAmount).toBe(10);
+    expect(secondResult.existing).toBe(true);
     expect(getPledges(campaign.id)).toHaveLength(1);
     expect(
       getCampaignHistory(campaign.id).filter((event) => event.eventType === 'pledged'),

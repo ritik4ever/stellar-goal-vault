@@ -1,5 +1,7 @@
 import { createClient, RedisClientType } from "redis";
+import { config } from "../config";
 import { logInfo, logError } from "../logger";
+import { config } from "../config";
 
 type RedisClient = RedisClientType;
 
@@ -15,7 +17,7 @@ export async function initRedisCache(): Promise<void> {
   const nodeEnv = process.env.NODE_ENV;
 
   if (!redisUrl || nodeEnv !== "production") {
-    logInfo("Redis cache disabled (not in production or REDIS_URL not set)");
+
     return;
   }
 
@@ -23,22 +25,18 @@ export async function initRedisCache(): Promise<void> {
     redisClient = createClient({ url: redisUrl });
 
     redisClient.on("error", (err) => {
-      logError("Redis client error", { error: err.message });
+
       isConnected = false;
     });
 
     redisClient.on("connect", () => {
-      logInfo("Redis cache connected");
+
       isConnected = true;
     });
 
     await redisClient.connect();
     isConnected = true;
-    logInfo("Redis cache initialized successfully");
-  } catch (error) {
-    logError("Failed to initialize Redis cache", {
-      error: error instanceof Error ? error.message : String(error),
-    });
+
     redisClient = null;
     isConnected = false;
   }
@@ -56,10 +54,7 @@ export async function getCacheValue(key: string): Promise<string | null> {
   try {
     return await redisClient.get(key);
   } catch (error) {
-    logError("Cache get error", {
-      key,
-      error: error instanceof Error ? error.message : String(error),
-    });
+
     return null;
   }
 }
@@ -85,10 +80,7 @@ export async function setCacheValue(
     }
     return true;
   } catch (error) {
-    logError("Cache set error", {
-      key,
-      error: error instanceof Error ? error.message : String(error),
-    });
+
     return false;
   }
 }
@@ -106,10 +98,7 @@ export async function deleteCacheValue(key: string): Promise<boolean> {
     const result = await redisClient.del(key);
     return result > 0;
   } catch (error) {
-    logError("Cache delete error", {
-      key,
-      error: error instanceof Error ? error.message : String(error),
-    });
+
     return false;
   }
 }
@@ -130,10 +119,7 @@ export async function clearCachePattern(pattern: string): Promise<number> {
     }
     return await redisClient.del(keys);
   } catch (error) {
-    logError("Cache pattern clear error", {
-      pattern,
-      error: error instanceof Error ? error.message : String(error),
-    });
+
     return 0;
   }
 }
@@ -146,11 +132,7 @@ export async function closeRedisCache(): Promise<void> {
     try {
       await redisClient.quit();
       isConnected = false;
-      logInfo("Redis cache connection closed");
-    } catch (error) {
-      logError("Error closing Redis connection", {
-        error: error instanceof Error ? error.message : String(error),
-      });
+
     }
   }
 }

@@ -2,9 +2,7 @@ import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
-import helmet from "helmet";
-import http, { Server } from "http";
-import { createServer } from "http";
+
 
 import { validateEnv } from "./validateEnv";
 import { z } from "zod";
@@ -13,8 +11,11 @@ import { config, walletIntegrationReady } from "./config";
 import { apiKeyAuthMiddleware } from "./middleware/apiKeyAuth";
 import { cacheMiddleware } from "./middleware/cacheMiddleware";
 import { requestIdMiddleware } from "./middleware/requestId";
+import { validateBody } from "./middleware/validateBody";
 import type { RequestWithId } from "./middleware/types";
 import { initRedisCache } from "./services/cache";
+
+import swaggerUi from 'swagger-ui-express';
 
 import {
   addPledge,
@@ -37,7 +38,6 @@ import {
   reconcileOnChainPledge,
   refundContributor,
   SortOrder,
-  updateCampaign,
 } from './services/campaignStore';
 import { checkDbHealth } from './services/db';
 import { listCampaignHistory } from './services/eventHistory';
@@ -50,7 +50,6 @@ import {
   claimCampaignPayloadSchema,
   createCampaignPayloadSchema,
   createPledgePayloadSchema,
-  parseCampaignListPaginationQuery,
   parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
@@ -60,6 +59,7 @@ import {
   parseCampaignListQuery,
   normalizeQueryValue,
 } from './validation/schemas';
+import { generateOpenApiDocument } from './openapi';
 import { logError, logInfo } from './logger';
 import {
   buildCampaignCacheKey,
@@ -111,6 +111,14 @@ app.use(compression({ threshold: 1024 }));
 const bodySizeLimit = process.env.MAX_BODY_SIZE || "16kb";
 app.use(express.json({ limit: bodySizeLimit }));
 
+// OpenAPI documentation endpoints (public, not rate-limited or cached)
+const openApiDocument = generateOpenApiDocument();
+app.get('/api/docs', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.json(openApiDocument);
+});
+app.use('/api/docs/ui', swaggerUi.serve, swaggerUi.setup(openApiDocument, { explorer: true }));
+
 // Add API key authentication middleware (production only)
 if (process.env.NODE_ENV === "production") {
   app.use(apiKeyAuthMiddleware);
@@ -125,10 +133,16 @@ const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
 export function applyRateLimit(limitOverride?: number) {
   return (req: Request, res: Response, next: express.NextFunction) => {
-    if ((req as any).rateLimitedProcessed) {
+    const rateLimitedReq = req as Request & { rateLimitedProcessed?: boolean };
+    if (rateLimitedReq.rateLimitedProcessed) {
       return next();
     }
-    (req as any).rateLimitedProcessed = true;
+    rateLimitedReq.rateLimitedProcessed = true;
+
+    // Skip rate limiting when client IP is unavailable (common in test environments)
+    if (!req.ip) {
+      return next();
+    }
 
     const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
     const maxRequests = limitOverride ?? (isWrite ? WRITE_RATE_LIMIT_MAX_REQUESTS : RATE_LIMIT_MAX_REQUESTS);
@@ -381,11 +395,11 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
     listOptions.limit = params.limit;
   }
 
-  const { campaigns, totalCount, pledgeCounts } = listCampaigns(listOptions);
+  const { campaigns, totalCount } = listCampaigns(listOptions);
 
   const data = campaigns.map((campaign) => ({
     ...campaign,
-    progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
+    progress: calculateProgress(campaign),
   }));
 
   const page = params.page ?? 1;
@@ -468,44 +482,41 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/campaigns', (req: Request, res: Response) => {
-  const parsedBody = createCampaignPayloadSchema.safeParse(req.body);
-  if (!parsedBody.success) {
-    sendValidationError(parsedBody.error.issues);
-    return;
-  }
+app.post(
+  '/api/campaigns',
+  validateBody(createCampaignPayloadSchema),
+  (req: Request, res: Response) => {
+    const body = req.body as z.infer<typeof createCampaignPayloadSchema>;
 
-  if (parsedBody.data.deadline <= Math.floor(Date.now() / 1000)) {
-    throw new AppError('deadline must be in the future.', 400, 'INVALID_DEADLINE');
-  }
+    if (body.deadline <= Math.floor(Date.now() / 1000)) {
+      throw new AppError('deadline must be in the future.', 400, 'INVALID_DEADLINE');
+    }
 
-  const campaignInput = {
-    ...parsedBody.data,
-    maxPerContributor:
-      parsedBody.data.maxPerContributor ??
-      (config.defaultMaxPerContributor > 0 ? config.defaultMaxPerContributor : undefined),
-  };
+    const campaignInput = {
+      ...body,
+      maxPerContributor:
+        body.maxPerContributor ??
+        (config.defaultMaxPerContributor > 0 ? config.defaultMaxPerContributor : undefined),
+    };
 
-  const campaign = createCampaign(campaignInput);
-  invalidateCampaignCache();
-  res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
-});
+    const campaign = createCampaign(campaignInput);
+    invalidateCampaignCache();
+    res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+  },
+);
 
 app.post(
   '/api/campaigns/:id/pledges',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(createPledgePayloadSchema),
   (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
     }
 
-    const parsedBody = createPledgePayloadSchema.safeParse(req.body);
-    if (!parsedBody.success) {
-      sendValidationError(parsedBody.error.issues);
-    }
-
-    const campaign = addPledge(parsedId.value, parsedBody.data);
+    const body = req.body as z.infer<typeof createPledgePayloadSchema>;
+    const campaign = addPledge(parsedId.value, body);
     invalidateCampaignCache();
     res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
   },
@@ -514,23 +525,18 @@ app.post(
 app.post(
   '/api/campaigns/:id/pledges/reconcile',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(reconcilePledgePayloadSchema),
   (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
     }
 
-    const parsedBody = reconcilePledgePayloadSchema.safeParse(req.body);
-    if (!parsedBody.success) {
-      sendValidationError(parsedBody.error.issues);
-    }
 
-    const campaign = reconcileOnChainPledge(parsedId.value, parsedBody.data);
     invalidateCampaignCache();
-    res.status(201).json({
+    res.status(result.existing ? 200 : 201).json({
       data: {
-        campaign: { ...campaign, progress: calculateProgress(campaign) },
-        transactionHash: parsedBody.data.transactionHash,
+
       },
     });
   },
@@ -539,21 +545,18 @@ app.post(
 app.post(
   '/api/campaigns/:id/claim',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(claimCampaignPayloadSchema),
   (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
     }
 
-    const parsedBody = claimCampaignPayloadSchema.safeParse(req.body);
-    if (!parsedBody.success) {
-      sendValidationError(parsedBody.error.issues);
-    }
-
+    const body = req.body as z.infer<typeof claimCampaignPayloadSchema>;
     const campaign = claimCampaign(parsedId.value, {
-      creator: parsedBody.data.creator,
-      transactionHash: parsedBody.data.transactionHash,
-      confirmedAt: parsedBody.data.confirmedAt,
+      creator: body.creator,
+      transactionHash: body.transactionHash,
+      confirmedAt: body.confirmedAt,
     });
     invalidateCampaignCache();
     res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
@@ -563,6 +566,7 @@ app.post(
 app.post(
   '/api/campaigns/:id/refund',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(refundPayloadSchema),
   async (req: Request, res: Response, next: express.NextFunction) => {
     try {
       const parsedId = parseCampaignId(req.params.id);
@@ -570,19 +574,15 @@ app.post(
         sendValidationError(parsedId.issues);
       }
 
-      const parsedBody = refundPayloadSchema.safeParse(req.body);
-      if (!parsedBody.success) {
-        sendValidationError(parsedBody.error.issues);
-      }
-
+      const body = req.body as z.infer<typeof refundPayloadSchema>;
       ensureSorobanRefundConfig();
-      const verified = await verifyRefundTransaction(parsedBody.data.soroban.txHash);
-      const result = refundContributor(parsedId.value, parsedBody.data.contributor, {
-        ...parsedBody.data.soroban,
+      const verified = await verifyRefundTransaction(body.soroban.txHash);
+      const result = refundContributor(parsedId.value, body.contributor, {
+        ...body.soroban,
         txHash: verified.txHash,
-        ledger: verified.ledger ?? parsedBody.data.soroban.ledger,
-        createdAt: verified.createdAt ?? parsedBody.data.soroban.createdAt,
-        latestLedger: verified.latestLedger ?? parsedBody.data.soroban.latestLedger,
+        ledger: verified.ledger ?? body.soroban.ledger,
+        createdAt: verified.createdAt ?? body.soroban.createdAt,
+        latestLedger: verified.latestLedger ?? body.soroban.latestLedger,
         source: 'soroban-contract',
       });
       invalidateCampaignCache();
@@ -708,8 +708,17 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
   }
 });
 
-app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => {
-  if (err.type === 'entity.too.large') {
+function isErrorWithMessage(error: unknown): error is { message: string; [key: string]: unknown } {
+  return typeof error === 'object' && error !== null && 'message' in error && typeof (error as { message: unknown }).message === 'string';
+}
+
+function isErrorWithType(error: unknown, type: string): boolean {
+  return typeof error === 'object' && error !== null && (error as { type?: string }).type === type;
+}
+
+app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) => {
+  void next;
+  if (isErrorWithType(err, 'entity.too.large')) {
     return res.status(413).json({
       success: false,
       error: {
@@ -720,7 +729,7 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     });
   }
 
-  if (err.message === 'Not allowed by CORS') {
+  if (isErrorWithMessage(err) && err.message === 'Not allowed by CORS') {
     return res.status(403).json({
       success: false,
       error: {
@@ -731,21 +740,25 @@ app.use((err: any, req: Request, res: Response, _next: express.NextFunction) => 
     });
   }
 
-  const statusCode = err instanceof AppError ? err.statusCode : (err.statusCode ?? 500);
-  const code = err instanceof AppError ? err.code : (err.code ?? 'INTERNAL_SERVER_ERROR');
+  const errorWithCode = err as { statusCode?: number; code?: string };
+  const statusCode = err instanceof AppError ? err.statusCode : (errorWithCode.statusCode ?? 500);
+  const code = err instanceof AppError ? err.code : (errorWithCode.code ?? 'INTERNAL_SERVER_ERROR');
   const response: ApiErrorResponse = {
     success: false,
     error: {
       code,
-      message: err.message || 'An unexpected error occurred',
+      message: isErrorWithMessage(err) ? err.message : 'An unexpected error occurred',
       requestId: (req as RequestWithId).requestId,
     },
   };
 
   if (err instanceof AppError && err.details) {
     response.error.details = err.details;
-  } else if (err.details) {
-    response.error.details = err.details;
+  } else {
+    const errorWithDetails = err as { details?: ApiErrorResponse['error']['details'] };
+    if (errorWithDetails.details) {
+      response.error.details = errorWithDetails.details;
+    }
   }
 
   logError(

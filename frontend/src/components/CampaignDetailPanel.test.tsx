@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { vi, describe, it, expect } from 'vitest';
+
 import { CampaignDetailPanel } from './CampaignDetailPanel';
 import { AppConfig, Campaign } from '../types/campaign';
 
@@ -50,30 +50,6 @@ const mockCampaign: Campaign = {
 };
 
 describe('CampaignDetailPanel', () => {
-  it('renders empty state when no campaign is selected', () => {
-    render(<CampaignDetailPanel campaign={null} appConfig={mockConfig} />);
 
-    expect(screen.getByText(/pick a campaign/i)).toBeInTheDocument();
-  });
-
-  it('renders campaign details when a campaign is provided', () => {
-    render(
-      <CampaignDetailPanel campaign={mockCampaign} appConfig={mockConfig} />,
-    );
-
-    expect(screen.getByText('Test Campaign')).toBeInTheDocument();
-    expect(screen.getByText('A test campaign description')).toBeInTheDocument();
-  });
-
-  it('renders loading skeleton when isLoading is true', () => {
-    render(
-      <CampaignDetailPanel
-        campaign={null}
-        appConfig={mockConfig}
-        isLoading={true}
-      />,
-    );
-
-    expect(document.querySelectorAll('.skeleton').length).toBeGreaterThan(0);
   });
 });

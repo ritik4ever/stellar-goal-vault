@@ -29,7 +29,7 @@ jobs:
 
       - name: Build backend
         working-directory: backend
-        run: npm run build|| npx tsc --noEmit || echo "No build script found - typecheck passed"
+        run: npm run build
 
       - name: Lint backend
         working-directory: backend
