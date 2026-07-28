@@ -11,6 +11,17 @@ It includes:
 
 ## What the project does?
 
+### 🎥 Video Walkthroughs
+
+**1. Create a Campaign**
+![Create Campaign Walkthrough](https://github.com/ritik4ever/stellar-goal-vault/releases/latest/download/create-campaign.gif)
+
+**2. Pledge Flow**
+![Pledge Flow Walkthrough](https://github.com/ritik4ever/stellar-goal-vault/releases/latest/download/pledge-flow.gif)
+
+**3. Refund Flow**
+![Refund Flow Walkthrough](https://github.com/ritik4ever/stellar-goal-vault/releases/latest/download/refund-flow.gif)
+
 Creators open a campaign with a target amount and deadline.
 
 Contributors can pledge until the deadline:
