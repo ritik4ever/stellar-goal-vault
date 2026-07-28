@@ -109,7 +109,7 @@ app.use(
 app.use(compression({ threshold: 1024 }));
 
 const bodySizeLimit = process.env.MAX_BODY_SIZE || "16kb";
-app.use(express.json({ limit: bodySizeLimit }));
+app.use(express.json({ limit: bodySizeLimit, type: ['application/json', 'application/csp-report'] }));
 
 // OpenAPI documentation endpoints (public, not rate-limited or cached)
 const openApiDocument = generateOpenApiDocument();
@@ -642,6 +642,11 @@ app.get('/api/campaigns/:id/history', (req: Request, res: Response) => {
 app.get('/api/open-issues', async (_req: Request, res: Response) => {
   const data = await fetchOpenIssues();
   res.json({ data });
+});
+
+app.post('/api/csp-report', (req: Request, res: Response) => {
+  logInfo('csp_violation', { report: req.body }, config.logLevel);
+  res.status(204).end();
 });
 
 app.get('/api/config', (_req: Request, res: Response) => {
