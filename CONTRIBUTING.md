@@ -138,6 +138,25 @@ Thank you for your interest in contributing to **Stellar Goal Vault**!
 - TypeScript: ESLint + Prettier (pre-commit via Husky + lint-staged)
 - Rust: `cargo fmt`
 
+### Pre-commit hooks
+
+This project uses Husky + lint-staged to run automated checks on staged files before each commit:
+
+- **TypeScript/TSX files**: ESLint, Prettier formatting, and TypeScript type checking
+- **Rust files**: `cargo clippy` linting
+
+The hooks are designed to run in under 20 seconds for typical changes.
+
+#### Bypassing pre-commit hooks
+
+If you need to skip the pre-commit hooks (e.g., for a quick fix or when hooks are failing due to environment issues), use the `--no-verify` flag:
+
+```bash
+git commit --no-verify -m "your commit message"
+```
+
+Use this sparingly and ensure your code still meets the project's quality standards.
+
 ## Questions?
 
 Check the [FAQ.md](./FAQ.md) before opening an issue. If your question isn't covered there, feel free to open a GitHub Discussion.
