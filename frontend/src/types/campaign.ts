@@ -159,3 +159,13 @@ export interface ApiError {
   details?: Array<{ field: string; message: string }>;
   requestId?: string;
 }
+
+export interface PlatformStats {
+  totalCampaigns: number;
+  openCampaigns: number;
+  fundedCampaigns: number;
+  claimedCampaigns: number;
+  failedCampaigns: number;
+  totalPledgeVolume: number;
+  uniqueContributors: number;
+}
