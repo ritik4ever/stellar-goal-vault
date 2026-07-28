@@ -26,7 +26,8 @@
     "build:openapi": "ts-node src/scripts/generateOpenApi.ts",
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:contract": "vitest run tests/schemathesis.test.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
