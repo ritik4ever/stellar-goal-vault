@@ -442,6 +442,38 @@ app.get('/api/campaigns/:id', (req: Request, res: Response) => {
   res.json({ data: campaign });
 });
 
+app.get('/api/campaigns/:id/reachability', (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  const campaign = getCampaign(parsedId.value);
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const days_remaining = Math.max(0, (campaign.deadline - now) / (24 * 3600));
+  const days_elapsed = Math.max(0, (now - campaign.createdAt) / (24 * 3600));
+  
+  const funding_gap = Math.max(0, campaign.targetAmount - campaign.pledgedAmount);
+  
+  const required_daily_rate = days_remaining > 0 ? funding_gap / days_remaining : (funding_gap > 0 ? Infinity : 0);
+  
+  const current_daily_rate = days_elapsed > 0 ? campaign.pledgedAmount / days_elapsed : campaign.pledgedAmount;
+  
+  const is_on_track = days_remaining <= 0 ? false : current_daily_rate >= required_daily_rate;
+
+  res.json({
+    funding_gap,
+    days_remaining,
+    required_daily_rate,
+    current_daily_rate,
+    is_on_track
+  });
+});
+
 app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
