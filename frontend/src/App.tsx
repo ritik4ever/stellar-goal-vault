@@ -5,6 +5,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
+import { PlatformStatsHero } from "./components/PlatformStatsHero";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { CreatorAnalytics } from "./components/CreatorAnalytics";
@@ -756,6 +757,7 @@ function App() {
       </section>
 
       <section className="secondary-grid">
+        <PlatformStatsHero />
         <ErrorBoundary componentName="CampaignsTable">
           <CampaignsTable
             campaigns={campaigns}

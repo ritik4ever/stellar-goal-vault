@@ -5,6 +5,7 @@ import {
   CreateCampaignPayload,
   CreatePledgePayload,
   OpenIssue,
+  PlatformStats,
   ReconcilePledgePayload,
   SorobanRefundMetadata,
 } from '../types/campaign';
@@ -188,6 +189,14 @@ export async function listOpenIssues(): Promise<OpenIssue[]> {
 export async function getDistinctAssetCodes(): Promise<string[]> {
   const body = await apiRequest<{ data: string[] }>({
     url: '/campaigns/assets',
+    method: 'GET',
+  });
+  return body.data;
+}
+
+export async function getPlatformStats(): Promise<PlatformStats> {
+  const body = await apiRequest<{ data: PlatformStats }>({
+    url: '/stats',
     method: 'GET',
   });
   return body.data;
