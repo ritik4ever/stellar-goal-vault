@@ -17,6 +17,7 @@ import { AddressAvatar } from "./AddressAvatar";
 import { SkeletonCard } from "./SkeletonCard";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { formatAmount } from "../utils/formatCurrency";
 
 type StatusFilterValue = "" | CampaignStatus;
 
@@ -363,7 +364,7 @@ export function CampaignsTable({
                         </td>
                         <td>
                           <div className="progress-copy">
-                            {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
+                            {formatAmount(campaign.pledgedAmount)} / {formatAmount(campaign.targetAmount)}{" "}
                             {campaign.assetCode}
                           </div>
                           <div className="progress-bar" aria-hidden>
@@ -461,7 +462,7 @@ export function CampaignsTable({
                       </div>
                       <div className="campaign-progress">
                         <div className="progress-copy">
-                          {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
+                          {formatAmount(campaign.pledgedAmount)} / {formatAmount(campaign.targetAmount)}{" "}
                           {campaign.assetCode}
                         </div>
                         <div className="progress-bar" aria-hidden>

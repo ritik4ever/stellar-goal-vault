@@ -8,6 +8,7 @@ import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
 import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
+import { formatAmount } from '../utils/formatCurrency';
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -236,7 +237,7 @@ export function CampaignDetailPanel({
         </article>
         <article className="detail-stat">
           <span>Remaining</span>
-          <strong>{activeCampaign.progress.remainingAmount}</strong>
+          <strong>{formatAmount(activeCampaign.progress.remainingAmount, activeCampaign.assetCode)}</strong>
         </article>
         <article className="detail-stat">
           <span>Active pledges</span>

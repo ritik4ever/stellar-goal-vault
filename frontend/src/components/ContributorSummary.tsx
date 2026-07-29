@@ -6,6 +6,7 @@ import { EmptyState } from './EmptyState';
 import { ContributorSummary as ContributorSummaryData } from '../types/campaign';
 import { apiRequest } from '../services/httpClient';
 import { buildContributorCsv, downloadCsv } from '../utils/exportCsv';
+import { formatAmount } from '../utils/formatCurrency';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -131,12 +132,8 @@ export function ContributorSummary({
   // Compute stats from the API data
   const uniqueAddresses = contributors.length;
   const activeAddresses = contributors.filter((c) => !c.isFullyRefunded).length;
-  const activeGrandTotal = Number(
-    contributors.reduce((sum, c) => sum + c.totalPledged, 0).toFixed(2),
-  );
-  const refundedGrandTotal = Number(
-    contributors.reduce((sum, c) => sum + c.refundedAmount, 0).toFixed(2),
-  );
+  const activeGrandTotal = contributors.reduce((sum, c) => sum + c.totalPledged, 0);
+  const refundedGrandTotal = contributors.reduce((sum, c) => sum + c.refundedAmount, 0);
 
   function handleExportCsv() {
     const filename = `contributors-${campaignId ?? 'export'}.csv`;
@@ -175,14 +172,14 @@ export function ContributorSummary({
         <article className="contributor-stat">
           <span className="contributor-stat-label">Active total</span>
           <strong>
-            {activeGrandTotal} {assetCode}
+            {formatAmount(activeGrandTotal, assetCode)}
           </strong>
           <span className="contributor-stat-hint muted">Sum of all non-refunded pledges.</span>
         </article>
         <article className="contributor-stat">
           <span className="contributor-stat-label">Refunded total</span>
           <strong>
-            {refundedGrandTotal} {assetCode}
+            {formatAmount(refundedGrandTotal, assetCode)}
           </strong>
           <span className="contributor-stat-hint muted">
             Historical refunds only; not counted in active.
@@ -217,7 +214,7 @@ export function ContributorSummary({
               <div role="cell" className="contributor-amounts">
                 {row.totalPledged > 0 ? (
                   <strong>
-                    {row.totalPledged} {assetCode}
+                    {formatAmount(row.totalPledged, assetCode)}
                   </strong>
                 ) : (
                   <span className="muted">—</span>
@@ -227,14 +224,14 @@ export function ContributorSummary({
                 {row.isFullyRefunded ? (
                   <span className="contributor-refunded">
                     <strong>
-                      {row.refundedAmount} {assetCode}
+                      {formatAmount(row.refundedAmount, assetCode)}
                     </strong>
                     <span className="muted"> (fully refunded)</span>
                   </span>
                 ) : row.refundedAmount > 0 ? (
                   <span className="contributor-refunded">
                     <strong>
-                      {row.refundedAmount} {assetCode}
+                      {formatAmount(row.refundedAmount, assetCode)}
                     </strong>
                     <span className="muted"> (partial refund)</span>
                   </span>
