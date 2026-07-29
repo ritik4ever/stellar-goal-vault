@@ -1,3 +1,5 @@
+Closes #647
+
 ## Summary
 
 This PR addresses issue #647 by adding a comprehensive environment variable reference table and secret rotation guide, updating the README, and fixing a backend TypeScript compiler error.
