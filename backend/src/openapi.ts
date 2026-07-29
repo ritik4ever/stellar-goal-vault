@@ -309,6 +309,50 @@ const openIssuesResponseSchema = z
   })
   .openapi('OpenIssuesResponse');
 
+const campaignAnalyticsSchema = z
+  .object({
+    campaignId: z.string().openapi({ example: '1' }),
+    creator: stellarAddressSchema,
+    title: z.string().openapi({ example: 'Clean Water Initiative' }),
+    targetAmount: z.number().openapi({ example: 1000 }),
+    pledgedAmount: z.number().openapi({ example: 455 }),
+    percentFunded: z.number().openapi({ example: 45.5 }),
+    totalPledges: z.number().int().openapi({ example: 12 }),
+    totalContributors: z.number().int().openapi({ example: 5 }),
+    pledgeVelocity: z.array(
+      z.object({
+        date: z.string().openapi({ example: '2024-01-15' }),
+        amount: z.number().openapi({ example: 150 }),
+        count: z.number().int().openapi({ example: 3 }),
+      }),
+    ),
+    contributorMap: z.array(
+      z.object({
+        date: z.string().openapi({ example: '2024-01-15' }),
+        count: z.number().int().openapi({ example: 2 }),
+      }),
+    ),
+    fundingPace: z.array(
+      z.object({
+        date: z.string().openapi({ example: '2024-01-15' }),
+        cumulativePercent: z.number().openapi({ example: 45.5 }),
+      }),
+    ),
+    topContributors: z.array(
+      z.object({
+        contributor: stellarAddressSchema,
+        totalPledged: z.number().openapi({ example: 200 }),
+      }),
+    ),
+  })
+  .openapi('CampaignAnalytics');
+
+const campaignAnalyticsResponseSchema = z
+  .object({
+    data: campaignAnalyticsSchema,
+  })
+  .openapi('CampaignAnalyticsResponse');
+
 const contributorSummaryResponseSchema = z
   .object({
     data: z.array(contributorSummarySchema),
@@ -370,6 +414,8 @@ const registeredSchemas = {
   StatsResponse: registry.register('StatsResponse', statsResponseSchema),
   LeaderboardResponse: registry.register('LeaderboardResponse', leaderboardResponseSchema),
   OpenIssuesResponse: registry.register('OpenIssuesResponse', openIssuesResponseSchema),
+  CampaignAnalytics: registry.register('CampaignAnalytics', campaignAnalyticsSchema),
+  CampaignAnalyticsResponse: registry.register('CampaignAnalyticsResponse', campaignAnalyticsResponseSchema),
 };
 
 // ---------------------------------------------------------------------------
@@ -623,6 +669,20 @@ registry.registerPath({
   description: 'Returns the machine-readable OpenAPI 3.1 specification for this API.',
   responses: {
     200: { description: 'OpenAPI JSON spec', content: { 'application/json': { schema: z.object({}).passthrough() } } },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/campaigns/{id}/analytics',
+  tags: ['Campaigns'],
+  summary: 'Get campaign analytics',
+  description: 'Returns detailed analytics for a specific campaign including pledge velocity, contributor map, funding pace, and top contributors.',
+  request: { params: z.object({ id: campaignIdParamSchema }) },
+  responses: {
+    200: { description: 'Campaign analytics', content: { 'application/json': { schema: registeredSchemas.CampaignAnalyticsResponse } } },
+    400: validationErrorResponse,
+    404: notFoundResponse,
   },
 });
 

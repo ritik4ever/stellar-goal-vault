@@ -159,3 +159,18 @@ export interface ApiError {
   details?: Array<{ field: string; message: string }>;
   requestId?: string;
 }
+
+export interface CampaignAnalytics {
+  campaignId: string;
+  creator: string;
+  title: string;
+  targetAmount: number;
+  pledgedAmount: number;
+  percentFunded: number;
+  totalPledges: number;
+  totalContributors: number;
+  pledgeVelocity: Array<{ date: string; amount: number; count: number }>;
+  contributorMap: Array<{ date: string; count: number }>;
+  fundingPace: Array<{ date: string; cumulativePercent: number }>;
+  topContributors: Array<{ contributor: string; totalPledged: number }>;
+}

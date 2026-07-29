@@ -1,6 +1,7 @@
 import {
   AppConfig,
   Campaign,
+  CampaignAnalytics,
   CampaignEvent,
   CreateCampaignPayload,
   CreatePledgePayload,
@@ -188,6 +189,14 @@ export async function listOpenIssues(): Promise<OpenIssue[]> {
 export async function getDistinctAssetCodes(): Promise<string[]> {
   const body = await apiRequest<{ data: string[] }>({
     url: '/campaigns/assets',
+    method: 'GET',
+  });
+  return body.data;
+}
+
+export async function getCampaignAnalytics(campaignId: string): Promise<CampaignAnalytics> {
+  const body = await apiRequest<{ data: CampaignAnalytics }>({
+    url: `/campaigns/${campaignId}/analytics`,
     method: 'GET',
   });
   return body.data;

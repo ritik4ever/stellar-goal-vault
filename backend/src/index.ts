@@ -27,6 +27,7 @@ import {
   claimCampaign,
   createCampaign,
   getCampaign,
+  getCampaignAnalytics,
   getCampaignWithProgress,
   getContributorSummary,
   getGlobalStats,
@@ -662,6 +663,20 @@ app.get('/api/config', (_req: Request, res: Response) => {
       assetAddresses: config.assetAddresses,
     },
   });
+});
+
+app.get('/api/campaigns/:id/analytics', (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  const analytics = getCampaignAnalytics(parsedId.value);
+  if (!analytics) {
+    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+  }
+
+  res.json({ data: analytics });
 });
 
 app.get('/api/stats', cacheMiddleware(30), (_req: Request, res: Response) => {

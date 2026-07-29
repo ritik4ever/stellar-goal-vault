@@ -1232,6 +1232,121 @@ export function updateCampaignMetadata(campaignId: string, newMetadata: string):
   );
 }
 
+export interface CampaignAnalytics {
+  campaignId: string;
+  creator: string;
+  title: string;
+  targetAmount: number;
+  pledgedAmount: number;
+  percentFunded: number;
+  totalPledges: number;
+  totalContributors: number;
+  pledgeVelocity: Array<{ date: string; amount: number; count: number }>;
+  contributorMap: Array<{ date: string; count: number }>;
+  fundingPace: Array<{ date: string; cumulativePercent: number }>;
+  topContributors: Array<{ contributor: string; totalPledged: number }>;
+}
+
+/**
+ * Computes analytics for a specific campaign, including pledge velocity,
+ * contributor map, funding pace, and top contributors.
+ *
+ * @param campaignId - The unique campaign identifier.
+ * @returns A {@link CampaignAnalytics} object with detailed analytics data,
+ *          or `undefined` if the campaign does not exist.
+ */
+export function getCampaignAnalytics(campaignId: string): CampaignAnalytics | undefined {
+  const campaign = getCampaign(campaignId);
+  if (!campaign) {
+    return undefined;
+  }
+
+  const progress = calculateProgress(campaign);
+  const db = getDb();
+
+  // Pledge velocity: daily pledge amounts grouped by day
+  const velocityRows = db
+    .prepare(
+      `SELECT 
+         date(created_at, 'unixepoch') as day,
+         COALESCE(SUM(amount), 0) as daily_amount,
+         COUNT(*) as daily_count
+       FROM pledges
+       WHERE campaign_id = ? AND refunded_at IS NULL
+       GROUP BY day
+       ORDER BY day ASC`,
+    )
+    .all(campaignId) as Array<{ day: string; daily_amount: number; daily_count: number }>;
+
+  const pledgeVelocity = velocityRows.map((row) => ({
+    date: row.day,
+    amount: round(row.daily_amount),
+    count: row.daily_count,
+  }));
+
+  // Contributor map: number of unique contributors per day
+  const contributorMapRows = db
+    .prepare(
+      `SELECT 
+         date(created_at, 'unixepoch') as day,
+         COUNT(DISTINCT contributor) as contributor_count
+       FROM pledges
+       WHERE campaign_id = ? AND refunded_at IS NULL
+       GROUP BY day
+       ORDER BY day ASC`,
+    )
+    .all(campaignId) as Array<{ day: string; contributor_count: number }>;
+
+  const contributorMap = contributorMapRows.map((row) => ({
+    date: row.day,
+    count: row.contributor_count,
+  }));
+
+  // Funding pace: cumulative percentage of target over time
+  const fundingPace: Array<{ date: string; cumulativePercent: number }> = [];
+  let cumulativeAmount = 0;
+  for (const row of velocityRows) {
+    cumulativeAmount += row.daily_amount;
+    const cumulativePercent = round(
+      Math.min(100, (cumulativeAmount / campaign.targetAmount) * 100),
+    );
+    fundingPace.push({
+      date: row.day,
+      cumulativePercent,
+    });
+  }
+
+  // Top contributors (top 10)
+  const topContributors = getContributorSummary(campaignId)
+    .slice(0, 10)
+    .map((c) => ({
+      contributor: c.contributor,
+      totalPledged: c.totalPledged,
+    }));
+
+  // Count unique contributors
+  const contributorCountRow = db
+    .prepare(
+      `SELECT COUNT(DISTINCT contributor) as count FROM pledges WHERE campaign_id = ? AND refunded_at IS NULL`,
+    )
+    .get(campaignId) as { count: number };
+
+  return {
+    campaignId: campaign.id,
+    creator: campaign.creator,
+    title: campaign.title,
+    targetAmount: campaign.targetAmount,
+    pledgedAmount: campaign.pledgedAmount,
+    percentFunded: progress.percentFunded,
+    totalPledges: progress.pledgeCount,
+    totalContributors: contributorCountRow.count,
+    pledgeVelocity,
+    contributorMap,
+    fundingPace,
+    topContributors,
+  };
+}
+
 export function getTopContributors(limit: number = 10): LeaderboardEntry[] {
   const db = getDb();
   const rows = db

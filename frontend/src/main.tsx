@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App";
+import { CampaignAnalytics } from "./components/CampaignAnalytics";
 import { NotFoundPage } from "./components/NotFoundPage";
 import "./index.css";
 
@@ -11,6 +12,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/campaigns/:id" element={<App />} />
+        <Route path="/campaigns/:id/analytics" element={<CampaignAnalytics />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </BrowserRouter>
