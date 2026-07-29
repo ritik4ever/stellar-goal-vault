@@ -483,6 +483,34 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'get',
+  path: '/api/campaigns/{id}/pledges/export.csv',
+  tags: ['Pledges'],
+  summary: 'Export campaign pledges as CSV',
+  description: 'Exports all pledges for a campaign in CSV format. Accessible by campaign creator only.',
+  request: {
+    params: z.object({ id: campaignIdParamSchema }),
+    query: z.object({
+      creator: z.string().optional().openapi({ description: 'Creator address (alternative to X-User-Address header).' }),
+    }),
+    headers: z.object({
+      'x-user-address': z.string().optional().openapi({ description: 'Stellar address of the campaign creator.' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'CSV export stream of campaign pledges',
+      content: { 'text/csv': { schema: z.string() } },
+    },
+    403: {
+      description: 'Forbidden - only campaign creator can export',
+      content: { 'application/json': { schema: registeredSchemas.ApiError } },
+    },
+    404: notFoundResponse,
+  },
+});
+
+registry.registerPath({
   method: 'post',
   path: '/api/campaigns/{id}/pledges',
   tags: ['Pledges'],

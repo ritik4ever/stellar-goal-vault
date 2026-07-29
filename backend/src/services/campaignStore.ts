@@ -22,6 +22,7 @@ export interface PledgeInput {
   contributor: string;
   amount: number;
   assetCode?: string; // Optional for backward compatibility if only one token
+  transactionHash?: string;
 }
 
 export interface ReconciledPledgeInput extends PledgeInput {
@@ -358,21 +359,20 @@ if (options?.searchQuery && options.searchQuery.trim()) {
   const cleanQuery = rawQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
   const ftsMatchTerm = cleanQuery ? `${cleanQuery}*` : '';
 
-  // Fixes CodeRabbit: Use exact matching for creator public key instead of a slow LIKE scan
-  const creatorExactTerm = rawQuery; 
+  const creatorMatchTerm = `%${rawQuery}%`; 
   const exactTerm = rawQuery;
 
   if (ftsMatchTerm) {
     whereClauses.push(`(
       campaigns.id IN (SELECT id FROM campaigns_fts WHERE campaigns_fts MATCH ?)
-      OR LOWER(campaigns.creator) = LOWER(?)
+      OR LOWER(campaigns.creator) LIKE LOWER(?)
       OR campaigns.id = ?
     )`);
-    params.push(ftsMatchTerm, creatorExactTerm, exactTerm);
+    params.push(ftsMatchTerm, creatorMatchTerm, exactTerm);
   } else {
     // Fallback if cleaning the query stripped all characters
-    whereClauses.push(`(LOWER(campaigns.creator) = LOWER(?) OR campaigns.id = ?)`);
-    params.push(creatorExactTerm, exactTerm);
+    whereClauses.push(`(LOWER(campaigns.creator) LIKE LOWER(?) OR campaigns.id = ?)`);
+    params.push(creatorMatchTerm, exactTerm);
   }
 }
   if (options?.assetCode) {
@@ -757,8 +757,8 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
   }
   db.prepare(
     `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
-     VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-  ).run(campaignId, input.contributor, roundedAmount, assetCode, createdAt);
+     VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+  ).run(campaignId, input.contributor, roundedAmount, assetCode, createdAt, input.transactionHash ?? null);
 
   db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`).run(
     roundedAmount,
@@ -1123,8 +1123,8 @@ export function refundContributor(
   const refundedAt = reconciliation?.createdAt ?? nowInSeconds();
 
   db.prepare(
-    `UPDATE pledges SET refunded_at = ? WHERE campaign_id = ? AND contributor = ? AND refunded_at IS NULL`,
-  ).run(refundedAt, campaignId, contributor);
+    `UPDATE pledges SET refunded_at = ?, refund_transaction_hash = ? WHERE campaign_id = ? AND contributor = ? AND refunded_at IS NULL`,
+  ).run(refundedAt, reconciliation?.txHash ?? null, campaignId, contributor);
 
   db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount - ? WHERE id = ?`).run(
     refundedAmount,
@@ -1261,4 +1261,51 @@ export function getTopContributors(limit: number = 10): LeaderboardEntry[] {
     campaignCount: row.campaign_count,
     averagePledgeAmount: round(row.avg_pledge),
   }));
+}
+
+export interface PledgeExportRow {
+  contributor: string;
+  amount: number;
+  pledged_at: number;
+  tx_hash: string | null;
+  refunded_at: number | null;
+  refund_tx_hash: string | null;
+}
+
+export function escapeCsvCell(value: unknown): string {
+  if (value == null) return '';
+  const str = String(value);
+  if (/[",\r\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+export function formatCsvTimestamp(ts: number | null | undefined): string {
+  if (ts == null) return '';
+  const ms = ts > 1e11 ? ts : ts * 1000;
+  return new Date(ms).toISOString();
+}
+
+export function getPledgesStreamIterator(campaignId: string): IterableIterator<PledgeExportRow> {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT 
+      p.contributor,
+      p.amount,
+      p.created_at AS pledged_at,
+      p.transaction_hash AS tx_hash,
+      p.refunded_at AS refunded_at,
+      COALESCE(p.refund_transaction_hash, (
+        SELECT json_extract(blockchain_metadata, '$.txHash')
+        FROM campaign_events
+        WHERE campaign_id = p.campaign_id AND event_type = 'refunded' AND actor = p.contributor
+        LIMIT 1
+      )) AS refund_tx_hash
+    FROM pledges p
+    WHERE p.campaign_id = ?
+    ORDER BY p.created_at ASC, p.id ASC
+  `);
+
+  return stmt.iterate(campaignId) as IterableIterator<PledgeExportRow>;
 }

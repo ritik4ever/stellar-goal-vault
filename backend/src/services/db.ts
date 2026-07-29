@@ -154,6 +154,11 @@ function migrate(database: SQLiteDatabase): void {
     database.exec(`ALTER TABLE pledges ADD COLUMN asset_code TEXT NOT NULL DEFAULT 'XLM'`);
   }
 
+  const hasRefundTransactionHash = pledgeColumns.some((column) => column.name === 'refund_transaction_hash');
+  if (!hasRefundTransactionHash) {
+    database.exec(`ALTER TABLE pledges ADD COLUMN refund_transaction_hash TEXT`);
+  }
+
   // Add deleted_at column if not exists
   const campaignColumns = database.prepare(`PRAGMA table_info(campaigns)`).all() as Array<{
     name: string;

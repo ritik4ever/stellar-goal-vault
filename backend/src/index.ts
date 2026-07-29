@@ -1,7 +1,8 @@
 import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
-import express, { Request, Response } from "express";
+import express, { Request, Response, NextFunction } from "express";
+import helmet from "helmet";
 
 
 import { validateEnv } from "./validateEnv";
@@ -31,6 +32,9 @@ import {
   getContributorSummary,
   getGlobalStats,
   getTopContributors,
+  getPledgesStreamIterator,
+  escapeCsvCell,
+  formatCsvTimestamp,
   initCampaignStore,
   listCampaignPledges,
   listCampaigns,
@@ -482,6 +486,77 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
   });
 });
 
+export function getRequestUserAddress(req: Request): string | undefined {
+  const headerAddress =
+    (req.headers['x-user-address'] as string) ||
+    (req.headers['x-creator-address'] as string) ||
+    (req.headers['x-user-id'] as string);
+  if (headerAddress && headerAddress.trim()) {
+    return headerAddress.trim();
+  }
+
+  const queryAddress =
+    (req.query.creator as string) ||
+    (req.query.userAddress as string) ||
+    (req.query.user as string) ||
+    (req.query.address as string);
+  if (queryAddress && queryAddress.trim()) {
+    return queryAddress.trim();
+  }
+
+  return undefined;
+}
+
+app.get('/api/campaigns/:id/pledges/export.csv', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsedId = parseCampaignId(req.params.id);
+    if (!parsedId.ok) {
+      sendValidationError(parsedId.issues);
+    }
+
+    const campaign = getCampaign(parsedId.value);
+    if (!campaign) {
+      throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+    }
+
+    const requesterAddress = getRequestUserAddress(req);
+    if (!requesterAddress || requesterAddress.toLowerCase() !== campaign.creator.toLowerCase()) {
+      throw new AppError('Only the campaign creator can export pledges.', 403, 'FORBIDDEN');
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="campaign-${parsedId.value}-pledges.export.csv"`);
+    res.status(200);
+
+    const headerLine = 'contributor,amount,pledged_at,tx_hash,refunded_at,refund_tx_hash\r\n';
+    res.write(headerLine);
+
+    const iterator = getPledgesStreamIterator(parsedId.value);
+    for (const row of iterator) {
+      if (res.destroyed) {
+        break;
+      }
+
+      const line = [
+        escapeCsvCell(row.contributor),
+        escapeCsvCell(row.amount),
+        escapeCsvCell(formatCsvTimestamp(row.pledged_at)),
+        escapeCsvCell(row.tx_hash ?? ''),
+        escapeCsvCell(formatCsvTimestamp(row.refunded_at)),
+        escapeCsvCell(row.refund_tx_hash ?? ''),
+      ].join(',') + '\r\n';
+
+      res.write(line);
+    }
+
+    if (!res.destroyed) {
+      res.end();
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post(
   '/api/campaigns',
   validateBody(createCampaignPayloadSchema),
@@ -532,11 +607,14 @@ app.post(
       sendValidationError(parsedId.issues);
     }
 
+    const body = req.body as z.infer<typeof reconcilePledgePayloadSchema>;
+    const result = reconcileOnChainPledge(parsedId.value, body);
 
     invalidateCampaignCache();
     res.status(result.existing ? 200 : 201).json({
       data: {
-
+        ...result.campaign,
+        progress: calculateProgress(result.campaign),
       },
     });
   },

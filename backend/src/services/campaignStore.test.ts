@@ -109,7 +109,7 @@ describe('on-chain pledge reconciliation', () => {
       deadline: futureDeadline,
     });
 
-    const updatedCampaign = reconcileOnChainPledge(campaign.id, {
+    const { campaign: updatedCampaign } = reconcileOnChainPledge(campaign.id, {
       contributor: CONTRIBUTOR,
       amount: 25.5,
       transactionHash: TX_HASH,

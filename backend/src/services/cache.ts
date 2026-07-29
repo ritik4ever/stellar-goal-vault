@@ -1,7 +1,6 @@
 import { createClient, RedisClientType } from "redis";
 import { config } from "../config";
 import { logInfo, logError } from "../logger";
-import { config } from "../config";
 
 type RedisClient = RedisClientType;
 
@@ -17,7 +16,6 @@ export async function initRedisCache(): Promise<void> {
   const nodeEnv = process.env.NODE_ENV;
 
   if (!redisUrl || nodeEnv !== "production") {
-
     return;
   }
 
@@ -25,18 +23,16 @@ export async function initRedisCache(): Promise<void> {
     redisClient = createClient({ url: redisUrl });
 
     redisClient.on("error", (err) => {
-
       isConnected = false;
     });
 
     redisClient.on("connect", () => {
-
       isConnected = true;
     });
 
     await redisClient.connect();
     isConnected = true;
-
+  } catch (error) {
     redisClient = null;
     isConnected = false;
   }
@@ -132,7 +128,8 @@ export async function closeRedisCache(): Promise<void> {
     try {
       await redisClient.quit();
       isConnected = false;
-
+    } catch (error) {
+      isConnected = false;
     }
   }
 }
