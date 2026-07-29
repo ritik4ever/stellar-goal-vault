@@ -16,18 +16,23 @@ export const APP_SHORTCUTS: ShortcutConfig[] = [
     description: 'Close any open modal or overlay',
   },
   {
-    key: 'c',
-    label: 'Create',
+    key: 'N',
+    label: 'New Campaign',
     description: 'Focus the create campaign form',
   },
   {
-    key: 'w',
-    label: 'Wallet',
-    description: 'Connect freighter wallet',
-  },
-  {
-    key: 's',
+    key: '/',
     label: 'Search',
     description: 'Focus search input',
+  },
+  {
+    key: 'D',
+    label: 'Dashboard',
+    description: 'Go to dashboard',
+  },
+  {
+    key: 'P',
+    label: 'My Pledges',
+    description: 'View my pledges',
   },
 ];

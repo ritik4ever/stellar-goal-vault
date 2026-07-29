@@ -26,7 +26,8 @@
     "build:openapi": "ts-node src/scripts/generateOpenApi.ts",
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:load:advanced": "node scripts/advanced-load-test.js"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

@@ -122,6 +122,7 @@ export function CreateCampaignForm({
         <label className="field-group">
           <span>Creator account</span>
           <input
+            id="create-campaign-creator"
             type="text"
             value={values.creator}
             onChange={(event) => update('creator', event.target.value)}
