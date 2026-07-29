@@ -9,6 +9,8 @@ services:
       - "3001:3001"
     env_file:
       - ./backend/.env
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318/v1/traces
     restart: unless-stopped
     healthcheck:
       # Probe the backend REST API health endpoint.
@@ -79,3 +81,11 @@ services:
 
 volumes:
   nginx-certs:
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: stellar-goal-vault-jaeger
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+    restart: unless-stopped

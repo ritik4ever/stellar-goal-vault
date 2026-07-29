@@ -10,8 +10,9 @@ export interface ApiErrorResponse {
   error: {
     code: string;
     message: string;
-    details?: ApiErrorDetail[];
     requestId?: string;
+    traceId?: string;
+    details?: ApiErrorDetail[];
   };
 }
 

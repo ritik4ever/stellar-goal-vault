@@ -53,13 +53,28 @@ function getConsoleMethod(
 /* eslint-enable no-console */
 
 import { getRequestId } from './requestContext';
+import opentelemetry from '@opentelemetry/api';
 
 function withRequestContext(fields: LogFields): LogFields {
+  const enhancedFields = { ...fields };
+  
   const requestId = getRequestId();
-  if (requestId && fields.requestId === undefined) {
-    return { requestId, ...fields };
+  if (requestId && enhancedFields.requestId === undefined) {
+    enhancedFields.requestId = requestId;
   }
-  return fields;
+
+  const span = opentelemetry.trace.getSpan(opentelemetry.context.active());
+  if (span) {
+    const spanContext = span.spanContext();
+    if (enhancedFields.traceId === undefined) {
+      enhancedFields.traceId = spanContext.traceId;
+    }
+    if (enhancedFields.spanId === undefined) {
+      enhancedFields.spanId = spanContext.spanId;
+    }
+  }
+
+  return enhancedFields;
 }
 
 export function logLine(
