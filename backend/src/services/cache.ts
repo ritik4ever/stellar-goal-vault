@@ -1,7 +1,6 @@
 import { createClient, RedisClientType } from "redis";
 import { config } from "../config";
 import { logInfo, logError } from "../logger";
-import { config } from "../config";
 
 type RedisClient = RedisClientType;
 
@@ -25,18 +24,22 @@ export async function initRedisCache(): Promise<void> {
     redisClient = createClient({ url: redisUrl });
 
     redisClient.on("error", (err) => {
-
+      logError("Redis client error", { error: err.message });
       isConnected = false;
     });
 
     redisClient.on("connect", () => {
-
+      logInfo("Redis cache connected");
       isConnected = true;
     });
 
     await redisClient.connect();
     isConnected = true;
-
+    logInfo("Redis cache initialized successfully");
+  } catch (error) {
+    logError("Failed to initialize Redis cache", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     redisClient = null;
     isConnected = false;
   }
@@ -132,7 +135,11 @@ export async function closeRedisCache(): Promise<void> {
     try {
       await redisClient.quit();
       isConnected = false;
-
+      logInfo("Redis cache connection closed");
+    } catch (error) {
+      logError("Error closing Redis connection", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }

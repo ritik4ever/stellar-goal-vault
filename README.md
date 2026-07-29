@@ -507,24 +507,20 @@ The script will:
 
 ## Environment variables
 
-Backend:
+The application is configured using environment variables for the backend service, frontend service, and contract deployment.
 
-- `PORT` defaults to `3001`
-- `DB_PATH` defaults to `backend/data/campaigns.db`
-- `SOROBAN_RPC_URL` defaults to Stellar testnet RPC
-- `CONTRACT_ID` is required for Freighter pledge signing
-- `NETWORK_PASSPHRASE` defaults to Stellar testnet
-- `CONTRACT_AMOUNT_DECIMALS` defaults to `2` and controls display-to-contract unit scaling
+A complete reference of all environment variables, including descriptions, default values, examples, and security/rotation guidelines, can be found in the [Environment Variables Guide](./docs/ENVIRONMENT.md) (accessible locally at [docs/ENVIRONMENT.md](file:///c:/Users/user/Drips/stellar-goal-vault/docs/ENVIRONMENT.md)).
 
-Frontend:
+### Quick Reference
 
-- `VITE_API_URL` defaults to `/api`
-
-Contract deployment:
-
-- `SECRET_KEY` required
-- `NETWORK_PASSPHRASE` optional
-- `RPC_URL` optional
+| Area | Variable | Required? | Default / Purpose |
+| :--- | :--- | :--- | :--- |
+| **Backend** | `CONTRACT_ID` | **Yes** | Deployed contract ID for Freighter signing. |
+| **Backend** | `PORT` | No | Express server port (defaults to `3001`). |
+| **Backend** | `LOG_LEVEL` | No | Log verbosity (`info`, `debug`, etc.). |
+| **Backend** | `API_KEYS` | No (⚠️ Sensitive) | Auth keys list (enforced in `production`). |
+| **Frontend** | `VITE_API_URL` | No | API base proxy endpoint (defaults to `/api`). |
+| **Contract** | `SECRET_KEY` | **Yes** (⚠️ Sensitive) | Deployer Stellar account private key. |
 
 ## Open-source ready next steps
 
