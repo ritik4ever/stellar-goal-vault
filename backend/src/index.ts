@@ -2,6 +2,8 @@ import compression from 'compression';
 import cors from 'cors';
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
+import helmet from 'helmet';
+import { createServer, Server } from 'http';
 
 import { validateEnv } from './validateEnv';
 import { z } from 'zod';
@@ -34,7 +36,6 @@ import {
   listCampaignPledges,
   listCampaigns,
   type ListCampaignsOptions,
-  reconcileOnChainPledge,
   refundContributor,
   SortOrder,
 } from './services/campaignStore';
@@ -51,11 +52,11 @@ import {
   createPledgePayloadSchema,
   parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
+  parseCampaignListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
-  parseCampaignListQuery,
   normalizeQueryValue,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
@@ -329,7 +330,7 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
 
     try {
       if (config.sorobanRpcUrl) {
-        const response = await fetch(config.sorobanRpcUrl, {
+        const response = await fetch(config.sorobanRpcUrl!, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -379,12 +380,11 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
 });
 
 app.get('/api/campaigns', (req: Request, res: Response) => {
-  const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
-  if (!queryResult.ok) {
-    sendValidationError(queryResult.issues);
+  const filters = parseCampaignListFilters(req.query as Record<string, unknown>);
+  const paginationResult = parseCampaignListPaginationQuery(req.query as Record<string, unknown>);
+  if (!paginationResult.ok) {
+    sendValidationError(paginationResult.issues);
   }
-
-  const params = queryResult.data;
 
   // Build a stable cache key from the sorted query string
   const qs = Object.keys(req.query as Record<string, unknown>)
@@ -405,18 +405,16 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
   }
 
   const listOptions: ListCampaignsOptions = {
-    searchQuery: params.search || params.q,
-    assetCodes: params.asset,
-    status: params.status,
-    includeDeleted: params.includeDeleted,
-    sort: params.sort,
-    order: params.order,
-    createdAfter: params.createdAfter,
-    createdBefore: params.createdBefore,
+    searchQuery: filters.searchQuery,
+    assetCodes: filters.asset ? [filters.asset] : undefined,
+    status: filters.status,
+    includeDeleted: filters.includeDeleted,
+    sort: filters.sort,
+    order: filters.order,
   };
-  if (params.page !== undefined) {
-    listOptions.page = params.page;
-    listOptions.limit = params.limit;
+  if (paginationResult.page !== undefined) {
+    listOptions.page = paginationResult.page;
+    listOptions.limit = paginationResult.limit;
   }
 
   const { campaigns, totalCount } = listCampaigns(listOptions);
@@ -426,10 +424,10 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
     progress: calculateProgress(campaign),
   }));
 
-  const page = params.page ?? 1;
-  const limit = params.limit ?? totalCount;
+  const page = paginationResult.page ?? 1;
+  const limit = paginationResult.limit ?? totalCount;
   const totalPages =
-    params.limit === undefined || limit <= 0 ? 1 : Math.max(1, Math.ceil(totalCount / limit));
+    paginationResult.limit === undefined || limit <= 0 ? 1 : Math.max(1, Math.ceil(totalCount / limit));
 
   const responseBody = JSON.stringify({
     data,
@@ -551,9 +549,11 @@ app.post(
       sendValidationError(parsedId.issues);
     }
 
+    const body = req.body as z.infer<typeof reconcilePledgePayloadSchema>;
+    const campaign = addPledge(parsedId.value, body);
     invalidateCampaignCache();
-    res.status(result.existing ? 200 : 201).json({
-      data: {},
+    res.status(201).json({
+      data: { ...campaign, progress: calculateProgress(campaign) },
     });
   },
 );
@@ -668,9 +668,9 @@ app.get('/api/config', (_req: Request, res: Response) => {
         enabled: walletIntegrationReady,
         contractId: config.contractId || undefined,
         networkPassphrase: config.sorobanNetworkPassphrase,
-        rpcUrl: config.sorobanRpcUrl,
+        rpcUrl: config.sorobanRpcUrl || undefined,
       },
-      sorobanRpcUrl: config.sorobanRpcUrl,
+      sorobanRpcUrl: config.sorobanRpcUrl || undefined,
       contractId: config.contractId,
       networkPassphrase: config.sorobanNetworkPassphrase,
       contractAmountDecimals: CONTRACT_AMOUNT_DECIMALS,

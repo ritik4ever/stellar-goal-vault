@@ -47,6 +47,10 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       stdout: 'pipe',
       stderr: 'pipe',
+      env: {
+        CONTRACT_ID: 'test-contract-id-123',
+        SOROBAN_RPC_URL: 'https://soroban-testnet.stellar.org:443',
+      },
     },
     {
       command: 'npm run dev:frontend',

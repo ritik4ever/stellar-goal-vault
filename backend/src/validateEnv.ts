@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 const envSchema = z.object({
-  // Required
-  CONTRACT_ID: z.string().min(1, 'CONTRACT_ID is required for Soroban pledge signing'),
+  // Optional - Soroban integration (required for on-chain features, optional for local dev/E2E)
+  CONTRACT_ID: z.string().optional(),
 
   // Optional with documented defaults
   PORT: z.string().optional().describe('default: 3001'),
