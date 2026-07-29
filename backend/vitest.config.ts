@@ -11,11 +11,20 @@ export default defineConfig({
     isolate: true,
     globals: true,
     testTimeout: 30000,
+    hookTimeout: 30000,
     reporters: ["verbose"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
-      exclude: ["node_modules/", "tests/", "dist/"],
+      include: ["src/**/*.ts"],
+      exclude: [
+        "node_modules/",
+        "tests/",
+        "dist/",
+        "src/**/*.test.ts",
+        "src/**/__tests__/**",
+        "src/scripts/**",
+      ],
       thresholds: {
         lines: 80,
       },

@@ -2,6 +2,8 @@ import compression from "compression";
 import cors from "cors";
 import "dotenv/config";
 import express, { Request, Response } from "express";
+import helmet from "helmet";
+import { createServer, Server } from "http";
 
 
 import { validateEnv } from "./validateEnv";
@@ -532,11 +534,12 @@ app.post(
       sendValidationError(parsedId.issues);
     }
 
-
+    const result = reconcileOnChainPledge(parsedId.value, req.body);
     invalidateCampaignCache();
     res.status(result.existing ? 200 : 201).json({
       data: {
-
+        ...result.campaign,
+        progress: calculateProgress(result.campaign),
       },
     });
   },

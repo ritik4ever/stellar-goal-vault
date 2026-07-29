@@ -19,8 +19,9 @@ let createCampaign: (typeof import('./services/campaignStore'))['createCampaign'
 let initCampaignStore: (typeof import('./services/campaignStore'))['initCampaignStore'];
 let recordEvent: (typeof import('./services/eventHistory'))['recordEvent'];
 let getDb: (typeof import('./services/db'))['getDb'];
+let resetDbForTests: (typeof import('./services/db'))['resetDbForTests'];
 
-const CREATOR = `G${'A'.repeat(55)}`;
+const CREATOR = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
 
 function nowInSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -31,13 +32,14 @@ beforeAll(async () => {
 
   ({ createCampaign, initCampaignStore } = await import('./services/campaignStore'));
   ({ recordEvent } = await import('./services/eventHistory'));
-  ({ getDb } = await import('./services/db'));
+  ({ getDb, resetDbForTests } = await import('./services/db'));
   ({ app } = await import('./index'));
 
   initCampaignStore();
 });
 
 afterAll(() => {
+  resetDbForTests();
   fs.rmSync(TEST_DB_PATH, { force: true });
 });
 

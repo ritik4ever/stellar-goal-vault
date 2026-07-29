@@ -256,7 +256,7 @@ function isPrivateOrLoopbackIPv6(ip: string): boolean {
  * `null` if the input cannot be parsed by `net.isIPv6`.
  */
 function expandIPv6(ip: string): string | null {
-  if (net.isIPv6(ip) === 0) return null;
+  if (!net.isIPv6(ip)) return null;
 
   // Strip zone identifier (e.g. `fe80::1%eth0`).
   const zoneIndex = ip.indexOf('%');
