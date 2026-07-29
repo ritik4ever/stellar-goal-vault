@@ -1,5 +1,8 @@
 #![no_std]
 
+pub mod matching;
+
+
 
 
 use soroban_sdk::{
@@ -613,6 +616,8 @@ impl StellarGoalVaultContract {
                 );
             }
         }
+
+        matching::process_campaign_matching_grants(&env, campaign_id, &creator);
     }
 
     pub fn refund(env: Env, campaign_id: u64, contributor: Address) {
@@ -806,9 +811,50 @@ impl StellarGoalVaultContract {
             deployed_at,
         }
     }
+
+    pub fn create_matching_grant(
+        env: Env,
+        sponsor: Address,
+        campaign_id: u64,
+        token: Address,
+        match_ratio_num: u32,
+        match_ratio_den: u32,
+        max_match_cap: i128,
+        min_campaign_target: i128,
+    ) -> u64 {
+        matching::create_matching_grant(
+            env,
+            sponsor,
+            campaign_id,
+            token,
+            match_ratio_num,
+            match_ratio_den,
+            max_match_cap,
+            min_campaign_target,
+        )
+    }
+
+    pub fn refund_matching_grant(env: Env, grant_id: u64, sponsor: Address) {
+        matching::refund_matching_grant(env, grant_id, sponsor);
+    }
+
+    pub fn get_matching_grant(env: Env, grant_id: u64) -> matching::MatchingGrant {
+        matching::get_matching_grant(env, grant_id)
+    }
+
+    pub fn get_campaign_matching_grants(
+        env: Env,
+        campaign_id: u64,
+    ) -> Vec<matching::MatchingGrant> {
+        matching::get_campaign_matching_grants(env, campaign_id)
+    }
+
+    pub fn calculate_match_amount(env: Env, grant_id: u64) -> i128 {
+        matching::calculate_match_amount(env, grant_id)
+    }
 }
 
-fn require_not_paused(env: &Env) {
+pub(crate) fn require_not_paused(env: &Env) {
     if env
         .storage()
         .instance()
@@ -819,7 +865,7 @@ fn require_not_paused(env: &Env) {
     }
 }
 
-fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
+pub(crate) fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
     env.storage()
         .persistent()
         .get(&DataKey::Campaign(campaign_id))

@@ -1207,4 +1207,257 @@ mod tests {
         client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
     }
 
+    #[test]
+    fn test_matching_grant_creation_and_escrow() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &sponsor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline = env.ledger().timestamp() + 100;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "matching test"),
+            &0_i128,
+        );
+
+        let grant_id = client.create_matching_grant(
+            &sponsor,
+            &campaign_id,
+            &token,
+            &1_u32, // 1:1 match
+            &1_u32,
+            &500_i128, // max match cap
+            &1_000_i128, // min campaign target
+        );
+
+        assert_eq!(grant_id, 1);
+        let grant = client.get_matching_grant(&grant_id);
+        assert_eq!(grant.sponsor, sponsor);
+        assert_eq!(grant.total_match_locked, 500);
+        assert_eq!(grant.max_match_cap, 500);
+        assert_eq!(grant.min_campaign_target, 1_000);
+    }
+
+    #[test]
+    fn test_matching_grant_successful_claim_and_release() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        // Also mint tokens to sponsor
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&sponsor, &500);
+
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "matching claim test"),
+            &0_i128,
+        );
+
+        let grant_id = client.create_matching_grant(
+            &sponsor,
+            &campaign_id,
+            &token,
+            &1_u32,
+            &1_u32,
+            &500_i128,
+            &1_000_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &1_000);
+        advance_time(&env, deadline_offset + 1);
+
+        client.claim(&campaign_id, &creator);
+
+        let grant = client.get_matching_grant(&grant_id);
+        assert!(grant.claimed);
+        assert_eq!(grant.released_amount, 500);
+
+        // Creator should have pledged (1000) + matched (500) = 1500 tokens
+        let token_client = soroban_sdk::token::Client::new(&env, &token);
+        assert_eq!(token_client.balance(&creator), 1_500);
+    }
+
+    #[test]
+    fn test_matching_grant_non_qualifying_campaign_no_match() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&sponsor, &500);
+
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "non qualifying test"),
+            &0_i128,
+        );
+
+        // Set min_campaign_target to 1000
+        let grant_id = client.create_matching_grant(
+            &sponsor,
+            &campaign_id,
+            &token,
+            &1_u32,
+            &1_u32,
+            &500_i128,
+            &1_000_i128,
+        );
+
+        // Contributor only pledges 500 (does not meet campaign target 1000 or min_campaign_target 1000)
+        client.contribute(&campaign_id, &contributor, &token, &500);
+
+        // Campaign is not funded, so deadline passes and sponsor reclaims unused match after deadline
+        advance_time(&env, deadline_offset + 1);
+
+        client.refund_matching_grant(&grant_id, &sponsor);
+
+        let grant = client.get_matching_grant(&grant_id);
+        assert!(grant.refunded);
+        assert_eq!(grant.released_amount, 0);
+
+        // Sponsor should get full 500 escrowed tokens back
+        let token_client = soroban_sdk::token::Client::new(&env, &token);
+        assert_eq!(token_client.balance(&sponsor), 500);
+    }
+
+    #[test]
+    fn test_matching_grant_cap_enforced_precisely() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&sponsor, &300);
+
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "cap test"),
+            &0_i128,
+        );
+
+        // 2:1 ratio (num=2, den=1), cap = 300, min_target = 500
+        let grant_id = client.create_matching_grant(
+            &sponsor,
+            &campaign_id,
+            &token,
+            &2_u32,
+            &1_u32,
+            &300_i128,
+            &500_i128,
+        );
+
+        // Pledged = 1000 -> raw match 2000, capped at 300
+        client.contribute(&campaign_id, &contributor, &token, &1_000);
+        advance_time(&env, deadline_offset + 1);
+
+        client.claim(&campaign_id, &creator);
+
+        let grant = client.get_matching_grant(&grant_id);
+        assert_eq!(grant.released_amount, 300);
+
+        let token_client = soroban_sdk::token::Client::new(&env, &token);
+        assert_eq!(token_client.balance(&creator), 1_300);
+    }
+
+    #[test]
+    fn test_matching_grant_unused_partial_match_returned_to_sponsor_on_claim() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&sponsor, &500); // Sponsor locks 500
+
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "partial match return test"),
+            &0_i128,
+        );
+
+        // 1:2 ratio (num=1, den=2): for 1000 pledged -> 500 match. Cap is set to 500, but let's test 200 released and 300 returned if cap was 500 but max cap was larger
+        // Let's set 1:4 ratio (num=1, den=4): for 1000 pledged -> 250 match. Cap = 500.
+        let grant_id = client.create_matching_grant(
+            &sponsor,
+            &campaign_id,
+            &token,
+            &1_u32,
+            &4_u32,
+            &500_i128, // locks 500
+            &500_i128,  // min target
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &1_000);
+        advance_time(&env, deadline_offset + 1);
+
+        client.claim(&campaign_id, &creator);
+
+        let grant = client.get_matching_grant(&grant_id);
+        assert_eq!(grant.released_amount, 250); // 1000 * 1/4 = 250
+
+        // Creator gets 1000 pledged + 250 match = 1250
+        let token_client = soroban_sdk::token::Client::new(&env, &token);
+        assert_eq!(token_client.balance(&creator), 1_250);
+
+        // Sponsor locked 500, 250 released, remaining 250 unused match returned to sponsor on claim!
+        assert_eq!(token_client.balance(&sponsor), 250);
+    }
+
 }
