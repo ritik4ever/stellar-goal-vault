@@ -1,19 +1,20 @@
-import compression from "compression";
-import cors from "cors";
-import "dotenv/config";
-import express, { Request, Response } from "express";
+import compression from 'compression';
+import cors from 'cors';
+import 'dotenv/config';
+import express, { Request, Response } from 'express';
+import helmet from 'helmet';
+import { createServer, Server } from 'node:http';
 
-
-import { validateEnv } from "./validateEnv";
-import { z } from "zod";
-import path from "path";
-import { config, walletIntegrationReady } from "./config";
-import { apiKeyAuthMiddleware } from "./middleware/apiKeyAuth";
-import { cacheMiddleware } from "./middleware/cacheMiddleware";
-import { requestIdMiddleware } from "./middleware/requestId";
-import { validateBody } from "./middleware/validateBody";
-import type { RequestWithId } from "./middleware/types";
-import { initRedisCache } from "./services/cache";
+import { validateEnv } from './validateEnv';
+import { z } from 'zod';
+import path from 'path';
+import { config, walletIntegrationReady } from './config';
+import { apiKeyAuthMiddleware } from './middleware/apiKeyAuth';
+import { cacheMiddleware } from './middleware/cacheMiddleware';
+import { requestIdMiddleware } from './middleware/requestId';
+import { validateBody } from './middleware/validateBody';
+import type { RequestWithId } from './middleware/types';
+import { initRedisCache } from './services/cache';
 
 import swaggerUi from 'swagger-ui-express';
 
@@ -74,17 +75,23 @@ type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 const CAMPAIGN_STATUSES: CampaignStatus[] = ['open', 'funded', 'claimed', 'failed'];
 const CONTRACT_AMOUNT_DECIMALS = Number(process.env.CONTRACT_AMOUNT_DECIMALS ?? 2);
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60000);
-const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_READ_LIMIT ?? process.env.RATE_LIMIT_MAX_REQUESTS ?? 120);
-const WRITE_RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_WRITE_LIMIT ?? process.env.WRITE_RATE_LIMIT_MAX_REQUESTS ?? 20);
+const RATE_LIMIT_MAX_REQUESTS = Number(
+  process.env.RATE_LIMIT_READ_LIMIT ?? process.env.RATE_LIMIT_MAX_REQUESTS ?? 120,
+);
+const WRITE_RATE_LIMIT_MAX_REQUESTS = Number(
+  process.env.RATE_LIMIT_WRITE_LIMIT ?? process.env.WRITE_RATE_LIMIT_MAX_REQUESTS ?? 20,
+);
 const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'none'"],
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+      },
     },
-  },
-}));
+  }),
+);
 
 app.use(
   cors({
@@ -102,30 +109,43 @@ app.use(
       }
     },
     credentials: true,
-    exposedHeaders: ['X-Total-Count', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Retry-After'],
+    exposedHeaders: [
+      'X-Total-Count',
+      'X-RateLimit-Limit',
+      'X-RateLimit-Remaining',
+      'X-RateLimit-Reset',
+      'Retry-After',
+    ],
   }),
 );
 
 app.use(compression({ threshold: 1024 }));
 
-const bodySizeLimit = process.env.MAX_BODY_SIZE || "16kb";
-app.use(express.json({ limit: bodySizeLimit, type: ['application/json', 'application/csp-report'] }));
+const bodySizeLimit = process.env.MAX_BODY_SIZE || '16kb';
+app.use(express.json({ limit: bodySizeLimit }));
 
-// OpenAPI documentation endpoints (public, not rate-limited or cached)
+// OpenAPI documentation endpoints are public and bypass API middleware.
 const openApiDocument = generateOpenApiDocument();
-app.get('/api/docs', (_req: Request, res: Response) => {
+app.get('/api/openapi.json', (_req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/json');
   res.json(openApiDocument);
 });
-app.use('/api/docs/ui', swaggerUi.serve, swaggerUi.setup(openApiDocument, { explorer: true }));
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/api/docs', swaggerUi.setup(openApiDocument, { explorer: true }));
+  app.use('/api/docs', swaggerUi.serve);
+} else {
+  app.get('/api/docs', (_req: Request, res: Response) => {
+    res.sendStatus(404);
+  });
+}
 
 // Add API key authentication middleware (production only)
-if (process.env.NODE_ENV === "production") {
+if (process.env.NODE_ENV === 'production') {
   app.use(apiKeyAuthMiddleware);
 }
 
 // Add cache middleware for GET requests (production only, 5 minute TTL)
-if (process.env.NODE_ENV === "production") {
+if (process.env.NODE_ENV === 'production') {
   app.use(cacheMiddleware(300));
 }
 
@@ -144,10 +164,11 @@ export function applyRateLimit(limitOverride?: number) {
       return next();
     }
 
-    const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
-    const maxRequests = limitOverride ?? (isWrite ? WRITE_RATE_LIMIT_MAX_REQUESTS : RATE_LIMIT_MAX_REQUESTS);
+    const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+    const maxRequests =
+      limitOverride ?? (isWrite ? WRITE_RATE_LIMIT_MAX_REQUESTS : RATE_LIMIT_MAX_REQUESTS);
 
-    const key = `${req.ip}:${isWrite ? "write" : "read"}`;
+    const key = `${req.ip}:${isWrite ? 'write' : 'read'}`;
     const now = Date.now();
     const current = rateLimitBuckets.get(key);
 
@@ -159,14 +180,14 @@ export function applyRateLimit(limitOverride?: number) {
       resetAt = current.resetAt;
     }
 
-    res.setHeader("X-RateLimit-Limit", String(maxRequests));
-    res.setHeader("X-RateLimit-Remaining", String(Math.max(0, maxRequests - count)));
-    res.setHeader("X-RateLimit-Reset", String(Math.ceil(resetAt / 1000)));
+    res.setHeader('X-RateLimit-Limit', String(maxRequests));
+    res.setHeader('X-RateLimit-Remaining', String(Math.max(0, maxRequests - count)));
+    res.setHeader('X-RateLimit-Reset', String(Math.ceil(resetAt / 1000)));
 
     if (current && now < current.resetAt && current.count >= maxRequests) {
       const retryAfterSec = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
-      res.setHeader("Retry-After", String(retryAfterSec));
-      throw new AppError("Rate limit exceeded. Please retry shortly.", 429, "RATE_LIMITED");
+      res.setHeader('Retry-After', String(retryAfterSec));
+      throw new AppError('Rate limit exceeded. Please retry shortly.', 429, 'RATE_LIMITED');
     }
 
     rateLimitBuckets.set(key, { count, resetAt });
@@ -220,9 +241,7 @@ export function normalizeAssetFilter(assetRaw: unknown): string | undefined {
   return config.allowedAssets.includes(asset) ? asset : undefined;
 }
 
-export function normalizeStatusFilter(
-  statusRaw: unknown,
-): CampaignStatus | undefined {
+export function normalizeStatusFilter(statusRaw: unknown): CampaignStatus | undefined {
   const status = normalizeQueryValue(statusRaw)?.toLowerCase();
   if (!status) {
     return undefined;
@@ -249,23 +268,38 @@ export function parseCampaignListFilters(query: {
   sort?: CampaignSortField;
   order?: SortOrder;
 } {
-  const VALID_SORT_FIELDS: CampaignSortField[] = ['createdAt', 'deadline', 'pledgedAmount', 'targetAmount'];
+  const VALID_SORT_FIELDS: CampaignSortField[] = [
+    'createdAt',
+    'deadline',
+    'pledgedAmount',
+    'targetAmount',
+  ];
   const VALID_ORDERS: SortOrder[] = ['asc', 'desc'];
   const rawSort = normalizeQueryValue(query.sort);
   const rawOrder = normalizeQueryValue(query.order);
 
   if (rawSort && !VALID_SORT_FIELDS.includes(rawSort as CampaignSortField)) {
-    throw new AppError(`Invalid sort field: ${rawSort}. Supported fields: ${VALID_SORT_FIELDS.join(', ')}`, 400, 'INVALID_SORT_FIELD');
+    throw new AppError(
+      `Invalid sort field: ${rawSort}. Supported fields: ${VALID_SORT_FIELDS.join(', ')}`,
+      400,
+      'INVALID_SORT_FIELD',
+    );
+  }
+  if (rawOrder && !VALID_ORDERS.includes(rawOrder as SortOrder)) {
+    throw new AppError(
+      `Invalid sort order: ${rawOrder}. Supported orders: ${VALID_ORDERS.join(', ')}`,
+      400,
+      'INVALID_SORT_ORDER',
+    );
   }
 
   return {
     asset: normalizeAssetFilter(query.asset),
     status: normalizeStatusFilter(query.status),
-    searchQuery:
-      normalizeQueryValue(query.search) || normalizeQueryValue(query.q),
-    includeDeleted: query.includeDeleted === "true",
-    sort: rawSort && VALID_SORT_FIELDS.includes(rawSort as CampaignSortField) ? (rawSort as CampaignSortField) : undefined,
-    order: rawOrder && VALID_ORDERS.includes(rawOrder as SortOrder) ? (rawOrder as SortOrder) : undefined,
+    searchQuery: normalizeQueryValue(query.search) || normalizeQueryValue(query.q),
+    includeDeleted: query.includeDeleted === 'true',
+    sort: rawSort as CampaignSortField | undefined,
+    order: rawOrder as SortOrder | undefined,
   };
 }
 
@@ -277,10 +311,8 @@ export function filterCampaignList(
   },
 ): CampaignListItem[] {
   return campaigns.filter((campaign) => {
-    const matchesAsset =
-      !filters.asset || campaign.assetCode.toUpperCase() === filters.asset;
-    const matchesStatus =
-      !filters.status || campaign.progress.status === filters.status;
+    const matchesAsset = !filters.asset || campaign.assetCode.toUpperCase() === filters.asset;
+    const matchesStatus = !filters.status || campaign.progress.status === filters.status;
 
     return matchesAsset && matchesStatus;
   });
@@ -336,7 +368,9 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
         },
         soroban: {
           status: sorobanHealthy ? 'up' : 'down',
-          details: config.sorobanRpcUrl ? 'Soroban RPC reachable' : 'Soroban RPC URL not configured',
+          details: config.sorobanRpcUrl
+            ? 'Soroban RPC reachable'
+            : 'Soroban RPC URL not configured',
         },
         contract: {
           status: hasContractId ? 'up' : 'down',
@@ -405,9 +439,7 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
   const page = params.page ?? 1;
   const limit = params.limit ?? totalCount;
   const totalPages =
-    params.limit === undefined || limit <= 0
-      ? 1
-      : Math.max(1, Math.ceil(totalCount / limit));
+    params.limit === undefined || limit <= 0 ? 1 : Math.max(1, Math.ceil(totalCount / limit));
 
   const responseBody = JSON.stringify({
     data,
@@ -465,10 +497,7 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
     page: paginationResult.page,
     limit: paginationResult.limit,
   });
-  const totalPages = Math.max(
-    1,
-    Math.ceil(totalCount / paginationResult.limit),
-  );
+  const totalPages = Math.max(1, Math.ceil(totalCount / paginationResult.limit));
 
   res.setHeader('X-Total-Count', String(totalCount));
   res.json({
@@ -532,11 +561,13 @@ app.post(
       sendValidationError(parsedId.issues);
     }
 
-
+    const body = req.body as z.infer<typeof reconcilePledgePayloadSchema>;
+    const result = reconcileOnChainPledge(parsedId.value, body);
     invalidateCampaignCache();
     res.status(result.existing ? 200 : 201).json({
       data: {
-
+        campaign: { ...result.campaign, progress: calculateProgress(result.campaign) },
+        transactionHash: body.transactionHash,
       },
     });
   },
@@ -680,7 +711,7 @@ app.get('/api/stats', cacheMiddleware(30), (_req: Request, res: Response) => {
       failedCampaigns: stats.campaignCountByStatus.failed,
       totalPledgeVolume: stats.totalPledgedAmount,
       uniqueContributors: stats.totalContributors,
-    }
+    },
   });
 });
 
@@ -714,7 +745,12 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
 });
 
 function isErrorWithMessage(error: unknown): error is { message: string; [key: string]: unknown } {
-  return typeof error === 'object' && error !== null && 'message' in error && typeof (error as { message: unknown }).message === 'string';
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as { message: unknown }).message === 'string'
+  );
 }
 
 function isErrorWithType(error: unknown, type: string): boolean {
@@ -791,12 +827,16 @@ function printStartupBanner(): void {
   const dbPath = process.env.DB_PATH || path.join(__dirname, '..', '..', 'data', 'campaigns.db');
   const nodeEnv = process.env.NODE_ENV || 'development';
 
-  logInfo('startup_banner', {
-    message: 'Stellar Goal Vault Backend - Starting Up',
-    port: config.port,
-    environment: nodeEnv,
-    databasePath: dbPath,
-  }, config.logLevel);
+  logInfo(
+    'startup_banner',
+    {
+      message: 'Stellar Goal Vault Backend - Starting Up',
+      port: config.port,
+      environment: nodeEnv,
+      databasePath: dbPath,
+    },
+    config.logLevel,
+  );
 }
 
 export function configureHttpServer(server: Server): Server {

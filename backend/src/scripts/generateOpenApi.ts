@@ -1,14 +1,21 @@
 import fs from 'fs';
 import path from 'path';
+import { stringify } from 'yaml';
 import { generateOpenApiDocument } from '../openapi';
 
-const outputDir = path.resolve(__dirname, '..', '..', 'dist');
-const outputPath = path.join(outputDir, 'openapi.json');
+const distDir = path.resolve(__dirname, '..', '..', 'dist');
+const docsDir = path.resolve(__dirname, '..', '..', '..', 'docs');
+const jsonOutputPath = path.join(distDir, 'openapi.json');
+const yamlOutputPath = path.join(docsDir, 'openapi.yaml');
 
 const document = generateOpenApiDocument();
 
-fs.mkdirSync(outputDir, { recursive: true });
-fs.writeFileSync(outputPath, JSON.stringify(document, null, 2));
+fs.mkdirSync(distDir, { recursive: true });
+fs.mkdirSync(docsDir, { recursive: true });
+fs.writeFileSync(jsonOutputPath, JSON.stringify(document, null, 2));
+fs.writeFileSync(yamlOutputPath, stringify(document));
 
 // eslint-disable-next-line no-console
-console.log(`OpenAPI spec written to ${outputPath} (${document.paths ? Object.keys(document.paths).length : 0} paths)`);
+console.log(
+  `OpenAPI spec written to ${yamlOutputPath} (${document.paths ? Object.keys(document.paths).length : 0} paths)`,
+);

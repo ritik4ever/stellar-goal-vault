@@ -159,3 +159,11 @@ export interface ApiError {
   details?: Array<{ field: string; message: string }>;
   requestId?: string;
 }
+
+export interface CampaignUpdate {
+  id: number;
+  campaignId: string;
+  creator: string;
+  content: string;
+  createdAt: number;
+}
