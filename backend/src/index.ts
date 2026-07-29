@@ -675,6 +675,11 @@ app.get('/api/open-issues', async (_req: Request, res: Response) => {
   res.json({ data });
 });
 
+app.post('/api/csp-report', (req: Request, res: Response) => {
+  logInfo('csp_violation', { report: req.body }, config.logLevel);
+  res.status(204).end();
+});
+
 app.get('/api/config', (_req: Request, res: Response) => {
   res.json({
     data: {

@@ -4,52 +4,45 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 const isAnalyze = process.env.ANALYZE === 'true';
 
+import crypto from 'crypto';
+
 /**
- * Custom Vite plugin that injects a Content-Security-Policy meta tag into
- * the HTML <head>. Uses Report-Only mode so violations are logged to the
- * browser console without blocking resources.
- *
- * Dev mode relaxes script-src (inline scripts for HMR) and connect-src
- * (WebSocket for hot-reload). Production uses a strict policy.
- *
- * To switch from report-only to enforcement, change the meta tag's
- * http-equiv from "Content-Security-Policy-Report-Only" to
- * "Content-Security-Policy".
+ * Custom Vite plugin that sets Content-Security-Policy header during development.
+ * It generates a unique nonce per request for inline scripts.
+ * In production build, it injects a placeholder for the nonce that Nginx replaces.
  */
-function cspMetaTagPlugin(): Plugin {
+function cspPlugin(): Plugin {
   return {
-    name: 'html-csp-meta-tag',
+    name: 'csp-plugin',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const nonce = crypto.randomBytes(16).toString('base64');
+        (req as any).cspNonce = nonce;
+        
+        const scriptSrc = "'self' 'nonce-" + nonce + "' 'strict-dynamic'";
+        const connectSrc = "'self' https://soroban-testnet.stellar.org ws: wss:";
+        
+        const directives = [
+          "default-src 'none'",
+          `script-src ${scriptSrc}`,
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          "font-src 'self' https://fonts.gstatic.com",
+          "img-src 'self' https: data:",
+          `connect-src ${connectSrc}`,
+          "frame-src 'none'",
+          "object-src 'none'",
+          "base-uri 'self'",
+          "form-action 'self'",
+          "report-uri /api/csp-report"
+        ].join('; ');
+        
+        res.setHeader('Content-Security-Policy', directives);
+        next();
+      });
+    },
     transformIndexHtml(html, ctx) {
-      const isDev = ctx.server != null;
-
-      const scriptSrc = isDev
-        ? "'self' 'unsafe-inline'"
-        : "'self'";
-
-      const connectSrc = isDev
-        ? "'self' https://soroban-testnet.stellar.org ws:"
-        : "'self' https://soroban-testnet.stellar.org";
-
-      const directives = [
-        "default-src 'none'",
-        `script-src ${scriptSrc}`,
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-        "font-src 'self' https://fonts.gstatic.com",
-        "img-src 'self' https: data:",
-        `connect-src ${connectSrc}`,
-        "frame-src 'none'",
-        "object-src 'none'",
-        "base-uri 'self'",
-        "form-action 'self'",
-      ].join('; ');
-
-      const metaTag =
-        `<meta http-equiv="Content-Security-Policy-Report-Only" content="${directives}">`;
-
-      return html.replace(
-        '<meta charset="UTF-8" />',
-        `<meta charset="UTF-8" />\n    ${metaTag}`,
-      );
+      const nonce = (ctx.req as any)?.cspNonce || '__CSP_NONCE__';
+      return html.replace(/<script(\s|>)/g, `<script nonce="${nonce}"$1`);
     },
   };
 }
@@ -57,7 +50,7 @@ function cspMetaTagPlugin(): Plugin {
 export default defineConfig(async () => {
   const plugins = [
     react(),
-    cspMetaTagPlugin(),
+    cspPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       strategies: 'injectManifest',
