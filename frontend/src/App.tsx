@@ -15,6 +15,7 @@ import {
 } from "./components/TransactionPreviewModal";
 import { ToastContainer } from "./components/ToastContainer";
 import { WalletWidget } from "./components/WalletWidget";
+import { WalletPickerModal } from "./components/WalletPickerModal";
 import {
   claimCampaign,
   createCampaign,
@@ -30,10 +31,9 @@ import {
 import {
   submitFreighterClaim,
   submitFreighterPledge,
-  watchFreighterAccount,
 } from "./services/freighter";
 import { submitRefundTransaction } from "./services/soroban";
-import { useFreighter } from "./hooks/useFreighter";
+import { useWallet } from "./hooks/useWallet";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useToast } from "./hooks/useToast";
 import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
@@ -122,12 +122,22 @@ function stellarExpertTxUrl(txHash: string, networkPassphrase: string | undefine
   return `https://stellar.expert/explorer/${network}/tx/${txHash}`;
 }
 
+function getNetworkName(networkPassphrase: string): string {
+  if (networkPassphrase === 'Test SDF Network ; September 2015') {
+    return 'Testnet';
+  }
+  if (networkPassphrase === 'Public Global Stellar Network ; September 2015') {
+    return 'Mainnet';
+  }
+  return networkPassphrase;
+}
+
 function App() {
   const { id: paramId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const freighter = useFreighter();
+  const wallet = useWallet();
   const { toasts, addToast, dismiss } = useToast();
-  const connectedWallet = freighter.publicKey;
+  const connectedWallet = wallet.publicKey;
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignPage, setCampaignPage] = useState(1);
@@ -452,35 +462,23 @@ function App() {
     }
   }
 
-  async function handleConnectWallet() {
+  async function handleConnectWallet(walletType: string) {
     const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
     setIsConnectingWallet(true);
     try {
-      const key = await freighter.connect(networkPassphrase);
-      if (key) {
-        addToast(`Wallet connected: ${key.slice(0, 16)}...`, "success");
-      }
+      await wallet.connect(walletType as any, networkPassphrase);
+      addToast(`Wallet connected: ${wallet.publicKey?.slice(0, 16)}...`, "success");
     } finally {
       setIsConnectingWallet(false);
     }
   }
 
   function handleDisconnectWallet() {
-    freighter.disconnect();
+    wallet.disconnect();
     addToast("Wallet disconnected.", "success");
   }
 
-  useEffect(() => {
-    if (!connectedWallet) return;
-    const stop = watchFreighterAccount((address) => {
-      if (address && address !== connectedWallet) {
-        addToast(`Switched to ${address.slice(0, 16)}...`, "success");
-      } else if (!address) {
-        addToast("Wallet disconnected.", "success");
-      }
-    });
-    return stop;
-  }, [connectedWallet, addToast]);
+  // Account watching is handled by individual wallet adapters
 
   async function handlePledge(campaignId: string, amount: number, assetCode: string) {
     if (!connectedWallet) {
@@ -665,14 +663,14 @@ function App() {
           </div>
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <WalletWidget
-              status={freighter.status}
-              publicKey={freighter.publicKey}
-              error={freighter.error}
+              status={wallet.status}
+              publicKey={wallet.publicKey}
+              walletName={wallet.walletName}
+              error={wallet.error}
               network={getNetworkName(appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE)}
-              onConnect={() => {
-                void handleConnectWallet();
-              }}
+              onConnect={wallet.openPicker}
               onDisconnect={handleDisconnectWallet}
+              onSwitchWallet={wallet.openPicker}
             />
             <button className="btn-ghost" type="button" onClick={handleThemeToggle}>
               {themeMode === "dark" ? "Light mode" : "Dark mode"}
@@ -810,6 +808,14 @@ function App() {
       <KeyboardShortcutsOverlay
         isOpen={isShortcutsOpen}
         onClose={() => setIsShortcutsOpen(false)}
+      />
+
+      <WalletPickerModal
+        isOpen={wallet.isPickerOpen}
+        onClose={wallet.closePicker}
+        onSelectWallet={handleConnectWallet}
+        isConnecting={wallet.status === 'connecting'}
+        connectingWallet={wallet.walletType}
       />
     </div>
   );

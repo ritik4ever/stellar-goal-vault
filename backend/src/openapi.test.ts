@@ -24,8 +24,8 @@ describe('OpenAPI documentation endpoints', () => {
     }
   });
 
-  it('GET /api/docs returns a valid OpenAPI 3.1 JSON spec', async () => {
-    const response = await request(app).get('/api/docs').expect(200);
+  it('GET /api/openapi.json returns a valid OpenAPI 3.1 JSON spec', async () => {
+    const response = await request(app).get('/api/openapi.json').expect(200);
     expect(response.headers['content-type']).toContain('application/json');
 
     const spec = response.body;
@@ -37,15 +37,15 @@ describe('OpenAPI documentation endpoints', () => {
     expect(spec.paths['/api/campaigns']).toBeDefined();
   });
 
-  it('GET /api/docs/ui serves Swagger UI HTML', async () => {
-    const response = await request(app).get('/api/docs/ui/').expect(200);
+  it('GET /api/docs serves Swagger UI HTML in development', async () => {
+    const response = await request(app).get('/api/docs/').expect(200);
     expect(response.headers['content-type']).toContain('text/html');
     expect(response.text).toContain('swagger-ui');
     expect(response.text).toContain('swagger-ui-bundle.js');
   });
 
   it('OpenAPI spec documents all campaign endpoints', async () => {
-    const response = await request(app).get('/api/docs').expect(200);
+    const response = await request(app).get('/api/openapi.json').expect(200);
     const spec = response.body;
 
     const expectedPaths = [
@@ -64,6 +64,7 @@ describe('OpenAPI documentation endpoints', () => {
       '/api/stats',
       '/api/leaderboard',
       '/api/docs',
+      '/api/openapi.json',
     ];
 
     for (const pathName of expectedPaths) {

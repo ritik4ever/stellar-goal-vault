@@ -175,7 +175,7 @@ export function CampaignDetailPanel({
           <p className="muted">
             {connectedWallet
               ? `Connected to ${networkName(appConfig)}`
-              : `Not connected — connect Freighter to take actions`}
+              : `Not connected — connect a wallet to take actions`}
           </p>
         </div>
         <div className="wallet-connected">
@@ -206,7 +206,7 @@ export function CampaignDetailPanel({
               }}
               disabled={isSubmitting || isConnectingWallet}
             >
-              {isConnectingWallet ? 'Connecting...' : 'Connect Freighter'}
+              {isConnectingWallet ? 'Connecting...' : 'Connect Wallet'}
             </button>
           )}
         </div>
@@ -263,7 +263,7 @@ export function CampaignDetailPanel({
           <input
             type="text"
             value={connectedWallet ?? ''}
-            placeholder="Connect Freighter to use the pledge flow"
+            placeholder="Connect a wallet to use the pledge flow"
             readOnly
           />
         </label>
