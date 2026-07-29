@@ -755,53 +755,61 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
       'CAMPAIGN_FUNDING_CAP_EXCEEDED',
     );
   }
-  db.prepare(
-    `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
-     VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-  ).run(campaignId, input.contributor, roundedAmount, assetCode, createdAt);
+  // The pledge row, the campaign total and the emitted events must land in a
+  // single atomic commit. Without it an unclean shutdown between the INSERT and
+  // the UPDATE leaves `campaigns.pledged_amount` out of sync with the pledge
+  // rows (see scripts/chaos/kill-backend-mid-pledge.mjs).
+  const commitPledge = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
+    ).run(campaignId, input.contributor, roundedAmount, assetCode, createdAt);
 
-  db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`).run(
-    roundedAmount,
-    campaignId,
-  );
-
-  recordEvent(
-    campaignId,
-    'pledged',
-    createdAt,
-    input.contributor,
-    roundedAmount,
-    {
-      newTotalPledged: nextPledgedAmount,
-      assetCode,
-      source: 'backend-mvp',
-    },
-    { source: 'local' } as BlockchainMetadata,
-  );
-
-  // Check if contributor has reached their limit and record event
-  if (
-    campaign.maxPerContributor !== undefined &&
-    campaign.maxPerContributor > 0
-  ) {
-    const newContributorTotal = round(
-      getContributorPledgedTotal(campaignId, input.contributor),
+    db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`).run(
+      roundedAmount,
+      campaignId,
     );
-    if (newContributorTotal >= campaign.maxPerContributor) {
-      recordEvent(
-        campaignId,
-        "pledge_limit_reached",
-        createdAt,
-        input.contributor,
-        newContributorTotal,
-        {
-          maxPerContributor: campaign.maxPerContributor,
-          assetCode,
-        },
-        { source: "local" } as BlockchainMetadata,
+
+    recordEvent(
+      campaignId,
+      'pledged',
+      createdAt,
+      input.contributor,
+      roundedAmount,
+      {
+        newTotalPledged: nextPledgedAmount,
+        assetCode,
+        source: 'backend-mvp',
+      },
+      { source: 'local' } as BlockchainMetadata,
+    );
+
+    // Check if contributor has reached their limit and record event
+    if (
+      campaign.maxPerContributor !== undefined &&
+      campaign.maxPerContributor > 0
+    ) {
+      const newContributorTotal = round(
+        getContributorPledgedTotal(campaignId, input.contributor),
       );
+      if (newContributorTotal >= campaign.maxPerContributor) {
+        recordEvent(
+          campaignId,
+          "pledge_limit_reached",
+          createdAt,
+          input.contributor,
+          newContributorTotal,
+          {
+            maxPerContributor: campaign.maxPerContributor,
+            assetCode,
+          },
+          { source: "local" } as BlockchainMetadata,
+        );
+      }
     }
-  }
+  });
+
+  commitPledge();
 
   return getCampaign(campaignId)!;
 }
