@@ -1,0 +1,87 @@
+name: OWASP ZAP Security Scan
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL to scan (overrides STAGING_URL secret)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  deployments: read
+  checks: write
+
+jobs:
+  zap-scan:
+    name: OWASP ZAP Passive Scan
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.deployment_status.state == 'success'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine target URL
+        id: target
+        run: |
+          if [ -n "${{ github.event.inputs.target_url }}" ]; then
+            echo "url=${{ github.event.inputs.target_url }}" >> $GITHUB_OUTPUT
+          elif [ -n "${{ github.event.deployment_status.target_url }}" ]; then
+            echo "url=${{ github.event.deployment_status.target_url }}" >> $GITHUB_OUTPUT
+          elif [ -n "${{ secrets.STAGING_URL }}" ]; then
+            echo "url=${{ secrets.STAGING_URL }}" >> $GITHUB_OUTPUT
+          else
+            echo "No target URL available. Set STAGING_URL secret or provide target_url input."
+            exit 1
+          fi
+
+      - name: ZAP Passive Scan
+        id: zap
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: ${{ steps.target.outputs.url }}
+          cmd_options: '-I -T 60'
+          fail_action: true
+          allow_issue_writing: false
+          artifact_name: zap-report
+
+      - name: Upload SARIF report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: zap-scan
+
+      - name: Upload ZAP HTML report as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-html-report
+          path: zap-report.html
+
+      - name: Check for high-severity findings
+        if: always()
+        run: |
+          if [ -f zap-report.json ]; then
+            HIGH_COUNT=$(jq '[.site[]?.alerts[]? | select(.riskcode == "3" or .riskcode == "2")] | length' zap-report.json 2>/dev/null || echo "0")
+            echo "## OWASP ZAP Scan Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Target:** ${{ steps.target.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **High-severity alerts:** $(jq '[.site[]?.alerts[]? | select(.riskcode == "3")] | length' zap-report.json 2>/dev/null || echo "0")" >> $GITHUB_STEP_SUMMARY
+            echo "- **Medium-severity alerts:** $(jq '[.site[]?.alerts[]? | select(.riskcode == "2")] | length' zap-report.json 2>/dev/null || echo "0")" >> $GITHUB_STEP_SUMMARY
+            echo "- **Low-severity alerts:** $(jq '[.site[]?.alerts[]? | select(.riskcode == "1")] | length' zap-report.json 2>/dev/null || echo "0")" >> $GITHUB_STEP_SUMMARY
+            if [ "$HIGH_COUNT" -gt 0 ]; then
+              echo "❌ **Deploy blocked:** $HIGH_COUNT high-severity or medium-severity findings detected." >> $GITHUB_STEP_SUMMARY
+              echo "Please review the ZAP report artifact for details."
+              exit 1
+            else
+              echo "✅ **No high-severity or medium-severity findings.** Scan passed." >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "No ZAP JSON report found. Scan results may not be available."
+          fi
