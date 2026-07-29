@@ -1,4 +1,8 @@
-
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+import { z } from 'zod';
+import { config } from '../config';
+import { httpsOnlyUrlSchema } from './urlSafety';
+import { isValidStellarPublicKey } from './stellarAddress';
 
 extendZodWithOpenApi(z);
 import type { CampaignStatus, CampaignSortField, SortOrder } from "../services/campaignStore";
@@ -24,7 +28,10 @@ export const stellarAccountIdSchema = z
   .regex(
     STELLAR_ACCOUNT_REGEX,
     'Must be a valid Stellar account ID (starts with G and is exactly 56 characters).',
-  );
+  )
+  .refine(isValidStellarPublicKey, {
+    message: 'creator must be a valid Stellar public key',
+  });
 
 export const assetCodeSchema = z
   .string()
@@ -67,7 +74,13 @@ export const createCampaignPayloadSchema = z.object({
   title: z
     .string()
     .trim()
-
+    .min(1, 'Title is required.')
+    .max(100, 'Title cannot exceed 100 characters.'),
+  description: z
+    .string()
+    .trim()
+    .min(1, 'Description is required.')
+    .max(2000, 'Description cannot exceed 2000 characters.'),
   acceptedTokens: z
     .array(assetCodeSchema)
     .min(1, 'At least one accepted token is required.'),
@@ -147,7 +160,7 @@ function singleCampaignListQueryParam(value: unknown): string | undefined {
 
 function parsePositiveIntegerQueryParam(
   value: unknown,
-
+  field: string,
   max?: number,
 ): { ok: true; value?: number } | { ok: false; issues: z.core.$ZodIssue[] } {
   const raw = singleCampaignListQueryParam(value);
