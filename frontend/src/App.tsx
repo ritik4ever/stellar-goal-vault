@@ -244,9 +244,21 @@ function App() {
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInputFocused =
+        activeEl &&
+        (activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA" ||
+          (activeEl as HTMLElement).isContentEditable);
+
+      if (isInputFocused && event.key !== 'Escape') {
+        return;
+      }
+
       if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         setIsShortcutsOpen((current) => !current);
+        return;
       }
 
       if (event.key === "Escape") {
@@ -255,6 +267,40 @@ function App() {
           transactionPreview.resolve(false);
           setTransactionPreview(null);
         }
+        return;
+      }
+
+      if (event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        const creatorInput = document.getElementById("create-campaign-creator");
+        if (creatorInput) {
+          creatorInput.scrollIntoView({ behavior: 'smooth' });
+          creatorInput.focus();
+        }
+        return;
+      }
+
+      if (event.key === "/") {
+        event.preventDefault();
+        const searchInput = document.querySelector('.search-input-field') as HTMLInputElement;
+        if (searchInput) {
+          searchInput.scrollIntoView({ behavior: 'smooth' });
+          searchInput.focus();
+        }
+        return;
+      }
+
+      if (event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        navigate("/");
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+
+      if (event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        navigate("/pledges");
+        return;
       }
     };
 
