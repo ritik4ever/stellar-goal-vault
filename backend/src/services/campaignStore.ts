@@ -194,6 +194,15 @@ export function getPledgeByTransactionHash(transactionHash: string): PledgeRecor
   return row ? rowToPledge(row) : undefined;
 }
 
+export function getPledgeById(campaignId: string, pledgeId: number): PledgeRecord | undefined {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT * FROM pledges WHERE campaign_id = ? AND id = ?`)
+    .get(campaignId, pledgeId) as PledgeRow | undefined;
+
+  return row ? rowToPledge(row) : undefined;
+}
+
 function getContributorPledgedTotal(campaignId: string, contributor: string): number {
   const db = getDb();
   const row = db

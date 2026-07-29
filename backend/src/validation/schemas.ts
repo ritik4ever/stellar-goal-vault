@@ -1,4 +1,7 @@
-
+import { z } from 'zod';
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+import { config } from '../config';
+import { httpsOnlyUrlSchema } from './urlSafety';
 
 extendZodWithOpenApi(z);
 import type { CampaignStatus, CampaignSortField, SortOrder } from "../services/campaignStore";
@@ -67,7 +70,12 @@ export const createCampaignPayloadSchema = z.object({
   title: z
     .string()
     .trim()
-
+    .min(3, 'title must be at least 3 characters.')
+    .max(100, 'title must not exceed 100 characters.'),
+  description: z
+    .string()
+    .trim()
+    .min(10, 'description must be at least 10 characters.'),
   acceptedTokens: z
     .array(assetCodeSchema)
     .min(1, 'At least one accepted token is required.'),

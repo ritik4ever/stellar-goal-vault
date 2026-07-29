@@ -36,7 +36,7 @@ export async function initRedisCache(): Promise<void> {
 
     await redisClient.connect();
     isConnected = true;
-
+  } catch (error) {
     redisClient = null;
     isConnected = false;
   }
@@ -132,7 +132,8 @@ export async function closeRedisCache(): Promise<void> {
     try {
       await redisClient.quit();
       isConnected = false;
-
+    } catch (error) {
+      // Ignore errors on close
     }
   }
 }
