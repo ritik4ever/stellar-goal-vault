@@ -1460,4 +1460,50 @@ mod tests {
         assert_eq!(token_client.balance(&sponsor), 250);
     }
 
+    #[test]
+    #[should_panic(expected = "campaign qualifies for matching; refund not allowed")]
+    fn test_matching_grant_refund_rejected_for_qualifying_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&sponsor, &500);
+
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "qualifying refund test"),
+            &0_i128,
+        );
+
+        let grant_id = client.create_matching_grant(
+            &sponsor,
+            &campaign_id,
+            &token,
+            &1_u32,
+            &1_u32,
+            &500_i128,
+            &1_000_i128,
+        );
+
+        // Contributor pledges 1000 (meets target)
+        client.contribute(&campaign_id, &contributor, &token, &1_000);
+        advance_time(&env, deadline_offset + 1);
+
+        // Sponsor attempts to refund matching grant before creator calls claim() -> MUST PANIC
+        client.refund_matching_grant(&grant_id, &sponsor);
+    }
+
 }

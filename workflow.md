@@ -5,7 +5,7 @@ This workflow describes the design, implementation, and lifecycle of **Condition
 
 ## Architecture & Data Flow
 
-```
+```text
 [ Sponsor ] ─── create_matching_grant() ───► [ Vault Contract Escrow ]
                                                     │
                       ┌─────────────────────────────┴─────────────────────────────┐

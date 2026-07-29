@@ -275,6 +275,9 @@ pub fn refund_matching_grant(env: Env, grant_id: u64, sponsor: Address) {
     if !campaign.canceled && !is_expired {
         panic!("campaign is still active");
     }
+    if !campaign.canceled && campaign.pledged_amount >= grant.min_campaign_target {
+        panic!("campaign qualifies for matching; refund not allowed");
+    }
 
     let remaining_escrow = grant.total_match_locked - grant.released_amount;
     if remaining_escrow <= 0 {
