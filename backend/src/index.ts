@@ -32,6 +32,7 @@ import {
   getContributorSummary,
   getGlobalStats,
   getTopContributors,
+  getUserPledges,
   initCampaignStore,
   listCampaignPledges,
   listCampaigns,
@@ -630,6 +631,16 @@ app.get('/api/campaigns/:id/contributors', (req: Request, res: Response) => {
   res.json({ data: summary });
 });
 
+app.get('/api/users/:address/pledges', (req: Request, res: Response) => {
+  const address = req.params.address;
+  if (!address || typeof address !== 'string') {
+    throw new AppError('Invalid address parameter.', 400, 'BAD_REQUEST');
+  }
+
+  const summaries = getUserPledges(address);
+  res.json({ data: summaries });
+});
+
 app.get('/api/campaigns/:id/history', (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
@@ -851,17 +862,12 @@ function startServer() {
   const gracefulShutdown = (signal: string) => {
     if (isShuttingDown) return;
     isShuttingDown = true;
+    const startTime = Date.now();
 
-    logInfo('server_shutting_down', { signal }, config.logLevel);
-
-    // Stop accepting new connections
-    server.close(() => {
-      logInfo('server_closed', { message: 'Server closed' }, config.logLevel);
-      process.exit(0);
-    });
+    logInfo('server_shutting_down', { signal, reason: `Received ${signal}` }, config.logLevel);
 
     // Force shutdown after grace period
-    const gracePeriodSeconds = 10;
+    const gracePeriodSeconds = 30;
     const gracePeriodTimer = setTimeout(() => {
       logError(
         new Error('Graceful shutdown timeout exceeded'),
@@ -870,9 +876,21 @@ function startServer() {
       );
       process.exit(1);
     }, gracePeriodSeconds * 1000);
-
-    // Close the database connection when shutting down
     gracePeriodTimer.unref();
+
+    // Stop accepting new connections
+    server.close(() => {
+      const drainDurationMs = Date.now() - startTime;
+      logInfo('server_closed', { message: 'Server closed', drainDurationMs }, config.logLevel);
+      
+      import('./services/db').then(({ closeDb }) => {
+        closeDb();
+        process.exit(0);
+      }).catch((e) => {
+        logError(e instanceof Error ? e : new Error(String(e)), { event: 'db_close_error' }, config.logLevel);
+        process.exit(1);
+      });
+    });
   };
 
   // Handle graceful shutdown

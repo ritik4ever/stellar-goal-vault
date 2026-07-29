@@ -7,6 +7,7 @@ import {
   OpenIssue,
   ReconcilePledgePayload,
   SorobanRefundMetadata,
+  UserPledgeSummary,
 } from '../types/campaign';
 import { apiRequest } from './httpClient';
 
@@ -188,6 +189,14 @@ export async function listOpenIssues(): Promise<OpenIssue[]> {
 export async function getDistinctAssetCodes(): Promise<string[]> {
   const body = await apiRequest<{ data: string[] }>({
     url: '/campaigns/assets',
+    method: 'GET',
+  });
+  return body.data;
+}
+
+export async function getUserPledges(address: string): Promise<UserPledgeSummary[]> {
+  const body = await apiRequest<{ data: UserPledgeSummary[] }>({
+    url: `/users/${address}/pledges`,
     method: 'GET',
   });
   return body.data;

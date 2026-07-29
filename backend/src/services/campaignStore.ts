@@ -1209,3 +1209,63 @@ export function getTopContributors(limit: number = 10): LeaderboardEntry[] {
     averagePledgeAmount: round(row.avg_pledge),
   }));
 }
+
+export interface UserPledgeSummary {
+  campaign: CampaignRecord & { progress: CampaignProgress };
+  totalPledged: number;
+  totalRefunded: number;
+  pledges: PledgeRecord[];
+}
+
+export function getUserPledges(contributor: string): UserPledgeSummary[] {
+  const db = getDb();
+  
+  const campaignRows = db.prepare(`
+    SELECT DISTINCT c.* 
+    FROM campaigns c
+    JOIN pledges p ON p.campaign_id = c.id
+    WHERE p.contributor = ? AND c.deleted_at IS NULL
+  `).all(contributor) as CampaignRow[];
+
+  const summaries: UserPledgeSummary[] = [];
+
+  for (const row of campaignRows) {
+    const campaign = rowToCampaign(row);
+    const progress = calculateProgress(campaign);
+
+    const pledgeRows = db.prepare(`
+      SELECT * FROM pledges 
+      WHERE campaign_id = ? AND contributor = ?
+      ORDER BY created_at DESC
+    `).all(campaign.id, contributor) as PledgeRow[];
+
+    const pledges: PledgeRecord[] = pledgeRows.map(rowToPledge);
+
+    let totalPledged = 0;
+    let totalRefunded = 0;
+
+    for (const pledge of pledges) {
+      if (pledge.refundedAt) {
+        totalRefunded += pledge.amount;
+      } else {
+        totalPledged += pledge.amount;
+      }
+    }
+
+    summaries.push({
+      campaign: { ...campaign, progress },
+      totalPledged,
+      totalRefunded,
+      pledges
+    });
+  }
+
+  // Sort summaries by the latest pledge time
+  summaries.sort((a, b) => {
+    const latestA = Math.max(...a.pledges.map(p => p.createdAt));
+    const latestB = Math.max(...b.pledges.map(p => p.createdAt));
+    return latestB - latestA;
+  });
+
+  return summaries;
+}

@@ -51,6 +51,18 @@ export function resetDbForTests(): void {
   }
 }
 
+export function closeDb(): void {
+  if (db) {
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)');
+    } catch {
+      // Ignore if checkpoint fails during shutdown
+    }
+    db.close();
+    db = null;
+  }
+}
+
 export function checkDbHealth(): {
   status: DbHealthStatus;
   reachable: boolean;

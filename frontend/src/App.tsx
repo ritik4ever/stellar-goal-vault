@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams, Link } from "react-router-dom";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
@@ -664,6 +664,11 @@ function App() {
             <h1>Campaign control center</h1>
           </div>
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            {freighter.publicKey && (
+              <Link to="/my-pledges" className="btn-ghost" style={{ textDecoration: 'none' }}>
+                My Pledges
+              </Link>
+            )}
             <WalletWidget
               status={freighter.status}
               publicKey={freighter.publicKey}

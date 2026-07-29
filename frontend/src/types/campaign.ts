@@ -159,3 +159,10 @@ export interface ApiError {
   details?: Array<{ field: string; message: string }>;
   requestId?: string;
 }
+
+export interface UserPledgeSummary {
+  campaign: Campaign;
+  totalPledged: number;
+  totalRefunded: number;
+  pledges: Pledge[];
+}
