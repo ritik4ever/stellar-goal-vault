@@ -12,3 +12,5 @@ backend/data/
 CLAUDE.md
 pr.md
 issue.md
+# Chaos test scratch database
+scripts/chaos/.chaos-data/
