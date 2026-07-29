@@ -1,142 +1,121 @@
 # Contributing
 
-Thank you for your interest in contributing to **Stellar Goal Vault**!
+Thank you for your interest in contributing to **Stellar Goal Vault**! We welcome all contributions, from bug fixes and documentation to new features. This guide will help you go from zero to passing tests and submitting your first Pull Request.
 
-## Quick start
+## Finding a Good First Issue
 
-1. **Fork** the repository on GitHub.
-2. **Clone** your fork: `git clone https://github.com/YOUR_USERNAME/stellar-goal-vault.git`
-3. **Install dependencies:** `npm run install:all`
-4. **Create a branch:** `git checkout -b feature/my-feature`
-5. Make your changes and test them.
-6. **Commit** using conventional commits (e.g., `feat: add new endpoint`).
-7. **Push** and open a **Pull Request** against the `main` branch.
+If you're looking for a place to start:
+1. Browse `OPEN_SOURCE_ISSUES.md` for curated contribution ideas.
+2. Check our GitHub Issues tab for issues labeled `good first issue` or `help wanted`.
+3. Read the [README.md](./README.md) to understand the project overview and architecture.
+4. Check the [FAQ.md](./FAQ.md) for answers to common questions.
 
-## Before you start
+## Local Setup Checklist
 
-- Read the [README.md](./README.md) for project overview and architecture.
-- Check the [FAQ.md](./FAQ.md) for answers to common questions.
-- Browse `OPEN_SOURCE_ISSUES.md` for curated contribution ideas.
+Follow these steps to set up the project locally:
 
-## Backend Development
+1. **Fork and Clone**
+   - Fork the repository on GitHub.
+   - Clone your fork: `git clone https://github.com/YOUR_USERNAME/stellar-goal-vault.git`
+   - Navigate to the directory: `cd stellar-goal-vault`
 
-### Prerequisites
+2. **Install Dependencies**
+   - **Node.js** 18+ and **npm** 9+ are required.
+   - Run `npm run install:all` in the root directory to install both frontend and backend dependencies.
 
-- **Node.js** 18+ (check with `node --version`)
-- **npm** 9+ (comes with Node.js)
+3. **Backend Setup**
+   - Navigate to the backend directory: `cd backend`
+   - Copy the environment file: `cp .env.example .env`
+   - Configure `.env` (default values are fine for local development).
+   - Go back to root: `cd ..`
 
-### Setup
+4. **Create a Branch**
+   - `git checkout -b feature/my-feature`
 
-1. Navigate to the backend directory:
-   ```bash
-   cd backend
-   ```
+## Running All Tests
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+To ensure everything is working correctly, run the test suites:
 
-3. Copy the environment file:
-   ```bash
-   cp .env.example .env
-   ```
-
-4. Configure environment variables in `.env`:
-   - `DB_PATH`: Path to SQLite database file (default: `../../data/campaigns.db`)
-   - `NODE_ENV`: Set to `development` for local development
-   - `PORT`: Server port (default: 3000)
-   - `CORS_ALLOWED_ORIGINS`: Comma-separated list of allowed origins
-   - `CONTRACT_ID`: Stellar contract ID (required for pledge operations)
-   - `SOROBAN_RPC_URL`: URL to Soroban RPC endpoint
-   - `NETWORK_PASSPHRASE`: Stellar network (default: `Test SDF Network ; September 2015` for testnet)
-
-### Running the Backend
-
-- **Development mode** (with auto-reload):
+- **Backend Tests**: 
   ```bash
-  npm run dev
-  ```
-  Server listens on `http://localhost:3000` by default.
-
-- **Production mode** (build and run):
-  ```bash
-  npm run build
-  npm start
-  ```
-
-- **Watch mode** (for editing and testing):
-  ```bash
-  npm run dev
-  ```
-
-### Testing
-
-- **Run all tests once**:
-  ```bash
+  cd backend
   npm test
   ```
-
-- **Run tests in watch mode** (re-run on file changes):
+- **Frontend Tests**:
   ```bash
-  npm run test:watch
+  cd frontend
+  npm test
+  ```
+- **Contract Tests**: 
+  ```bash
+  cd contracts
+  cargo test
+  ```
+- **E2E Tests**: 
+  ```bash
+  npm run test:e2e
   ```
 
-- **Run with coverage**:
-  ```bash
-  npm test -- --coverage
-  ```
+If all tests pass, your local environment is correctly configured!
 
-### Database
+## Local Soroban Testnet Setup
 
-- **Seeding**: The application automatically initializes the SQLite database with the schema on first run. To seed deterministic test campaigns:
-  ```bash
-  npm test -- tests/services/seedDeterministic.test.ts
-  ```
+To interact with the smart contracts on the testnet:
 
-- **Viewing the database**:
-  - Use SQLite CLI: `sqlite3 ../../data/campaigns.db`
-  - Or use a GUI tool like [DB Browser for SQLite](https://sqlitebrowser.org/)
+1. **Install Soroban CLI**:
+   ```bash
+   cargo install --locked soroban-cli
+   ```
+2. **Configure Testnet Network**:
+   ```bash
+   soroban network add \
+     --global testnet \
+     --rpc-url https://soroban-testnet.stellar.org:443 \
+     --network-passphrase "Test SDF Network ; September 2015"
+   ```
+3. **Generate an Identity**:
+   ```bash
+   soroban keys generate --global alice --network testnet
+   ```
+4. **Fund your Account**:
+   - The CLI automatically funds new identities via Friendbot. You can verify your balance with:
+   ```bash
+   soroban keys address alice
+   ```
+5. **Update `.env`**:
+   - Set `CONTRACT_ID` in `backend/.env` to a deployed testnet contract or deploy your own (see `README.md`).
 
-- **Resetting the database** (for testing):
-  - Delete the database file: `rm ../../data/campaigns.db`
-  - Next run will recreate it with the schema
+## Opening a Pull Request
 
-### Troubleshooting
+1. Make your changes and ensure all tests pass (`npm test`).
+2. **Commit** your changes using conventional commits (e.g., `feat: add new endpoint`, `fix: correct typo in docs`).
+3. **Push** your branch: `git push origin feature/my-feature`.
+4. Open a **Pull Request** against the `main` branch.
+5. Provide a clear description of the problem you are solving and the changes you made.
 
-#### "SQLITE_CANTOPEN" or database file not found
-- Ensure the directory specified in `DB_PATH` exists
-- Check file permissions on the database directory
-- If the directory doesn't exist, create it: `mkdir -p data`
+## Code Style
 
-#### Tests fail with "database is locked"
-- This indicates concurrent access issues. Ensure only one test process is running.
-- Try clearing the test database: `rm test-temp-*.db*`
-- Run tests serially: `npm test -- --no-coverage`
+- **TypeScript**: ESLint + Prettier (pre-commit via Husky + lint-staged)
+- **Rust**: `cargo fmt`
 
-#### "Cannot find module" errors
-- Run `npm install` in the `backend` directory
-- Clear node_modules and reinstall: `rm -rf node_modules && npm install`
+## Common Setup Errors and Fixes
 
-#### Port already in use
-- Change the `PORT` in `.env` to an available port (e.g., 3001)
-- Or kill the process on the current port
+Here are the top 5 most common issues new contributors run into:
 
-#### Environment variable not picked up
-- Ensure `.env` file is in the `backend` directory
-- Restart the development server after editing `.env`
-- Check for syntax errors in `.env` (no spaces around `=`)
+#### 1. "SQLITE_CANTOPEN" or database file not found
+- **Fix**: Ensure the directory specified in `DB_PATH` exists. If you are in the `backend` directory, run `mkdir -p data`.
 
-## Testing
+#### 2. Tests fail with "database is locked"
+- **Fix**: This indicates concurrent access issues. Ensure only one test process is running. Try clearing the test database: `rm test-temp-*.db*` or run tests serially with `npm test -- --no-coverage`.
 
-- Backend: `cd backend && npm test`
-- Contract: `cd contracts && cargo test`
-- E2E: `npm run test:e2e`
+#### 3. "Cannot find module" errors
+- **Fix**: You might have skipped dependency installation. Run `npm run install:all` in the project root, or `npm install` inside the respective `backend`/`frontend` directory.
 
-## Code style
+#### 4. Port already in use (EADDRINUSE)
+- **Fix**: If port 3000 or 3001 is taken, change the `PORT` variable in your `.env` file (e.g., to 3002) or kill the existing process using that port.
 
-- TypeScript: ESLint + Prettier (pre-commit via Husky + lint-staged)
-- Rust: `cargo fmt`
+#### 5. Soroban CLI build/deploy errors
+- **Fix**: Ensure you have the `wasm32-unknown-unknown` Rust target installed: `rustup target add wasm32-unknown-unknown`. Also, make sure your Soroban CLI version matches the network version requirements.
 
 ## Questions?
 
