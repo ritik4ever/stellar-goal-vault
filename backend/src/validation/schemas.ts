@@ -107,6 +107,26 @@ export const paginationSchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(10),
 });
 
+export const createCampaignUpdatePayloadSchema = z
+  .object({
+    creator: stellarAccountIdSchema.optional(),
+    creatorAddress: stellarAccountIdSchema.optional(),
+    creator_address: stellarAccountIdSchema.optional(),
+    content: z
+      .string()
+      .trim()
+      .min(1, "Update content cannot be empty.")
+      .max(2000, "Update content cannot exceed 2000 characters."),
+  })
+  .refine((data) => Boolean(data.creator || data.creatorAddress || data.creator_address), {
+    message: "creator address is required.",
+    path: ["creator"],
+  })
+  .transform((data) => ({
+    creatorAddress: (data.creatorAddress || data.creator_address || data.creator)!,
+    content: data.content,
+  }));
+
 
 export type ValidationIssue = {
   field: string;

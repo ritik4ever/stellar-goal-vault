@@ -105,9 +105,20 @@ function migrate(database: SQLiteDatabase): void {
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
     );
 
+    CREATE TABLE IF NOT EXISTS campaign_updates (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id     TEXT NOT NULL,
+      creator_address TEXT NOT NULL,
+      content         TEXT NOT NULL,
+      created_at      INTEGER NOT NULL,
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_id ON campaign_events(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_campaign_updates_campaign_id ON campaign_updates(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_campaign_updates_created_at ON campaign_updates(created_at);
   `);
 
   const pledgeColumns = database

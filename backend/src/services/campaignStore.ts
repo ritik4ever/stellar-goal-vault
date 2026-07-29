@@ -1,5 +1,6 @@
 import { getDb, initDb } from "./db";
 import { getCampaignHistory, recordEvent, BlockchainMetadata } from "./eventHistory";
+import { notifyContributorsOnUpdate } from "./notificationService";
 
 export type CampaignStatus = "open" | "funded" | "claimed" | "failed";
 
@@ -76,6 +77,21 @@ export interface RefundReconciliationInput {
   source?: "local" | "soroban-contract";
 }
 
+export interface CreateCampaignUpdateInput {
+  creatorAddress: string;
+  content: string;
+}
+
+export interface CampaignUpdateRecord {
+  id: number;
+  campaignId: string;
+  creatorAddress: string;
+  creator_address: string;
+  content: string;
+  createdAt: number;
+  created_at: number;
+}
+
 interface CampaignRow {
   id: string;
   creator: string;
@@ -98,6 +114,14 @@ interface PledgeRow {
   created_at: number;
   refunded_at: number | null;
   transaction_hash: string | null;
+}
+
+interface CampaignUpdateRow {
+  id: number;
+  campaign_id: string;
+  creator_address: string;
+  content: string;
+  created_at: number;
 }
 
 type ServiceError = Error & {
@@ -145,6 +169,18 @@ function rowToPledge(row: PledgeRow): PledgeRecord {
     createdAt: row.created_at,
     refundedAt: row.refunded_at ?? undefined,
     transactionHash: row.transaction_hash ?? undefined,
+  };
+}
+
+function rowToUpdate(row: CampaignUpdateRow): CampaignUpdateRecord {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    creatorAddress: row.creator_address,
+    creator_address: row.creator_address,
+    content: row.content,
+    createdAt: row.created_at,
+    created_at: row.created_at,
   };
 }
 
@@ -615,3 +651,81 @@ export function refundContributor(
     refundedAmount,
   };
 }
+
+export function createCampaignUpdate(
+  campaignId: string,
+  input: CreateCampaignUpdateInput,
+): CampaignUpdateRecord {
+  const campaign = getCampaign(campaignId);
+  if (!campaign) {
+    throw toServiceError("Campaign not found.", 404, "NOT_FOUND");
+  }
+
+  if (campaign.creator !== input.creatorAddress) {
+    throw toServiceError(
+      "Only the campaign creator can post updates.",
+      403,
+      "FORBIDDEN",
+    );
+  }
+
+  const createdAt = nowInSeconds();
+  const db = getDb();
+
+  const info = db
+    .prepare(
+      `INSERT INTO campaign_updates (campaign_id, creator_address, content, created_at)
+       VALUES (?, ?, ?, ?)`,
+    )
+    .run(campaignId, input.creatorAddress, input.content, createdAt);
+
+  const updateId = info.lastInsertRowid as number;
+
+  recordEvent(
+    campaignId,
+    "update_posted",
+    createdAt,
+    input.creatorAddress,
+    undefined,
+    {
+      updateId,
+      contentPreview: input.content.slice(0, 50),
+    },
+    { source: "local" } as BlockchainMetadata,
+  );
+
+  notifyContributorsOnUpdate({
+    id: updateId,
+    campaignId,
+    creatorAddress: input.creatorAddress,
+    content: input.content,
+    createdAt,
+  });
+
+  return {
+    id: updateId,
+    campaignId,
+    creatorAddress: input.creatorAddress,
+    creator_address: input.creatorAddress,
+    content: input.content,
+    createdAt,
+    created_at: createdAt,
+  };
+}
+
+export function getCampaignUpdates(campaignId: string): CampaignUpdateRecord[] {
+  const campaign = getCampaign(campaignId);
+  if (!campaign) {
+    throw toServiceError("Campaign not found.", 404, "NOT_FOUND");
+  }
+
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT * FROM campaign_updates WHERE campaign_id = ? ORDER BY created_at DESC, id DESC`,
+    )
+    .all(campaignId) as CampaignUpdateRow[];
+
+  return rows.map(rowToUpdate);
+}
+

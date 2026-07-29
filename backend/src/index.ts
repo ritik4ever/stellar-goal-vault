@@ -10,7 +10,9 @@ import {
   CampaignStatus,
   claimCampaign,
   createCampaign,
+  createCampaignUpdate,
   getCampaign,
+  getCampaignUpdates,
   getCampaignWithProgress,
   initCampaignStore,
   listCampaigns,
@@ -27,6 +29,7 @@ import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
   createCampaignPayloadSchema,
+  createCampaignUpdatePayloadSchema,
   createPledgePayloadSchema,
   paginationSchema,
   reconcilePledgePayloadSchema,
@@ -353,6 +356,31 @@ app.get("/api/campaigns/:id/history", (req: Request, res: Response) => {
   }
 
   res.json({ data: getCampaignHistory(parsedId.value) });
+});
+
+app.post("/api/campaigns/:id/updates", (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  const parsedBody = createCampaignUpdatePayloadSchema.safeParse(req.body);
+  if (!parsedBody.success) {
+    sendValidationError(parsedBody.error.issues);
+  }
+
+  const update = createCampaignUpdate(parsedId.value, parsedBody.data);
+  res.status(201).json({ data: update });
+});
+
+app.get("/api/campaigns/:id/updates", (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  const updates = getCampaignUpdates(parsedId.value);
+  res.json({ data: updates });
 });
 
 app.get("/api/open-issues", async (_req: Request, res: Response) => {
