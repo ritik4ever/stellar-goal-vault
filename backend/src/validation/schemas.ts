@@ -1,7 +1,10 @@
-
+import { z } from 'zod';
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+import { config } from '../config';
+import type { CampaignStatus, CampaignSortField, SortOrder } from "../services/campaignStore";
+import { httpsOnlyUrlSchema } from './urlSafety';
 
 extendZodWithOpenApi(z);
-import type { CampaignStatus, CampaignSortField, SortOrder } from "../services/campaignStore";
 
 export const STELLAR_ACCOUNT_REGEX = /^G[A-Z2-7]{55}$/;
 export const ASSET_CODE_REGEX = /^[A-Za-z0-9]{1,12}$/;
@@ -67,7 +70,8 @@ export const createCampaignPayloadSchema = z.object({
   title: z
     .string()
     .trim()
-
+    .min(1, 'Title is required.')
+    .max(200, 'Title must be at most 200 characters.'),
   acceptedTokens: z
     .array(assetCodeSchema)
     .min(1, 'At least one accepted token is required.'),
@@ -322,4 +326,42 @@ export function normalizeQueryValue(value: unknown): string | undefined {
 
   const trimmed = value.trim();
   return trimmed === '' ? undefined : trimmed;
+}
+
+export type LeaderboardType = 'most_funded' | 'most_backers' | 'trending';
+
+export function parseLeaderboardQuery(query: {
+  type?: unknown;
+  limit?: unknown;
+}): 
+  | { ok: true; type: LeaderboardType; limit: number }
+  | { ok: false; issues: z.ZodIssue[] } {
+  const rawType = singleCampaignListQueryParam(query.type);
+  const rawLimit = singleCampaignListQueryParam(query.limit);
+  const issues: z.ZodIssue[] = [];
+
+  const validTypes: LeaderboardType[] = ['most_funded', 'most_backers', 'trending'];
+  const type = rawType && validTypes.includes(rawType as LeaderboardType) 
+    ? (rawType as LeaderboardType) 
+    : 'most_funded';
+
+  let limit = 10;
+  if (rawLimit !== undefined) {
+    const parsed = Number(rawLimit);
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+      issues.push({
+        code: 'custom',
+        message: 'limit must be an integer from 1 to 100.',
+        path: ['limit'],
+      });
+    } else {
+      limit = parsed;
+    }
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return { ok: true, type, limit };
 }

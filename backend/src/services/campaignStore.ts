@@ -1262,3 +1262,119 @@ export function getTopContributors(limit: number = 10): LeaderboardEntry[] {
     averagePledgeAmount: round(row.avg_pledge),
   }));
 }
+
+export interface CampaignLeaderboardEntry {
+  rank: number;
+  campaignId: string;
+  title: string;
+  creator: string;
+  pledgedAmount: number;
+  targetAmount: number;
+  backerCount: number;
+  pledgeVelocity?: number;
+}
+
+export type CampaignLeaderboardType = 'most_funded' | 'most_backers' | 'trending';
+
+/**
+ * Retrieves campaign leaderboard based on the specified type.
+ * 
+ * @param type - The leaderboard type: 'most_funded' (by pledged amount),
+ *               'most_backers' (by unique contributor count), or
+ *               'trending' (by pledge velocity in last 24h).
+ * @param limit - Maximum number of campaigns to return (default: 10).
+ * @returns An array of {@link CampaignLeaderboardEntry} objects sorted by the specified metric.
+ */
+export function getCampaignLeaderboard(
+  type: CampaignLeaderboardType,
+  limit: number = 10,
+): CampaignLeaderboardEntry[] {
+  const db = getDb();
+  const now = nowInSeconds();
+  const twentyFourHoursAgo = now - (24 * 60 * 60);
+
+  let query: string;
+  let params: (string | number)[] = [limit];
+
+  switch (type) {
+    case 'most_funded':
+      query = `
+        SELECT 
+          c.id,
+          c.title,
+          c.creator,
+          c.pledged_amount,
+          c.target_amount,
+          COUNT(DISTINCT p.contributor) as backer_count
+        FROM campaigns c
+        LEFT JOIN pledges p ON c.id = p.campaign_id AND p.refunded_at IS NULL
+        WHERE c.deleted_at IS NULL
+        GROUP BY c.id
+        ORDER BY c.pledged_amount DESC
+        LIMIT ?
+      `;
+      break;
+
+    case 'most_backers':
+      query = `
+        SELECT 
+          c.id,
+          c.title,
+          c.creator,
+          c.pledged_amount,
+          c.target_amount,
+          COUNT(DISTINCT p.contributor) as backer_count
+        FROM campaigns c
+        LEFT JOIN pledges p ON c.id = p.campaign_id AND p.refunded_at IS NULL
+        WHERE c.deleted_at IS NULL
+        GROUP BY c.id
+        ORDER BY backer_count DESC
+        LIMIT ?
+      `;
+      break;
+
+    case 'trending':
+      query = `
+        SELECT 
+          c.id,
+          c.title,
+          c.creator,
+          c.pledged_amount,
+          c.target_amount,
+          COUNT(DISTINCT p.contributor) as backer_count,
+          COUNT(CASE WHEN p.created_at >= ? THEN 1 END) as pledge_velocity
+        FROM campaigns c
+        LEFT JOIN pledges p ON c.id = p.campaign_id AND p.refunded_at IS NULL
+        WHERE c.deleted_at IS NULL
+        GROUP BY c.id
+        ORDER BY pledge_velocity DESC
+        LIMIT ?
+      `;
+      params = [twentyFourHoursAgo, limit];
+      break;
+
+    default:
+      throw toServiceError(`Invalid leaderboard type: ${type}`, 400, 'INVALID_LEADERBOARD_TYPE');
+  }
+
+  const rows = db.prepare(query).all(...params) as Array<{
+    id: string;
+    title: string;
+    creator: string;
+    pledged_amount: number;
+    target_amount: number;
+    backer_count: number;
+    pledge_velocity?: number;
+  }>;
+
+  return rows.map((row, index) => ({
+    rank: index + 1,
+    campaignId: row.id,
+    title: row.title,
+    creator: row.creator,
+    pledgedAmount: round(row.pledged_amount),
+    targetAmount: round(row.target_amount),
+    backerCount: row.backer_count,
+    pledgeVelocity: row.pledge_velocity !== undefined ? round(row.pledge_velocity) : undefined,
+  }));
+}

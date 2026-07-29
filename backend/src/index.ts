@@ -29,6 +29,7 @@ import {
   getCampaign,
   getCampaignWithProgress,
   getContributorSummary,
+  getCampaignLeaderboard,
   getGlobalStats,
   getTopContributors,
   initCampaignStore,
@@ -56,8 +57,8 @@ import {
   refundPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
-  parseCampaignListQuery,
   normalizeQueryValue,
+  parseLeaderboardQuery,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
 import { logError, logInfo } from './logger';
@@ -702,6 +703,59 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
       error: {
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to fetch leaderboard',
+        requestId: (req as RequestWithId).requestId,
+      },
+    });
+  }
+});
+
+app.get('/api/campaigns/leaderboard', (req: Request, res: Response) => {
+  const queryResult = parseLeaderboardQuery(req.query as Record<string, unknown>);
+  if (!queryResult.ok) {
+    sendValidationError(queryResult.issues);
+  }
+
+  const { type, limit } = queryResult;
+
+  // Build cache key based on type and limit
+  const cacheKey = `campaign_leaderboard:${type}:${limit}`;
+  const cached = getCampaignCacheEntry(cacheKey);
+
+  if (cached) {
+    const cachedData = JSON.parse(cached);
+    res.setHeader('Cache-Control', 'max-age=300');
+    res.setHeader('X-Cache', 'HIT');
+    res.setHeader('Content-Type', 'application/json');
+    res.send(cached);
+    return;
+  }
+
+  try {
+    const leaderboard = getCampaignLeaderboard(type, limit);
+    const responseBody = JSON.stringify({ data: leaderboard });
+
+    setCampaignCacheEntry(cacheKey, responseBody);
+
+    res.setHeader('Cache-Control', 'max-age=300');
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('Content-Type', 'application/json');
+    res.send(responseBody);
+  } catch (err) {
+    logError(
+      err as Error,
+      {
+        event: 'campaign_leaderboard_error',
+        requestId: (req as RequestWithId).requestId,
+        type,
+        limit,
+      },
+      config.logLevel,
+    );
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to fetch campaign leaderboard',
         requestId: (req as RequestWithId).requestId,
       },
     });
