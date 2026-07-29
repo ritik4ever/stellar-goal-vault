@@ -7,6 +7,7 @@ import CopyButton from './CopyButton';
 import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
 import { ContributorSummary } from './ContributorSummary';
+import { ContributorTable } from './ContributorTable';
 import { CampaignImage } from './CampaignImage';
 
 interface CampaignDetailPanelProps {
@@ -247,6 +248,12 @@ export function CampaignDetailPanel({
       <ContributorSummary
         campaignId={activeCampaign.id}
         assetCode={activeCampaign.assetCode}
+        isLoading={isLoading}
+      />
+
+      <ContributorTable
+        campaignId={activeCampaign.id}
+        networkPassphrase={appConfig?.networkPassphrase}
         isLoading={isLoading}
       />
 

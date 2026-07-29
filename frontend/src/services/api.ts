@@ -5,6 +5,7 @@ import {
   CreateCampaignPayload,
   CreatePledgePayload,
   OpenIssue,
+  Pledge,
   ReconcilePledgePayload,
   SorobanRefundMetadata,
 } from '../types/campaign';
@@ -185,10 +186,37 @@ export async function listOpenIssues(): Promise<OpenIssue[]> {
   return body.data;
 }
 
-export async function getDistinctAssetCodes(): Promise<string[]> {
-  const body = await apiRequest<{ data: string[] }>({
-    url: '/campaigns/assets',
+export type PledgeListResponse = {
+  data: Pledge[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+};
+
+export type PledgeSortField = 'amount' | 'createdAt';
+export type PledgeSortOrder = 'asc' | 'desc';
+
+export async function getCampaignPledges(
+  campaignId: string,
+  options?: {
+    page?: number;
+    limit?: number;
+    sort?: PledgeSortField;
+    order?: PledgeSortOrder;
+  },
+): Promise<PledgeListResponse> {
+  const params = new URLSearchParams();
+  if (options?.page !== undefined) params.set('page', String(options.page));
+  if (options?.limit !== undefined) params.set('limit', String(options.limit));
+  if (options?.sort) params.set('sort', options.sort);
+  if (options?.order) params.set('order', options.order);
+
+  const query = params.toString();
+  return apiRequest<PledgeListResponse>({
+    url: `/campaigns/${campaignId}/pledges${query ? `?${query}` : ''}`,
     method: 'GET',
   });
-  return body.data;
 }

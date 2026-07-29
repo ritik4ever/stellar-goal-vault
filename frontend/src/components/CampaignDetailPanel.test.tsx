@@ -1,11 +1,16 @@
 import { render, screen } from '@testing-library/react';
+import { vi } from 'vitest';
 
 import { CampaignDetailPanel } from './CampaignDetailPanel';
 import { AppConfig, Campaign } from '../types/campaign';
 
-// Mock the ContributorSummary since it makes API calls
+// Mock the ContributorSummary and ContributorTable since they make API calls
 vi.mock('./ContributorSummary', () => ({
   ContributorSummary: () => <div data-testid="contributor-summary-mock" />,
+}));
+
+vi.mock('./ContributorTable', () => ({
+  ContributorTable: () => <div data-testid="contributor-table-mock" />,
 }));
 
 const mockConfig: AppConfig = {
