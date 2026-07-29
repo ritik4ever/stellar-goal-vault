@@ -64,10 +64,7 @@ const containsScriptTag = (val: string) => /<script/i.test(val);
 
 export const createCampaignPayloadSchema = z.object({
   creator: stellarAccountIdSchema,
-  title: z
-    .string()
-    .trim()
-
+  title: z.string().trim().min(4, 'Title must be at least 4 characters.').max(80),
   acceptedTokens: z
     .array(assetCodeSchema)
     .min(1, 'At least one accepted token is required.'),
