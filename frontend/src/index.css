@@ -1789,3 +1789,100 @@ tbody tr:hover td {
     max-width: 100%;
   }
 }
+
+/* QR Code Donation Styles */
+.qr-code-container {
+  margin-top: 24px;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel-soft);
+  border: 1px solid var(--contributor-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.qr-code-header {
+  text-align: center;
+}
+
+.qr-code-header h3 {
+  margin: 0 0 4px;
+  font-size: 1.15rem;
+  color: var(--text-on-light-surface);
+}
+
+.qr-code-header .muted {
+  font-size: 0.88rem;
+  color: var(--text-on-light-muted);
+  margin: 0;
+}
+
+.qr-code-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  background: var(--bg-panel-strong);
+  border-radius: var(--radius-md);
+}
+
+.qr-code-address {
+  padding: 10px 14px;
+  background: var(--bg-panel-strong);
+  border: 1px solid var(--contributor-stat-border);
+  border-radius: var(--radius-md);
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.qr-address-text {
+  font-size: 0.8rem;
+  color: var(--text-on-light-surface);
+  word-break: break-all;
+  display: block;
+}
+
+.qr-download-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 10px 18px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-on-light-surface);
+  background: var(--bg-panel-strong);
+  border: 1px solid var(--contributor-stat-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.qr-download-btn:hover:not(:disabled) {
+  background: var(--bg-glass);
+  border-color: var(--primary);
+  color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.qr-download-btn:active {
+  transform: translateY(0);
+}
+
+@media (max-width: 767px) {
+  .qr-code-container {
+    padding: 20px;
+  }
+
+  .qr-code-wrapper canvas {
+    max-width: 100%;
+    height: auto !important;
+    width: auto !important;
+  }
+
+  .qr-address-text {
+    font-size: 0.72rem;
+  }
+}
