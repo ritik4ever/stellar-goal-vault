@@ -1,7 +1,8 @@
 import { createClient, RedisClientType } from "redis";
+import { logError } from "../logger";
 import { config } from "../config";
-import { logInfo, logError } from "../logger";
-import { config } from "../config";
+
+const LOG_LEVEL = config.logLevel;
 
 type RedisClient = RedisClientType;
 
@@ -24,7 +25,7 @@ export async function initRedisCache(): Promise<void> {
   try {
     redisClient = createClient({ url: redisUrl });
 
-    redisClient.on("error", (err) => {
+    redisClient.on("error", () => {
 
       isConnected = false;
     });
@@ -36,7 +37,8 @@ export async function initRedisCache(): Promise<void> {
 
     await redisClient.connect();
     isConnected = true;
-
+  } catch (error) {
+    logError(error, { event: "Failed to connect to Redis" }, LOG_LEVEL);
     redisClient = null;
     isConnected = false;
   }
@@ -132,7 +134,8 @@ export async function closeRedisCache(): Promise<void> {
     try {
       await redisClient.quit();
       isConnected = false;
-
+    } catch (error) {
+      logError(error, { event: "Failed to close Redis connection" }, LOG_LEVEL);
     }
   }
 }

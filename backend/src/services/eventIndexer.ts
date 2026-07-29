@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { getDb } from './db';
-import { recordEvent, BlockchainMetadata, CampaignEventType } from './eventHistory';
+import { recordEvent, BlockchainMetadata, type CampaignEventType } from './eventHistory';
 import { reconcileOnChainPledge, getCampaign, updateCampaignMetadata } from './campaignStore';
 import dotenv from 'dotenv';
 import { config } from '../config';
