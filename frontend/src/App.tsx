@@ -15,6 +15,7 @@ import {
 } from "./components/TransactionPreviewModal";
 import { ToastContainer } from "./components/ToastContainer";
 import { WalletWidget } from "./components/WalletWidget";
+import { TrendingCampaigns } from "./components/TrendingCampaigns";
 import {
   claimCampaign,
   createCampaign,
@@ -689,6 +690,11 @@ function App() {
         {actionError ? <p className="form-error">{actionError.message}</p> : null}
         {actionMessage ? <p className="form-success">{actionMessage}</p> : null}
       </section>
+
+      <TrendingCampaigns
+        onSelect={handleSelect}
+        selectedCampaignId={selectedCampaignId}
+      />
 
       <section className="metric-grid animate-fade-in">
         <article className="metric-card">
