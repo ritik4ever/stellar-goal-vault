@@ -42,6 +42,7 @@ import {
 import { checkDbHealth } from './services/db';
 import { listCampaignHistory } from './services/eventHistory';
 import { startEventIndexer } from './services/eventIndexer';
+import { startCampaignExpirer } from './jobs/campaignExpirer';
 import { fetchOpenIssues } from './services/openIssues';
 import { ensureSorobanRefundConfig, verifyRefundTransaction } from './services/sorobanRpc';
 import { AppError, ApiErrorResponse } from './types/errors';
@@ -808,6 +809,7 @@ function startServer() {
   printStartupBanner();
   initCampaignStore();
   startEventIndexer();
+  startCampaignExpirer();
 
   // Initialize Redis cache in production
   if (process.env.NODE_ENV === 'production') {
