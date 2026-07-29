@@ -67,7 +67,7 @@ export const createCampaignPayloadSchema = z.object({
   title: z
     .string()
     .trim()
-
+    .min(1, 'Title is required.'),
   acceptedTokens: z
     .array(assetCodeSchema)
     .min(1, 'At least one accepted token is required.'),
@@ -269,8 +269,10 @@ export function parseHistoryPaginationQuery(query: {
 export function parsePledgeListPaginationQuery(query: {
   page?: unknown;
   limit?: unknown;
+  sort?: unknown;
+  order?: unknown;
 }):
-  | { ok: true; page: number; limit: number }
+  | { ok: true; page: number; limit: number; sort?: 'amount' | 'createdAt'; order?: 'asc' | 'desc' }
   | { ok: false; issues: z.core.$ZodIssue[] } {
   const parsedPage = parsePositiveIntegerQueryParam(query.page, 'page');
   const parsedLimit = parsePositiveIntegerQueryParam(query.limit, 'limit', 100);
@@ -283,6 +285,39 @@ export function parsePledgeListPaginationQuery(query: {
     issues.push(...parsedLimit.issues);
   }
 
+  const VALID_SORTS = ['amount', 'createdAt'] as const;
+  const VALID_ORDERS = ['asc', 'desc'] as const;
+
+  const rawSort = normalizeQueryValue(query.sort);
+  const rawOrder = normalizeQueryValue(query.order);
+
+  let sort: 'amount' | 'createdAt' | undefined;
+  let order: 'asc' | 'desc' | undefined;
+
+  if (rawSort !== undefined) {
+    if ((VALID_SORTS as readonly string[]).includes(rawSort)) {
+      sort = rawSort as 'amount' | 'createdAt';
+    } else {
+      issues.push({
+        code: 'custom',
+        message: `sort must be one of: ${VALID_SORTS.join(', ')}.`,
+        path: ['sort'],
+      });
+    }
+  }
+
+  if (rawOrder !== undefined) {
+    if ((VALID_ORDERS as readonly string[]).includes(rawOrder)) {
+      order = rawOrder as 'asc' | 'desc';
+    } else {
+      issues.push({
+        code: 'custom',
+        message: `order must be one of: ${VALID_ORDERS.join(', ')}.`,
+        path: ['order'],
+      });
+    }
+  }
+
   if (issues.length > 0) {
     return { ok: false, issues };
   }
@@ -291,6 +326,8 @@ export function parsePledgeListPaginationQuery(query: {
     ok: true,
     page: parsedPage.ok ? (parsedPage.value ?? 1) : 1,
     limit: parsedLimit.ok ? (parsedLimit.value ?? 10) : 10,
+    sort,
+    order,
   };
 }
 

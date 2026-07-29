@@ -300,9 +300,13 @@ export interface ListCampaignsResult {
   pledgeCounts: Record<string, number>;
 }
 
+export type PledgeSortField = 'amount' | 'createdAt';
+
 export interface ListCampaignPledgesOptions {
   page: number;
   limit: number;
+  sort?: PledgeSortField;
+  order?: SortOrder;
 }
 
 export interface ListCampaignPledgesResult {
@@ -545,12 +549,26 @@ export function listCampaignPledges(
     }
   ).total;
 
+  const sortField = options.sort ?? 'createdAt';
+  const sortOrder = options.order ?? 'desc';
+  const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
+  let orderByClause: string;
+  switch (sortField) {
+    case 'amount':
+      orderByClause = `amount ${orderDir}, created_at DESC, id DESC`;
+      break;
+    case 'createdAt':
+    default:
+      orderByClause = `created_at ${orderDir}, id ${orderDir}`;
+      break;
+  }
+
   const rows = db
     .prepare(
       `SELECT *
        FROM pledges
        WHERE campaign_id = ?
-       ORDER BY created_at DESC, id DESC
+       ORDER BY ${orderByClause}
        LIMIT ? OFFSET ?`,
     )
     .all(campaignId, options.limit, offset) as PledgeRow[];

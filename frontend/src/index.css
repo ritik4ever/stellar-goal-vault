@@ -749,6 +749,141 @@ select {
   color: var(--text-on-light-muted);
 }
 
+/* Contributor Table (Pledge List) */
+.contributor-table-section {
+  margin-top: 24px;
+}
+
+.contributor-table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.contributor-table-title {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text-main);
+}
+
+.contributor-table-count {
+  font-size: 0.85rem;
+}
+
+.contributor-table-section .contributor-table-wrap {
+  border-radius: 12px;
+  border: 1px solid var(--border-glass);
+  overflow: hidden;
+  overflow-x: auto;
+  background: var(--bg-surface);
+}
+
+.contributor-table-section .contributor-table-head {
+  background: var(--bg-table-head);
+  border-bottom: 1px solid var(--contributor-table-head-border);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-on-light-muted);
+}
+
+.contributor-table-section .contributor-table-row {
+  display: grid;
+  grid-template-columns: 1.5fr 0.8fr 0.6fr 1.2fr 1fr;
+  gap: 12px;
+  padding: 12px 14px;
+  align-items: center;
+  color: var(--text-main);
+}
+
+.contributor-table-section .pledges-header-row {
+  color: var(--text-on-light-muted);
+  min-width: 600px;
+}
+
+.contributor-table-section .contributor-table-body .contributor-table-row:not(:last-child) {
+  border-bottom: 1px solid var(--contributor-table-row-border);
+}
+
+.sortable-header {
+  cursor: pointer;
+}
+
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  font-weight: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.sort-button:hover {
+  color: var(--text-main);
+}
+
+.sort-icon {
+  opacity: 0.4;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.sort-icon.sort-active {
+  opacity: 1;
+  color: var(--primary);
+}
+
+.anonymous-backer {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.tx-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--link-accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+  transition: opacity 0.15s;
+}
+
+.tx-link:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 8px 0;
+}
+
+.pagination-btn {
+  min-height: 38px;
+  padding: 0 16px;
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pagination-info {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
 .table-wrap {
   margin: 0 -32px;
   padding: 0 32px;

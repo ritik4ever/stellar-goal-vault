@@ -451,6 +451,8 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
   const paginationResult = parsePledgeListPaginationQuery({
     page: req.query.page,
     limit: req.query.limit,
+    sort: req.query.sort,
+    order: req.query.order,
   });
   if (!paginationResult.ok) {
     sendValidationError(paginationResult.issues);
@@ -464,6 +466,8 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
   const { pledges, totalCount } = listCampaignPledges(parsedId.value, {
     page: paginationResult.page,
     limit: paginationResult.limit,
+    sort: paginationResult.sort,
+    order: paginationResult.order,
   });
   const totalPages = Math.max(
     1,
