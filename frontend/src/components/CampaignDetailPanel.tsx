@@ -8,6 +8,7 @@ import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
 import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
+import { DonationQRCode } from './DonationQRCode';
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -385,6 +386,11 @@ export function CampaignDetailPanel({
       {activeCampaign.metadata?.imageUrl ? (
         <CampaignImage url={activeCampaign.metadata.imageUrl} alt={activeCampaign.title} />
       ) : null}
+
+      <DonationQRCode 
+        stellarAddress={activeCampaign.creator} 
+        campaignTitle={activeCampaign.title}
+      />
 
       {activeCampaign.metadata?.externalLink ? (
         <div className="external-link-container">

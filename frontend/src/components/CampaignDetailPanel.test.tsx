@@ -50,6 +50,14 @@ const mockCampaign: Campaign = {
 };
 
 describe('CampaignDetailPanel', () => {
+  it('renders empty state when no campaign is selected', () => {
+    render(<CampaignDetailPanel campaign={null} appConfig={mockConfig} />);
+    expect(screen.getByText(/Pick a campaign from the board/i)).toBeInTheDocument();
+  });
 
+  it('renders campaign details when campaign is provided', () => {
+    render(<CampaignDetailPanel campaign={mockCampaign} appConfig={mockConfig} />);
+    expect(screen.getByText('Test Campaign')).toBeInTheDocument();
+    expect(screen.getByText('A test campaign description')).toBeInTheDocument();
   });
 });
