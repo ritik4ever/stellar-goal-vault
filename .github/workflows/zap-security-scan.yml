@@ -40,15 +40,13 @@ jobs:
             exit 1
           fi
 
-      - name: ZAP Passive Scan
+      - name: ZAP Baseline Passive Scan
         id: zap
-        uses: zaproxy/action-full-scan@v0.10.0
+        uses: zaproxy/action-baseline@v0.10.0
         with:
           target: ${{ steps.target.outputs.url }}
           cmd_options: '-I -T 60'
           fail_action: true
-          allow_issue_writing: false
-          artifact_name: zap-report
 
       - name: Upload SARIF report
         if: always()
