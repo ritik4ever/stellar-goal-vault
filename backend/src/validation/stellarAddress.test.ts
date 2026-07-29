@@ -8,7 +8,7 @@ import { stellarAccountIdSchema } from "./schemas";
 // These are well-known Stellar addresses referenced in official Stellar docs.
 const VALID_KEYS = [
   // Stellar Laboratory default test account (used in stellar.org docs)
-  "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+  "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7",
   // Stellar quickstart network mode example (developers.stellar.org/docs/tools/quickstart/network-modes)
   "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI",
   // Stellar testnet USDC issuer (well-known testnet address)
@@ -61,7 +61,7 @@ describe("isValidStellarPublicKey", () => {
 
   it("rejects a key with a flipped bit in the payload (bad checksum)", () => {
     // Take a valid key and flip one character in the middle
-    const valid = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+    const valid = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
     const corrupted = valid.slice(0, 20) + "X" + valid.slice(21);
     expect(isValidStellarPublicKey(corrupted)).toBe(false);
   });
@@ -73,14 +73,14 @@ describe("isValidStellarPublicKey", () => {
 describe("stellarAccountIdSchema", () => {
   it("passes for a valid Stellar public key", () => {
     const result = stellarAccountIdSchema.safeParse(
-      "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+      "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7",
     );
     expect(result.success).toBe(true);
   });
 
   it("trims whitespace before validating", () => {
     const result = stellarAccountIdSchema.safeParse(
-      "  GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN  ",
+      "  GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7  ",
     );
     expect(result.success).toBe(true);
   });

@@ -18,7 +18,7 @@ type SeedCampaign = {
 const SEED_CAMPAIGNS: SeedCampaign[] = [
   {
     id: '1',
-    creator: `G${'A'.repeat(55)}`,
+    creator: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7",
     title: 'Open deterministic campaign',
     description: 'Deterministic campaign seed for open status checks.',
     assetCode: 'USDC',

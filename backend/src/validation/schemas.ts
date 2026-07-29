@@ -1,7 +1,11 @@
-
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+import { z } from 'zod';
+import { config } from '../config';
+import { isValidStellarPublicKey } from './stellarAddress';
+import { httpsOnlyUrlSchema } from './urlSafety';
+import type { CampaignStatus, CampaignSortField, SortOrder } from "../services/campaignStore";
 
 extendZodWithOpenApi(z);
-import type { CampaignStatus, CampaignSortField, SortOrder } from "../services/campaignStore";
 
 export const STELLAR_ACCOUNT_REGEX = /^G[A-Z2-7]{55}$/;
 export const ASSET_CODE_REGEX = /^[A-Za-z0-9]{1,12}$/;
@@ -24,7 +28,10 @@ export const stellarAccountIdSchema = z
   .regex(
     STELLAR_ACCOUNT_REGEX,
     'Must be a valid Stellar account ID (starts with G and is exactly 56 characters).',
-  );
+  )
+  .refine(isValidStellarPublicKey, {
+    message: 'creator must be a valid Stellar public key',
+  });
 
 export const assetCodeSchema = z
   .string()
@@ -64,7 +71,22 @@ const containsScriptTag = (val: string) => /<script/i.test(val);
 
 export const createCampaignPayloadSchema = z.object({
   creator: stellarAccountIdSchema,
-  title: z.string().trim().min(4, 'Title must be at least 4 characters.').max(80),
+  title: z
+    .string()
+    .trim()
+    .min(4, 'Title must be at least 4 characters.')
+    .max(80)
+    .transform(sanitizeInput)
+    .refine((val) => !containsScriptTag(val), { message: 'Title cannot contain script tags.' })
+    .refine((val) => !containsSqlComment(val), { message: 'Title cannot contain SQL comment sequences.' }),
+  description: z
+    .string()
+    .trim()
+    .min(20, 'Description must be at least 20 characters.')
+    .max(500)
+    .transform(sanitizeInput)
+    .refine((val) => !containsScriptTag(val), { message: 'Description cannot contain script tags.' })
+    .refine((val) => !containsSqlComment(val), { message: 'Description cannot contain SQL comment sequences.' }),
   acceptedTokens: z
     .array(assetCodeSchema)
     .min(1, 'At least one accepted token is required.'),
@@ -144,29 +166,29 @@ function singleCampaignListQueryParam(value: unknown): string | undefined {
 
 function parsePositiveIntegerQueryParam(
   value: unknown,
-
+  field: string,
   max?: number,
-): { ok: true; value?: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+): { ok: true; value?: number } | { ok: false; issues: z.ZodIssue[] } {
   const raw = singleCampaignListQueryParam(value);
   if (raw === undefined) {
     return { ok: true };
   }
 
   const parsed = Number(raw);
-  const issues: z.core.$ZodIssue[] = [];
+  const issues: z.ZodIssue[] = [];
 
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1) {
     issues.push({
       code: 'custom',
       message: `${field} must be a positive integer.`,
       path: [field],
-    });
+    } as any);
   } else if (max !== undefined && parsed > max) {
     issues.push({
       code: 'custom',
       message: `${field} must be an integer from 1 to ${max}.`,
       path: [field],
-    });
+    } as any);
   }
 
   if (issues.length > 0) {
@@ -186,7 +208,7 @@ export function parseCampaignListPaginationQuery(query: {
   limit?: unknown;
 }):
   | { ok: true; page?: number; limit?: number }
-  | { ok: false; issues: z.core.$ZodIssue[] } {
+  | { ok: false; issues: z.ZodIssue[] } {
   const pageStr = singleCampaignListQueryParam(query.page);
   const limitStr = singleCampaignListQueryParam(query.limit);
 
@@ -201,21 +223,21 @@ export function parseCampaignListPaginationQuery(query: {
           code: 'custom',
           message: 'Pagination requires both page and limit query parameters.',
           path: pageStr === undefined ? ['page'] : ['limit'],
-        },
+        } as any,
       ],
     };
   }
 
   const pageNum = Number(pageStr);
   const limitNum = Number(limitStr);
-  const issues: z.core.$ZodIssue[] = [];
+  const issues: z.ZodIssue[] = [];
 
   if (!Number.isFinite(pageNum) || !Number.isInteger(pageNum) || pageNum < 1) {
     issues.push({
       code: 'custom',
       message: 'page must be a positive integer.',
       path: ['page'],
-    });
+    } as any);
   }
   if (
     !Number.isFinite(limitNum) ||
@@ -227,7 +249,7 @@ export function parseCampaignListPaginationQuery(query: {
       code: 'custom',
       message: 'limit must be an integer from 1 to 100.',
       path: ['limit'],
-    });
+    } as any);
   }
 
   if (issues.length > 0) {
@@ -240,10 +262,10 @@ export function parseCampaignListPaginationQuery(query: {
 export function parseHistoryPaginationQuery(query: {
   page?: unknown;
   pageSize?: unknown;
-}): { ok: true; page: number; pageSize: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+}): { ok: true; page: number; pageSize: number } | { ok: false; issues: z.ZodIssue[] } {
   const parsedPage = parsePositiveIntegerQueryParam(query.page, "page");
   const parsedPageSize = parsePositiveIntegerQueryParam(query.pageSize, "pageSize", 100);
-  const issues: z.core.$ZodIssue[] = [];
+  const issues: z.ZodIssue[] = [];
 
   if (!parsedPage.ok) {
     issues.push(...parsedPage.issues);
@@ -268,10 +290,10 @@ export function parsePledgeListPaginationQuery(query: {
   limit?: unknown;
 }):
   | { ok: true; page: number; limit: number }
-  | { ok: false; issues: z.core.$ZodIssue[] } {
+  | { ok: false; issues: z.ZodIssue[] } {
   const parsedPage = parsePositiveIntegerQueryParam(query.page, 'page');
   const parsedLimit = parsePositiveIntegerQueryParam(query.limit, 'limit', 100);
-  const issues: z.core.$ZodIssue[] = [];
+  const issues: z.ZodIssue[] = [];
 
   if (!parsedPage.ok) {
     issues.push(...parsedPage.issues);
@@ -288,6 +310,227 @@ export function parsePledgeListPaginationQuery(query: {
     ok: true,
     page: parsedPage.ok ? (parsedPage.value ?? 1) : 1,
     limit: parsedLimit.ok ? (parsedLimit.value ?? 10) : 10,
+  };
+}
+
+function parseIso8601Timestamp(value: unknown): number | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  return Math.floor(timestamp / 1000);
+}
+
+function parseAssetCodes(value: unknown): string[] | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const codes = value.split(',').map(code => code.trim().toUpperCase()).filter(code => code.length > 0);
+  return codes.length > 0 ? codes : null;
+}
+
+export interface CampaignListQueryParams {
+  page?: number;
+  limit?: number;
+  q?: string;
+  search?: string;
+  asset?: string[];
+  status?: CampaignStatus;
+  sort?: CampaignSortField;
+  order?: SortOrder;
+  includeDeleted?: boolean;
+  createdAfter?: number;
+  createdBefore?: number;
+}
+
+export function parseCampaignListQuery(query: Record<string, unknown>):
+  { ok: true; data: CampaignListQueryParams } | { ok: false; issues: z.ZodIssue[] } {
+  const issues: z.ZodIssue[] = [];
+
+  const pageStr = singleCampaignListQueryParam(query.page);
+  const limitStr = singleCampaignListQueryParam(query.limit);
+
+  let page: number | undefined;
+  let limit: number | undefined;
+
+  if (pageStr === undefined && limitStr === undefined) {
+    page = undefined;
+    limit = undefined;
+  } else if (pageStr === undefined || limitStr === undefined) {
+    issues.push({
+      code: "custom",
+      message: "Pagination requires both page and limit query parameters.",
+      path: pageStr === undefined ? ["page"] : ["limit"],
+    } as any);
+  } else {
+    const pageNum = Number(pageStr);
+    const limitNum = Number(limitStr);
+
+    if (!Number.isFinite(pageNum) || !Number.isInteger(pageNum) || pageNum < 1) {
+      issues.push({
+        code: "custom",
+        message: "page must be a positive integer.",
+        path: ["page"],
+      } as any);
+    } else {
+      page = pageNum;
+    }
+
+    if (!Number.isFinite(limitNum) || !Number.isInteger(limitNum) || limitNum < 1 || limitNum > 100) {
+      issues.push({
+        code: "custom",
+        message: "limit must be an integer from 1 to 100.",
+        path: ["limit"],
+      } as any);
+    } else {
+      limit = limitNum;
+    }
+  }
+
+  const searchQuery = normalizeQueryValue(query.search) || normalizeQueryValue(query.q);
+
+  const assetCodes = parseAssetCodes(query.asset);
+  let assetList: string[] | undefined = undefined;
+  if (query.asset !== undefined && assetCodes === null) {
+    issues.push({
+      code: "custom",
+      message: "asset must be a comma-separated list of valid asset codes.",
+      path: ["asset"],
+    } as any);
+  } else if (assetCodes) {
+    const validCodes = assetCodes.filter(code => config.allowedAssets.includes(code));
+    if (validCodes.length !== assetCodes.length) {
+      issues.push({
+        code: "custom",
+        message: `Invalid asset code(s). Supported assets: ${config.allowedAssets.join(", ")}`,
+        path: ["asset"],
+      } as any);
+    } else {
+      assetList = validCodes;
+    }
+  }
+
+  const statusStr = normalizeQueryValue(query.status);
+  let status: CampaignStatus | undefined = undefined;
+  const VALID_STATUSES: CampaignStatus[] = ['open', 'funded', 'claimed', 'failed'];
+  if (statusStr !== undefined) {
+    const lowerStatus = statusStr.toLowerCase();
+    if (!VALID_STATUSES.includes(lowerStatus as CampaignStatus)) {
+      issues.push({
+        code: "custom",
+        message: `status must be one of: ${VALID_STATUSES.join(", ")}`,
+        path: ["status"],
+      } as any);
+    } else {
+      status = lowerStatus as CampaignStatus;
+    }
+  }
+
+  const sortStr = normalizeQueryValue(query.sort);
+  let sort: CampaignSortField | undefined = undefined;
+  const VALID_SORTS = ['newest', 'deadline', 'percentFunded', 'totalPledged', 'createdAt', 'pledgedAmount', 'targetAmount'];
+  if (sortStr !== undefined) {
+    if (!VALID_SORTS.includes(sortStr)) {
+      issues.push({
+        code: "custom",
+        message: `sort must be one of: ${VALID_SORTS.join(", ")}`,
+        path: ["sort"],
+      } as any);
+    } else {
+      if (sortStr === 'newest') {
+        sort = 'createdAt';
+      } else if (sortStr === 'percentFunded' || sortStr === 'totalPledged') {
+        sort = 'pledgedAmount';
+      } else {
+        sort = sortStr as CampaignSortField;
+      }
+    }
+  }
+
+  const orderStr = normalizeQueryValue(query.order);
+  let order: SortOrder | undefined = undefined;
+  const VALID_ORDERS: SortOrder[] = ['asc', 'desc'];
+  if (orderStr !== undefined) {
+    if (!VALID_ORDERS.includes(orderStr as SortOrder)) {
+      issues.push({
+        code: "custom",
+        message: `order must be one of: ${VALID_ORDERS.join(", ")}`,
+        path: ["order"],
+      } as any);
+    } else {
+      order = orderStr as SortOrder;
+    }
+  }
+
+  const includeDeletedStr = singleCampaignListQueryParam(query.includeDeleted);
+  let includeDeleted: boolean | undefined = undefined;
+  if (includeDeletedStr !== undefined) {
+    if (includeDeletedStr !== 'true' && includeDeletedStr !== 'false') {
+      issues.push({
+        code: "custom",
+        message: "includeDeleted must be 'true' or 'false'.",
+        path: ["includeDeleted"],
+      } as any);
+    } else {
+      includeDeleted = includeDeletedStr === 'true';
+    }
+  }
+
+  const createdAfterStr = normalizeQueryValue(query.createdAfter);
+  let createdAfter: number | undefined = undefined;
+  if (createdAfterStr !== undefined) {
+    const timestamp = parseIso8601Timestamp(createdAfterStr);
+    if (timestamp === null) {
+      issues.push({
+        code: "custom",
+        message: "createdAfter must be a valid ISO 8601 timestamp.",
+        path: ["createdAfter"],
+      } as any);
+    } else {
+      createdAfter = timestamp;
+    }
+  }
+
+  const createdBeforeStr = normalizeQueryValue(query.createdBefore);
+  let createdBefore: number | undefined = undefined;
+  if (createdBeforeStr !== undefined) {
+    const timestamp = parseIso8601Timestamp(createdBeforeStr);
+    if (timestamp === null) {
+      issues.push({
+        code: "custom",
+        message: "createdBefore must be a valid ISO 8601 timestamp.",
+        path: ["createdBefore"],
+      } as any);
+    } else {
+      createdBefore = timestamp;
+    }
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return {
+    ok: true,
+    data: {
+      page,
+      limit,
+      q: query.q ? normalizeQueryValue(query.q) : undefined,
+      search: query.search ? normalizeQueryValue(query.search) : undefined,
+      asset: assetList,
+      status,
+      sort,
+      order,
+      includeDeleted,
+      createdAfter,
+      createdBefore,
+    },
   };
 }
 

@@ -26,7 +26,11 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  fs.rmSync(TEST_DB_PATH, { force: true });
+  try {
+    fs.rmSync(TEST_DB_PATH, { force: true });
+  } catch {
+    // Ignore EPERM locks on Windows
+  }
 });
 
 describe('request id middleware', () => {

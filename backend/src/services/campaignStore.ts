@@ -358,20 +358,20 @@ if (options?.searchQuery && options.searchQuery.trim()) {
   const cleanQuery = rawQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
   const ftsMatchTerm = cleanQuery ? `${cleanQuery}*` : '';
 
-  // Fixes CodeRabbit: Use exact matching for creator public key instead of a slow LIKE scan
-  const creatorExactTerm = rawQuery; 
+  // Allow case-insensitive substring search for creator public key
+  const creatorExactTerm = `%${rawQuery}%`; 
   const exactTerm = rawQuery;
 
   if (ftsMatchTerm) {
     whereClauses.push(`(
       campaigns.id IN (SELECT id FROM campaigns_fts WHERE campaigns_fts MATCH ?)
-      OR LOWER(campaigns.creator) = LOWER(?)
+      OR LOWER(campaigns.creator) LIKE LOWER(?)
       OR campaigns.id = ?
     )`);
     params.push(ftsMatchTerm, creatorExactTerm, exactTerm);
   } else {
     // Fallback if cleaning the query stripped all characters
-    whereClauses.push(`(LOWER(campaigns.creator) = LOWER(?) OR campaigns.id = ?)`);
+    whereClauses.push(`(LOWER(campaigns.creator) LIKE LOWER(?) OR campaigns.id = ?)`);
     params.push(creatorExactTerm, exactTerm);
   }
 }

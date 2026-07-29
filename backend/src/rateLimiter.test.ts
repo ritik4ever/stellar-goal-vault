@@ -12,7 +12,7 @@ describe("Rate Limiter Middleware", () => {
     nextCalled = false;
     headers = {};
     mockReq = {
-      ip: "127.0.0.1",
+      ip: `127.0.0.${Math.floor(Math.random() * 253) + 2}`,
       method: "GET",
     };
     mockRes = {
@@ -51,18 +51,18 @@ describe("Rate Limiter Middleware", () => {
     const middleware = applyRateLimit(2); // Set limit to 2 for testing
 
     // First request
-    middleware(mockReq as Request, mockRes as Response, next);
+    middleware({ ...mockReq } as Request, mockRes as Response, next);
     expect(nextCalled).toBe(true);
 
     // Second request
     nextCalled = false;
-    middleware(mockReq as Request, mockRes as Response, next);
+    middleware({ ...mockReq } as Request, mockRes as Response, next);
     expect(nextCalled).toBe(true);
 
     // Third request - should exceed limit
     nextCalled = false;
     expect(() => {
-      middleware(mockReq as Request, mockRes as Response, next);
+      middleware({ ...mockReq } as Request, mockRes as Response, next);
     }).toThrow(/Rate limit exceeded/);
     expect(headers["Retry-After"]).toBeDefined();
   });

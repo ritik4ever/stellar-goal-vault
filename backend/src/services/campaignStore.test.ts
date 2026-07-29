@@ -23,9 +23,9 @@ let getDb: DbModule['getDb'];
 let getCampaignHistory: EventHistoryModule['getCampaignHistory'];
 let addPledge: CampaignStoreModule['addPledge'];
 
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
-const CONTRIBUTOR2 = `G${'C'.repeat(55)}`;
+const CREATOR = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
+const CONTRIBUTOR = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI";
+const CONTRIBUTOR2 = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
 const TX_HASH = 'a'.repeat(64);
 
 beforeAll(async () => {
@@ -91,7 +91,7 @@ describe('campaign store search', () => {
 
     expect(listCampaigns({ searchQuery: 'rocket' }).campaigns[0].id).toBe(campaign.id);
     expect(
-      listCampaigns({ searchQuery: 'gaaa' }).campaigns.some((row) => row.id === campaign.id),
+      listCampaigns({ searchQuery: 'gaaz' }).campaigns.some((row) => row.id === campaign.id),
     ).toBe(true);
     expect(listCampaigns({ searchQuery: campaign.id }).campaigns[0].id).toBe(campaign.id);
   });
@@ -109,7 +109,7 @@ describe('on-chain pledge reconciliation', () => {
       deadline: futureDeadline,
     });
 
-    const updatedCampaign = reconcileOnChainPledge(campaign.id, {
+    const { campaign: updatedCampaign } = reconcileOnChainPledge(campaign.id, {
       contributor: CONTRIBUTOR,
       amount: 25.5,
       transactionHash: TX_HASH,

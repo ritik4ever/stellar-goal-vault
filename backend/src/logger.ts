@@ -62,11 +62,19 @@ function withRequestContext(fields: LogFields): LogFields {
   return fields;
 }
 
+let globalConfiguredLevel: LogLevel | null = null;
+export function getGlobalConfiguredLogLevel(): LogLevel {
+  if (!globalConfiguredLevel) {
+    globalConfiguredLevel = normalizeLogLevel(process.env.LOG_LEVEL);
+  }
+  return globalConfiguredLevel;
+}
+
 export function logLine(
   level: LogLevel,
   event: string,
   fields: LogFields,
-  configuredLevel: LogLevel,
+  configuredLevel: LogLevel = getGlobalConfiguredLogLevel(),
 ): void {
   if (!shouldLog(level, configuredLevel)) {
     return;
@@ -75,7 +83,11 @@ export function logLine(
   getConsoleMethod(level)(createLogLine(level, event, withRequestContext(fields)));
 }
 
-export function logInfo(event: string, fields: LogFields, configuredLevel: LogLevel): void {
+export function logInfo(
+  event: string,
+  fields: LogFields = {},
+  configuredLevel: LogLevel = getGlobalConfiguredLogLevel(),
+): void {
   logLine('info', event, fields, configuredLevel);
 }
 
@@ -87,7 +99,7 @@ export function logRequest(
     status: number;
     durationMs: number;
   },
-  configuredLevel: LogLevel,
+  configuredLevel: LogLevel = getGlobalConfiguredLogLevel(),
 ): void {
   const durationMs = Number(request.durationMs.toFixed(2));
 
@@ -115,7 +127,7 @@ export function logError(
     status?: number;
     [key: string]: unknown;
   },
-  configuredLevel: LogLevel,
+  configuredLevel: LogLevel = getGlobalConfiguredLogLevel(),
 ): void {
   const normalizedError =
     error instanceof Error ? error : new Error(typeof error === 'string' ? error : 'Unknown error');
