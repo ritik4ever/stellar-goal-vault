@@ -282,6 +282,7 @@ export type SortOrder = 'asc' | 'desc';
 
 export interface ListCampaignsOptions {
   searchQuery?: string;
+  creator?: string;
   assetCode?: string;
   assetCodes?: string[];
   status?: CampaignStatus;
@@ -375,6 +376,10 @@ if (options?.searchQuery && options.searchQuery.trim()) {
     params.push(creatorExactTerm, exactTerm);
   }
 }
+  if (options?.creator) {
+    whereClauses.push(`LOWER(campaigns.creator) = LOWER(?)`);
+    params.push(options.creator);
+  }
   if (options?.assetCode) {
     whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);

@@ -430,6 +430,99 @@ describe('Campaign maxPerContributor Field', () => {
   });
 });
 
+describe('GET /api/creators/:address/campaigns', () => {
+  async function get(apiPath: string) {
+    const response = await fetch(`${baseUrl}${apiPath}`);
+    const data = await response.json().catch(() => null);
+    return { status: response.status, data };
+  }
+
+  const OTHER_CREATOR = `G${'D'.repeat(55)}`;
+
+  it('returns 400 for a malformed address', async () => {
+    const res = await get('/api/creators/not-a-valid-address/campaigns');
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 for an address of the wrong length', async () => {
+    const res = await get(`/api/creators/${'G' + 'A'.repeat(10)}/campaigns`);
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns an empty array for a well-formed address with no campaigns', async () => {
+    const res = await get(`/api/creators/${CREATOR}/campaigns`);
+    expect(res.status).toBe(200);
+    expect(res.data.data).toEqual([]);
+    expect(res.data.pagination.total).toBe(0);
+  });
+
+  it('returns only campaigns created by the given address', async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    const mine = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'My campaign',
+      description: 'Campaign owned by the queried creator address',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+    expect(mine.status).toBe(201);
+
+    const other = await post('/api/campaigns', {
+      creator: OTHER_CREATOR,
+      title: 'Someone else campaign',
+      description: 'Campaign owned by a different creator address',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+    expect(other.status).toBe(201);
+
+    const res = await get(`/api/creators/${CREATOR}/campaigns`);
+    expect(res.status).toBe(200);
+    expect(res.data.data).toHaveLength(1);
+    expect(res.data.data[0].creator).toBe(CREATOR);
+    expect(res.data.data[0].id).toBe(mine.data.data.id);
+    // Response schema matches GET /api/campaigns (data + pagination + progress per item)
+    expect(res.data.data[0].progress).toBeDefined();
+    expect(res.data.pagination).toMatchObject({ total: 1, page: 1 });
+  });
+
+  it('supports the same filters and pagination as GET /api/campaigns', async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    for (const asset of ['USDC', 'XLM']) {
+      const res = await post('/api/campaigns', {
+        creator: CREATOR,
+        title: `${asset} campaign`,
+        description: `Campaign accepting ${asset} for pagination test`,
+        acceptedTokens: [asset],
+        targetAmount: 100,
+        deadline: now + 3600,
+      });
+      expect(res.status).toBe(201);
+    }
+
+    const filtered = await get(`/api/creators/${CREATOR}/campaigns?asset=XLM`);
+    expect(filtered.status).toBe(200);
+    expect(filtered.data.data.every((c: { assetCode: string }) => c.assetCode === 'XLM')).toBe(true);
+
+    const paginated = await get(`/api/creators/${CREATOR}/campaigns?page=1&limit=1`);
+    expect(paginated.status).toBe(200);
+    expect(paginated.data.data).toHaveLength(1);
+    expect(paginated.data.pagination).toMatchObject({ page: 1, limit: 1, total: 2 });
+  });
+
+  it('returns 400 for invalid pagination parameters, matching GET /api/campaigns', async () => {
+    const res = await get(`/api/creators/${CREATOR}/campaigns?page=1`);
+    expect(res.status).toBe(400);
+    expect(res.data.error.code).toBe('VALIDATION_ERROR');
+  });
+});
+
 describe('GET /api/stats', () => {
   it('returns aggregate metrics in the correct format', async () => {
     const res = await get('/api/stats');
