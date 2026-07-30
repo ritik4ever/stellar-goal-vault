@@ -8,7 +8,10 @@
     "build:analyze": "tsc && ANALYZE=true vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "lint": "eslint 'src/**/*.{ts,tsx}'"
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build",
+    "test-storybook": "test-storybook"
   },
   "dependencies": {
     "@creit.tech/xbull-wallet-connect": "^0.4.0",
@@ -28,6 +31,11 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@chromatic-com/storybook": "^8.0.0",
+    "@storybook/addon-a11y": "^8.0.0",
+    "@storybook/addon-docs": "^8.0.0",
+    "@storybook/addon-vitest": "^8.0.0",
+    "@storybook/react-vite": "^8.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

@@ -2,10 +2,32 @@ import type { Campaign } from '../types/campaign';
 import type { SortOption } from './SortDropdown';
 
 /**
- * Returns sorted, deduplicated assetCode values from the given campaigns.
+ * Returns sorted, deduplicated category values from the given campaigns.
+ * Categories are derived from the assetCode field.
  */
-export function getDistinctAssetCodes(campaigns: Campaign[]): string[] {
+export function getDistinctCategories(campaigns: Campaign[]): string[] {
   return [...new Set(campaigns.map((c) => c.assetCode))].sort();
+}
+
+/**
+ * Filters campaigns by one or more categories using OR logic.
+ * An empty categories array means no category filter is applied.
+ *
+ * @param campaigns - Array of campaigns to filter
+ * @param categories - Array of selected category values (OR logic)
+ * @returns Filtered campaigns matching any of the selected categories
+ */
+export function filterByCategories(
+  campaigns: Campaign[],
+  categories: string[],
+): Campaign[] {
+  if (categories.length === 0) {
+    return campaigns;
+  }
+
+  const categorySet = new Set(categories);
+
+  return campaigns.filter((campaign) => categorySet.has(campaign.assetCode));
 }
 
 /**

@@ -5,9 +5,12 @@ import { useSearchParams } from "react-router-dom";
 import { Campaign, CampaignStatus } from "../types/campaign";
 import { EmptyState } from "./EmptyState";
 import { AssetFilterDropdown } from "./AssetFilterDropdown";
+import { CategoryFilterSidebar } from "./CategoryFilterSidebar";
 import {
   applyFilters,
+  filterByCategories,
   getDistinctAssetCodes,
+  getDistinctCategories,
   searchCampaigns,
   sortCampaigns,
 } from "./campaignsTableUtils";
@@ -79,11 +82,15 @@ export function CampaignsTable({
   const urlSort = (searchParams.get('sort') as SortOption | null) ?? 'createdAt';
   const urlOrder = (searchParams.get('order') as 'asc' | 'desc' | null) ?? 'desc';
   const urlStatus = (searchParams.get('status') as StatusFilterValue | null) ?? '';
+  const urlCategories = (searchParams.get('categories') as string | null) ?? '';
   const VALID_SORTS: SortOption[] = ['createdAt', 'deadline', 'pledgedAmount', 'targetAmount'];
   const sortBy: SortOption = VALID_SORTS.includes(urlSort) ? urlSort : 'createdAt';
   const [assetCode, setAssetCode] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>(urlStatus);
   const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilters, setCategoryFilters] = useState<string[]>(
+    urlCategories ? urlCategories.split(',').filter(Boolean) : [],
+  );
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
@@ -112,6 +119,19 @@ export function CampaignsTable({
     }, { replace: true });
   }
 
+  function handleCategoryToggle(category: string) {
+    setCategoryFilters((prev) => {
+      const next = prev.includes(category)
+        ? prev.filter((c) => c !== category)
+        : [...prev, category];
+      return next;
+    });
+  }
+
+  function handleCategoryClear() {
+    setCategoryFilters([]);
+  }
+
   function handleSearchChange(value: string) {
     setSearchQuery(value);
     if (value === '') {
@@ -124,6 +144,7 @@ export function CampaignsTable({
     setSearchQuery('');
     setAssetCode('');
     handleStatusFilterChange('');
+    handleCategoryClear();
     onSearchChange?.('');
   }
 
@@ -133,9 +154,26 @@ export function CampaignsTable({
     }
   }, [debouncedSearchQuery, onSearchChange]);
 
-  useEffect(() => {
+useEffect(() => {
     setStatusFilter(urlStatus);
   }, [urlStatus]);
+
+  useEffect(() => {
+    const next = urlCategories ? urlCategories.split(',').filter(Boolean) : [];
+    setCategoryFilters(next);
+  }, [urlCategories]);
+
+  useEffect(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (categoryFilters.length === 0) {
+        next.delete('categories');
+      } else {
+        next.set('categories', categoryFilters.join(','));
+      }
+      return next;
+    }, { replace: true });
+  }, [categoryFilters, setSearchParams]);
 
   useEffect(() => {
     const sentinel = loadMoreRef.current;
@@ -163,6 +201,10 @@ export function CampaignsTable({
     () => getDistinctAssetCodes(campaigns),
     [campaigns],
   );
+  const categoryOptions = useMemo(
+    () => getDistinctCategories(campaigns),
+    [campaigns],
+  );
   const statusCounts = useMemo(() => {
     const counts: Record<CampaignStatus, number> = {
       open: 0,
@@ -185,16 +227,18 @@ export function CampaignsTable({
   const hasSearchQuery = debouncedSearchQuery.trim() !== '';
   const hasAssetFilter = assetCode !== '';
   const hasStatusFilter = statusFilter !== '';
-  const isFiltered = hasSearchQuery || hasAssetFilter || hasStatusFilter;
+  const hasCategoryFilter = categoryFilters.length > 0;
+  const isFiltered = hasSearchQuery || hasAssetFilter || hasStatusFilter || hasCategoryFilter;
 
   const filteredCampaigns = useMemo(() => {
-    // Apply asset + status filters first (pure client-side).
+    // Apply asset + status + category filters first (pure client-side).
     const assetStatusFiltered = applyFilters(campaigns, assetCode, statusFilter);
+    const categoryFiltered = filterByCategories(assetStatusFiltered, categoryFilters);
     // Then apply search query client-side (title / creator / id).
-    const searched = searchCampaigns(assetStatusFiltered, debouncedSearchQuery);
+    const searched = searchCampaigns(categoryFiltered, debouncedSearchQuery);
     // Server already sorted; client sort acts as a stable tie-break.
     return sortCampaigns(searched, sortBy);
-  }, [campaigns, assetCode, statusFilter, debouncedSearchQuery, sortBy]);
+  }, [campaigns, assetCode, statusFilter, categoryFilters, debouncedSearchQuery, sortBy]);
 
   const isMobile = useMediaQuery("(max-width: 767px)");
 
@@ -247,150 +291,268 @@ export function CampaignsTable({
         </p>
       ) : null}
 
-      <div className="board-controls">
-        <SearchInput
-          value={searchQuery}
-          onChange={handleSearchChange}
-          disabled={isLoading}
+      <div className="board-layout">
+        <CategoryFilterSidebar
+          categories={categoryOptions}
+          selectedCategories={categoryFilters}
+          onToggle={handleCategoryToggle}
+          onClear={handleCategoryClear}
         />
-        <label className="field-group" style={{ minWidth: 180 }}>
-          <span>Asset:</span>
-          <AssetFilterDropdown
-            options={assetOptions}
-            value={assetCode}
-            onChange={setAssetCode}
-            disabled={isLoading}
-          />
-        </label>
-        <label className="field-group" style={{ minWidth: 180 }}>
-          <span>Status:</span>
-          <div
-            className="status-filter-tabs"
-            role="group"
-            aria-label="Filter campaigns by status"
-          >
-            {STATUS_FILTERS.map((filter) => {
-              const isActive = statusFilter === filter.value;
-              const count =
-                filter.value === ""
-                  ? statusCounts.all
-                  : statusCounts[filter.value];
 
-              return (
-                <button
-                  key={filter.label}
-                  type="button"
-                  className={`status-filter-tab ${isActive ? "status-filter-tab-active" : ""}`}
-                  onClick={() => handleStatusFilterChange(filter.value)}
-                  aria-pressed={isActive}
-                  disabled={isLoading}
-                >
-                  <span>{filter.label}</span>
-                  <span className="status-filter-count">{count}</span>
-                </button>
-              );
-            })}
+        <div className="board-content">
+          {hasCategoryFilter && (
+            <div className="chip-row">
+              {categoryFilters.map((category) => (
+                <span key={category} className="chip chip-emphasis">
+                  {category}
+                  <button
+                    type="button"
+                    className="chip-remove"
+                    onClick={() => handleCategoryToggle(category)}
+                    aria-label={`Remove ${category} filter`}
+                  >
+                    &times;
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="board-controls">
+            <SearchInput
+              value={searchQuery}
+              onChange={handleSearchChange}
+              disabled={isLoading}
+            />
+            <label className="field-group" style={{ minWidth: 180 }}>
+              <span>Asset:</span>
+              <AssetFilterDropdown
+                options={assetOptions}
+                value={assetCode}
+                onChange={setAssetCode}
+                disabled={isLoading}
+              />
+            </label>
+            <label className="field-group" style={{ minWidth: 180 }}>
+              <span>Status:</span>
+              <div
+                className="status-filter-tabs"
+                role="group"
+                aria-label="Filter campaigns by status"
+              >
+                {STATUS_FILTERS.map((filter) => {
+                  const isActive = statusFilter === filter.value;
+                  const count =
+                    filter.value === ""
+                      ? statusCounts.all
+                      : statusCounts[filter.value];
+
+                  return (
+                    <button
+                      key={filter.label}
+                      type="button"
+                      className={`status-filter-tab ${isActive ? "status-filter-tab-active" : ""}`}
+                      onClick={() => handleStatusFilterChange(filter.value)}
+                      aria-pressed={isActive}
+                      disabled={isLoading}
+                    >
+                      <span>{filter.label}</span>
+                      <span className="status-filter-count">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </label>
+            <label className="field-group" style={{ minWidth: 180 }}>
+              <span>Sort:</span>
+              <SortDropdown
+                value={sortBy}
+                onChange={handleSortChange}
+                disabled={isLoading}
+              />
+            </label>
           </div>
-        </label>
-        <label className="field-group" style={{ minWidth: 180 }}>
-          <span>Sort:</span>
-          <SortDropdown
-            value={sortBy}
-            onChange={handleSortChange}
-            disabled={isLoading}
-          />
-        </label>
-      </div>
 
-      {filteredCampaigns.length === 0 && isFiltered ? (
-        <EmptyState
-          variant="inline"
-          title={hasSearchQuery && !hasAssetFilter && !hasStatusFilter
-            ? 'No campaigns match your search.'
-            : 'No campaigns match the selected filters.'}
-          message={hasSearchQuery && !hasAssetFilter && !hasStatusFilter
-            ? 'Try a different search term or clear your search to see all campaigns.'
-            : 'Try adjusting or clearing your filters to see all campaigns.'}
-          action={{
-            label: hasSearchQuery && !hasAssetFilter && !hasStatusFilter
-              ? 'Clear Search'
-              : 'Clear Filters',
-            onClick: handleClearFilters,
-          }}
-        />
-      ) : (
-        <>
-          {!isMobile && (
-            <div className="table-wrap table-only">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Campaign</th>
-                    <th>Creator</th>
-                    <th>Funding</th>
-                    <th>Status</th>
-                    <th>Deadline</th>
-                    <th>
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+          {filteredCampaigns.length === 0 && isFiltered ? (
+            <EmptyState
+              variant="inline"
+              title={hasSearchQuery && !hasAssetFilter && !hasStatusFilter && !hasCategoryFilter
+                ? 'No campaigns match your search.'
+                : 'No campaigns match the selected filters.'}
+              message={hasSearchQuery && !hasAssetFilter && !hasStatusFilter && !hasCategoryFilter
+                ? 'Try a different search term or clear your search to see all campaigns.'
+                : 'Try adjusting or clearing your filters to see all campaigns.'}
+              action={{
+                label: hasSearchQuery && !hasAssetFilter && !hasStatusFilter && !hasCategoryFilter
+                  ? 'Clear Search'
+                  : 'Clear Filters',
+                onClick: handleClearFilters,
+              }}
+            />
+          ) : (
+            <>
+              {!isMobile && (
+                <div className="table-wrap table-only">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Campaign</th>
+                        <th>Creator</th>
+                        <th>Funding</th>
+                        <th>Status</th>
+                        <th>Deadline</th>
+                        <th>
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {virtualizer.getVirtualItems().length > 0 && (
+                        <tr style={{ height: virtualizer.getVirtualItems()[0].start }} />
+                      )}
+                      {virtualizer.getVirtualItems().map((virtualRow) => {
+                        const campaign = filteredCampaigns[virtualRow.index];
+                        return (
+                          <tr key={campaign.id} ref={virtualizer.measureElement} data-index={virtualRow.index}>
+                            <td>
+                              <div className="stacked">
+                                <strong>{campaign.title}</strong>
+                                <span className="muted">#{campaign.id}</span>
+                              </div>
+                            </td>
+                            <td className="mono">
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 10,
+                                }}
+                              >
+                                <AddressAvatar address={campaign.creator} size={28} />
+                                <span>{campaign.creator.slice(0, 12)}...</span>
+                              </div>
+                            </td>
+                            <td>
+                              <div className="progress-copy">
+                                {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
+                                {campaign.assetCode}
+                              </div>
+                              <div className="progress-bar" aria-hidden>
+                                <div
+                                  style={{
+                                    width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                                  }}
+                                />
+                              </div>
+                              <span className="muted">
+                                {campaign.progress.percentFunded}% funded
+                              </span>
+                            </td>
+                            <td>
+                              <span
+                                className={`badge badge-${campaign.progress.status}`}
+                              >
+                                {getStatusLabel(campaign.progress.status)}
+                              </span>
+                            </td>
+                            <td className="stacked">
+                              <span>{formatTimestamp(campaign.deadline)}</span>
+                              <span className="muted">
+                                {campaign.progress.hoursLeft}h left
+                              </span>
+                            </td>
+                            <td>
+                              <button
+                                className={
+                                  selectedCampaignId === campaign.id
+                                    ? "btn-secondary"
+                                    : "btn-ghost"
+                                }
+                                type="button"
+                                onClick={() => onSelect(campaign.id)}
+                              >
+                                {selectedCampaignId === campaign.id
+                                  ? "Selected"
+                                  : "View"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {virtualizer.getVirtualItems().length > 0 && (
+                        <tr
+                          style={{
+                            height:
+                              virtualizer.getTotalSize() -
+                              virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1].end,
+                          }}
+                        />
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {isMobile && (
+                <div className="cards-only">
                   {virtualizer.getVirtualItems().length > 0 && (
-                    <tr style={{ height: virtualizer.getVirtualItems()[0].start }} />
+                    <div style={{ height: virtualizer.getVirtualItems()[0].start }} />
                   )}
                   {virtualizer.getVirtualItems().map((virtualRow) => {
                     const campaign = filteredCampaigns[virtualRow.index];
                     return (
-                      <tr key={campaign.id} ref={virtualizer.measureElement} data-index={virtualRow.index}>
-                        <td>
-                          <div className="stacked">
-                            <strong>{campaign.title}</strong>
-                            <span className="muted">#{campaign.id}</span>
+                      <article
+                        key={campaign.id}
+                        ref={virtualizer.measureElement}
+                        data-index={virtualRow.index}
+                        className={`campaign-card ${
+                          selectedCampaignId === campaign.id
+                            ? "campaign-card-selected"
+                            : ""
+                        }`}
+                      >
+                        <div className="campaign-card-main">
+                          <div className="campaign-card-header">
+                            <strong className="campaign-title">{campaign.title}</strong>
+                            <span className={`badge badge-${campaign.progress.status}`}>
+                              {getStatusLabel(campaign.progress.status)}
+                            </span>
                           </div>
-                        </td>
-                        <td className="mono">
                           <div
+                            className="campaign-creator mono"
                             style={{
                               display: "flex",
                               alignItems: "center",
                               gap: 10,
+                              marginBottom: 12,
                             }}
                           >
-                            <AddressAvatar address={campaign.creator} size={28} />
-                            <span>{campaign.creator.slice(0, 12)}...</span>
+                            <AddressAvatar address={campaign.creator} size={24} />
+                            <span>{campaign.creator.slice(0, 16)}...</span>
                           </div>
-                        </td>
-                        <td>
-                          <div className="progress-copy">
-                            {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-                            {campaign.assetCode}
+                          <div className="campaign-progress">
+                            <div className="progress-copy">
+                              {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
+                              {campaign.assetCode}
+                            </div>
+                            <div className="progress-bar" aria-hidden>
+                              <div
+                                style={{
+                                  width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
+                                }}
+                              />
+                            </div>
                           </div>
-                          <div className="progress-bar" aria-hidden>
-                            <div
-                              style={{
-                                width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
-                              }}
-                            />
+                          <div className="campaign-meta">
+                            <span className="muted">
+                              {campaign.progress.hoursLeft}h left
+                            </span>
+                            <span className="muted">
+                              {formatTimestamp(campaign.deadline)}
+                            </span>
                           </div>
-                          <span className="muted">
-                            {campaign.progress.percentFunded}% funded
-                          </span>
-                        </td>
-                        <td>
-                          <span
-                            className={`badge badge-${campaign.progress.status}`}
-                          >
-                            {getStatusLabel(campaign.progress.status)}
-                          </span>
-                        </td>
-                        <td className="stacked">
-                          <span>{formatTimestamp(campaign.deadline)}</span>
-                          <span className="muted">
-                            {campaign.progress.hoursLeft}h left
-                          </span>
-                        </td>
-                        <td>
+                        </div>
+                        <div className="campaign-card-actions">
                           <button
                             className={
                               selectedCampaignId === campaign.id
@@ -400,16 +562,14 @@ export function CampaignsTable({
                             type="button"
                             onClick={() => onSelect(campaign.id)}
                           >
-                            {selectedCampaignId === campaign.id
-                              ? "Selected"
-                              : "View"}
+                            {selectedCampaignId === campaign.id ? "Selected" : "View"}
                           </button>
-                        </td>
-                      </tr>
+                        </div>
+                      </article>
                     );
                   })}
                   {virtualizer.getVirtualItems().length > 0 && (
-                    <tr
+                    <div
                       style={{
                         height:
                           virtualizer.getTotalSize() -
@@ -417,107 +577,20 @@ export function CampaignsTable({
                       }}
                     />
                   )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {isMobile && (
-            <div className="cards-only">
-              {virtualizer.getVirtualItems().length > 0 && (
-                <div style={{ height: virtualizer.getVirtualItems()[0].start }} />
+                </div>
               )}
-              {virtualizer.getVirtualItems().map((virtualRow) => {
-                const campaign = filteredCampaigns[virtualRow.index];
-                return (
-                  <article
-                    key={campaign.id}
-                    ref={virtualizer.measureElement}
-                    data-index={virtualRow.index}
-                    className={`campaign-card ${
-                      selectedCampaignId === campaign.id
-                        ? "campaign-card-selected"
-                        : ""
-                    }`}
-                  >
-                    <div className="campaign-card-main">
-                      <div className="campaign-card-header">
-                        <strong className="campaign-title">{campaign.title}</strong>
-                        <span className={`badge badge-${campaign.progress.status}`}>
-                          {getStatusLabel(campaign.progress.status)}
-                        </span>
-                      </div>
-                      <div
-                        className="campaign-creator mono"
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          marginBottom: 12,
-                        }}
-                      >
-                        <AddressAvatar address={campaign.creator} size={24} />
-                        <span>{campaign.creator.slice(0, 16)}...</span>
-                      </div>
-                      <div className="campaign-progress">
-                        <div className="progress-copy">
-                          {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-                          {campaign.assetCode}
-                        </div>
-                        <div className="progress-bar" aria-hidden>
-                          <div
-                            style={{
-                              width: `${Math.min(campaign.progress.percentFunded, 100)}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                      <div className="campaign-meta">
-                        <span className="muted">
-                          {campaign.progress.hoursLeft}h left
-                        </span>
-                        <span className="muted">
-                          {formatTimestamp(campaign.deadline)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="campaign-card-actions">
-                      <button
-                        className={
-                          selectedCampaignId === campaign.id
-                            ? "btn-secondary"
-                            : "btn-ghost"
-                        }
-                        type="button"
-                        onClick={() => onSelect(campaign.id)}
-                      >
-                        {selectedCampaignId === campaign.id ? "Selected" : "View"}
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-              {virtualizer.getVirtualItems().length > 0 && (
-                <div
-                  style={{
-                    height:
-                      virtualizer.getTotalSize() -
-                      virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1].end,
-                  }}
-                />
-              )}
-            </div>
-          )}
 
-          <div ref={loadMoreRef} aria-hidden="true" />
-          {isLoadingMore ? (
-            <p className="muted campaigns-load-more">Loading more campaigns...</p>
-          ) : null}
-          {!hasMore && filteredCampaigns.length > 0 ? (
-            <p className="muted campaigns-end-of-list">You have reached the end of the campaign list.</p>
-          ) : null}
-        </>
-      )}
+              <div ref={loadMoreRef} aria-hidden="true" />
+              {isLoadingMore ? (
+                <p className="muted campaigns-load-more">Loading more campaigns...</p>
+              ) : null}
+              {!hasMore && filteredCampaigns.length > 0 ? (
+                <p className="muted campaigns-end-of-list">You have reached the end of the campaign list.</p>
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
