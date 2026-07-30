@@ -55,10 +55,12 @@ import {
   parsePledgeListPaginationQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
+  stellarAccountIdSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
   parseCampaignListQuery,
   normalizeQueryValue,
+  type CampaignListQueryParams,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
 import { logError, logInfo } from './logger';
@@ -232,6 +234,30 @@ function parseCampaignId(
   return { ok: true, value: parsed.data };
 }
 
+function parseCreatorAddress(
+  addressRaw: unknown,
+): { ok: true; value: string } | { ok: false; issues: z.ZodIssue[] } {
+  if (typeof addressRaw !== 'string') {
+    return {
+      ok: false,
+      issues: [
+        {
+          code: 'custom',
+          message: 'address must be a string.',
+          path: ['address'],
+        },
+      ],
+    };
+  }
+
+  const parsed = stellarAccountIdSchema.safeParse(addressRaw);
+  if (!parsed.success) {
+    return { ok: false, issues: parsed.error.issues };
+  }
+
+  return { ok: true, value: parsed.data };
+}
+
 export function normalizeAssetFilter(assetRaw: unknown): string | undefined {
   const asset = normalizeQueryValue(assetRaw)?.toUpperCase();
   if (!asset) {
@@ -388,6 +414,57 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
   }
 });
 
+function buildCampaignListOptions(
+  params: CampaignListQueryParams,
+  extra?: Partial<ListCampaignsOptions>,
+): ListCampaignsOptions {
+  const listOptions: ListCampaignsOptions = {
+    searchQuery: params.search || params.q,
+    assetCodes: params.asset,
+    status: params.status,
+    includeDeleted: params.includeDeleted,
+    sort: params.sort,
+    order: params.order,
+    createdAfter: params.createdAfter,
+    createdBefore: params.createdBefore,
+    ...extra,
+  };
+  if (params.page !== undefined) {
+    listOptions.page = params.page;
+    listOptions.limit = params.limit;
+  }
+  return listOptions;
+}
+
+function buildCampaignListResponseBody(
+  params: CampaignListQueryParams,
+  listOptions: ListCampaignsOptions,
+): { totalCount: number; body: string } {
+  const { campaigns, totalCount } = listCampaigns(listOptions);
+
+  const data = campaigns.map((campaign) => ({
+    ...campaign,
+    progress: calculateProgress(campaign),
+  }));
+
+  const page = params.page ?? 1;
+  const limit = params.limit ?? totalCount;
+  const totalPages =
+    params.limit === undefined || limit <= 0 ? 1 : Math.max(1, Math.ceil(totalCount / limit));
+
+  const body = JSON.stringify({
+    data,
+    pagination: {
+      total: totalCount,
+      page,
+      limit,
+      totalPages,
+    },
+  });
+
+  return { totalCount, body };
+}
+
 app.get('/api/campaigns', (req: Request, res: Response) => {
   const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
   if (!queryResult.ok) {
@@ -414,50 +491,36 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
     return;
   }
 
-  const listOptions: ListCampaignsOptions = {
-    searchQuery: params.search || params.q,
-    assetCodes: params.asset,
-    status: params.status,
-    includeDeleted: params.includeDeleted,
-    sort: params.sort,
-    order: params.order,
-    createdAfter: params.createdAfter,
-    createdBefore: params.createdBefore,
-  };
-  if (params.page !== undefined) {
-    listOptions.page = params.page;
-    listOptions.limit = params.limit;
-  }
+  const listOptions = buildCampaignListOptions(params);
+  const { totalCount, body } = buildCampaignListResponseBody(params, listOptions);
 
-  const { campaigns, totalCount } = listCampaigns(listOptions);
-
-  const data = campaigns.map((campaign) => ({
-    ...campaign,
-    progress: calculateProgress(campaign),
-  }));
-
-  const page = params.page ?? 1;
-  const limit = params.limit ?? totalCount;
-  const totalPages =
-    params.limit === undefined || limit <= 0 ? 1 : Math.max(1, Math.ceil(totalCount / limit));
-
-  const responseBody = JSON.stringify({
-    data,
-    pagination: {
-      total: totalCount,
-      page,
-      limit,
-      totalPages,
-    },
-  });
-
-  setCampaignCacheEntry(cacheKey, responseBody);
+  setCampaignCacheEntry(cacheKey, body);
 
   res.setHeader('Cache-Control', 'max-age=5');
   res.setHeader('X-Cache', 'MISS');
   res.setHeader('X-Total-Count', String(totalCount));
   res.setHeader('Content-Type', 'application/json');
-  res.send(responseBody);
+  res.send(body);
+});
+
+app.get('/api/creators/:address/campaigns', (req: Request, res: Response) => {
+  const parsedAddress = parseCreatorAddress(req.params.address);
+  if (!parsedAddress.ok) {
+    sendValidationError(parsedAddress.issues);
+  }
+
+  const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
+  if (!queryResult.ok) {
+    sendValidationError(queryResult.issues);
+  }
+
+  const params = queryResult.data;
+  const listOptions = buildCampaignListOptions(params, { creator: parsedAddress.value });
+  const { totalCount, body } = buildCampaignListResponseBody(params, listOptions);
+
+  res.setHeader('X-Total-Count', String(totalCount));
+  res.setHeader('Content-Type', 'application/json');
+  res.send(body);
 });
 
 app.get('/api/campaigns/:id', (req: Request, res: Response) => {

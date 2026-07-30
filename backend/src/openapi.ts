@@ -463,6 +463,31 @@ registry.registerPath({
   },
 });
 
+const campaignListQuerySchema = z.object({
+  page: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .openapi({ description: 'Page number (requires limit).' }),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .openapi({ description: 'Items per page (requires page).' }),
+  q: z.string().optional().openapi({ description: 'Search query (title, creator, or id).' }),
+  search: z.string().optional().openapi({ description: 'Alias for q.' }),
+  asset: z.string().optional().openapi({ description: 'Comma-separated list of asset codes.' }),
+  status: z.enum(['open', 'funded', 'claimed', 'failed']).optional(),
+  sort: z.enum(['createdAt', 'deadline', 'pledgedAmount', 'targetAmount']).optional(),
+  order: z.enum(['asc', 'desc']).optional(),
+  includeDeleted: z.enum(['true', 'false']).optional(),
+  createdAfter: z.string().datetime().optional().openapi({ description: 'ISO 8601 timestamp.' }),
+  createdBefore: z.string().datetime().optional().openapi({ description: 'ISO 8601 timestamp.' }),
+});
+
 registry.registerPath({
   method: 'get',
   path: '/api/campaigns',
@@ -470,42 +495,31 @@ registry.registerPath({
   summary: 'List campaigns',
   description: 'List campaigns with optional filtering, sorting, and pagination.',
   request: {
-    query: z.object({
-      page: z.coerce
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .openapi({ description: 'Page number (requires limit).' }),
-      limit: z.coerce
-        .number()
-        .int()
-        .min(1)
-        .max(100)
-        .optional()
-        .openapi({ description: 'Items per page (requires page).' }),
-      q: z.string().optional().openapi({ description: 'Search query (title, creator, or id).' }),
-      search: z.string().optional().openapi({ description: 'Alias for q.' }),
-      asset: z.string().optional().openapi({ description: 'Comma-separated list of asset codes.' }),
-      status: z.enum(['open', 'funded', 'claimed', 'failed']).optional(),
-      sort: z.enum(['createdAt', 'deadline', 'pledgedAmount', 'targetAmount']).optional(),
-      order: z.enum(['asc', 'desc']).optional(),
-      includeDeleted: z.enum(['true', 'false']).optional(),
-      createdAfter: z
-        .string()
-        .datetime()
-        .optional()
-        .openapi({ description: 'ISO 8601 timestamp.' }),
-      createdBefore: z
-        .string()
-        .datetime()
-        .optional()
-        .openapi({ description: 'ISO 8601 timestamp.' }),
-    }),
+    query: campaignListQuerySchema,
   },
   responses: {
     200: {
       description: 'Paginated list of campaigns',
+      content: { 'application/json': { schema: registeredSchemas.CampaignListResponse } },
+    },
+    400: validationErrorResponse,
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/creators/{address}/campaigns',
+  tags: ['Campaigns'],
+  summary: "List a creator's campaigns",
+  description:
+    'List all campaigns created by the given Stellar address, with the same filtering, sorting, and pagination as GET /api/campaigns. Returns an empty list for addresses with no campaigns.',
+  request: {
+    params: z.object({ address: stellarAddressSchema }),
+    query: campaignListQuerySchema,
+  },
+  responses: {
+    200: {
+      description: "Paginated list of the creator's campaigns",
       content: { 'application/json': { schema: registeredSchemas.CampaignListResponse } },
     },
     400: validationErrorResponse,
