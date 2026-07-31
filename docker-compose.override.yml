@@ -1,8 +1,6 @@
 # Local development override — auto-merged with docker-compose.yml by Docker Compose.
 # Mounts source directories for hot-reload and uses dev commands.
 # Usage: docker compose up   (override is applied automatically)
-version: "3.9"
-
 services:
   backend:
     build:

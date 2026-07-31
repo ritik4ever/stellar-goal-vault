@@ -11,9 +11,12 @@ import path from 'path';
 import { config, walletIntegrationReady } from './config';
 import { apiKeyAuthMiddleware } from './middleware/apiKeyAuth';
 import { cacheMiddleware } from './middleware/cacheMiddleware';
+import { idempotencyMiddleware } from './middleware/idempotencyMiddleware';
+import { metricsBasicAuth } from './middleware/metricsBasicAuth';
 import { requestIdMiddleware } from './middleware/requestId';
 import { validateBody } from './middleware/validateBody';
 import type { RequestWithId } from './middleware/types';
+import { metricsMiddleware, metricsRegistry } from './metrics';
 import { initRedisCache } from './services/cache';
 
 import swaggerUi from 'swagger-ui-express';
@@ -100,6 +103,8 @@ app.use(
   }),
 );
 
+app.use(metricsMiddleware);
+
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -130,6 +135,11 @@ app.use(compression({ threshold: 1024 }));
 
 const bodySizeLimit = process.env.MAX_BODY_SIZE || '16kb';
 app.use(express.json({ limit: bodySizeLimit }));
+
+app.get('/metrics', metricsBasicAuth, async (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', metricsRegistry.contentType);
+  res.send(await metricsRegistry.metrics());
+});
 
 // OpenAPI documentation endpoints are public and bypass API middleware.
 const openApiDocument = generateOpenApiDocument();

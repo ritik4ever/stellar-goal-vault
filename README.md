@@ -38,6 +38,38 @@ Backend (`backend`, port `3001`)
 - Real-time campaign status derived from current timestamps and stored pledges
 - Exposes contract/network config to the frontend and reconciles confirmed pledge hashes
 
+Monitoring
+
+- The backend exposes Prometheus data at `http://localhost:3001/metrics`
+- Prometheus runs on port `9090` and scrapes the backend every five seconds
+- Grafana runs on port `3002` with the `Stellar Goal Vault Backend` dashboard preloaded
+- The dashboard covers request count, request duration, errors, campaigns, and pledges
+- Production metrics access requires `METRICS_USERNAME` and `METRICS_PASSWORD`
+
+Start the local monitoring stack with:
+
+```bash
+docker compose up --build backend prometheus grafana
+```
+
+Open Grafana at `http://localhost:3002`. The default local credentials are
+`admin` / `admin`; set `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` to
+override them.
+
+Production Prometheus configuration must send the backend metrics credentials:
+
+```yaml
+scrape_configs:
+  - job_name: stellar-goal-vault-backend
+    metrics_path: /metrics
+    basic_auth:
+      username: prometheus
+      password_file: /run/secrets/metrics_password
+    static_configs:
+      - targets:
+          - backend:3001
+```
+
 Contract (`contracts`)
 
 - Soroban Rust scaffold

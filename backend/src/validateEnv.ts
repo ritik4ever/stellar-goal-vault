@@ -36,6 +36,27 @@ const envSchema = z.object({
     .describe('default: 0 (no limit)'),
   WEBHOOK_URL: z.string().optional().describe('Configurable webhook URL for status change notifications'),
   WEBHOOK_SECRET: z.string().optional().describe('Secret used to compute HMAC-SHA256 signature in X-GoalVault-Signature header'),
+  METRICS_USERNAME: z.string().min(1).optional(),
+  METRICS_PASSWORD: z.string().min(1).optional(),
+}).superRefine((env, ctx) => {
+  if (env.NODE_ENV !== 'production') {
+    return;
+  }
+
+  if (!env.METRICS_USERNAME) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['METRICS_USERNAME'],
+      message: 'METRICS_USERNAME is required in production',
+    });
+  }
+  if (!env.METRICS_PASSWORD) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['METRICS_PASSWORD'],
+      message: 'METRICS_PASSWORD is required in production',
+    });
+  }
 });
 
 export function validateEnv(): void {
