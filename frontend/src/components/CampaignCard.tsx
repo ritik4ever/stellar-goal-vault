@@ -14,6 +14,7 @@ interface CampaignCardProps {
 function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignCardProps) {
   const prevPercentRef = useRef<number | null>(null);
   const [animate, setAnimate] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
     if (
@@ -24,6 +25,11 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
     }
     prevPercentRef.current = campaign.progress.percentFunded;
   }, [campaign.progress.percentFunded]);
+
+  // Reset image error when campaign changes
+  useEffect(() => {
+    setImageError(false);
+  }, [campaign.id]);
 
   const handleShareCampaign = () => {
     const deepLinkUrl = `${window.location.origin}${window.location.pathname}?campaign=${campaign.id}`;
@@ -38,6 +44,32 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
     <article
       className={`campaign-card ${selectedCampaignId === campaign.id ? 'campaign-card-selected' : ''}`}
     >
+      {/* Campaign Banner Image or Gradient Fallback */}
+      <div
+        style={{
+          width: '100%',
+          height: '160px',
+          overflow: 'hidden',
+          borderRadius: '8px 8px 0 0',
+          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+          position: 'relative',
+        }}
+      >
+        {campaign.metadata?.imageUrl && !imageError ? (
+          <img
+            src={campaign.metadata.imageUrl}
+            alt={campaign.title}
+            onError={() => setImageError(true)}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        ) : null}
+      </div>
+
       <div className="campaign-card-main">
         <div className="campaign-card-header">
           <div>

@@ -135,6 +135,16 @@ function migrate(database: SQLiteDatabase): void {
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
     );
 
+    CREATE TABLE IF NOT EXISTS webhook_dead_letter_queue (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      event         TEXT NOT NULL,
+      campaign_id   TEXT NOT NULL,
+      payload       TEXT NOT NULL,
+      error_message TEXT,
+      failed_at     INTEGER NOT NULL,
+      attempts      INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_id ON campaign_events(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
