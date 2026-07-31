@@ -47,7 +47,11 @@ import {
 import { checkDbHealth } from './services/db';
 import { getCampaignTimeline, listCampaignHistory } from './services/eventHistory';
 import { startEventIndexer } from './services/eventIndexer';
-import { getDeadLetterQueue, clearDeadLetterQueue, retryDeadLetter } from './services/webhookService';
+import {
+  getDeadLetterQueue,
+  clearDeadLetterQueue,
+  retryDeadLetter,
+} from './services/webhookService';
 import { fetchOpenIssues } from './services/openIssues';
 import { ensureSorobanRefundConfig, verifyRefundTransaction } from './services/sorobanRpc';
 import { AppError, ApiErrorResponse } from './types/errors';
@@ -752,7 +756,10 @@ app.get('/api/campaigns/:id/timeline', (req: Request, res: Response) => {
     limit: parsed.limit,
   });
 
-  res.json({ data: result.data, pagination: { nextCursor: result.nextCursor, hasMore: result.hasMore } });
+  res.json({
+    data: result.data,
+    pagination: { nextCursor: result.nextCursor, hasMore: result.hasMore },
+  });
 });
 
 app.get('/api/open-issues', async (_req: Request, res: Response) => {
@@ -760,9 +767,22 @@ app.get('/api/open-issues', async (_req: Request, res: Response) => {
   res.json({ data });
 });
 
-const ASSET_METADATA: Record<string, { name: string, icon_url: string, min_pledge: number, max_pledge: number }> = {
-  USDC: { name: 'USD Coin', icon_url: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png', min_pledge: 1, max_pledge: 10000 },
-  XLM: { name: 'Stellar Lumens', icon_url: 'https://cryptologos.cc/logos/stellar-xlm-logo.png', min_pledge: 10, max_pledge: 100000 },
+const ASSET_METADATA: Record<
+  string,
+  { name: string; icon_url: string; min_pledge: number; max_pledge: number }
+> = {
+  USDC: {
+    name: 'USD Coin',
+    icon_url: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png',
+    min_pledge: 1,
+    max_pledge: 10000,
+  },
+  XLM: {
+    name: 'Stellar Lumens',
+    icon_url: 'https://cryptologos.cc/logos/stellar-xlm-logo.png',
+    min_pledge: 10,
+    max_pledge: 100000,
+  },
   ARS: { name: 'Argentine Peso', icon_url: '', min_pledge: 1000, max_pledge: 10000000 },
 };
 
@@ -905,7 +925,7 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
       success: false,
       error: {
         code: 'PAYLOAD_TOO_LARGE',
-        message: `Request body exceeds the ${bodySizeLimit} maximum limit.`, 
+        message: `Request body exceeds the ${bodySizeLimit} maximum limit.`,
         requestId: (req as RequestWithId).requestId,
       },
     });

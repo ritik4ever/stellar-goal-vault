@@ -43,11 +43,7 @@ export function InstallPrompt() {
   }
 
   return (
-    <div
-      role="region"
-      aria-label="Install Stellar Goal Vault"
-      className="install-prompt"
-    >
+    <div role="region" aria-label="Install Stellar Goal Vault" className="install-prompt">
       <div className="install-prompt__icon" aria-hidden="true">
         <img src="/icon-192.svg" alt="" width="40" height="40" />
       </div>

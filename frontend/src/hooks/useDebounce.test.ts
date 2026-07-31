@@ -37,7 +37,7 @@ describe('useDebounce Hook', () => {
       });
 
       // Now should be updated
-      expect().toBe;
+      expect(result.current).toBe('updated');
     });
 
     it('should use default delay of 300ms when not specified', async () => {
@@ -59,7 +59,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(200);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('end');
     });
 
     it('should use custom delay when specified', async () => {
@@ -81,7 +81,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(200);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('updated');
     });
   });
 
@@ -117,7 +117,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('fourth');
     });
 
     it('should reset timer on each value change', async () => {
@@ -149,7 +149,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(100);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('c');
     });
   });
 
@@ -165,7 +165,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('updated text');
     });
 
     it('should debounce number values', async () => {
@@ -179,7 +179,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe(100);
     });
 
     it('should debounce boolean values', async () => {
@@ -193,7 +193,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe(true);
     });
 
     it('should debounce object values', async () => {
@@ -212,7 +212,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe(obj2);
     });
 
     it('should debounce array values', async () => {
@@ -229,7 +229,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe(arr2);
     });
   });
 
@@ -246,7 +246,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe(null);
     });
 
     it('should handle undefined values', async () => {
@@ -261,7 +261,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe(undefined);
     });
 
     it('should handle empty strings', async () => {
@@ -275,7 +275,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('');
     });
 
     it('should handle zero values', async () => {
@@ -289,7 +289,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe(0);
     });
   });
 
@@ -365,7 +365,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(200);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('rock');
     });
 
     it('should perform efficient debouncing for multiple searches', async () => {
@@ -379,7 +379,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(300);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('search1');
 
       // Second search before waiting
       rerender({ value: 'search2', delay: 300 });
@@ -394,7 +394,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(150);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('search2');
     });
   });
 
@@ -418,7 +418,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(200);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('updated');
     });
 
     it('should handle decreasing delay', async () => {
@@ -442,7 +442,7 @@ describe('useDebounce Hook', () => {
         vi.advanceTimersByTime(100);
       });
 
-      expect().toBe;
+      expect(result.current).toBe('final');
     });
   });
 });

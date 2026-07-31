@@ -1,21 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { initDb, resetDbForTests } from "./db";
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { initDb, resetDbForTests } from './db';
 import {
   initCampaignStore,
   createCampaign,
   addPledge,
   getCampaign,
   claimCampaign,
-} from "./campaignStore";
+} from './campaignStore';
 
-const CREATOR = "GCZST3XVCDTUJ76ZAV2HA72KYQM4YO4EQQ5FILWIXNJNHKS4JF7JVbarq";
-const CONTRIBUTOR_1 =
-  "GBBD47UZQ5QBTMX5V27ZM6L5LH4A5V5SOAWBULJGHZDV3AFP6FIUCSHMN";
-const CONTRIBUTOR_2 = "GBRPYHIL2CI3WHZDTOOQFC6EB4YPQQYWO3F3XVGKBYSELNWJVLBARQ2";
-const CONTRIBUTOR_3 =
-  "GCZST3XVCDTUJ76ZAV2HA72KYQM4YO4EQQ5FILWIXNJNHKS4JF7JVBARQ";
+const CREATOR = 'GCZST3XVCDTUJ76ZAV2HA72KYQM4YO4EQQ5FILWIXNJNHKS4JF7JVbarq';
+const CONTRIBUTOR_1 = 'GBBD47UZQ5QBTMX5V27ZM6L5LH4A5V5SOAWBULJGHZDV3AFP6FIUCSHMN';
+const CONTRIBUTOR_2 = 'GBRPYHIL2CI3WHZDTOOQFC6EB4YPQQYWO3F3XVGKBYSELNWJVLBARQ2';
+const CONTRIBUTOR_3 = 'GCZST3XVCDTUJ76ZAV2HA72KYQM4YO4EQQ5FILWIXNJNHKS4JF7JVBARQ';
 
-describe("Concurrent Pledge Race Condition Tests", () => {
+describe('Concurrent Pledge Race Condition Tests', () => {
   beforeEach(() => {
     initDb();
     initCampaignStore();
@@ -25,13 +23,13 @@ describe("Concurrent Pledge Race Condition Tests", () => {
     resetDbForTests();
   });
 
-  it("should handle concurrent pledges without race conditions", async () => {
+  it('should handle concurrent pledges without race conditions', async () => {
     // Create a campaign with a target of 1000
     const { id: campaignId } = createCampaign({
       creator: CREATOR,
-      title: "Concurrent Test Campaign",
-      description: "Testing concurrent pledge handling with race conditions",
-      acceptedTokens: ["USDC"],
+      title: 'Concurrent Test Campaign',
+      description: 'Testing concurrent pledge handling with race conditions',
+      acceptedTokens: ['USDC'],
       targetAmount: 1000,
       deadline: Math.floor(Date.now() / 1000) + 86400, // 24 hours from now
     });
@@ -46,22 +44,22 @@ describe("Concurrent Pledge Race Condition Tests", () => {
       addPledge(campaignId, {
         contributor: CONTRIBUTOR_1,
         amount: pledgeAmount,
-        assetCode: "USDC",
+        assetCode: 'USDC',
       }),
       addPledge(campaignId, {
         contributor: CONTRIBUTOR_2,
         amount: pledgeAmount,
-        assetCode: "USDC",
+        assetCode: 'USDC',
       }),
       addPledge(campaignId, {
         contributor: CONTRIBUTOR_3,
         amount: pledgeAmount,
-        assetCode: "USDC",
+        assetCode: 'USDC',
       }),
       addPledge(campaignId, {
         contributor: CREATOR,
         amount: pledgeAmount,
-        assetCode: "USDC",
+        assetCode: 'USDC',
       }),
     ];
 
@@ -82,13 +80,13 @@ describe("Concurrent Pledge Race Condition Tests", () => {
     expect(campaign?.pledgedAmount).toBe(campaign?.targetAmount);
   });
 
-  it("should prevent over-pledging when concurrent pledges exceed target", async () => {
+  it('should prevent over-pledging when concurrent pledges exceed target', async () => {
     // Create a campaign with a target of 500
     const { id: campaignId } = createCampaign({
       creator: CREATOR,
-      title: "Over-pledge Test Campaign",
-      description: "Testing over-pledge prevention with concurrent requests",
-      acceptedTokens: ["USDC"],
+      title: 'Over-pledge Test Campaign',
+      description: 'Testing over-pledge prevention with concurrent requests',
+      acceptedTokens: ['USDC'],
       targetAmount: 500,
       deadline: Math.floor(Date.now() / 1000) + 86400,
     });
@@ -96,9 +94,9 @@ describe("Concurrent Pledge Race Condition Tests", () => {
     // Try to pledge 300 from 3 different contributors concurrently
     // Total would be 900, exceeding the 500 target
     const pledges = [
-      { contributor: CONTRIBUTOR_1, amount: 300, assetCode: "USDC" as const },
-      { contributor: CONTRIBUTOR_2, amount: 300, assetCode: "USDC" as const },
-      { contributor: CONTRIBUTOR_3, amount: 300, assetCode: "USDC" as const },
+      { contributor: CONTRIBUTOR_1, amount: 300, assetCode: 'USDC' as const },
+      { contributor: CONTRIBUTOR_2, amount: 300, assetCode: 'USDC' as const },
+      { contributor: CONTRIBUTOR_3, amount: 300, assetCode: 'USDC' as const },
     ];
 
     let succeeded = 0;
@@ -122,13 +120,13 @@ describe("Concurrent Pledge Race Condition Tests", () => {
     expect(campaign?.pledgedAmount).toBeLessThanOrEqual(500);
   });
 
-  it("should enforce per-contributor limits with concurrent pledges", async () => {
+  it('should enforce per-contributor limits with concurrent pledges', async () => {
     // Create a campaign with max 200 per contributor
     const { id: campaignId } = createCampaign({
       creator: CREATOR,
-      title: "Per-Contributor Limit Test",
-      description: "Testing per-contributor limits with concurrent pledges",
-      acceptedTokens: ["USDC"],
+      title: 'Per-Contributor Limit Test',
+      description: 'Testing per-contributor limits with concurrent pledges',
+      acceptedTokens: ['USDC'],
       targetAmount: 1000,
       deadline: Math.floor(Date.now() / 1000) + 86400,
       maxPerContributor: 200,
@@ -136,8 +134,8 @@ describe("Concurrent Pledge Race Condition Tests", () => {
 
     // Try to pledge 150 twice from the same contributor
     const pledges = [
-      { contributor: CONTRIBUTOR_1, amount: 150, assetCode: "USDC" as const },
-      { contributor: CONTRIBUTOR_1, amount: 150, assetCode: "USDC" as const },
+      { contributor: CONTRIBUTOR_1, amount: 150, assetCode: 'USDC' as const },
+      { contributor: CONTRIBUTOR_1, amount: 150, assetCode: 'USDC' as const },
     ];
 
     let succeeded = 0;
@@ -161,13 +159,13 @@ describe("Concurrent Pledge Race Condition Tests", () => {
     expect(campaign?.pledgedAmount).toBeLessThanOrEqual(200);
   });
 
-  it("should maintain data consistency under high concurrent load", async () => {
+  it('should maintain data consistency under high concurrent load', async () => {
     // Create a campaign
     const { id: campaignId } = createCampaign({
       creator: CREATOR,
-      title: "High Load Test Campaign",
-      description: "Testing data consistency under high concurrent load",
-      acceptedTokens: ["USDC"],
+      title: 'High Load Test Campaign',
+      description: 'Testing data consistency under high concurrent load',
+      acceptedTokens: ['USDC'],
       targetAmount: 10000,
       deadline: Math.floor(Date.now() / 1000) + 86400,
     });
@@ -180,13 +178,13 @@ describe("Concurrent Pledge Race Condition Tests", () => {
         CONTRIBUTOR_2,
         CONTRIBUTOR_3,
         CREATOR,
-        "GCZST3XVCDTUJ76ZAV2HA72KYQM4YO4EQQ5FILWIXNJNHKS4JF7JVBARQ",
+        'GCZST3XVCDTUJ76ZAV2HA72KYQM4YO4EQQ5FILWIXNJNHKS4JF7JVBARQ',
       ];
 
       return addPledge(campaignId, {
         contributor: contributors[contributorIndex],
         amount: 50,
-        assetCode: "USDC",
+        assetCode: 'USDC',
       });
     });
 
@@ -205,13 +203,13 @@ describe("Concurrent Pledge Race Condition Tests", () => {
     expect(campaign?.pledgedAmount).toBe(1000); // 20 * 50
   });
 
-  it("should handle concurrent claim and pledge operations safely", async () => {
+  it('should handle concurrent claim and pledge operations safely', async () => {
     // Create a campaign with target 500 and future deadline
     const { id: campaignId } = createCampaign({
       creator: CREATOR,
-      title: "Concurrent Claim Test",
-      description: "Testing concurrent claim and pledge operations",
-      acceptedTokens: ["USDC"],
+      title: 'Concurrent Claim Test',
+      description: 'Testing concurrent claim and pledge operations',
+      acceptedTokens: ['USDC'],
       targetAmount: 500,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
@@ -220,12 +218,12 @@ describe("Concurrent Pledge Race Condition Tests", () => {
     addPledge(campaignId, {
       contributor: CONTRIBUTOR_1,
       amount: 250,
-      assetCode: "USDC",
+      assetCode: 'USDC',
     });
     addPledge(campaignId, {
       contributor: CONTRIBUTOR_2,
       amount: 250,
-      assetCode: "USDC",
+      assetCode: 'USDC',
     });
 
     // Now advance time past deadline so campaign becomes claimable
@@ -235,14 +233,18 @@ describe("Concurrent Pledge Race Condition Tests", () => {
     // Try to claim and pledge — both may throw, just verify no corruption
     try {
       claimCampaign(campaignId, { creator: CREATOR, transactionHash: 'a'.repeat(64) });
-    } catch { /* expected in some orderings */ }
+    } catch {
+      /* expected in some orderings */
+    }
     try {
       addPledge(campaignId, {
         contributor: CONTRIBUTOR_3,
         amount: 100,
-        assetCode: "USDC",
+        assetCode: 'USDC',
       });
-    } catch { /* expected if campaign already claimed */ }
+    } catch {
+      /* expected if campaign already claimed */
+    }
 
     vi.useRealTimers();
 
@@ -253,12 +255,12 @@ describe("Concurrent Pledge Race Condition Tests", () => {
     expect(campaign?.pledgedAmount).toBeLessThanOrEqual(600);
   });
 
-  it("should detect and handle duplicate concurrent pledges from same contributor", async () => {
+  it('should detect and handle duplicate concurrent pledges from same contributor', async () => {
     const { id: campaignId } = createCampaign({
       creator: CREATOR,
-      title: "Duplicate Pledge Test",
-      description: "Testing duplicate pledge detection",
-      acceptedTokens: ["USDC"],
+      title: 'Duplicate Pledge Test',
+      description: 'Testing duplicate pledge detection',
+      acceptedTokens: ['USDC'],
       targetAmount: 1000,
       deadline: Math.floor(Date.now() / 1000) + 86400,
     });
@@ -269,7 +271,7 @@ describe("Concurrent Pledge Race Condition Tests", () => {
       addPledge(campaignId, {
         contributor: CONTRIBUTOR_1,
         amount: 100,
-        assetCode: "USDC",
+        assetCode: 'USDC',
       }),
     );
 

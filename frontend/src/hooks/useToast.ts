@@ -27,18 +27,12 @@ export function useToast() {
   }, []);
 
   const addToast = useCallback(
-    (
-      message: string,
-      variant: ToastVariant = 'info',
-      link?: { href: string; label: string },
-    ) => {
+    (message: string, variant: ToastVariant = 'info', link?: { href: string; label: string }) => {
       const id = crypto.randomUUID();
       setToasts((prev) => {
         const next = [...prev, { id, message, variant, link }];
         if (next.length <= MAX_VISIBLE) return next;
-        const oldestRemovable = next.findIndex(
-          (t) => t.id !== id && t.variant !== 'error',
-        );
+        const oldestRemovable = next.findIndex((t) => t.id !== id && t.variant !== 'error');
         if (oldestRemovable !== -1) {
           const timer = timersRef.current.get(next[oldestRemovable].id);
           if (timer !== undefined) {

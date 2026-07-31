@@ -23,7 +23,7 @@ export async function idempotencyMiddleware(
 
   const apiKey = (req as unknown as RequestWithApiKey).apiKey ?? 'anonymous';
   const campaignId = req.params.id as string;
-  const contributor = (req.body as Record<string, unknown>)?.contributor as string ?? 'unknown';
+  const contributor = ((req.body as Record<string, unknown>)?.contributor as string) ?? 'unknown';
   const cacheKey = buildIdempotencyCacheKey(apiKey, `${campaignId}:${contributor}`, idempotencyKey);
 
   try {
