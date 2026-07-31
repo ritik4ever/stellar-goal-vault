@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { config } from '../config';
-import type { CampaignStatus, CampaignSortField, SortOrder } from '../services/campaignStore';
 import { httpsOnlyUrlSchema } from './urlSafety';
 
 extendZodWithOpenApi(z);
@@ -626,9 +625,20 @@ export function parseLeaderboardQuery(query: {
   const issues: z.ZodIssue[] = [];
 
   const validTypes: LeaderboardType[] = ['most_funded', 'most_backers', 'trending'];
-  const type = rawType && validTypes.includes(rawType as LeaderboardType) 
-    ? (rawType as LeaderboardType) 
-    : 'most_funded';
+  let type: LeaderboardType;
+  
+  if (rawType === undefined) {
+    type = 'most_funded';
+  } else if (validTypes.includes(rawType as LeaderboardType)) {
+    type = rawType as LeaderboardType;
+  } else {
+    issues.push({
+      code: 'custom',
+      message: 'type must be one of: most_funded, most_backers, trending.',
+      path: ['type'],
+    });
+    type = 'most_funded';
+  }
 
   let limit = 10;
   if (rawLimit !== undefined) {

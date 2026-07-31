@@ -1599,10 +1599,11 @@ export function getCampaignLeaderboard(
         LEFT JOIN pledges p ON c.id = p.campaign_id AND p.refunded_at IS NULL
         WHERE c.deleted_at IS NULL
         GROUP BY c.id
+        HAVING COUNT(CASE WHEN p.created_at >= ? THEN 1 END) > 0
         ORDER BY pledge_velocity DESC
         LIMIT ?
       `;
-      params = [twentyFourHoursAgo, limit];
+      params = [twentyFourHoursAgo, twentyFourHoursAgo, limit];
       break;
 
     default:

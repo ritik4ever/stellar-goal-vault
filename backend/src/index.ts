@@ -27,8 +27,6 @@ import {
   CampaignStatus,
   claimCampaign,
   createCampaign,
-  createComment,
-  deleteComment,
   getCampaign,
   getCampaignWithProgress,
   getContributorSummary,
@@ -39,9 +37,7 @@ import {
   initCampaignStore,
   listCampaignPledges,
   listCampaigns,
-  listComments,
   type ListCampaignsOptions,
-  reconcileOnChainPledge,
   refundContributor,
   restoreCampaign,
   softDeleteCampaign,
@@ -62,12 +58,8 @@ import { AppError, ApiErrorResponse } from './types/errors';
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
-  commentIdSchema,
   createCampaignPayloadSchema,
-  createCommentPayloadSchema,
   createPledgePayloadSchema,
-  deleteCommentPayloadSchema,
-  parseCommentListPaginationQuery,
   parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
   parseTimelineQuery,
@@ -79,7 +71,7 @@ import {
   parseLeaderboardQuery,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
-import { logError, logInfo, logger } from './logger';
+import { logError, logInfo } from './logger';
 import {
   buildCampaignCacheKey,
   getCampaignCacheEntry,
@@ -87,7 +79,9 @@ import {
   setTrendingCacheEntry,
   invalidateCampaignCache,
   setCampaignCacheEntry,
-} from './services/campaignCache';export const app = express();
+} from './services/campaignCache';
+
+export const app = express();
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
@@ -511,31 +505,28 @@ app.get('/api/campaigns/:id', (req: Request, res: Response) => {
     sendValidationError(parsedId.issues);
   }
 
-    const cacheKey = `campaigns:detail:${parsedId.value}`;
-    const cached = await getCampaignCacheEntry(cacheKey);
-    if (cached) {
-      res.setHeader('Cache-Control', 'max-age=30');
-      res.setHeader('X-Cache', 'HIT');
-      res.setHeader('Content-Type', 'application/json');
-      res.send(cached);
-      return;
-    }
-
-    const campaign = getCampaignWithProgress(parsedId.value, CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT);
-    if (!campaign) {
-      throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
-    }
-
-    const responseBody = JSON.stringify({ data: campaign });
-    await setCampaignCacheEntry(cacheKey, responseBody);
-
+  const cacheKey = `campaigns:detail:${parsedId.value}`;
+  const cached = getCampaignCacheEntry(cacheKey);
+  if (cached) {
     res.setHeader('Cache-Control', 'max-age=30');
-    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('X-Cache', 'HIT');
     res.setHeader('Content-Type', 'application/json');
-    res.send(responseBody);
-  } catch (error) {
-    next(error);
+    res.send(cached);
+    return;
   }
+
+  const campaign = getCampaignWithProgress(parsedId.value, CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT);
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+  }
+
+  const responseBody = JSON.stringify({ data: campaign });
+  setCampaignCacheEntry(cacheKey, responseBody);
+
+  res.setHeader('Cache-Control', 'max-age=30');
+  res.setHeader('X-Cache', 'MISS');
+  res.setHeader('Content-Type', 'application/json');
+  res.send(responseBody);
 });
 
 app.delete(
@@ -905,6 +896,58 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
   }
 });
 
+// Legacy route for backward compatibility
+app.get('/api/leaderboard', (req: Request, res: Response) => {
+  const queryResult = parseLeaderboardQuery(req.query as Record<string, unknown>);
+  if (!queryResult.ok) {
+    sendValidationError(queryResult.issues);
+  }
+
+  const { type, limit } = queryResult;
+
+  // Build cache key based on type and limit
+  const cacheKey = `campaign_leaderboard:${type}:${limit}`;
+  const cached = getCampaignCacheEntry(cacheKey);
+
+  if (cached) {
+    res.setHeader('Cache-Control', 'max-age=300');
+    res.setHeader('X-Cache', 'HIT');
+    res.setHeader('Content-Type', 'application/json');
+    res.send(cached);
+    return;
+  }
+
+  try {
+    const leaderboard = getCampaignLeaderboard(type, limit);
+    const responseBody = JSON.stringify({ data: leaderboard });
+
+    setCampaignCacheEntry(cacheKey, responseBody);
+
+    res.setHeader('Cache-Control', 'max-age=300');
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('Content-Type', 'application/json');
+    res.send(responseBody);
+  } catch (err) {
+    logError(
+      err as Error,
+      {
+        event: 'campaign_leaderboard_error',
+        requestId: (req as RequestWithId).requestId,
+        type,
+      },
+      config.logLevel,
+    );
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to fetch leaderboard',
+        requestId: (req as RequestWithId).requestId,
+      },
+    });
+  }
+});
+
 app.get('/api/campaigns/leaderboard', (req: Request, res: Response) => {
   const queryResult = parseLeaderboardQuery(req.query as Record<string, unknown>);
   if (!queryResult.ok) {
@@ -918,7 +961,6 @@ app.get('/api/campaigns/leaderboard', (req: Request, res: Response) => {
   const cached = getCampaignCacheEntry(cacheKey);
 
   if (cached) {
-    const cachedData = JSON.parse(cached);
     res.setHeader('Cache-Control', 'max-age=300');
     res.setHeader('X-Cache', 'HIT');
     res.setHeader('Content-Type', 'application/json');
