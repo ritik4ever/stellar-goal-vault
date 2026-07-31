@@ -1,7 +1,6 @@
-import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { config } from '../config';
-import type { CampaignStatus, CampaignSortField, SortOrder } from '../services/campaignStore';
 import { httpsOnlyUrlSchema } from './urlSafety';
 
 extendZodWithOpenApi(z);
@@ -94,7 +93,7 @@ export const unixTimestampSchema = z.coerce
   .positive('deadline must be a valid UNIX timestamp in seconds.');
 
 function sanitizeInput(val: string): string {
-  return val.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\//g, '&sol;');
+  return val.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 const containsSqlComment = (val: string) => /--|\/\*|\*\//.test(val);
@@ -106,7 +105,7 @@ export const createCampaignPayloadSchema = z.object({
     .string()
     .trim()
     .min(4, 'Title must be at least 4 characters.')
-    .max(80)
+    .max(200, 'Title must be at most 200 characters.')
     .refine((val) => val.trim().length >= 4, 'Title cannot be only whitespace.')
     .refine((val) => !containsScriptTag(val), 'Title cannot contain script tags.')
     .refine((val) => !containsSqlComment(val), 'Title cannot contain SQL comment sequences.')
@@ -611,6 +610,55 @@ export function normalizeQueryValue(value: unknown): string | undefined {
 
   const trimmed = value.trim();
   return trimmed === '' ? undefined : trimmed;
+}
+
+export type LeaderboardType = 'most_funded' | 'most_backers' | 'trending';
+
+export function parseLeaderboardQuery(query: {
+  type?: unknown;
+  limit?: unknown;
+}): 
+  | { ok: true; type: LeaderboardType; limit: number }
+  | { ok: false; issues: z.ZodIssue[] } {
+  const rawType = singleCampaignListQueryParam(query.type);
+  const rawLimit = singleCampaignListQueryParam(query.limit);
+  const issues: z.ZodIssue[] = [];
+
+  const validTypes: LeaderboardType[] = ['most_funded', 'most_backers', 'trending'];
+  let type: LeaderboardType;
+  
+  if (rawType === undefined) {
+    type = 'most_funded';
+  } else if (validTypes.includes(rawType as LeaderboardType)) {
+    type = rawType as LeaderboardType;
+  } else {
+    issues.push({
+      code: 'custom',
+      message: 'type must be one of: most_funded, most_backers, trending.',
+      path: ['type'],
+    });
+    type = 'most_funded';
+  }
+
+  let limit = 10;
+  if (rawLimit !== undefined) {
+    const parsed = Number(rawLimit);
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+      issues.push({
+        code: 'custom',
+        message: 'limit must be an integer from 1 to 100.',
+        path: ['limit'],
+      });
+    } else {
+      limit = parsed;
+    }
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return { ok: true, type, limit };
 }
 
 export const COMMENT_ID_REGEX = /^[1-9]\d*$/;
