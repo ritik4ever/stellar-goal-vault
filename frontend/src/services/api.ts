@@ -2,9 +2,15 @@ import {
   AppConfig,
   Campaign,
   CampaignEvent,
+  ContributorBadge,
+  ContributorBackedCampaign,
+  ContributorProfile,
+  ContributorRefundEntry,
   CreateCampaignPayload,
   CreatePledgePayload,
+  LeaderboardEntry,
   OpenIssue,
+  Pledge,
   ReconcilePledgePayload,
   SorobanRefundMetadata,
 } from '../types/campaign';
@@ -191,4 +197,159 @@ export async function getDistinctAssetCodes(): Promise<string[]> {
     method: 'GET',
   });
   return body.data;
+}
+
+export async function getLeaderboard(limit = 50): Promise<LeaderboardEntry[]> {
+  const body = await apiRequest<{ data: LeaderboardEntry[] }>({
+    url: `/leaderboard?limit=${limit}`,
+    method: 'GET',
+  });
+  return body.data;
+}
+
+function buildBadges(profile: {
+  campaignCount: number;
+  totalPledged: number;
+  refundedAmount: number;
+  rank: number;
+}): ContributorBadge[] {
+  const badges: ContributorBadge[] = [];
+  const now = Math.floor(Date.now() / 1000);
+
+  if (profile.campaignCount >= 1) {
+    badges.push({
+      name: 'First Backer',
+      description: 'Backed their first campaign',
+      earnedAt: now,
+      icon: '🎯',
+    });
+  }
+  if (profile.campaignCount >= 5) {
+    badges.push({
+      name: 'Serial Supporter',
+      description: 'Backed 5 or more campaigns',
+      earnedAt: now,
+      icon: '⭐',
+    });
+  }
+  if (profile.campaignCount >= 10) {
+    badges.push({
+      name: 'Campaign Veteran',
+      description: 'Backed 10 or more campaigns',
+      earnedAt: now,
+      icon: '🏆',
+    });
+  }
+  if (profile.totalPledged >= 1000) {
+    badges.push({
+      name: 'Whale Pledger',
+      description: 'Pledged over 1,000 tokens total',
+      earnedAt: now,
+      icon: '🐋',
+    });
+  }
+  if (profile.rank > 0 && profile.rank <= 10) {
+    badges.push({
+      name: 'Top 10 Contributor',
+      description: 'Ranked in the global top 10',
+      earnedAt: now,
+      icon: '👑',
+    });
+  }
+  if (profile.refundedAmount > 0 && profile.refundedAmount < profile.totalPledged) {
+    badges.push({
+      name: 'Mixed Portfolio',
+      description: 'Has both active pledges and refunds',
+      earnedAt: now,
+      icon: '🔄',
+    });
+  }
+
+  return badges;
+}
+
+export async function getContributorProfile(address: string): Promise<ContributorProfile> {
+  const leaderboard = await getLeaderboard(100);
+  const entry = leaderboard.find((e) => e.contributor === address);
+  const rank = entry?.rank ?? 0;
+
+  const { data: campaigns } = await apiRequest<{ data: Campaign[] }>({
+    url: '/campaigns?limit=100',
+    method: 'GET',
+  });
+
+  const backedCampaigns: ContributorBackedCampaign[] = [];
+  const refundHistory: ContributorRefundEntry[] = [];
+  let totalPledged = 0;
+  let refundedAmount = 0;
+
+  for (const campaign of campaigns) {
+    let pledges: Pledge[] = [];
+    if (campaign.pledges) {
+      pledges = campaign.pledges.filter((p) => p.contributor === address);
+    } else {
+      try {
+        const body = await apiRequest<{ data: Pledge[] }>({
+          url: `/campaigns/${campaign.id}/pledges`,
+          method: 'GET',
+          params: { limit: 500 },
+        });
+        pledges = body.data.filter((p) => p.contributor === address);
+      } catch {
+        // skip campaigns where pledges can't be fetched
+        continue;
+      }
+    }
+
+    if (pledges.length === 0) continue;
+
+    let campaignPledged = 0;
+    let campaignRefunded = 0;
+    let earliestPledgeAt = Infinity;
+
+    for (const pledge of pledges) {
+      if (pledge.refundedAt) {
+        campaignRefunded += pledge.amount;
+        refundHistory.push({
+          campaignId: campaign.id,
+          title: campaign.title,
+          amount: pledge.amount,
+          assetCode: pledge.assetCode,
+          refundedAt: pledge.refundedAt,
+        });
+      } else {
+        campaignPledged += pledge.amount;
+      }
+      if (pledge.createdAt < earliestPledgeAt) {
+        earliestPledgeAt = pledge.createdAt;
+      }
+    }
+
+    totalPledged += campaignPledged + campaignRefunded;
+    refundedAmount += campaignRefunded;
+
+    backedCampaigns.push({
+      campaignId: campaign.id,
+      title: campaign.title,
+      status: campaign.progress.status,
+      pledgedAmount: campaignPledged,
+      refundedAmount: campaignRefunded,
+      assetCode: campaign.assetCode,
+      pledgedAt: earliestPledgeAt === Infinity ? 0 : earliestPledgeAt,
+    });
+  }
+
+  const campaignCount = backedCampaigns.length;
+  const badges = buildBadges({ campaignCount, totalPledged, refundedAmount, rank });
+
+  return {
+    address,
+    totalPledged,
+    refundedAmount,
+    campaignCount,
+    rank,
+    badges,
+    backedCampaigns: backedCampaigns.sort((a, b) => b.pledgedAt - a.pledgedAt),
+    refundHistory: refundHistory.sort((a, b) => b.refundedAt - a.refundedAt),
+  };
 }

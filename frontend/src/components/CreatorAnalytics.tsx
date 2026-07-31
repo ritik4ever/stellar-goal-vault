@@ -12,6 +12,8 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { Campaign } from '../types/campaign';
+import { SkeletonAnalytics } from './SkeletonAnalytics';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 interface CreatorAnalyticsProps {
   creatorAddress: string;
@@ -80,26 +82,9 @@ export const CreatorAnalytics: React.FC<CreatorAnalyticsProps> = ({
     };
   }, [creatorAddress, campaigns]);
 
-  if (isLoading) {
-    return (
-      <div className="creator-metrics-container">
-        <h3 className="creator-metrics-title">Creator Performance</h3>
-        <div className="metric-grid">
-          <div className="metric-card">
-            <span>Campaigns Created</span>
-            <strong>—</strong>
-          </div>
-          <div className="metric-card">
-            <span>Funded Campaigns</span>
-            <strong>—</strong>
-          </div>
-          <div className="metric-card">
-            <span>Claimed Vaults</span>
-            <strong>—</strong>
-          </div>
-        </div>
-      </div>
-    );
+  const showSkeleton = useMinDisplayTime(isLoading);
+  if (showSkeleton) {
+    return <SkeletonAnalytics />;
   }
 
   const hasChartData = pledgeData.length > 0;

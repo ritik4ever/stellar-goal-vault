@@ -1,7 +1,4 @@
-import { createClient, RedisClientType } from "redis";
-import { config } from "../config";
-import { logInfo, logError } from "../logger";
-import { config } from "../config";
+import { createClient, RedisClientType } from 'redis';
 
 type RedisClient = RedisClientType;
 
@@ -16,27 +13,34 @@ export async function initRedisCache(): Promise<void> {
   const redisUrl = process.env.REDIS_URL;
   const nodeEnv = process.env.NODE_ENV;
 
-  if (!redisUrl || nodeEnv !== "production") {
-
+  if (!redisUrl || nodeEnv !== 'production') {
     return;
   }
 
   try {
     redisClient = createClient({ url: redisUrl });
 
-    redisClient.on("error", (err) => {
-
+    redisClient.on('error', () => {
       isConnected = false;
     });
 
-    redisClient.on("connect", () => {
-
+    redisClient.on('connect', () => {
       isConnected = true;
     });
 
     await redisClient.connect();
     isConnected = true;
   } catch (error) {
+
+    logInfo('redis_connected', {}, config.logLevel);
+  } catch (error) {
+    logError(error instanceof Error ? error : new Error(String(error)), { event: 'redis_connection_failed' }, config.logLevel);
+    redisClient = null;
+    isConnected = false;
+  } catch {
+    redisClient = null;
+    isConnected = false;
+  } catch {
     redisClient = null;
     isConnected = false;
   }
@@ -54,7 +58,6 @@ export async function getCacheValue(key: string): Promise<string | null> {
   try {
     return await redisClient.get(key);
   } catch (error) {
-
     return null;
   }
 }
@@ -80,7 +83,6 @@ export async function setCacheValue(
     }
     return true;
   } catch (error) {
-
     return false;
   }
 }
@@ -98,7 +100,6 @@ export async function deleteCacheValue(key: string): Promise<boolean> {
     const result = await redisClient.del(key);
     return result > 0;
   } catch (error) {
-
     return false;
   }
 }
@@ -119,7 +120,6 @@ export async function clearCachePattern(pattern: string): Promise<number> {
     }
     return await redisClient.del(keys);
   } catch (error) {
-
     return 0;
   }
 }
@@ -134,6 +134,8 @@ export async function closeRedisCache(): Promise<void> {
       isConnected = false;
     } catch (error) {
       // Ignore errors on close
+    } catch {
+      isConnected = false;
     }
   }
 }

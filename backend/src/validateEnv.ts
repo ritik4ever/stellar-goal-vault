@@ -16,11 +16,11 @@ const envSchema = z.object({
     .string()
     .url()
     .optional()
-    .describe('default: https://soroban-testnet.stellar.org:443'),
+    .describe('default: testnet RPC in non-production; required in production'),
   SOROBAN_NETWORK_PASSPHRASE: z
     .string()
     .optional()
-    .describe('default: Test SDF Network ; September 2015'),
+    .describe('default: testnet passphrase in non-production; required in production'),
   ALLOWED_ASSETS: z.string().optional().describe('default: USDC,XLM'),
   ALLOWED_ORIGINS: z.string().optional().describe('default: (empty — all origins allowed in dev)'),
   ASSET_ADDRESSES: z.string().optional().describe('default: XLM and USDC testnet addresses'),
@@ -34,6 +34,8 @@ const envSchema = z.object({
     .regex(/^\d+$/, 'DEFAULT_MAX_PER_CONTRIBUTOR must be a non-negative integer')
     .optional()
     .describe('default: 0 (no limit)'),
+  WEBHOOK_URL: z.string().optional().describe('Configurable webhook URL for status change notifications'),
+  WEBHOOK_SECRET: z.string().optional().describe('Secret used to compute HMAC-SHA256 signature in X-GoalVault-Signature header'),
 });
 
 export function validateEnv(): void {
