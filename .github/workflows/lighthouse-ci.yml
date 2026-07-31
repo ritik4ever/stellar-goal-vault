@@ -2,6 +2,95 @@ name: Lighthouse CI
 
 on:
   pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Serve built frontend
+        run: |
+          npx --yes http-server frontend/dist -p 8080 -c-1 &
+
+      - name: Wait for server
+        run: npx wait-on http://127.0.0.1:8080
+
+      - name: Run Lighthouse
+        id: run-lighthouse
+        run: |
+          npx --yes lighthouse http://127.0.0.1:8080 --output=json --output-path=./lhreport.json --chrome-flags="--no-sandbox" || true
+
+      - name: Generate summary
+        id: gen-summary
+        run: |
+          apt-get update && apt-get install -y jq bc >/dev/null
+          SCORE=$(jq -r '.categories.performance.score * 100' lhreport.json)
+          LCP=$(jq -r '.audits["largest-contentful-paint"].numericValue' lhreport.json)
+          FID=$(jq -r '.audits["max-potential-fid"].numericValue' lhreport.json)
+          CLS=$(jq -r '.audits["cumulative-layout-shift"].numericValue' lhreport.json)
+          cat > lhci-summary.md <<EOF
+## Lighthouse CI summary
+
+- Performance score: ${SCORE}
+- Largest Contentful Paint (ms): ${LCP}
+- Max potential First Input Delay (ms): ${FID}
+- Cumulative Layout Shift: ${CLS}
+
+EOF
+          PASS=1
+          python3 - <<PY
+import sys
+S=float(sys.argv[1])
+L=float(sys.argv[2])
+F=float(sys.argv[3])
+C=float(sys.argv[4])
+ok=True
+if S<85: ok=False
+if L>2500: ok=False
+if F>100: ok=False
+if C>0.1: ok=False
+print('0' if ok else '1')
+PY ${SCORE:-0} ${LCP:-99999} ${FID:-99999} ${CLS:-99999} > _passcode
+          PASS=$(cat _passcode)
+          if [ "$PASS" = "1" ]; then echo "Lighthouse budget passed" > lhci-result; else echo "Lighthouse budget failed" > lhci-result; fi
+          if [ "$PASS" != "1" ]; then exit 1; fi
+
+      - name: Comment PR with summary
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-file: lhci-summary.md
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-report-json
+          path: lhreport.json
+name: Lighthouse CI
+
+on:
+  pull_request:
     branches:
       - main
   push:
