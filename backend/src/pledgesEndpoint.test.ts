@@ -163,7 +163,7 @@ describe('concurrent pledge race condition', () => {
     const concurrentPledges = 10;
 
     // Create 10 concurrent pledges from the same contributor using setTimeout to simulate true concurrency
-    const pledgePromises = Array.from({ length: concurrentPledges }, (_, i) =>
+    const pledgePromises = Array.from({ length: concurrentPledges }, () =>
       new Promise((resolve, reject) => {
         // Use setImmediate to allow the event loop to interleave operations
         setImmediate(() => {
@@ -187,7 +187,6 @@ describe('concurrent pledge race condition', () => {
     expect(failed).toBe(5);
 
     // Verify the final pledged amount does not exceed the limit
-    const finalCampaign = getCampaignWithProgress(campaign.id);
     const contributorTotal = getContributorPledgedTotal(campaign.id, contributor);
     expect(contributorTotal).toBeLessThanOrEqual(50);
     expect(contributorTotal).toBeGreaterThan(0);

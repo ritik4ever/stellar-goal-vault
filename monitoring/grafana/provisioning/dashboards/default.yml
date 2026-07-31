@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: Stellar Goal Vault
+    orgId: 1
+    folder: Stellar Goal Vault
+    type: file
+    disableDeletion: true
+    editable: true
+    updateIntervalSeconds: 10
+    options:
+      path: /var/lib/grafana/dashboards
