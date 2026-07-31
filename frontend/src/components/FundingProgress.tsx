@@ -15,7 +15,7 @@ export function FundingProgress({
   // Ensure percentage is between 0 and 100
   const percentage = Math.min(
     100,
-    Math.max(0, targetAmount > 0 ? (currentAmount / targetAmount) * 100 : 0)
+    Math.max(0, targetAmount > 0 ? (currentAmount / targetAmount) * 100 : 0),
   );
   const isFunded = percentage >= 100;
 
@@ -57,10 +57,7 @@ export function FundingProgress({
         ))}
       </div>
       {showConfetti && (
-        <FundedConfetti
-          campaignTitle={campaignTitle}
-          onComplete={() => setShowConfetti(false)}
-        />
+        <FundedConfetti campaignTitle={campaignTitle} onComplete={() => setShowConfetti(false)} />
       )}
     </div>
   );

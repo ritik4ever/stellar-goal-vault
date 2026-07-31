@@ -577,7 +577,7 @@ registry.registerPath({
   summary: 'Archive (soft-delete) a campaign',
   description:
     'Sets the archivedAt/deletedAt timestamp on a campaign. Archived campaigns are excluded ' +
-    "from the default campaign list but their pledges and history are preserved. Use POST " +
+    'from the default campaign list but their pledges and history are preserved. Use POST ' +
     '/api/campaigns/{id}/restore to un-archive.',
   request: { params: z.object({ id: campaignIdParamSchema }) },
   responses: {
@@ -638,7 +638,8 @@ registry.registerPath({
   path: '/api/campaigns/{id}/pledges',
   tags: ['Pledges'],
   summary: 'Create a pledge',
-  description: 'Creates a pledge for a campaign. Use the Idempotency-Key header to make the request idempotent. Cached responses are returned for 24 hours.',
+  description:
+    'Creates a pledge for a campaign. Use the Idempotency-Key header to make the request idempotent. Cached responses are returned for 24 hours.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
     body: {

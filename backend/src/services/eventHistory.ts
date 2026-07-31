@@ -323,7 +323,9 @@ function rowToTimelineItem(row: TimelineRow): TimelineItem {
     type = 'pledge';
     parsedMetadata = undefined;
   } else {
-    parsedMetadata = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined;
+    parsedMetadata = row.metadata
+      ? (JSON.parse(row.metadata) as Record<string, unknown>)
+      : undefined;
 
     switch (row.event_type) {
       case 'created':

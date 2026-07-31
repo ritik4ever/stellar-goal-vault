@@ -31,16 +31,16 @@ export const imageUrlSchema = z
         if (!dataUrlMatch) {
           return false;
         }
-        
+
         // Estimate decoded size (base64 adds ~33% overhead)
         // A base64 string of length N encodes roughly N * 0.75 bytes
         const base64Data = dataUrlMatch[2];
         const estimatedBytes = (base64Data.length * 3) / 4;
         const maxBytes = 2 * 1024 * 1024; // 2MB
-        
+
         return estimatedBytes <= maxBytes;
       }
-      
+
       // For HTTPS URLs, delegate to httpsOnlyUrlSchema
       try {
         httpsOnlyUrlSchema.parse(value);
@@ -552,9 +552,7 @@ export function parseCampaignListQuery(
 export function parseTimelineQuery(query: {
   cursor?: unknown;
   limit?: unknown;
-}):
-  | { ok: true; cursor?: string; limit: number }
-  | { ok: false; issues: z.core.$ZodIssue[] } {
+}): { ok: true; cursor?: string; limit: number } | { ok: false; issues: z.core.$ZodIssue[] } {
   const issues: z.core.$ZodIssue[] = [];
 
   let cursor: string | undefined;

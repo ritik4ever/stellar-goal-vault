@@ -23,6 +23,7 @@ let getDb: DbModule['getDb'];
 let getCampaignHistory: EventHistoryModule['getCampaignHistory'];
 let addPledge: CampaignStoreModule['addPledge'];
 let getCampaignAnalytics: CampaignStoreModule['getCampaignAnalytics'];
+let findNearDuplicate: CampaignStoreModule['findNearDuplicate'];
 
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR = `G${'B'.repeat(55)}`;
@@ -43,6 +44,7 @@ beforeAll(async () => {
     getPledges,
     addPledge,
     getCampaignAnalytics,
+    findNearDuplicate,
   } = await import('./campaignStore'));
   ({ getDb } = await import('./db'));
   ({ getCampaignHistory } = await import('./eventHistory'));
@@ -93,7 +95,7 @@ describe('campaign store search', () => {
 
     expect(listCampaigns({ searchQuery: 'rocket' }).campaigns[0].id).toBe(campaign.id);
     expect(
-      listCampaigns({ searchQuery: 'gaaa' }).campaigns.some((row) => row.id === campaign.id),
+      listCampaigns({ searchQuery: CREATOR }).campaigns.some((row) => row.id === campaign.id),
     ).toBe(true);
     expect(listCampaigns({ searchQuery: campaign.id }).campaigns[0].id).toBe(campaign.id);
   });
@@ -111,14 +113,15 @@ describe('on-chain pledge reconciliation', () => {
       deadline: futureDeadline,
     });
 
-    const updatedCampaign = reconcileOnChainPledge(campaign.id, {
+    const result = reconcileOnChainPledge(campaign.id, {
       contributor: CONTRIBUTOR,
       amount: 25.5,
       transactionHash: TX_HASH,
       confirmedAt: futureDeadline - 300,
     });
 
-    expect(updatedCampaign.pledgedAmount).toBe(25.5);
+    expect(result.campaign.pledgedAmount).toBe(25.5);
+    expect(result.existing).toBe(false);
     expect(getCampaign(campaign.id)?.pledgedAmount).toBe(25.5);
 
     const pledges = getPledges(campaign.id);
@@ -163,6 +166,73 @@ describe('on-chain pledge reconciliation', () => {
     expect(
       getCampaignHistory(campaign.id).filter((event) => event.eventType === 'pledged'),
     ).toHaveLength(1);
+  });
+});
+
+describe('near-duplicate detection', () => {
+  const FUTURE_DEADLINE = Math.floor(Date.now() / 1000) + 86400;
+
+  it('returns duplicate when same creator creates near-identical title', () => {
+    createCampaign({
+      creator: CREATOR,
+      title: 'Help me build a rocket',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: FUTURE_DEADLINE,
+    });
+
+    const result = findNearDuplicate('Help me build a rocket!!', CREATOR);
+    expect(result).toBeDefined();
+    expect(result!.distance).toBeLessThan(5);
+  });
+
+  it('allows same title from different creator', () => {
+    createCampaign({
+      creator: CREATOR,
+      title: 'Fund my project',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: FUTURE_DEADLINE,
+    });
+
+    const otherCreator = `G${'D'.repeat(55)}`;
+    const result = findNearDuplicate('Fund my project', otherCreator);
+    expect(result).toBeUndefined();
+  });
+
+  it('returns undefined when title is sufficiently different', () => {
+    createCampaign({
+      creator: CREATOR,
+      title: 'Completely different topic',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: FUTURE_DEADLINE,
+    });
+
+    const result = findNearDuplicate('Totally unrelated campaign', CREATOR);
+    expect(result).toBeUndefined();
+  });
+
+  it('ignores campaigns older than 24 hours', () => {
+    const db = getDb();
+    const oldTimestamp = Math.floor(Date.now() / 1000) - 60 * 60 * 25;
+
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Old campaign title',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: FUTURE_DEADLINE,
+    });
+
+    db.prepare(`UPDATE campaigns SET created_at = ? WHERE id = ?`).run(oldTimestamp, campaign.id);
+
+    const result = findNearDuplicate('Old campaign title', CREATOR);
+    expect(result).toBeUndefined();
   });
 });
 

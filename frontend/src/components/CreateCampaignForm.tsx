@@ -208,7 +208,11 @@ export function CreateCampaignForm({
     }));
   }
 
-  function updateRewardTier(id: string, field: 'title' | 'minAmount' | 'description', value: string) {
+  function updateRewardTier(
+    id: string,
+    field: 'title' | 'minAmount' | 'description',
+    value: string,
+  ) {
     setValues((current) => ({
       ...current,
       rewardTiers: current.rewardTiers.map((tier) =>
@@ -400,7 +404,9 @@ export function CreateCampaignForm({
                 rows={5}
                 minLength={20}
                 maxLength={500}
-                className={errors.description && touchedFields.has('description') ? 'input-error' : ''}
+                className={
+                  errors.description && touchedFields.has('description') ? 'input-error' : ''
+                }
                 required
               />
               {errors.description && touchedFields.has('description') ? (
@@ -486,7 +492,9 @@ export function CreateCampaignForm({
                 value={values.targetAmount}
                 onChange={(event) => update('targetAmount', event.target.value)}
                 onBlur={() => handleFieldBlur('targetAmount')}
-                className={errors.targetAmount && touchedFields.has('targetAmount') ? 'input-error' : ''}
+                className={
+                  errors.targetAmount && touchedFields.has('targetAmount') ? 'input-error' : ''
+                }
                 required
               />
               {errors.targetAmount && touchedFields.has('targetAmount') ? (
@@ -503,7 +511,9 @@ export function CreateCampaignForm({
                 value={values.deadlineHours}
                 onChange={(event) => update('deadlineHours', event.target.value)}
                 onBlur={() => handleFieldBlur('deadlineHours')}
-                className={errors.deadlineHours && touchedFields.has('deadlineHours') ? 'input-error' : ''}
+                className={
+                  errors.deadlineHours && touchedFields.has('deadlineHours') ? 'input-error' : ''
+                }
                 required
               />
               {errors.deadlineHours && touchedFields.has('deadlineHours') ? (
@@ -538,8 +548,8 @@ export function CreateCampaignForm({
           <div className="field-group">
             <span>Reward tiers (optional)</span>
             <p className="muted wizard-hint">
-              Offer contributors a reward for pledging above a minimum amount. Skip this step if
-              you don&apos;t need tiers.
+              Offer contributors a reward for pledging above a minimum amount. Skip this step if you
+              don&apos;t need tiers.
             </p>
 
             {values.rewardTiers.length === 0 ? (
@@ -569,7 +579,9 @@ export function CreateCampaignForm({
                         <input
                           type="text"
                           value={tier.title}
-                          onChange={(event) => updateRewardTier(tier.id, 'title', event.target.value)}
+                          onChange={(event) =>
+                            updateRewardTier(tier.id, 'title', event.target.value)
+                          }
                           onBlur={() => handleTierFieldBlur(tier.id, 'title')}
                           placeholder="Early supporter badge"
                           className={tierErrors.title && titleTouched ? 'input-error' : ''}

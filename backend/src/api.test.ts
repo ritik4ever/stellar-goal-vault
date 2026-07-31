@@ -1,4 +1,3 @@
-
 import fs from 'fs';
 import { Server } from 'http';
 import path from 'path';
@@ -15,6 +14,7 @@ vi.hoisted(() => {
 import { app } from './index';
 import { createCampaign, initCampaignStore } from './services/campaignStore';
 import { getDb } from './services/db';
+import { invalidateCampaignCache } from './services/campaignCache';
 
 // Mock sorobanRpc to avoid real network calls during tests
 vi.mock('./services/sorobanRpc', () => ({
@@ -63,21 +63,17 @@ beforeEach(() => {
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR = `G${'B'.repeat(55)}`;
 
-async function post(apiPath: string, body: unknown) {
+async function post(apiPath: string, body: unknown, headers?: Record<string, string>) {
   const response = await fetch(`${baseUrl}${apiPath}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => null);
   return { status: response.status, data, headers: response.headers };
 }
 
-async function postWithHeaders(
-  apiPath: string,
-  body: unknown,
-  headers: Record<string, string>,
-) {
+async function postWithHeaders(apiPath: string, body: unknown, headers: Record<string, string>) {
   const mergedHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     ...headers,
@@ -119,7 +115,7 @@ describe('Campaign Lifecycle API', () => {
     const pledgeRes = await post(`/api/campaigns/${campaignId}/pledges`, {
       contributor: CONTRIBUTOR,
       amount: 100,
-      assetCode: "USDC",
+      assetCode: 'USDC',
     });
     expect(pledgeRes.status).toBe(201);
     expect(pledgeRes.data.data.progress.status).toBe('funded');
@@ -141,7 +137,7 @@ describe('Campaign Lifecycle API', () => {
 
     // Verify no duplicate claim event in history
     const historyRes = await get(`/api/campaigns/${campaignId}/history`);
-    const claimEvents = historyRes.data.events?.filter(
+    const claimEvents = historyRes.data.data?.filter(
       (e: { eventType: string }) => e.eventType === 'claimed',
     );
     expect(claimEvents?.length).toBe(1);
@@ -158,7 +154,7 @@ describe('Campaign Lifecycle API', () => {
 
     // Verify claim event still not duplicated
     const historyRes2 = await get(`/api/campaigns/${campaignId}/history`);
-    const claimEvents2 = historyRes2.data.events?.filter(
+    const claimEvents2 = historyRes2.data.data?.filter(
       (e: { eventType: string }) => e.eventType === 'claimed',
     );
     expect(claimEvents2?.length).toBe(1);
@@ -181,7 +177,7 @@ describe('Campaign Lifecycle API', () => {
     const pledgeRes = await post(`/api/campaigns/${campaignId}/pledges`, {
       contributor: CONTRIBUTOR,
       amount: 50,
-      assetCode: "XLM",
+      assetCode: 'XLM',
     });
     expect(pledgeRes.status).toBe(201);
 
@@ -216,18 +212,20 @@ describe('Campaign Lifecycle API', () => {
     expect(refundRes.data.data.pledgedAmount).toBe(0); // Pledged amount reduces to 0
   });
 
-  it("sanitizes HTML tags in title and description during campaign creation", async () => {
-    const createRes = await post("/api/campaigns", {
+  it('sanitizes HTML tags in title and description during campaign creation', async () => {
+    const createRes = await post('/api/campaigns', {
       creator: CREATOR,
-      title: "<h1>Test</h1>",
-      description: "<h1>Test</h1> with at least 20 characters",
-      acceptedTokens: ["USDC"],
+      title: '<h1>Test</h1>',
+      description: '<h1>Test</h1> with at least 20 characters',
+      acceptedTokens: ['USDC'],
       targetAmount: 100,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
     expect(createRes.status).toBe(201);
-    expect(createRes.data.data.title).toBe("&lt;h1&gt;Test&lt;&sol;h1&gt;");
-    expect(createRes.data.data.description).toBe("&lt;h1&gt;Test&lt;&sol;h1&gt; with at least 20 characters");
+    expect(createRes.data.data.title).toBe('&lt;h1&gt;Test&lt;&sol;h1&gt;');
+    expect(createRes.data.data.description).toBe(
+      '&lt;h1&gt;Test&lt;&sol;h1&gt; with at least 20 characters',
+    );
   });
 });
 
@@ -299,7 +297,9 @@ describe('Campaign List Query Parameter Validation', () => {
   });
 
   it('accepts valid ISO 8601 timestamps', async () => {
-    const res = await get('/api/campaigns?createdAfter=2024-01-01T00:00:00Z&createdBefore=2024-12-31T23:59:59Z');
+    const res = await get(
+      '/api/campaigns?createdAfter=2024-01-01T00:00:00Z&createdBefore=2024-12-31T23:59:59Z',
+    );
     expect(res.status).toBe(200);
     expect(res.data.data).toBeDefined();
   });
@@ -447,7 +447,9 @@ describe('Campaign maxPerContributor Field', () => {
     const listRes = await get('/api/campaigns?page=1&limit=10');
     expect(listRes.status).toBe(200);
 
-    const campaign = listRes.data.data.find((c: { id: string; maxPerContributor?: number }) => c.id === campaignId);
+    const campaign = listRes.data.data.find(
+      (c: { id: string; maxPerContributor?: number }) => c.id === campaignId,
+    );
     expect(campaign).toBeDefined();
     expect(campaign.maxPerContributor).toBe(50);
   });
@@ -469,21 +471,28 @@ describe('Campaign maxPerContributor Field', () => {
       const firstCall = await get('/api/campaigns?page=1&limit=10');
       expect(firstCall.status).toBe(200);
 
-      const firstListedCampaign = firstCall.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
+      const firstListedCampaign = firstCall.data.data.find(
+        (item: { id: string; progress: { status: string } }) => item.id === campaign.id,
+      );
       expect(firstListedCampaign?.progress.status).toBe('open');
 
       const secondCall = await get('/api/campaigns?page=1&limit=10');
       expect(secondCall.status).toBe(200);
 
-      const secondListedCampaign = secondCall.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
+      const secondListedCampaign = secondCall.data.data.find(
+        (item: { id: string; progress: { status: string } }) => item.id === campaign.id,
+      );
       expect(secondListedCampaign?.progress.status).toBe('open');
 
       nowSpy.mockReturnValue(fixedNow + 1);
+      invalidateCampaignCache();
 
       const oneMillisecondLater = await get('/api/campaigns?page=1&limit=10');
       expect(oneMillisecondLater.status).toBe(200);
 
-      const failedCampaign = oneMillisecondLater.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
+      const failedCampaign = oneMillisecondLater.data.data.find(
+        (item: { id: string; progress: { status: string } }) => item.id === campaign.id,
+      );
       expect(failedCampaign?.progress.status).toBe('failed');
     } finally {
       nowSpy.mockRestore();
@@ -685,11 +694,15 @@ describe('POST /api/campaigns/:id/pledges with Idempotency-Key', () => {
   it('request with Idempotency-Key creates a pledge', async () => {
     const campaignId = await createTestCampaign();
 
-    const res = await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_C,
-      amount: 100,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'test-key-1' });
+    const res = await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_C,
+        amount: 100,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'test-key-1' },
+    );
 
     expect(res.status).toBe(201);
     expect(res.data.data.progress.pledgeCount).toBe(1);
@@ -698,18 +711,26 @@ describe('POST /api/campaigns/:id/pledges with Idempotency-Key', () => {
   it('duplicate request with same Idempotency-Key returns cached response', async () => {
     const campaignId = await createTestCampaign();
 
-    const firstRes = await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_C,
-      amount: 100,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'dup-key-1' });
+    const firstRes = await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_C,
+        amount: 100,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'dup-key-1' },
+    );
     expect(firstRes.status).toBe(201);
 
-    const secondRes = await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_C,
-      amount: 100,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'dup-key-1' });
+    const secondRes = await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_C,
+        amount: 100,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'dup-key-1' },
+    );
     expect(secondRes.status).toBe(201);
     expect(secondRes.data).toEqual(firstRes.data);
   });
@@ -717,22 +738,34 @@ describe('POST /api/campaigns/:id/pledges with Idempotency-Key', () => {
   it('duplicate request with same Idempotency-Key performs only one database write', async () => {
     const campaignId = await createTestCampaign();
 
-    await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_C,
-      amount: 100,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'db-write-key' });
+    await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_C,
+        amount: 100,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'db-write-key' },
+    );
 
     const db = getDb();
-    const pledgeCountBefore = db.prepare('SELECT COUNT(*) AS count FROM pledges').get() as { count: number };
+    const pledgeCountBefore = db.prepare('SELECT COUNT(*) AS count FROM pledges').get() as {
+      count: number;
+    };
 
-    await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_C,
-      amount: 100,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'db-write-key' });
+    await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_C,
+        amount: 100,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'db-write-key' },
+    );
 
-    const pledgeCountAfter = db.prepare('SELECT COUNT(*) AS count FROM pledges').get() as { count: number };
+    const pledgeCountAfter = db.prepare('SELECT COUNT(*) AS count FROM pledges').get() as {
+      count: number;
+    };
     expect(pledgeCountAfter.count).toBe(pledgeCountBefore.count);
   });
 
@@ -751,41 +784,59 @@ describe('POST /api/campaigns/:id/pledges with Idempotency-Key', () => {
   it('different idempotency keys create independent pledges', async () => {
     const campaignId = await createTestCampaign();
 
-    const res1 = await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_C,
-      amount: 50,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'key-A' });
+    const res1 = await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_C,
+        amount: 50,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'key-A' },
+    );
     expect(res1.status).toBe(201);
 
-    const res2 = await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_C,
-      amount: 50,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'key-B' });
+    const res2 = await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_C,
+        amount: 50,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'key-B' },
+    );
     expect(res2.status).toBe(201);
 
     const db = getDb();
-    const pledgeCount = db.prepare('SELECT COUNT(*) AS count FROM pledges').get() as { count: number };
+    const pledgeCount = db.prepare('SELECT COUNT(*) AS count FROM pledges').get() as {
+      count: number;
+    };
     expect(pledgeCount.count).toBe(2);
   });
 
   it('different users using the same idempotency key do not share cached responses', async () => {
     const campaignId = await createTestCampaign();
 
-    const userARes = await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_C,
-      amount: 100,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'shared-key' });
+    const userARes = await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_C,
+        amount: 100,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'shared-key' },
+    );
     expect(userARes.status).toBe(201);
     expect(userARes.data.data.progress.pledgeCount).toBe(1);
 
-    const userBRes = await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_D,
-      amount: 100,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'shared-key' });
+    const userBRes = await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_D,
+        amount: 100,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'shared-key' },
+    );
     expect(userBRes.status).toBe(201);
     expect(userBRes.data.data.progress.pledgeCount).toBe(2);
   });
@@ -793,18 +844,26 @@ describe('POST /api/campaigns/:id/pledges with Idempotency-Key', () => {
   it('cached response preserves original status and payload', async () => {
     const campaignId = await createTestCampaign();
 
-    const firstRes = await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_C,
-      amount: 75,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'status-payload-key' });
+    const firstRes = await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_C,
+        amount: 75,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'status-payload-key' },
+    );
     expect(firstRes.status).toBe(201);
 
-    const cachedRes = await post(`/api/campaigns/${campaignId}/pledges`, {
-      contributor: CONTRIBUTOR_C,
-      amount: 75,
-      assetCode: 'USDC',
-    }, { 'Idempotency-Key': 'status-payload-key' });
+    const cachedRes = await post(
+      `/api/campaigns/${campaignId}/pledges`,
+      {
+        contributor: CONTRIBUTOR_C,
+        amount: 75,
+        assetCode: 'USDC',
+      },
+      { 'Idempotency-Key': 'status-payload-key' },
+    );
     expect(cachedRes.status).toBe(201);
     expect(cachedRes.data.data.id).toBe(firstRes.data.data.id);
     expect(cachedRes.data.data.amount).toBe(firstRes.data.data.amount);
