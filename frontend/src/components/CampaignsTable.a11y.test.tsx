@@ -44,9 +44,7 @@ describe.each(THEMES)('CampaignsTable Accessibility (%s theme)', (theme: ThemeMo
   });
 
   it('has no accessibility violations with campaign data', async () => {
-    const { container } = render(
-
-    );
+    const { container } = render();
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();

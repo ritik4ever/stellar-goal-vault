@@ -107,7 +107,9 @@ describe('useLocalStorage', () => {
         dispatchEvent: vi.fn(),
       });
 
-      const systemPreference = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      const systemPreference = window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
       const { result } = renderHook(() => useLocalStorage<string>(THEME_KEY, systemPreference));
       expect(result.current[0]).toBe('dark');
     });

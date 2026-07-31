@@ -13,7 +13,7 @@
  */
 
 // Base32 alphabet used by Stellar (RFC 4648, uppercase, no padding required here)
-const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 /**
  * Decodes a Base32 string into a Uint8Array.
@@ -21,7 +21,7 @@ const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
  */
 function base32Decode(input: string): Uint8Array | null {
   // Strip padding
-  const s = input.replace(/=+$/, "").toUpperCase();
+  const s = input.replace(/=+$/, '').toUpperCase();
   const lookup = new Uint8Array(256).fill(255);
   for (let i = 0; i < BASE32_ALPHABET.length; i++) {
     lookup[BASE32_ALPHABET.charCodeAt(i)] = i;
@@ -70,7 +70,7 @@ function crc16xmodem(data: Uint8Array): number {
  */
 export function isValidStellarPublicKey(address: string): boolean {
   // Quick structural check: must be exactly 56 chars starting with G
-  if (typeof address !== "string" || address.length !== 56 || address[0] !== "G") {
+  if (typeof address !== 'string' || address.length !== 56 || address[0] !== 'G') {
     return false;
   }
 

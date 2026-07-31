@@ -18,9 +18,7 @@ const sampleToasts: Toast[] = [
 
 describe.each(THEMES)('ToastContainer Accessibility (%s theme)', (theme: ThemeMode) => {
   it('has no accessibility violations for all toast variants', async () => {
-    const { container } = render(
-      <ToastContainer toasts={sampleToasts} onDismiss={() => {}} />,
-    );
+    const { container } = render(<ToastContainer toasts={sampleToasts} onDismiss={() => {}} />);
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
