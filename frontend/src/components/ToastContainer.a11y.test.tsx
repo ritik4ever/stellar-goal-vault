@@ -13,13 +13,12 @@ const sampleToasts: Toast[] = [
     link: { href: 'https://stellar.org', label: 'Learn more' },
   },
   { id: '3', message: 'Transaction is being processed on-chain.', variant: 'info' },
+  { id: '4', message: 'Campaign deadline is approaching.', variant: 'warning' },
 ];
 
 describe.each(THEMES)('ToastContainer Accessibility (%s theme)', (theme: ThemeMode) => {
   it('has no accessibility violations for all toast variants', async () => {
-    const { container } = render(
-      <ToastContainer toasts={sampleToasts} onDismiss={() => {}} />,
-    );
+    const { container } = render(<ToastContainer toasts={sampleToasts} onDismiss={() => {}} />);
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
