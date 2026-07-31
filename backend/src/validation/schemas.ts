@@ -93,7 +93,7 @@ export const unixTimestampSchema = z.coerce
   .positive('deadline must be a valid UNIX timestamp in seconds.');
 
 function sanitizeInput(val: string): string {
-  return val.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\//g, '&sol;');
+  return val.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 const containsSqlComment = (val: string) => /--|\/\*|\*\//.test(val);
