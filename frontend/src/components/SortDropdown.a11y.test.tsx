@@ -5,9 +5,7 @@ import { runAxeAudit, THEMES, type ThemeMode } from '../test/a11yTestUtils';
 
 describe.each(THEMES)('SortDropdown Accessibility (%s theme)', (theme: ThemeMode) => {
   it('has no accessibility violations', async () => {
-    const { container } = render(
-      <SortDropdown value="createdAt" onChange={() => {}} />,
-    );
+    const { container } = render(<SortDropdown value="createdAt" onChange={() => {}} />);
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();

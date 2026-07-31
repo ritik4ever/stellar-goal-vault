@@ -103,7 +103,10 @@ export function AssetFilterDropdown({
       disabled={disabled || isLoading}
       aria-label="Filter by asset"
       className="control-select"
-      style={{ cursor: disabled || isLoading ? 'not-allowed' : 'pointer', opacity: disabled || isLoading ? 0.55 : 1 }}
+      style={{
+        cursor: disabled || isLoading ? 'not-allowed' : 'pointer',
+        opacity: disabled || isLoading ? 0.55 : 1,
+      }}
     >
       <option value="">{isLoading ? 'Loading...' : 'All Assets'}</option>
       {options.map((code) => (

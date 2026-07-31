@@ -35,7 +35,13 @@ export class DashboardPage {
     await this.page.goto('/');
   }
 
-  async createCampaign(creator: string, title: string, description: string, target: string, deadlineHours: string = '24') {
+  async createCampaign(
+    creator: string,
+    title: string,
+    description: string,
+    target: string,
+    deadlineHours: string = '24',
+  ) {
     await this.creatorInput.fill(creator);
     await this.titleInput.fill(title);
     await this.descriptionInput.fill(description);

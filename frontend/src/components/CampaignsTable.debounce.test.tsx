@@ -88,7 +88,9 @@ describe('CampaignsTable debounced search (#254)', () => {
     expect(onSearchChange).not.toHaveBeenCalledWith('rock');
 
     // Advance past the debounce delay
-    await act(async () => { vi.advanceTimersByTime(300); });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
 
     const rocketCalls = onSearchChange.mock.calls.filter(([v]) => v === 'rock');
     expect(rocketCalls).toHaveLength(1);
@@ -103,7 +105,9 @@ describe('CampaignsTable debounced search (#254)', () => {
 
     const input = screen.getByRole('textbox', { name: /search campaigns/i });
     fireEvent.change(input, { target: { value: 'abc' } });
-    await act(async () => { vi.advanceTimersByTime(300); });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
     onSearchChange.mockClear();
 
     // Simulate clear button click by changing value to empty string

@@ -35,7 +35,7 @@ test.describe('Campaign Lifecycle', () => {
       );
       await dashboard.targetAmountInput.fill('100');
       await dashboard.deadlineHoursInput.fill('0.001');
-      
+
       await dashboard.createButton.click();
       await expect(page.locator(`text=${campaignTitle}`)).toBeVisible();
     });
@@ -62,7 +62,7 @@ test.describe('Campaign Lifecycle', () => {
 
       // Re-select to refresh status or just try to claim
       await dashboard.claim();
-      
+
       await expect(page.locator('text=Campaign claimed successfully')).toBeVisible();
       await expect(page.locator('.detail-stat:has-text("Status")')).toContainText('Claimed');
     });

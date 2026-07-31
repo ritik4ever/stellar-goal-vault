@@ -18,10 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
 
-const TEST_DB_PATH = path.join(
-  '/tmp',
-  `stellar-goal-vault-mutation-${process.pid}.db`,
-);
+const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-mutation-${process.pid}.db`);
 
 process.env.DB_PATH = TEST_DB_PATH;
 process.env.CONTRACT_ID = '';
@@ -62,10 +59,8 @@ const TX_HASH = 'b'.repeat(64);
 const TX_HASH2 = 'c'.repeat(64);
 
 // ── Helper: future deadline (seconds) ────────────────────────────────────────
-const future = (offsetSeconds = 86400) =>
-  Math.floor(Date.now() / 1000) + offsetSeconds;
-const past = (offsetSeconds = 86400) =>
-  Math.floor(Date.now() / 1000) - offsetSeconds;
+const future = (offsetSeconds = 86400) => Math.floor(Date.now() / 1000) + offsetSeconds;
+const past = (offsetSeconds = 86400) => Math.floor(Date.now() / 1000) - offsetSeconds;
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 beforeAll(async () => {
@@ -182,9 +177,7 @@ describe('calculateProgress – boundary conditions', () => {
     });
     addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 50 });
     // Manually move deadline to the past so canClaim becomes true
-    getDb()
-      .prepare('UPDATE campaigns SET deadline = ? WHERE id = ?')
-      .run(past(), campaign.id);
+    getDb().prepare('UPDATE campaigns SET deadline = ? WHERE id = ?').run(past(), campaign.id);
     const updated = getCampaign(campaign.id)!;
     const progress = calculateProgress(updated);
     expect(progress.canClaim).toBe(true);
@@ -203,9 +196,7 @@ describe('calculateProgress – boundary conditions', () => {
     });
     addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 30 });
     // Move deadline to the past so canRefund becomes true
-    getDb()
-      .prepare('UPDATE campaigns SET deadline = ? WHERE id = ?')
-      .run(past(), campaign.id);
+    getDb().prepare('UPDATE campaigns SET deadline = ? WHERE id = ?').run(past(), campaign.id);
     const updated = getCampaign(campaign.id)!;
     const progress = calculateProgress(updated);
     expect(progress.canRefund).toBe(true);
@@ -273,9 +264,7 @@ describe('calculateProgress – boundary conditions', () => {
     });
     addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 50 });
     // Move deadline to past so claimCampaign allows it
-    getDb()
-      .prepare('UPDATE campaigns SET deadline = ? WHERE id = ?')
-      .run(past(), campaign.id);
+    getDb().prepare('UPDATE campaigns SET deadline = ? WHERE id = ?').run(past(), campaign.id);
     claimCampaign(campaign.id, {
       creator: CREATOR,
       transactionHash: TX_HASH,
@@ -394,9 +383,9 @@ describe('createCampaign – validation edge cases', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 describe('addPledge – guard conditions', () => {
   it('throws NOT_FOUND for nonexistent campaign', () => {
-    expect(() =>
-      addPledge('nonexistent-99999', { contributor: CONTRIBUTOR, amount: 10 }),
-    ).toThrow('Campaign not found');
+    expect(() => addPledge('nonexistent-99999', { contributor: CONTRIBUTOR, amount: 10 })).toThrow(
+      'Campaign not found',
+    );
   });
 
   it('throws INVALID_ASSET when pledging with a non-accepted token', () => {
@@ -427,12 +416,10 @@ describe('addPledge – guard conditions', () => {
       deadline: future(),
     });
     // Manually set deadline to past
-    getDb()
-      .prepare('UPDATE campaigns SET deadline = ? WHERE id = ?')
-      .run(past(), c.id);
-    expect(() =>
-      addPledge(c.id, { contributor: CONTRIBUTOR, amount: 10 }),
-    ).toThrow('Campaign is no longer accepting pledges');
+    getDb().prepare('UPDATE campaigns SET deadline = ? WHERE id = ?').run(past(), c.id);
+    expect(() => addPledge(c.id, { contributor: CONTRIBUTOR, amount: 10 })).toThrow(
+      'Campaign is no longer accepting pledges',
+    );
   });
 
   it('throws CAMPAIGN_FUNDING_CAP_EXCEEDED when pledge would exceed target', () => {
@@ -447,9 +434,9 @@ describe('addPledge – guard conditions', () => {
     // First pledge fills 90
     addPledge(c.id, { contributor: CONTRIBUTOR, amount: 90 });
     // Second pledge of 11 would total 101 > 100
-    expect(() =>
-      addPledge(c.id, { contributor: CONTRIBUTOR2, amount: 11 }),
-    ).toThrow('Pledge exceeds campaign funding cap');
+    expect(() => addPledge(c.id, { contributor: CONTRIBUTOR2, amount: 11 })).toThrow(
+      'Pledge exceeds campaign funding cap',
+    );
   });
 
   it('allows pledge exactly at the remaining cap (not over)', () => {
@@ -463,9 +450,7 @@ describe('addPledge – guard conditions', () => {
     });
     addPledge(c.id, { contributor: CONTRIBUTOR, amount: 90 });
     // Should succeed (90 + 10 == 100)
-    expect(() =>
-      addPledge(c.id, { contributor: CONTRIBUTOR2, amount: 10 }),
-    ).not.toThrow();
+    expect(() => addPledge(c.id, { contributor: CONTRIBUTOR2, amount: 10 })).not.toThrow();
     expect(getCampaign(c.id)!.pledgedAmount).toBe(100);
   });
 
@@ -480,9 +465,9 @@ describe('addPledge – guard conditions', () => {
       maxPerContributor: 50,
     });
     addPledge(c.id, { contributor: CONTRIBUTOR, amount: 50 });
-    expect(() =>
-      addPledge(c.id, { contributor: CONTRIBUTOR, amount: 1 }),
-    ).toThrow('Pledge exceeds maximum allowed per contributor');
+    expect(() => addPledge(c.id, { contributor: CONTRIBUTOR, amount: 1 })).toThrow(
+      'Pledge exceeds maximum allowed per contributor',
+    );
   });
 
   it('contributor limit is per-contributor, not global', () => {
@@ -497,9 +482,7 @@ describe('addPledge – guard conditions', () => {
     });
     addPledge(c.id, { contributor: CONTRIBUTOR, amount: 50 });
     // Different contributor can still pledge
-    expect(() =>
-      addPledge(c.id, { contributor: CONTRIBUTOR2, amount: 50 }),
-    ).not.toThrow();
+    expect(() => addPledge(c.id, { contributor: CONTRIBUTOR2, amount: 50 })).not.toThrow();
   });
 
   it('records a "pledged" event with correct amount and newTotalPledged', () => {
@@ -552,9 +535,7 @@ describe('refundContributor – state and amount conditions', () => {
     addPledge(c.id, { contributor: CONTRIBUTOR, amount: 100 });
     addPledge(c.id, { contributor: CONTRIBUTOR, amount: 50 });
     // Move deadline to past so canRefund = true
-    getDb()
-      .prepare('UPDATE campaigns SET deadline = ? WHERE id = ?')
-      .run(past(), c.id);
+    getDb().prepare('UPDATE campaigns SET deadline = ? WHERE id = ?').run(past(), c.id);
     return c;
   }
 
@@ -633,16 +614,14 @@ describe('claimCampaign – guards', () => {
     });
     addPledge(c.id, { contributor: CONTRIBUTOR, amount: 100 });
     // Set deadline to past
-    getDb()
-      .prepare('UPDATE campaigns SET deadline = ? WHERE id = ?')
-      .run(past(), c.id);
+    getDb().prepare('UPDATE campaigns SET deadline = ? WHERE id = ?').run(past(), c.id);
     return c;
   }
 
   it('throws NOT_FOUND for nonexistent campaign', () => {
-    expect(() =>
-      claimCampaign('99999', { creator: CREATOR, transactionHash: TX_HASH }),
-    ).toThrow('Campaign not found');
+    expect(() => claimCampaign('99999', { creator: CREATOR, transactionHash: TX_HASH })).toThrow(
+      'Campaign not found',
+    );
   });
 
   it('throws FORBIDDEN when non-creator tries to claim', () => {
@@ -665,12 +644,10 @@ describe('claimCampaign – guards', () => {
       deadline: future(),
     });
     addPledge(c.id, { contributor: CONTRIBUTOR, amount: 100 });
-    getDb()
-      .prepare('UPDATE campaigns SET deadline = ? WHERE id = ?')
-      .run(past(), c.id);
-    expect(() =>
-      claimCampaign(c.id, { creator: CREATOR, transactionHash: TX_HASH }),
-    ).toThrow('Campaign cannot be claimed yet');
+    getDb().prepare('UPDATE campaigns SET deadline = ? WHERE id = ?').run(past(), c.id);
+    expect(() => claimCampaign(c.id, { creator: CREATOR, transactionHash: TX_HASH })).toThrow(
+      'Campaign cannot be claimed yet',
+    );
   });
 
   it('sets claimedAt and records "claimed" event', () => {
@@ -885,11 +862,19 @@ describe('eventHistory – field mapping and ordering', () => {
       deadline: future(),
     });
     const ts = Math.floor(Date.now() / 1000);
-    recordEvent(c.id, 'pledged', ts, CONTRIBUTOR, 10, {}, {
-      source: 'soroban',
-      ledgerNumber: 777,
-      eventIndex: 0,
-    });
+    recordEvent(
+      c.id,
+      'pledged',
+      ts,
+      CONTRIBUTOR,
+      10,
+      {},
+      {
+        source: 'soroban',
+        ledgerNumber: 777,
+        eventIndex: 0,
+      },
+    );
     const results = getEventsByLedger(777);
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0].blockchainMetadata?.ledgerNumber).toBe(777);
@@ -942,9 +927,7 @@ describe('getGlobalStats – status bucket counting', () => {
       deadline: future(),
     });
     addPledge(c.id, { contributor: CONTRIBUTOR, amount: 10 });
-    getDb()
-      .prepare('UPDATE campaigns SET deadline = ? WHERE id = ?')
-      .run(past(), c.id);
+    getDb().prepare('UPDATE campaigns SET deadline = ? WHERE id = ?').run(past(), c.id);
     const stats = getGlobalStats();
     expect(stats.campaignCountByStatus.failed).toBeGreaterThanOrEqual(1);
   });
@@ -1010,9 +993,7 @@ describe('getContributorSummary – isFullyRefunded flag', () => {
       deadline: future(),
     });
     addPledge(c.id, { contributor: CONTRIBUTOR, amount: 50 });
-    getDb()
-      .prepare('UPDATE campaigns SET deadline = ? WHERE id = ?')
-      .run(past(), c.id);
+    getDb().prepare('UPDATE campaigns SET deadline = ? WHERE id = ?').run(past(), c.id);
     refundContributor(c.id, CONTRIBUTOR);
     const summary = getContributorSummary(c.id);
     const entry = summary.find((s) => s.contributor === CONTRIBUTOR);

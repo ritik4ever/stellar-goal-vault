@@ -1,5 +1,5 @@
-import { Request, Response, NextFunction } from "express";
-import { AppError } from "../types/errors";
+import { Request, Response, NextFunction } from 'express';
+import { AppError } from '../types/errors';
 
 export interface RequestWithApiKey extends Request {
   apiKey?: string;
@@ -21,11 +21,11 @@ export function apiKeyAuthMiddleware(
 ): void {
   // Public endpoints that don't require authentication
   const publicPaths = [
-    "/api/health",
-    "/api/config",
-    "/api/stats",
-    "/api/leaderboard",
-    "/api/open-issues",
+    '/api/health',
+    '/api/config',
+    '/api/stats',
+    '/api/leaderboard',
+    '/api/open-issues',
   ];
 
   // Check if current path is public
@@ -38,16 +38,16 @@ export function apiKeyAuthMiddleware(
 
   // Extract API key from Authorization header
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new AppError(
-      "Missing or invalid Authorization header. Use format: Bearer <api-key>",
+      'Missing or invalid Authorization header. Use format: Bearer <api-key>',
       401,
-      "UNAUTHORIZED",
+      'UNAUTHORIZED',
     );
   }
 
   const apiKey = authHeader.slice(7); // Remove "Bearer " prefix
-  const validApiKeys = (process.env.API_KEYS || "").split(",").filter(Boolean);
+  const validApiKeys = (process.env.API_KEYS || '').split(',').filter(Boolean);
 
   if (validApiKeys.length === 0) {
     // If no API keys configured, allow all requests (development mode)
@@ -57,7 +57,7 @@ export function apiKeyAuthMiddleware(
   }
 
   if (!validApiKeys.includes(apiKey)) {
-    throw new AppError("Invalid API key", 403, "FORBIDDEN");
+    throw new AppError('Invalid API key', 403, 'FORBIDDEN');
   }
 
   req.isAuthenticated = true;

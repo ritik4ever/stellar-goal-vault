@@ -116,17 +116,12 @@ describe('FundedConfetti status transition', () => {
     vi.useFakeTimers();
     const onComplete = vi.fn();
 
-    render(
-      <FundedConfetti
-        campaignTitle="Orbit Fund"
-        onComplete={onComplete}
-      />
-    );
+    render(<FundedConfetti campaignTitle="Orbit Fund" onComplete={onComplete} />);
 
     expect(screen.getByTestId('funded-confetti')).toBeInTheDocument();
     expect(screen.getByTestId('funded-confetti')).toHaveAttribute(
       'title',
-      'Orbit Fund reached its funding target'
+      'Orbit Fund reached its funding target',
     );
 
     vi.advanceTimersByTime(1400);

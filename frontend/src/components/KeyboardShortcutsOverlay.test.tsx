@@ -93,9 +93,7 @@ describe('KeyboardShortcutsOverlay', () => {
     it('simulates ? keydown on window and verifies overlay becomes visible', () => {
       // Render a controlled wrapper that wires the window listener the same
       // way App.tsx does.
-      const { rerender } = render(
-        <ControlledOverlay />,
-      );
+      const { rerender } = render(<ControlledOverlay />);
 
       // Overlay should be hidden initially
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

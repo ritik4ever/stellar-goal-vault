@@ -135,9 +135,7 @@ describe('GET /api/campaigns/:id/history pagination', () => {
       deadline: nowInSeconds() + 3600,
     });
 
-    const response = await request(app).get(
-      `/api/campaigns/${campaign.id}/history?pageSize=101`,
-    );
+    const response = await request(app).get(`/api/campaigns/${campaign.id}/history?pageSize=101`);
 
     expect(response.status).toBe(400);
   });

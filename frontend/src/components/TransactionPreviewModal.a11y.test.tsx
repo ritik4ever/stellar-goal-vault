@@ -22,11 +22,7 @@ const previewWithFee = {
 describe.each(THEMES)('TransactionPreviewModal Accessibility (%s theme)', (theme: ThemeMode) => {
   it('has no accessibility violations with estimated fee', async () => {
     const { container } = render(
-      <TransactionPreviewModal
-        preview={previewWithFee}
-        onConfirm={() => {}}
-        onCancel={() => {}}
-      />,
+      <TransactionPreviewModal preview={previewWithFee} onConfirm={() => {}} onCancel={() => {}} />,
     );
 
     const results = await runAxeAudit(container, theme);
@@ -44,11 +40,7 @@ describe.each(THEMES)('TransactionPreviewModal Accessibility (%s theme)', (theme
 
   it('has no accessibility violations with expanded XDR panel', async () => {
     const { container } = render(
-      <TransactionPreviewModal
-        preview={previewWithFee}
-        onConfirm={() => {}}
-        onCancel={() => {}}
-      />,
+      <TransactionPreviewModal preview={previewWithFee} onConfirm={() => {}} onCancel={() => {}} />,
     );
 
     fireEvent.click(screen.getByRole('checkbox'));

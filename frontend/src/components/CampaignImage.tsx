@@ -1,19 +1,19 @@
-import { useState } from "react";
+import { useState } from 'react';
 
 function toBase64(str: string): string {
-  if (typeof btoa !== "undefined") return btoa(str);
-  return Buffer.from(str).toString("base64");
+  if (typeof btoa !== 'undefined') return btoa(str);
+  return Buffer.from(str).toString('base64');
 }
 
 export function proxiedImageUrl(url: string): string {
   try {
     const parsed = new URL(url);
-    parsed.searchParams.set("w", "400");
-    parsed.searchParams.set("q", "80");
+    parsed.searchParams.set('w', '400');
+    parsed.searchParams.set('q', '80');
     return parsed.toString();
   } catch {
-    const separator = url.includes("?") ? "&" : "?";
-    return url + separator + "w=400&q=80";
+    const separator = url.includes('?') ? '&' : '?';
+    return url + separator + 'w=400&q=80';
   }
 }
 
@@ -33,18 +33,12 @@ export function CampaignImage({ url, alt }: CampaignImageProps) {
     <circle cx="200" cy="160" r="25" fill="#64748b"/>
     <text x="200" y="240" font-family="system-ui" font-size="14" fill="#94a3b8" text-anchor="middle">Image unavailable</text>
   </svg>`;
-  const placeholderSrc = "data:image/svg+xml;base64," + toBase64(placeholderSvg);
+  const placeholderSrc = 'data:image/svg+xml;base64,' + toBase64(placeholderSvg);
 
   if (hasError) {
     return (
       <div className="campaign-image-container">
-        <img
-          src={placeholderSrc}
-          alt=""
-          width={400}
-          height={280}
-          className="campaign-image"
-        />
+        <img src={placeholderSrc} alt="" width={400} height={280} className="campaign-image" />
       </div>
     );
   }
@@ -61,7 +55,7 @@ export function CampaignImage({ url, alt }: CampaignImageProps) {
         height={280}
         onError={() => setHasError(true)}
         onLoad={() => setIsLoaded(true)}
-        style={{ opacity: isLoaded ? 1 : 0, transition: "opacity 0.3s ease" }}
+        style={{ opacity: isLoaded ? 1 : 0, transition: 'opacity 0.3s ease' }}
       />
       {!isLoaded && <div className="campaign-image-skeleton" />}
     </div>

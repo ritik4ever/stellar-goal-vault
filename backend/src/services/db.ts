@@ -194,7 +194,7 @@ function migrate(database: SQLiteDatabase): void {
     !campaignColumns.some((column) => column.name === 'accepted_tokens_json')
   ) {
     // 1. Create the FTS5 virtual table
-database.exec(`
+    database.exec(`
   CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
     id,
     title,
@@ -202,8 +202,8 @@ database.exec(`
   );
 `);
 
-// 2. Add the Triggers to keep data synchronized automatically
-database.exec(`
+    // 2. Add the Triggers to keep data synchronized automatically
+    database.exec(`
   -- Triggers for handling future changes
   CREATE TRIGGER IF NOT EXISTS after_campaigns_insert AFTER INSERT ON campaigns BEGIN
     INSERT INTO campaigns_fts(id, title, description) VALUES (new.id, new.title, new.description);
@@ -219,13 +219,12 @@ database.exec(`
   END;
 `);
 
-// 3. Fixes CodeRabbit: Backfill any pre-existing campaigns into the FTS table
-database.exec(`
+    // 3. Fixes CodeRabbit: Backfill any pre-existing campaigns into the FTS table
+    database.exec(`
   INSERT INTO campaigns_fts (id, title, description)
   SELECT id, title, description FROM campaigns
   WHERE id NOT IN (SELECT id FROM campaigns_fts);
 `);
-
   }
 
   database.exec(`
