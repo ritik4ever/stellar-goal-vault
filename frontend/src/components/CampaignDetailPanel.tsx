@@ -1,13 +1,19 @@
 
 
+
+
+
 import { FormEvent, useState, useEffect } from 'react';
-import { MousePointer2 } from 'lucide-react';
+import { MousePointer2, AlertCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Campaign, AppConfig } from '../types/campaign';
 import CopyButton from './CopyButton';
 import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
 import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
+import { ShareButtons } from './ShareButtons';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -16,6 +22,7 @@ interface CampaignDetailPanelProps {
   isConnectingWallet?: boolean;
   isLoading?: boolean;
   isPledgePending?: boolean;
+  notFoundCampaignId?: string | null;
   onConnectWallet?: () => Promise<void>;
   onDisconnectWallet?: () => void;
   onPledge?: (campaignId: string, amount: number, assetCode: string) => Promise<void>;
@@ -66,6 +73,7 @@ export function CampaignDetailPanel({
   isConnectingWallet = false,
   isLoading = false,
   isPledgePending = false,
+  notFoundCampaignId = null,
   onConnectWallet = async () => {},
   onDisconnectWallet = () => {},
   onPledge = async () => {},
@@ -77,17 +85,19 @@ export function CampaignDetailPanel({
   const [refundContributor, setRefundContributor] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pledgeError, setPledgeError] = useState<string | null>(null);
+  const [bannerImageError, setBannerImageError] = useState(false);
   const walletReady = appConfig?.walletIntegrationReady ?? false;
 
   useEffect(() => {
-
+    setBannerImageError(false);
   }, [campaign?.id, connectedWallet]);
 
 
 
-  if (isLoading) {
+  const showSkeleton = useMinDisplayTime(isLoading);
+  if (showSkeleton) {
     return (
-      <section className="card detail-panel">
+      <section className="card detail-panel" aria-busy="true" aria-label="Loading campaign details">
         <div className="section-heading">
           <h2>
             <div className="skeleton skeleton-line" style={{ width: 220 }} />
@@ -95,7 +105,7 @@ export function CampaignDetailPanel({
           <div className="skeleton skeleton-line" style={{ width: 320, height: 14 }} />
         </div>
         <div className="detail-grid">
-          {Array.from({ length: 4 }).map((_, index) => (
+          {Array.from({ length: 5 }).map((_, index) => (
             <article key={index} className="detail-stat">
               <div className="skeleton skeleton-line" style={{ width: 120 }} />
               <div
@@ -104,6 +114,24 @@ export function CampaignDetailPanel({
               />
             </article>
           ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (notFoundCampaignId) {
+    return (
+      <section className="card detail-panel">
+        <div className="section-heading">
+          <h2>Campaign not found</h2>
+          <p className="muted">
+            The campaign <code>#{notFoundCampaignId}</code> does not exist or may have been removed.
+          </p>
+        </div>
+        <div style={{ marginTop: 24 }}>
+          <Link to="/" className="btn-ghost">
+            Back to campaigns
+          </Link>
         </div>
       </section>
     );
@@ -132,6 +160,8 @@ export function CampaignDetailPanel({
     setIsSubmitting(true);
     try {
       await onPledge(activeCampaign.id, Number(pledgeAmount), selectedToken);
+      setPledgeAmount('25');
+      setPledgeToken('');
     } catch (error) {
       setPledgeError(describePledgeError(error));
     } finally {
@@ -164,6 +194,35 @@ export function CampaignDetailPanel({
 
   return (
     <section className="card detail-panel">
+      {/* Full-width Campaign Banner */}
+      <div
+        style={{
+          width: 'calc(100% + 2rem)',
+          marginLeft: '-1rem',
+          marginRight: '-1rem',
+          marginTop: '-1rem',
+          height: '240px',
+          overflow: 'hidden',
+          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+          position: 'relative',
+          marginBottom: '1.5rem',
+        }}
+      >
+        {activeCampaign.metadata?.imageUrl && !bannerImageError ? (
+          <img
+            src={activeCampaign.metadata.imageUrl}
+            alt={activeCampaign.title}
+            onError={() => setBannerImageError(true)}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        ) : null}
+      </div>
+
       <div className="section-heading">
         <h2>{activeCampaign.title}</h2>
         <p className="muted">{activeCampaign.description}</p>
@@ -175,7 +234,7 @@ export function CampaignDetailPanel({
           <p className="muted">
             {connectedWallet
               ? `Connected to ${networkName(appConfig)}`
-              : `Not connected — connect Freighter to take actions`}
+              : `Not connected — connect a wallet to take actions`}
           </p>
         </div>
         <div className="wallet-connected">
@@ -206,7 +265,7 @@ export function CampaignDetailPanel({
               }}
               disabled={isSubmitting || isConnectingWallet}
             >
-              {isConnectingWallet ? 'Connecting...' : 'Connect Freighter'}
+              {isConnectingWallet ? 'Connecting...' : 'Connect Wallet'}
             </button>
           )}
         </div>
@@ -263,7 +322,7 @@ export function CampaignDetailPanel({
           <input
             type="text"
             value={connectedWallet ?? ''}
-            placeholder="Connect Freighter to use the pledge flow"
+            placeholder="Connect a wallet to use the pledge flow"
             readOnly
           />
         </label>
@@ -382,10 +441,6 @@ export function CampaignDetailPanel({
         </p>
       ) : null}
 
-      {activeCampaign.metadata?.imageUrl ? (
-        <CampaignImage url={activeCampaign.metadata.imageUrl} alt={activeCampaign.title} />
-      ) : null}
-
       {activeCampaign.metadata?.externalLink ? (
         <div className="external-link-container">
           <a
@@ -398,6 +453,8 @@ export function CampaignDetailPanel({
           </a>
         </div>
       ) : null}
+
+      <ShareButtons campaign={activeCampaign} />
     </section>
   );
 }

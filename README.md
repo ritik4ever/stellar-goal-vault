@@ -20,6 +20,8 @@ Contributors can pledge until the deadline:
 
 This repo is intentionally scoped as an MVP so it is easy to extend with wallet signing, event indexing, and production-grade UX.
 
+> **📚 Documentation index:** See [INDEX.md](./INDEX.md) for a complete map of every documentation file in the repository, organized by topic.
+
 ## Current architecture
 
 Frontend (`frontend`, port `3000`)
@@ -250,20 +252,23 @@ Base URL:
 
 ### `GET /api/stats`
 
-- Returns aggregate metrics and totals computed from campaigns and pledges.
-- Cached with a 30-second TTL.
+- Returns aggregate metrics and totals computed from campaigns and pledges (platform summary).
+- Cached with a 60-second TTL.
+- Includes `X-Cache` header (`HIT` or `MISS`).
+- Public endpoint, no authentication required.
 - Response:
 
 ```json
 {
   "data": {
-    "totalCampaigns": 10,
-    "openCampaigns": 5,
-    "fundedCampaigns": 3,
-    "claimedCampaigns": 1,
-    "failedCampaigns": 1,
-    "totalPledgeVolume": 50000,
-    "uniqueContributors": 42
+    "total_campaigns": 10,
+    "open_campaigns": 5,
+    "funded_campaigns": 3,
+    "failed_campaigns": 1,
+    "total_pledged_usdc": 35000,
+    "total_pledged_xlm": 15000,
+    "total_contributors": 42,
+    "avg_funding_rate_pct": 78.5
   }
 }
 ```
@@ -323,6 +328,11 @@ Request body:
 
 - `contributor`
 - `amount`
+- `assetCode`
+
+Request headers:
+
+- `Idempotency-Key` (optional): A unique key used to make the request idempotent. When provided, duplicate requests with the same key (for the same user and campaign) will return the cached response instead of creating a new pledge. Cache entries expire after 24 hours. The `X-Idempotency-Cache` response header indicates whether the response was served from cache (`HIT`) or generated fresh (`MISS`).
 
 ### `POST /api/campaigns/:id/pledges/reconcile`
 
@@ -412,10 +422,42 @@ Open:
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:3001`
 
-Build:
+### Seed the dev database
+
+Wipes and repopulates the local SQLite database with deterministic campaigns and pledges — useful for a fresh, reproducible local state.
 
 ```bash
-npm run build
+cd backend
+npm run seed
+
+# Seed a custom number of campaigns (default: 3)
+npm run seed -- --count 10
+```
+
+Seeded campaign IDs are printed to stdout. The first 3 campaigns always match a fixed
+set (open, funded, claimed status). Any additional campaigns beyond that cycle
+deterministically through open/funded/claimed statuses so the seed is reproducible run to run.
+
+Build:eed the dev database
++
++Wipes and repopulates the local SQLite database with deterministic campaigns and pledges — useful for a fresh, reproducible local state.
++
++```bash
++cd backend
++npm run seed
++
++# Seed a custom number of campaigns (default: 3)
++npm run seed -- --count 10
++```
++
++Seeded campaign IDs are printed to stdout. The first 3 campaigns always match a fixed
++set (open, funded, claimed status). Any additional campaigns beyond that cycle
++deterministically through open/funded/claimed statuses so the seed is reproducible run to run.
++
+ Build:
+ 
+```bash
+ npm run build
 ```
 
 ### Local development with Docker (hot-reload)
@@ -540,7 +582,11 @@ That issue is already represented in:
 
 ## Frequently Asked Questions
 
-See the [FAQ.md](./FAQ.md) for answers to common questions about testnet funding, Freighter setup, contract deployment, database reset, pledge failures, and more.
+See [FAQ.md](./FAQ.md) for 22 Q&A entries covering campaign creation, pledging, refunds, supported wallets, fees, mainnet support, and local development — organized into **For Creators**, **For Backers**, and **Technical** sections.
+
+## Troubleshooting
+
+See the [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for solutions to common issues like SQLite permissions, Soroban CLI mismatches, and CORS errors.
 
 ## Security
 
