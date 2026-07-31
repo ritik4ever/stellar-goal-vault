@@ -14,6 +14,7 @@ export default defineConfig({
     reporters: ["verbose"],
     coverage: {
       provider: "v8",
+      provider: "v8",
       reporter: ["text", "json", "html"],
       exclude: ["node_modules/", "tests/", "dist/"],
       thresholds: {
