@@ -26,7 +26,9 @@
     "build:openapi": "ts-node src/scripts/generateOpenApi.ts",
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:openapi": "npm run build:openapi && git diff --exit-code -- ../docs/openapi.yaml",
+    "validate:openapi": "swagger-cli validate ../docs/openapi.yaml"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -41,9 +43,11 @@
     "autocannon": "^7.15.0",
     "eslint": "^8.57.0",
     "supertest": "^7.0.0",
+    "@apidevtools/swagger-cli": "4.0.4",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^6.0.2",
-    "vitest": "^1.0.0"
+    "vitest": "^1.0.0",
+    "yaml": "2.9.0"
   }
 }

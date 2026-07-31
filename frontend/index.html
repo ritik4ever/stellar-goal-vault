@@ -2,9 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- PWA: theme color for browser chrome on Android/iOS -->
+    <meta name="theme-color" content="#1a1a2e" />
+    <!-- PWA: viewport and mobile web app settings -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- iOS PWA settings -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Goal Vault" />
+    <!-- PWA icons -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/icon-192.svg" />
+    <!-- SEO / share -->
+    <meta name="description" content="Campaign management and funding dashboard for the Stellar ecosystem" />
     <title>Stellar Goal Vault</title>
+    <!-- Inline theme detection to avoid FOUC — runs before React hydrates -->
     <script>
       (function() {
         const THEME_KEY = 'stellar-goal-vault-theme';

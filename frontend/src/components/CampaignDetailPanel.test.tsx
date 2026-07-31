@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { BrowserRouter } from 'react-router-dom';
 
 import { CampaignDetailPanel } from './CampaignDetailPanel';
 import { AppConfig, Campaign } from '../types/campaign';
@@ -50,6 +51,57 @@ const mockCampaign: Campaign = {
 };
 
 describe('CampaignDetailPanel', () => {
+  it('renders loading state', () => {
+    render(
+      <BrowserRouter>
+        <CampaignDetailPanel
+          campaign={null}
+          appConfig={mockConfig}
+          isLoading={true}
+        />
+      </BrowserRouter>
+    );
+    expect(screen.getByRole('region')).toBeInTheDocument();
+  });
 
+  it('renders not found state when notFoundCampaignId is provided', () => {
+    render(
+      <BrowserRouter>
+        <CampaignDetailPanel
+          campaign={null}
+          appConfig={mockConfig}
+          notFoundCampaignId="999"
+        />
+      </BrowserRouter>
+    );
+    expect(screen.getByText('Campaign not found')).toBeInTheDocument();
+    expect(screen.getByText(/campaign #999 does not exist/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to campaigns' })).toBeInTheDocument();
+  });
+
+  it('renders empty state when no campaign is selected', () => {
+    render(
+      <BrowserRouter>
+        <CampaignDetailPanel
+          campaign={null}
+          appConfig={mockConfig}
+          isLoading={false}
+        />
+      </BrowserRouter>
+    );
+    expect(screen.getByText('Campaign actions')).toBeInTheDocument();
+  });
+
+  it('renders campaign details when campaign is provided', () => {
+    render(
+      <BrowserRouter>
+        <CampaignDetailPanel
+          campaign={mockCampaign}
+          appConfig={mockConfig}
+          isLoading={false}
+        />
+      </BrowserRouter>
+    );
+    expect(screen.getByText('Test Campaign')).toBeInTheDocument();
   });
 });

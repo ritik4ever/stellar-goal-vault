@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { ListTodo, X } from 'lucide-react';
 import { OpenIssue } from '../types/campaign';
 import { EmptyState } from './EmptyState';
+import { SkeletonIssueList } from './SkeletonIssueList';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 interface IssueBacklogProps {
   issues: OpenIssue[];
@@ -11,15 +13,9 @@ interface IssueBacklogProps {
 export function IssueBacklog({ issues, isLoading = false }: IssueBacklogProps) {
   const [activeLabels, setActiveLabels] = useState<string[]>([]);
 
-  if (isLoading) {
-    return (
-      <section className="card">
-        <div className="section-heading">
-          <h2>Contribution backlog</h2>
-          <p className="muted">Loading open issue ideas...</p>
-        </div>
-      </section>
-    );
+  const showSkeleton = useMinDisplayTime(isLoading);
+  if (showSkeleton) {
+    return <SkeletonIssueList />;
   }
 
   if (issues.length === 0) {

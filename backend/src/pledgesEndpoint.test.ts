@@ -20,6 +20,7 @@ let getCampaignWithProgress: CampaignStoreModule['getCampaignWithProgress'];
 let listCampaignPledges: CampaignStoreModule['listCampaignPledges'];
 let initCampaignStore: CampaignStoreModule['initCampaignStore'];
 let getPledges: CampaignStoreModule['getPledges'];
+let getContributorPledgedTotal: CampaignStoreModule['getContributorPledgedTotal'];
 let getDb: DbModule['getDb'];
 let parsePledgeListPaginationQuery: ValidationModule['parsePledgeListPaginationQuery'];
 
@@ -52,6 +53,7 @@ beforeAll(async () => {
     listCampaignPledges,
     initCampaignStore,
     getPledges,
+    getContributorPledgedTotal,
   } = await import('./services/campaignStore'));
   ({ getDb } = await import('./services/db'));
   ({ parsePledgeListPaginationQuery } = await import('./validation/schemas'));
@@ -141,5 +143,62 @@ describe('pledge pagination query parsing', () => {
         expect.objectContaining({ path: ['limit'] }),
       ]),
     );
+  });
+});
+
+describe('concurrent pledge race condition', () => {
+  it('prevents concurrent pledges from exceeding maxPerContributor limit', async () => {
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Campaign with contributor limit',
+      description: 'A campaign to test concurrent pledge limits.',
+      assetCode: 'USDC',
+      targetAmount: 1000,
+      deadline: nowInSeconds() + 86400,
+      maxPerContributor: 50,
+    });
+
+    const contributor = CONTRIBUTOR_A;
+    const pledgeAmount = 10;
+    const concurrentPledges = 10;
+
+    // Create 10 concurrent pledges from the same contributor using setTimeout to simulate true concurrency
+    const pledgePromises = Array.from({ length: concurrentPledges }, (_, i) =>
+      new Promise((resolve, reject) => {
+        // Use setImmediate to allow the event loop to interleave operations
+        setImmediate(() => {
+          try {
+            resolve(addPledge(campaign.id, { contributor, amount: pledgeAmount }));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      })
+    );
+
+    const results = await Promise.allSettled(pledgePromises);
+
+    // Count successful and failed pledges
+    const successful = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.filter((r) => r.status === 'rejected').length;
+
+    // With maxPerContributor of 50 and pledge amount of 10, only 5 pledges should succeed
+    expect(successful).toBe(5);
+    expect(failed).toBe(5);
+
+    // Verify the final pledged amount does not exceed the limit
+    const finalCampaign = getCampaignWithProgress(campaign.id);
+    const contributorTotal = getContributorPledgedTotal(campaign.id, contributor);
+    expect(contributorTotal).toBeLessThanOrEqual(50);
+    expect(contributorTotal).toBeGreaterThan(0);
+
+    // Verify failed pledges returned 400 error
+    const rejectedResults = results.filter((r) => r.status === 'rejected');
+    rejectedResults.forEach((result) => {
+      if (result.status === 'rejected') {
+        expect(result.reason).toHaveProperty('statusCode', 400);
+        expect(result.reason).toHaveProperty('code', 'MAX_PER_CONTRIBUTOR_EXCEEDED');
+      }
+    });
   });
 });
