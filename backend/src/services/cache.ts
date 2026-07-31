@@ -30,6 +30,7 @@ export async function initRedisCache(): Promise<void> {
 
     await redisClient.connect();
     isConnected = true;
+  } catch (error) {
 
     logInfo('redis_connected', {}, config.logLevel);
   } catch (error) {
@@ -131,6 +132,8 @@ export async function closeRedisCache(): Promise<void> {
     try {
       await redisClient.quit();
       isConnected = false;
+    } catch (error) {
+      // Ignore errors on close
     } catch {
       isConnected = false;
     }

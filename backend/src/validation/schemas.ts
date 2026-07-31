@@ -1,3 +1,6 @@
+import { z } from 'zod';
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+import { config } from '../config';
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import { config } from '../config';
@@ -105,6 +108,15 @@ export const createCampaignPayloadSchema = z.object({
   title: z
     .string()
     .trim()
+    .min(3, 'title must be at least 3 characters.')
+    .max(100, 'title must not exceed 100 characters.'),
+  description: z
+    .string()
+    .trim()
+    .min(10, 'description must be at least 10 characters.'),
+  acceptedTokens: z
+    .array(assetCodeSchema)
+    .min(1, 'At least one accepted token is required.'),
     .min(4, 'Title must be at least 4 characters.')
     .max(80)
     .refine((val) => val.trim().length >= 4, 'Title cannot be only whitespace.')

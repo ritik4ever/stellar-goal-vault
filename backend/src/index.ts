@@ -1,3 +1,19 @@
+import compression from "compression";
+import cors from "cors";
+import "dotenv/config";
+import express, { Request, Response } from "express";
+import helmet from "helmet";
+import { validateEnv } from "./validateEnv";
+import { z } from "zod";
+import path from "path";
+import PDFDocument from "pdfkit";
+import { config, walletIntegrationReady } from "./config";
+import { apiKeyAuthMiddleware } from "./middleware/apiKeyAuth";
+import { cacheMiddleware } from "./middleware/cacheMiddleware";
+import { requestIdMiddleware } from "./middleware/requestId";
+import { validateBody } from "./middleware/validateBody";
+import type { RequestWithId } from "./middleware/types";
+import { initRedisCache } from "./services/cache";
 import compression from 'compression';
 import cors from 'cors';
 import 'dotenv/config';
@@ -31,6 +47,7 @@ import {
   deleteComment,
   getCampaign,
   getCampaignWithProgress,
+  getPledgeById,
   getContributorSummary,
   getGlobalStats,
   getTrendingCampaigns,
@@ -602,6 +619,46 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
       totalPages,
     },
   });
+});
+
+app.get('/api/campaigns/:id/pledges/:pledgeId/receipt', (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+  const campaignId = parsedId.value;
+
+  const pledgeId = parseInt(req.params.pledgeId, 10);
+  if (isNaN(pledgeId)) {
+    throw new AppError('Invalid pledge ID', 400, 'INVALID_INPUT');
+  }
+
+  const campaign = getCampaign(campaignId);
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+  }
+
+  const pledge = getPledgeById(campaignId, pledgeId);
+  if (!pledge) {
+    throw new AppError('Pledge not found.', 404, 'NOT_FOUND');
+  }
+
+  const doc = new PDFDocument();
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename=receipt-${pledgeId}.pdf`);
+  doc.pipe(res);
+
+  doc.fontSize(20).text('Pledge Receipt', { align: 'center' });
+  doc.moveDown();
+  doc.fontSize(14).text(`Campaign: ${campaign.title}`);
+  doc.text(`Contributor: ${pledge.contributor}`);
+  doc.text(`Amount: ${pledge.amount} ${pledge.assetCode}`);
+  doc.text(`Date: ${new Date(pledge.createdAt * 1000).toISOString()}`);
+  if (pledge.transactionHash) {
+    doc.text(`Transaction Hash: ${pledge.transactionHash}`);
+  }
+
+  doc.end();
 });
 
 app.post(
