@@ -499,14 +499,14 @@ app.get('/api/campaigns/trending', (req: Request, res: Response) => {
   res.send(responseBody);
 });
 
-app.get('/api/campaigns/:id', (req: Request, res: Response) => {
+app.get('/api/campaigns/:id', async (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
     sendValidationError(parsedId.issues);
   }
 
   const cacheKey = `campaigns:detail:${parsedId.value}`;
-  const cached = getCampaignCacheEntry(cacheKey);
+  const cached = await getCampaignCacheEntry(cacheKey);
   if (cached) {
     res.setHeader('Cache-Control', 'max-age=30');
     res.setHeader('X-Cache', 'HIT');
@@ -521,7 +521,7 @@ app.get('/api/campaigns/:id', (req: Request, res: Response) => {
   }
 
   const responseBody = JSON.stringify({ data: campaign });
-  setCampaignCacheEntry(cacheKey, responseBody);
+  await setCampaignCacheEntry(cacheKey, responseBody);
 
   res.setHeader('Cache-Control', 'max-age=30');
   res.setHeader('X-Cache', 'MISS');
@@ -532,14 +532,14 @@ app.get('/api/campaigns/:id', (req: Request, res: Response) => {
 app.delete(
   '/api/campaigns/:id',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
     }
 
     const campaign = softDeleteCampaign(parsedId.value);
-    invalidateCampaignCache();
+    await invalidateCampaignCache();
     res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
   },
 );
@@ -547,14 +547,14 @@ app.delete(
 app.post(
   '/api/campaigns/:id/restore',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
     }
 
     const campaign = restoreCampaign(parsedId.value);
-    invalidateCampaignCache();
+    await invalidateCampaignCache();
     res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
   },
 );
@@ -658,7 +658,7 @@ app.post(
 
     const body = req.body as z.infer<typeof reconcilePledgePayloadSchema>;
     const result = reconcileOnChainPledge(parsedId.value, body);
-    invalidateCampaignCache();
+    await invalidateCampaignCache();
     res.status(result.existing ? 200 : 201).json({
       data: {
         campaign: { ...result.campaign, progress: calculateProgress(result.campaign) },
@@ -897,7 +897,7 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
 });
 
 // Legacy route for backward compatibility
-app.get('/api/leaderboard', (req: Request, res: Response) => {
+app.get('/api/leaderboard', async (req: Request, res: Response) => {
   const queryResult = parseLeaderboardQuery(req.query as Record<string, unknown>);
   if (!queryResult.ok) {
     sendValidationError(queryResult.issues);
@@ -907,7 +907,7 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
 
   // Build cache key based on type and limit
   const cacheKey = `campaign_leaderboard:${type}:${limit}`;
-  const cached = getCampaignCacheEntry(cacheKey);
+  const cached = await getCampaignCacheEntry(cacheKey);
 
   if (cached) {
     res.setHeader('Cache-Control', 'max-age=300');
@@ -921,7 +921,7 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
     const leaderboard = getCampaignLeaderboard(type, limit);
     const responseBody = JSON.stringify({ data: leaderboard });
 
-    setCampaignCacheEntry(cacheKey, responseBody);
+    await setCampaignCacheEntry(cacheKey, responseBody);
 
     res.setHeader('Cache-Control', 'max-age=300');
     res.setHeader('X-Cache', 'MISS');
@@ -948,7 +948,7 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/campaigns/leaderboard', (req: Request, res: Response) => {
+app.get('/api/campaigns/leaderboard', async (req: Request, res: Response) => {
   const queryResult = parseLeaderboardQuery(req.query as Record<string, unknown>);
   if (!queryResult.ok) {
     sendValidationError(queryResult.issues);
@@ -958,7 +958,7 @@ app.get('/api/campaigns/leaderboard', (req: Request, res: Response) => {
 
   // Build cache key based on type and limit
   const cacheKey = `campaign_leaderboard:${type}:${limit}`;
-  const cached = getCampaignCacheEntry(cacheKey);
+  const cached = await getCampaignCacheEntry(cacheKey);
 
   if (cached) {
     res.setHeader('Cache-Control', 'max-age=300');
@@ -972,7 +972,7 @@ app.get('/api/campaigns/leaderboard', (req: Request, res: Response) => {
     const leaderboard = getCampaignLeaderboard(type, limit);
     const responseBody = JSON.stringify({ data: leaderboard });
 
-    setCampaignCacheEntry(cacheKey, responseBody);
+    await setCampaignCacheEntry(cacheKey, responseBody);
 
     res.setHeader('Cache-Control', 'max-age=300');
     res.setHeader('X-Cache', 'MISS');
@@ -985,7 +985,6 @@ app.get('/api/campaigns/leaderboard', (req: Request, res: Response) => {
         event: 'campaign_leaderboard_error',
         requestId: (req as RequestWithId).requestId,
         type,
-        limit,
       },
       config.logLevel,
     );
@@ -993,7 +992,7 @@ app.get('/api/campaigns/leaderboard', (req: Request, res: Response) => {
       success: false,
       error: {
         code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to fetch campaign leaderboard',
+        message: 'Failed to fetch leaderboard',
         requestId: (req as RequestWithId).requestId,
       },
     });
