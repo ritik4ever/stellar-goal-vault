@@ -115,10 +115,7 @@ export const CreatorAnalytics: React.FC<CreatorAnalyticsProps> = ({
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={statusData} aria-label="Bar chart showing campaign count per status">
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis
-                dataKey="status"
-                aria-hidden="true"
-              />
+              <XAxis dataKey="status" aria-hidden="true" />
               <YAxis aria-hidden="true" />
               <Tooltip />
               <Legend />
@@ -142,10 +139,7 @@ export const CreatorAnalytics: React.FC<CreatorAnalyticsProps> = ({
               aria-label="Line chart showing pledge volume over the last 30 days"
             >
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis
-                dataKey="date"
-                aria-hidden="true"
-              />
+              <XAxis dataKey="date" aria-hidden="true" />
               <YAxis aria-hidden="true" />
               <Tooltip />
               <Legend />

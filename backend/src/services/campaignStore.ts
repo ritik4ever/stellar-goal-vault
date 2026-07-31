@@ -365,39 +365,41 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const whereClauses: string[] = [];
   const params: (string | number)[] = [];
 
-if (options?.searchQuery && options.searchQuery.trim()) {
-  const rawQuery = options.searchQuery.trim();
-  
-  // Fixes CodeRabbit: Sanitize/escape special characters so FTS5 MATCH doesn't syntax crash
-  const cleanQuery = rawQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
-  const ftsMatchTerm = cleanQuery ? `${cleanQuery}*` : '';
+  if (options?.searchQuery && options.searchQuery.trim()) {
+    const rawQuery = options.searchQuery.trim();
 
-  // Fixes CodeRabbit: Use exact matching for creator public key instead of a slow LIKE scan
-  const creatorExactTerm = rawQuery; 
-  const exactTerm = rawQuery;
+    // Fixes CodeRabbit: Sanitize/escape special characters so FTS5 MATCH doesn't syntax crash
+    const cleanQuery = rawQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
+    const ftsMatchTerm = cleanQuery ? `${cleanQuery}*` : '';
 
-  if (ftsMatchTerm) {
-    whereClauses.push(`(
+    // Fixes CodeRabbit: Use exact matching for creator public key instead of a slow LIKE scan
+    const creatorExactTerm = rawQuery;
+    const exactTerm = rawQuery;
+
+    if (ftsMatchTerm) {
+      whereClauses.push(`(
       campaigns.id IN (SELECT id FROM campaigns_fts WHERE campaigns_fts MATCH ?)
       OR LOWER(campaigns.creator) = LOWER(?)
       OR campaigns.id = ?
     )`);
-    params.push(ftsMatchTerm, creatorExactTerm, exactTerm);
-  } else {
-    // Fallback if cleaning the query stripped all characters
-    whereClauses.push(`(LOWER(campaigns.creator) = LOWER(?) OR campaigns.id = ?)`);
-    params.push(creatorExactTerm, exactTerm);
+      params.push(ftsMatchTerm, creatorExactTerm, exactTerm);
+    } else {
+      // Fallback if cleaning the query stripped all characters
+      whereClauses.push(`(LOWER(campaigns.creator) = LOWER(?) OR campaigns.id = ?)`);
+      params.push(creatorExactTerm, exactTerm);
+    }
   }
-}
   if (options?.assetCode) {
     whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);
   }
 
   if (options?.assetCodes && options.assetCodes.length > 0) {
-    const conditions = options.assetCodes.map(() => `campaigns.accepted_tokens_json LIKE ?`).join(' OR ');
+    const conditions = options.assetCodes
+      .map(() => `campaigns.accepted_tokens_json LIKE ?`)
+      .join(' OR ');
     whereClauses.push(`(${conditions})`);
-    options.assetCodes.forEach(code => {
+    options.assetCodes.forEach((code) => {
       params.push(`%${code.toUpperCase()}%`);
     });
   }
@@ -515,8 +517,7 @@ if (options?.searchQuery && options.searchQuery.trim()) {
 export function getCampaign(campaignId: string): CampaignRecord | undefined {
   const db = getDb();
   const row = db.prepare(`SELECT * FROM campaigns WHERE id = ?`).get(campaignId) as
-    | CampaignRow
-    | undefined;
+    CampaignRow | undefined;
 
   if (row) {
     const now = nowInMilliseconds();
@@ -596,9 +597,7 @@ export function listCampaignPledges(
  * @returns An array of {@link ContributorSummary} objects sorted by total pledged (descending),
  *          or an empty array if the campaign does not exist.
  */
-export function getContributorSummary(
-  campaignId: string,
-): ContributorSummary[] {
+export function getContributorSummary(campaignId: string): ContributorSummary[] {
   const db = getDb();
   const rows = db
     .prepare(
@@ -688,7 +687,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     title: input.title.trim(),
     description: input.description.trim(),
     acceptedTokens,
-    assetCode: acceptedTokens[0] || "",
+    assetCode: acceptedTokens[0] || '',
     targetAmount: round(input.targetAmount),
     pledgedAmount: 0,
     deadline: input.deadline,
@@ -1378,7 +1377,9 @@ export function updateCampaign(
   const db = getDb();
   const campaign = getCampaign(campaignId);
   if (!campaign) {
-    throw Object.assign(new Error(`Campaign ${campaignId} not found`), { code: 'CAMPAIGN_NOT_FOUND' });
+    throw Object.assign(new Error(`Campaign ${campaignId} not found`), {
+      code: 'CAMPAIGN_NOT_FOUND',
+    });
   }
 
   const updates: string[] = [];

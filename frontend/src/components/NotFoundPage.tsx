@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from 'react-router-dom';
 
 export function NotFoundPage() {
   return (
@@ -13,7 +13,7 @@ export function NotFoundPage() {
         <p className="hero-copy">
           The campaign you&apos;re looking for doesn&apos;t exist or may have been removed.
         </p>
-        <Link to="/" className="btn-primary" style={{ display: "inline-block", marginTop: 16 }}>
+        <Link to="/" className="btn-primary" style={{ display: 'inline-block', marginTop: 16 }}>
           Back to campaigns
         </Link>
       </section>
