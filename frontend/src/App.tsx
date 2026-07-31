@@ -39,7 +39,6 @@ import { useWallet } from "./hooks/useWallet";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useToast } from "./hooks/useToast";
 import { useOpenGraph } from "./hooks/useOpenGraph";
-import { useCampaignShareCard } from "./components/CampaignShareCard";
 import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
 import {
   ApiError,
@@ -333,22 +332,6 @@ function App() {
     await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
   }
 
-  const { toDataUrl } = useCampaignShareCard();
-
-  const ogMeta = useMemo(() => {
-    const c = selectedCampaign;
-    if (!c) return null;
-    const baseUrl = window.location.origin;
-    return {
-      title: `${c.title} — Stellar Goal Vault`,
-      description: c.description.slice(0, 200),
-      image: c.metadata?.imageUrl ?? undefined,
-      url: `${baseUrl}/campaigns/${c.id}`,
-    };
-  }, [selectedCampaign]);
-
-  useOpenGraph(ogMeta);
-
   const initialParamIdRef = useRef(paramId);
 
   useEffect(() => {
@@ -450,6 +433,22 @@ function App() {
       metadata: selectedCampaignDetails.metadata ?? summaryCampaign.metadata,
     };
   }, [campaigns, selectedCampaignDetails, selectedCampaignId]);
+
+  const ogMeta = useMemo(() => {
+    const c = selectedCampaign;
+    if (!c) return null;
+    const baseUrl = window.location.origin;
+    const imageUrl = c.metadata?.imageUrl;
+    const safeImage = imageUrl && !imageUrl.startsWith("data:") ? imageUrl : undefined;
+    return {
+      title: `${c.title} — Stellar Goal Vault`,
+      description: c.description.slice(0, 200),
+      image: safeImage,
+      url: `${baseUrl}/campaigns/${c.id}`,
+    };
+  }, [selectedCampaign]);
+
+  useOpenGraph(ogMeta);
 
   const metrics = useMemo(() => {
     const open = campaigns.filter((campaign) => campaign.progress.status === "open").length;
@@ -772,6 +771,7 @@ function App() {
             onClaim={handleClaim}
             onSoftDelete={handleSoftDelete}
             onRefund={handleRefund}
+            onToast={addToast}
           />
         </ErrorBoundary>
       </section>

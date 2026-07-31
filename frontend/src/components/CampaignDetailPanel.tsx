@@ -1,7 +1,8 @@
 
 
 import { FormEvent, useState, useEffect, useCallback } from 'react';
-import { MousePointer2, Share2, Download, Link } from 'lucide-react';
+import { MousePointer2, Download, LinkIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Campaign, AppConfig } from '../types/campaign';
 import CopyButton from './CopyButton';
 import { AddressAvatar } from './AddressAvatar';
@@ -9,9 +10,9 @@ import { EmptyState } from './EmptyState';
 import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
 import { useCampaignShareCard } from './CampaignShareCard';
-import { useToast } from '../hooks/useToast';
 import { ShareButtons } from './ShareButtons';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
+import type { ToastVariant } from '../hooks/useToast';
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -28,6 +29,11 @@ interface CampaignDetailPanelProps {
   onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
   onClose?: () => void;
+  onToast?: (
+    message: string,
+    variant?: ToastVariant,
+    link?: { href: string; label: string },
+  ) => void;
 }
 
 const FEE_ESTIMATION_ERROR_CODES = new Set([
@@ -77,6 +83,7 @@ export function CampaignDetailPanel({
   onPledge = async () => {},
   onClaim = async () => {},
   onRefund = async () => {},
+  onToast,
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState('25');
   const [pledgeToken, setPledgeToken] = useState('');
@@ -85,24 +92,39 @@ export function CampaignDetailPanel({
   const [pledgeError, setPledgeError] = useState<string | null>(null);
   const [bannerImageError, setBannerImageError] = useState(false);
   const walletReady = appConfig?.walletIntegrationReady ?? false;
-  const { downloadPng, toDataUrl } = useCampaignShareCard();
-  const { addToast } = useToast();
+  const { downloadPng } = useCampaignShareCard();
+  const notify = onToast ?? (() => {});
 
-  const handleDownloadPng = useCallback(() => {
+  const handleDownloadPng = useCallback(async () => {
     if (!campaign) return;
-    downloadPng(campaign, campaign.metadata?.imageUrl);
-    addToast('Campaign card downloaded as PNG.', 'success');
-  }, [campaign, downloadPng, addToast]);
+    await downloadPng(campaign, campaign.metadata?.imageUrl);
+    notify('Campaign card downloaded as PNG.', 'success');
+  }, [campaign, downloadPng, notify]);
 
-  const handleCopyLink = useCallback(() => {
+  const handleCopyLink = useCallback(async () => {
     if (!campaign) return;
     const url = `${window.location.origin}/campaigns/${campaign.id}`;
-    navigator.clipboard.writeText(url).then(() => {
-      addToast('Campaign link copied to clipboard.', 'success', { label: url.slice(0, 40) + '…' });
-    }).catch(() => {
-      addToast('Failed to copy link.', 'error');
-    });
-  }, [campaign, addToast]);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      notify('Campaign link copied to clipboard.', 'success', {
+        href: url,
+        label: url.slice(0, 40) + '…',
+      });
+    } catch {
+      notify('Failed to copy link.', 'error');
+    }
+  }, [campaign, notify]);
 
   useEffect(() => {
     setBannerImageError(false);
@@ -471,12 +493,12 @@ export function CampaignDetailPanel({
       ) : null}
 
       <div className="share-actions">
-        <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
+        <button className="btn-ghost" type="button" onClick={() => { void handleDownloadPng(); }}>
           <Download size={16} />
           Download PNG
         </button>
-        <button className="btn-ghost" type="button" onClick={handleCopyLink}>
-          <Link size={16} />
+        <button className="btn-ghost" type="button" onClick={() => { void handleCopyLink(); }}>
+          <LinkIcon size={16} />
           Copy link
         </button>
       </div>
