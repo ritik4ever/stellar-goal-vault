@@ -1615,6 +1615,178 @@ tbody tr:hover td {
   margin-top: 20px;
 }
 
+.share-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.share-actions .btn-ghost {
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 20px;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 0 6px rgba(244, 63, 94, 0.5);
+}
+
+.notification-drawer {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 380px;
+  max-height: 480px;
+  background: var(--bg-surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--card-shadow);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.notification-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.notification-drawer-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  flex: 1;
+}
+
+.notification-mark-read-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--primary-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  min-height: auto;
+  transition: background 0.15s;
+}
+
+.notification-mark-read-btn:hover {
+  background: var(--bg-row-hover);
+}
+
+.notification-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  min-height: auto;
+  transition: color 0.15s;
+}
+
+.notification-close-btn:hover {
+  color: var(--text-main);
+}
+
+.notification-drawer-body {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.notification-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.notification-item {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-glass);
+  transition: background 0.15s;
+}
+
+.notification-item:hover {
+  background: var(--bg-row-hover);
+}
+
+.notification-item:last-child {
+  border-bottom: none;
+}
+
+.notification-item-unread {
+  background: rgba(99, 102, 241, 0.05);
+  border-left: 3px solid var(--primary);
+}
+
+.notification-item-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 4px;
+  color: var(--text-main);
+}
+
+.notification-item-body {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.notification-item-time {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.countdown {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-main);
+}
+
+.countdown-urgent {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+}
+
+.countdown-expired {
+  color: var(--text-muted);
+  font-style: italic;
+  font-weight: 500;
+}
+
 .campaign-image-skeleton {
   position: absolute;
   inset: 0;

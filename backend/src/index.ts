@@ -43,6 +43,8 @@ import {
   CampaignStatus,
   claimCampaign,
   createCampaign,
+  createComment,
+  deleteComment,
   getCampaign,
   getCampaignWithProgress,
   getPledgeById,
@@ -53,6 +55,7 @@ import {
   initCampaignStore,
   listCampaignPledges,
   listCampaigns,
+  listComments,
   type ListCampaignsOptions,
   reconcileOnChainPledge,
   refundContributor,
@@ -63,6 +66,11 @@ import {
 import { checkDbHealth } from './services/db';
 import { getCampaignTimeline, listCampaignHistory } from './services/eventHistory';
 import { startEventIndexer } from './services/eventIndexer';
+import {
+  listNotifications,
+  getUnreadCount,
+  markAllRead,
+} from './services/notificationService';
 import { getDeadLetterQueue, clearDeadLetterQueue, retryDeadLetter } from './services/webhookService';
 import { fetchOpenIssues } from './services/openIssues';
 import { ensureSorobanRefundConfig, verifyRefundTransaction } from './services/sorobanRpc';
@@ -70,8 +78,12 @@ import { AppError, ApiErrorResponse } from './types/errors';
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
+  commentIdSchema,
   createCampaignPayloadSchema,
+  createCommentPayloadSchema,
   createPledgePayloadSchema,
+  deleteCommentPayloadSchema,
+  parseCommentListPaginationQuery,
   parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
   parseTimelineQuery,
@@ -83,7 +95,7 @@ import {
   normalizeQueryValue,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
-import { logError, logInfo } from './logger';
+import { logError, logInfo, logger } from './logger';
 import {
   buildCampaignCacheKey,
   getCampaignCacheEntry,
@@ -91,8 +103,7 @@ import {
   setTrendingCacheEntry,
   invalidateCampaignCache,
   setCampaignCacheEntry,
-} from './services/campaignCache';
-export const app = express();
+} from './services/campaignCache';export const app = express();
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
@@ -412,7 +423,8 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
   }
 });
 
-app.get('/api/campaigns', (req: Request, res: Response) => {
+app.get('/api/campaigns', async (req: Request, res: Response, next: express.NextFunction) => {
+  try {
   const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
   if (!queryResult.ok) {
     sendValidationError(queryResult.issues);
@@ -427,10 +439,10 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
     .join('&');
   const cacheKey = buildCampaignCacheKey(qs);
 
-  const cached = getCampaignCacheEntry(cacheKey);
+  const cached = await getCampaignCacheEntry(cacheKey);
   if (cached) {
     const cachedData = JSON.parse(cached);
-    res.setHeader('Cache-Control', 'max-age=5');
+    res.setHeader('Cache-Control', 'max-age=30');
     res.setHeader('X-Cache', 'HIT');
     res.setHeader('X-Total-Count', String(cachedData.pagination.total));
     res.setHeader('Content-Type', 'application/json');
@@ -475,13 +487,16 @@ app.get('/api/campaigns', (req: Request, res: Response) => {
     },
   });
 
-  setCampaignCacheEntry(cacheKey, responseBody);
+  await setCampaignCacheEntry(cacheKey, responseBody);
 
-  res.setHeader('Cache-Control', 'max-age=5');
+  res.setHeader('Cache-Control', 'max-age=30');
   res.setHeader('X-Cache', 'MISS');
   res.setHeader('X-Total-Count', String(totalCount));
   res.setHeader('Content-Type', 'application/json');
   res.send(responseBody);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/campaigns/trending', (req: Request, res: Response) => {
@@ -512,12 +527,31 @@ app.get('/api/campaigns/:id', (req: Request, res: Response) => {
     sendValidationError(parsedId.issues);
   }
 
-  const campaign = getCampaignWithProgress(parsedId.value, CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT);
-  if (!campaign) {
-    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
-  }
+    const cacheKey = `campaigns:detail:${parsedId.value}`;
+    const cached = await getCampaignCacheEntry(cacheKey);
+    if (cached) {
+      res.setHeader('Cache-Control', 'max-age=30');
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('Content-Type', 'application/json');
+      res.send(cached);
+      return;
+    }
 
-  res.json({ data: campaign });
+    const campaign = getCampaignWithProgress(parsedId.value, CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT);
+    if (!campaign) {
+      throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+    }
+
+    const responseBody = JSON.stringify({ data: campaign });
+    await setCampaignCacheEntry(cacheKey, responseBody);
+
+    res.setHeader('Cache-Control', 'max-age=30');
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('Content-Type', 'application/json');
+    res.send(responseBody);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.delete(
@@ -630,7 +664,8 @@ app.get('/api/campaigns/:id/pledges/:pledgeId/receipt', (req: Request, res: Resp
 app.post(
   '/api/campaigns',
   validateBody(createCampaignPayloadSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: express.NextFunction) => {
+    try {
     const body = req.body as z.infer<typeof createCampaignPayloadSchema>;
 
     if (body.deadline <= Math.floor(Date.now() / 1000)) {
@@ -645,8 +680,11 @@ app.post(
     };
 
     const campaign = createCampaign(campaignInput);
-    invalidateCampaignCache();
+    await invalidateCampaignCache();
     res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+    } catch (error) {
+      next(error);
+    }
   },
 );
 
@@ -655,7 +693,8 @@ app.post(
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
   idempotencyMiddleware,
   validateBody(createPledgePayloadSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: express.NextFunction) => {
+    try {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
@@ -663,8 +702,11 @@ app.post(
 
     const body = req.body as z.infer<typeof createPledgePayloadSchema>;
     const campaign = addPledge(parsedId.value, body);
-    invalidateCampaignCache();
+    await invalidateCampaignCache();
     res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+    } catch (error) {
+      next(error);
+    }
   },
 );
 
@@ -672,7 +714,8 @@ app.post(
   '/api/campaigns/:id/pledges/reconcile',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
   validateBody(reconcilePledgePayloadSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: express.NextFunction) => {
+    try {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
@@ -687,6 +730,9 @@ app.post(
         transactionHash: body.transactionHash,
       },
     });
+    } catch (error) {
+      next(error);
+    }
   },
 );
 
@@ -694,7 +740,8 @@ app.post(
   '/api/campaigns/:id/claim',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
   validateBody(claimCampaignPayloadSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: express.NextFunction) => {
+    try {
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
@@ -706,8 +753,11 @@ app.post(
       transactionHash: body.transactionHash,
       confirmedAt: body.confirmedAt,
     });
-    invalidateCampaignCache();
+    await invalidateCampaignCache();
     res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+    } catch (error) {
+      next(error);
+    }
   },
 );
 
@@ -733,7 +783,7 @@ app.post(
         latestLedger: verified.latestLedger ?? body.soroban.latestLedger,
         source: 'soroban-contract',
       });
-      invalidateCampaignCache();
+      await invalidateCampaignCache();
 
       res.json({
         data: {
@@ -909,6 +959,50 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
       },
     });
   }
+});
+
+// ── Notification Routes ───────────────────────────────────────────────────────
+
+app.get('/api/notifications', (req: Request, res: Response) => {
+  const wallet = normalizeQueryValue(req.query.wallet);
+  if (!wallet) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'MISSING_WALLET', message: 'wallet query parameter is required' },
+    });
+  }
+  const rawLimit = normalizeQueryValue(req.query.limit);
+  const rawOffset = normalizeQueryValue(req.query.offset);
+  const limit = rawLimit ? Math.min(Math.max(1, Number(rawLimit)), 100) : 50;
+  const offset = rawOffset ? Math.max(0, Number(rawOffset)) : 0;
+
+  const result = listNotifications(wallet, { limit, offset });
+  const unreadCount = getUnreadCount(wallet);
+  res.json({ data: result.data, total: result.total, unreadCount });
+});
+
+app.get('/api/notifications/unread-count', (req: Request, res: Response) => {
+  const wallet = normalizeQueryValue(req.query.wallet);
+  if (!wallet) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'MISSING_WALLET', message: 'wallet query parameter is required' },
+    });
+  }
+  const unreadCount = getUnreadCount(wallet);
+  res.json({ unreadCount });
+});
+
+app.post('/api/notifications/mark-all-read', (req: Request, res: Response) => {
+  const { wallet } = req.body as { wallet?: string };
+  if (!wallet || typeof wallet !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'MISSING_WALLET', message: 'wallet is required in request body' },
+    });
+  }
+  markAllRead(wallet);
+  res.json({ success: true });
 });
 
 app.get('/api/webhooks/dead-letter', (req: Request, res: Response) => {
