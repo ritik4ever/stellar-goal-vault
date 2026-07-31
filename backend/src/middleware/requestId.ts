@@ -8,11 +8,7 @@ import type { RequestWithId } from './types';
 
 export const REQUEST_ID_HEADER = 'X-Request-ID';
 
-export function requestIdMiddleware(
-  req: RequestWithId,
-  res: Response,
-  next: NextFunction,
-): void {
+export function requestIdMiddleware(req: RequestWithId, res: Response, next: NextFunction): void {
   const incoming = req.header(REQUEST_ID_HEADER);
   const requestId = incoming?.trim() ? incoming.trim() : randomUUID();
   req.requestId = requestId;

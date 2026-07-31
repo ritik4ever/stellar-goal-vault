@@ -51,9 +51,7 @@ describe('request id middleware', () => {
   it('includes request id in structured request logs', async () => {
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
-    await request(app)
-      .get('/api/health')
-      .set(REQUEST_ID_HEADER, 'log-context-request-id');
+    await request(app).get('/api/health').set(REQUEST_ID_HEADER, 'log-context-request-id');
 
     const loggedLine = infoSpy.mock.calls
       .map(([message]) => String(message))

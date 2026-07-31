@@ -50,7 +50,13 @@ export const Funded: Story = {
     campaign: {
       ...baseCampaign,
       pledgedAmount: 10000,
-      progress: { ...baseCampaign.progress, status: 'funded', percentFunded: 100, canClaim: true, canPledge: false },
+      progress: {
+        ...baseCampaign.progress,
+        status: 'funded',
+        percentFunded: 100,
+        canClaim: true,
+        canPledge: false,
+      },
     },
   },
 };
@@ -61,7 +67,14 @@ export const Failed: Story = {
       ...baseCampaign,
       pledgedAmount: 2000,
       deadline: Math.floor(Date.now() / 1000) - 3600,
-      progress: { ...baseCampaign.progress, status: 'failed', percentFunded: 20, canRefund: true, canPledge: false, hoursLeft: 0 },
+      progress: {
+        ...baseCampaign.progress,
+        status: 'failed',
+        percentFunded: 20,
+        canRefund: true,
+        canPledge: false,
+        hoursLeft: 0,
+      },
     },
   },
 };
@@ -72,7 +85,12 @@ export const Claimed: Story = {
       ...baseCampaign,
       pledgedAmount: 10000,
       claimedAt: Math.floor(Date.now() / 1000) - 3600,
-      progress: { ...baseCampaign.progress, status: 'claimed', percentFunded: 100, canPledge: false },
+      progress: {
+        ...baseCampaign.progress,
+        status: 'claimed',
+        percentFunded: 100,
+        canPledge: false,
+      },
     },
   },
 };

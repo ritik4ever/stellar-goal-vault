@@ -94,9 +94,7 @@ export function CampaignTimeline({
   pledgedAmount,
 }: CampaignTimelineProps) {
   const percentFunded =
-    targetAmount && targetAmount > 0
-      ? Math.min((pledgedAmount ?? 0) / targetAmount, 1) * 100
-      : 0;
+    targetAmount && targetAmount > 0 ? Math.min((pledgedAmount ?? 0) / targetAmount, 1) * 100 : 0;
 
   const showProgress = typeof targetAmount === 'number' && targetAmount > 0;
   const showSkeleton = useMinDisplayTime(isLoading);
@@ -135,10 +133,7 @@ export function CampaignTimeline({
             aria-valuemax={100}
             aria-label={`Campaign funded ${Math.round(percentFunded)}%`}
           >
-            <div
-              className="timeline-progress-fill"
-              style={{ width: `${percentFunded}%` }}
-            />
+            <div className="timeline-progress-fill" style={{ width: `${percentFunded}%` }} />
             {MILESTONES.map((pct) => {
               const milestoneAmount = (targetAmount! * pct) / 100;
               const isExceeded = (pledgedAmount ?? 0) >= milestoneAmount;
@@ -159,12 +154,9 @@ export function CampaignTimeline({
               );
             })}
           </div>
-          <span className="timeline-progress-label muted">
-            {Math.round(percentFunded)}% funded
-          </span>
+          <span className="timeline-progress-label muted">{Math.round(percentFunded)}% funded</span>
         </div>
       )}
-
 
       <div className="timeline">
         {history.map((event) => {
