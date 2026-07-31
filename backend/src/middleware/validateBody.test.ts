@@ -62,9 +62,7 @@ describe('validateBody', () => {
   });
 
   it('returns 400 with the Validation failed shape when a field has the wrong type', async () => {
-    const response = await request(buildApp())
-      .post('/echo')
-      .send({ name: 'goal', age: 'one' });
+    const response = await request(buildApp()).post('/echo').send({ name: 'goal', age: 'one' });
 
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('Validation failed');

@@ -22,9 +22,9 @@
     "zod": "^4.3.6"
   },
   "scripts": {
-    "dev": "ts-node-dev --respawn src/index.ts",
-    "start": "node dist/index.js",
-    "build": "tsc && npm run build:openapi",
+    "dev": "node api.js && ts-node-dev --respawn src/index.ts",
+    "start": "node api.js && node dist/index.js",
+    "build": "node api.js && tsc && npm run build:openapi",
     "build:openapi": "ts-node src/scripts/generateOpenApi.ts",
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest run",

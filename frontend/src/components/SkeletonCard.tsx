@@ -9,8 +9,8 @@ export function SkeletonCard() {
         <div
           className="campaign-creator mono"
           style={{
-            display: "flex",
-            alignItems: "center",
+            display: 'flex',
+            alignItems: 'center',
             gap: 10,
             marginBottom: 12,
           }}

@@ -17,11 +17,7 @@ describe('TransactionPreviewModal pledge flow', () => {
     const onCancel = vi.fn();
 
     render(
-      <TransactionPreviewModal
-        preview={basePreview}
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      />
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
     expect(screen.getByText('Transaction Preview')).toBeInTheDocument();
@@ -35,11 +31,7 @@ describe('TransactionPreviewModal pledge flow', () => {
     const onCancel = vi.fn();
 
     render(
-      <TransactionPreviewModal
-        preview={basePreview}
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      />
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
     const confirmButton = screen.getByRole('button', { name: /Confirm and Sign/ });
@@ -54,11 +46,7 @@ describe('TransactionPreviewModal pledge flow', () => {
     const onCancel = vi.fn();
 
     render(
-      <TransactionPreviewModal
-        preview={basePreview}
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      />
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
     const cancelButton = screen.getByRole('button', { name: /Cancel/ });
@@ -73,11 +61,7 @@ describe('TransactionPreviewModal pledge flow', () => {
     const onCancel = vi.fn();
 
     render(
-      <TransactionPreviewModal
-        preview={basePreview}
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      />
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
     const confirmButton = screen.getByRole('button', { name: /Confirm and Sign/ });
