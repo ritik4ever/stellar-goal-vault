@@ -95,7 +95,7 @@ describe('campaign store search', () => {
 
     expect(listCampaigns({ searchQuery: 'rocket' }).campaigns[0].id).toBe(campaign.id);
     expect(
-      listCampaigns({ searchQuery: 'gaaa' }).campaigns.some((row) => row.id === campaign.id),
+      listCampaigns({ searchQuery: CREATOR }).campaigns.some((row) => row.id === campaign.id),
     ).toBe(true);
     expect(listCampaigns({ searchQuery: campaign.id }).campaigns[0].id).toBe(campaign.id);
   });
@@ -113,14 +113,15 @@ describe('on-chain pledge reconciliation', () => {
       deadline: futureDeadline,
     });
 
-    const updatedCampaign = reconcileOnChainPledge(campaign.id, {
+    const result = reconcileOnChainPledge(campaign.id, {
       contributor: CONTRIBUTOR,
       amount: 25.5,
       transactionHash: TX_HASH,
       confirmedAt: futureDeadline - 300,
     });
 
-    expect(updatedCampaign.pledgedAmount).toBe(25.5);
+    expect(result.campaign.pledgedAmount).toBe(25.5);
+    expect(result.existing).toBe(false);
     expect(getCampaign(campaign.id)?.pledgedAmount).toBe(25.5);
 
     const pledges = getPledges(campaign.id);

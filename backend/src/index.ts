@@ -13,6 +13,7 @@ import { apiKeyAuthMiddleware } from './middleware/apiKeyAuth';
 import { cacheMiddleware } from './middleware/cacheMiddleware';
 import { requestIdMiddleware } from './middleware/requestId';
 import { validateBody } from './middleware/validateBody';
+import { idempotencyMiddleware } from './middleware/idempotencyMiddleware';
 import type { RequestWithId } from './middleware/types';
 import { initRedisCache } from './services/cache';
 
@@ -27,7 +28,6 @@ import {
   CampaignStatus,
   claimCampaign,
   createCampaign,
-  findNearDuplicate,
   getCampaign,
   getCampaignWithProgress,
   getContributorSummary,
@@ -579,19 +579,6 @@ app.post(
 
     if (body.deadline <= Math.floor(Date.now() / 1000)) {
       throw new AppError('deadline must be in the future.', 400, 'INVALID_DEADLINE');
-    }
-
-    const allowDuplicate = req.headers['x-allow-duplicate'] === 'true';
-
-    if (!allowDuplicate) {
-      const duplicate = findNearDuplicate(body.title, body.creator);
-      if (duplicate) {
-        throw new AppError(
-          `Near-duplicate campaign found: "${duplicate.title}" (Levenshtein distance: ${duplicate.distance}). Use X-Allow-Duplicate: true header to override.`,
-          409,
-          'NEAR_DUPLICATE_CAMPAIGN',
-        );
-      }
     }
 
     const campaignInput = {

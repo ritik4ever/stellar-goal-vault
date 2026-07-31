@@ -15,6 +15,7 @@ vi.hoisted(() => {
 import { app } from './index';
 import { createCampaign, initCampaignStore } from './services/campaignStore';
 import { getDb } from './services/db';
+import { invalidateCampaignCache } from './services/campaignCache';
 
 // Mock sorobanRpc to avoid real network calls during tests
 vi.mock('./services/sorobanRpc', () => ({
@@ -63,10 +64,10 @@ beforeEach(() => {
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR = `G${'B'.repeat(55)}`;
 
-async function post(apiPath: string, body: unknown) {
+async function post(apiPath: string, body: unknown, headers?: Record<string, string>) {
   const response = await fetch(`${baseUrl}${apiPath}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => null);
@@ -141,7 +142,7 @@ describe('Campaign Lifecycle API', () => {
 
     // Verify no duplicate claim event in history
     const historyRes = await get(`/api/campaigns/${campaignId}/history`);
-    const claimEvents = historyRes.data.events?.filter(
+    const claimEvents = historyRes.data.data?.filter(
       (e: { eventType: string }) => e.eventType === 'claimed',
     );
     expect(claimEvents?.length).toBe(1);
@@ -158,7 +159,7 @@ describe('Campaign Lifecycle API', () => {
 
     // Verify claim event still not duplicated
     const historyRes2 = await get(`/api/campaigns/${campaignId}/history`);
-    const claimEvents2 = historyRes2.data.events?.filter(
+    const claimEvents2 = historyRes2.data.data?.filter(
       (e: { eventType: string }) => e.eventType === 'claimed',
     );
     expect(claimEvents2?.length).toBe(1);
@@ -479,6 +480,7 @@ describe('Campaign maxPerContributor Field', () => {
       expect(secondListedCampaign?.progress.status).toBe('open');
 
       nowSpy.mockReturnValue(fixedNow + 1);
+      invalidateCampaignCache();
 
       const oneMillisecondLater = await get('/api/campaigns?page=1&limit=10');
       expect(oneMillisecondLater.status).toBe(200);
