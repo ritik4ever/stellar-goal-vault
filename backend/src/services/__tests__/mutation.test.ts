@@ -45,6 +45,7 @@ let reconcileOnChainPledge: CampaignStoreModule['reconcileOnChainPledge'];
 let getGlobalStats: CampaignStoreModule['getGlobalStats'];
 let getContributorSummary: CampaignStoreModule['getContributorSummary'];
 let softDeleteCampaign: CampaignStoreModule['softDeleteCampaign'];
+let restoreCampaign: CampaignStoreModule['restoreCampaign'];
 let listCampaigns: CampaignStoreModule['listCampaigns'];
 let getDb: DbModule['getDb'];
 let recordEvent: EventHistoryModule['recordEvent'];
@@ -83,6 +84,7 @@ beforeAll(async () => {
     getGlobalStats,
     getContributorSummary,
     softDeleteCampaign,
+    restoreCampaign,
     listCampaigns,
   } = await import('../campaignStore'));
 
@@ -124,21 +126,30 @@ describe('calculateProgress – boundary conditions', () => {
     expect(progress.canRefund).toBe(false);
   });
 
-  it('is "failed" when deadline == now (at boundary)', () => {
-    const now = Math.floor(Date.now() / 1000);
+  it('is "open" at the exact deadline and fails only after it passes', () => {
+    const now = Date.now();
     const campaign = createCampaign({
       creator: CREATOR,
-      title: 'Boundary failed',
+      title: 'Boundary open',
       description: 'desc',
       assetCode: 'USDC',
       targetAmount: 100,
-      deadline: now,
+      deadline: Math.floor(now / 1000) + 1,
     });
-    // Evaluate exactly AT the deadline
-    const progress = calculateProgress(campaign, campaign.deadline);
-    expect(progress.status).toBe('failed');
-    expect(progress.canPledge).toBe(false);
-    expect(progress.canRefund).toBe(true);
+    campaign.deadline = now / 1000;
+
+    const exactBoundary = calculateProgress(campaign, now);
+    expect(exactBoundary.status).toBe('open');
+    expect(exactBoundary.canPledge).toBe(true);
+    expect(exactBoundary.canRefund).toBe(false);
+
+    const oneMillisecondBefore = calculateProgress(campaign, now - 1);
+    expect(oneMillisecondBefore.status).toBe('open');
+
+    const oneMillisecondAfter = calculateProgress(campaign, now + 1);
+    expect(oneMillisecondAfter.status).toBe('failed');
+    expect(oneMillisecondAfter.canPledge).toBe(false);
+    expect(oneMillisecondAfter.canRefund).toBe(true);
   });
 
   it('is "funded" when pledgedAmount exactly equals targetAmount before deadline', () => {
@@ -246,7 +257,7 @@ describe('calculateProgress – boundary conditions', () => {
       deadline: future(3600), // 1 hour in the future
     });
     // Evaluate 2 hours AFTER the deadline → hoursLeft should be 0
-    const evalAt = campaign.deadline + 7200;
+    const evalAt = campaign.deadline * 1000 + 7200 * 1000;
     const progress = calculateProgress(campaign, evalAt);
     expect(progress.hoursLeft).toBe(0);
   });
@@ -673,11 +684,14 @@ describe('claimCampaign – guards', () => {
     expect(claimEvent!.blockchainMetadata?.txHash).toBe(TX_HASH);
   });
 
-  it('second claim is idempotent (returns same claimedAt)', () => {
+  it('second claim throws 409 CAMPAIGN_ALREADY_CLAIMED', () => {
     const c = fundedExpiredCampaign();
     claimCampaign(c.id, { creator: CREATOR, transactionHash: TX_HASH });
     const first = getCampaign(c.id)!.claimedAt;
-    claimCampaign(c.id, { creator: CREATOR, transactionHash: TX_HASH2 });
+    expect(() =>
+      claimCampaign(c.id, { creator: CREATOR, transactionHash: TX_HASH2 }),
+    ).toThrow('Campaign already claimed');
+    // claimedAt must remain unchanged after failed double-claim
     expect(getCampaign(c.id)!.claimedAt).toBe(first);
   });
 });
@@ -1059,6 +1073,114 @@ describe('softDeleteCampaign – guard mutations', () => {
     softDeleteCampaign(c.id);
     const { campaigns } = listCampaigns({ includeDeleted: true });
     expect(campaigns.find((x) => x.id === c.id)).toBeDefined();
+  });
+
+  it('sets deletedAt on the returned campaign and records an "archived" event', () => {
+    const c = createCampaign({
+      creator: CREATOR,
+      title: 'Archived event check',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: future(),
+    });
+    const archived = softDeleteCampaign(c.id);
+    expect(archived.deletedAt).toBeDefined();
+    const history = getCampaignHistory(c.id);
+    const archivedEvent = history.find((e) => e.eventType === 'archived');
+    expect(archivedEvent).toBeDefined();
+    expect(archivedEvent!.actor).toBe(CREATOR);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// restoreCampaign — un-archive guard mutations
+// ═════════════════════════════════════════════════════════════════════════════
+describe('restoreCampaign – guard mutations', () => {
+  it('throws NOT_FOUND for nonexistent campaign', () => {
+    expect(() => restoreCampaign('99999')).toThrow('Campaign not found');
+  });
+
+  it('throws NOT_ARCHIVED when campaign is not archived', () => {
+    const c = createCampaign({
+      creator: CREATOR,
+      title: 'Not archived',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: future(),
+    });
+    expect(() => restoreCampaign(c.id)).toThrow('Campaign is not archived');
+  });
+
+  it('clears deletedAt and makes the campaign visible in the default list again', () => {
+    const c = createCampaign({
+      creator: CREATOR,
+      title: 'Restore round trip',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: future(),
+    });
+    softDeleteCampaign(c.id);
+    expect(listCampaigns().campaigns.find((x) => x.id === c.id)).toBeUndefined();
+
+    const restored = restoreCampaign(c.id);
+    expect(restored.deletedAt).toBeUndefined();
+    expect(listCampaigns().campaigns.find((x) => x.id === c.id)).toBeDefined();
+  });
+
+  it('preserves pledges and history through archive + restore', () => {
+    const c = createCampaign({
+      creator: CREATOR,
+      title: 'Preserve on restore',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: future(),
+    });
+    addPledge(c.id, { contributor: CONTRIBUTOR, amount: 40 });
+    softDeleteCampaign(c.id);
+    restoreCampaign(c.id);
+
+    expect(getPledges(c.id)).toHaveLength(1);
+    expect(getCampaign(c.id)!.pledgedAmount).toBe(40);
+    const history = getCampaignHistory(c.id);
+    expect(history.some((e) => e.eventType === 'created')).toBe(true);
+    expect(history.some((e) => e.eventType === 'pledged')).toBe(true);
+    expect(history.some((e) => e.eventType === 'archived')).toBe(true);
+    expect(history.some((e) => e.eventType === 'restored')).toBe(true);
+  });
+
+  it('records a "restored" event with the campaign creator as actor', () => {
+    const c = createCampaign({
+      creator: CREATOR,
+      title: 'Restored event check',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: future(),
+    });
+    softDeleteCampaign(c.id);
+    restoreCampaign(c.id);
+    const history = getCampaignHistory(c.id);
+    const restoredEvent = history.find((e) => e.eventType === 'restored');
+    expect(restoredEvent).toBeDefined();
+    expect(restoredEvent!.actor).toBe(CREATOR);
+  });
+
+  it('throws ALREADY_DELETED if archived again without restoring first', () => {
+    const c = createCampaign({
+      creator: CREATOR,
+      title: 'Double archive',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: future(),
+    });
+    softDeleteCampaign(c.id);
+    restoreCampaign(c.id);
+    expect(() => softDeleteCampaign(c.id)).not.toThrow();
   });
 });
 

@@ -3,6 +3,27 @@ import { LRUCache } from 'lru-cache';
 const CACHE_TTL_MS = 5_000;
 const CACHE_MAX_SIZE = Number(process.env.CAMPAIGN_CACHE_MAX_SIZE ?? 100);
 
+// Trending endpoint cache: 10 minutes TTL as per spec
+const TRENDING_CACHE_TTL_MS = 10 * 60 * 1000;
+const TRENDING_CACHE_KEY = 'trending:campaigns';
+
+const trendingCache = new LRUCache<string, string>({
+  max: 1,
+  ttl: TRENDING_CACHE_TTL_MS,
+});
+
+export function getTrendingCacheEntry(): string | undefined {
+  return trendingCache.get(TRENDING_CACHE_KEY);
+}
+
+export function setTrendingCacheEntry(body: string): void {
+  trendingCache.set(TRENDING_CACHE_KEY, body);
+}
+
+export function invalidateTrendingCache(): void {
+  trendingCache.clear();
+}
+
 interface CacheEntry {
   body: string;
 }
