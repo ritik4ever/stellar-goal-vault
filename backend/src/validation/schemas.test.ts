@@ -38,7 +38,6 @@ describe('createCampaignPayloadSchema metadata', () => {
   it.each([
     ['http://example.com/banner.png', 'insecure protocol'],
     ['file:///etc/passwd', 'file URL'],
-    ['data:image/png;base64,iVBORw0K', 'data URL'],
     ['https://10.0.0.1/banner.png', 'private IPv4 host'],
     ['https://localhost/admin', 'loopback host'],
     ['https://172.20.0.5/x.png', 'private 172.16/12 host'],

@@ -13,6 +13,7 @@ function buildCampaign(status: Campaign['progress']['status']): Campaign {
     pledgedAmount: status === 'funded' ? 100 : 50,
     deadline: 1_800_000_000,
     createdAt: 1_700_000_000,
+    acceptedTokens: ['USDC'],
     progress: {
       status,
       percentFunded: status === 'funded' ? 100 : 50,

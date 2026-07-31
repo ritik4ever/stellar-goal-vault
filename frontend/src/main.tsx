@@ -1,10 +1,10 @@
-import React from "react";
-import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import App from "./App";
-import { ContributorProfile } from "./components/ContributorProfile";
-import { NotFoundPage } from "./components/NotFoundPage";
-import "./index.css";
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import App from './App';
+import { ContributorProfile } from './components/ContributorProfile';
+import { NotFoundPage } from './components/NotFoundPage';
+import './index.css';
 
 // Register the service worker for PWA offline support.
 // `virtual:pwa-register` is injected by vite-plugin-pwa at build time.
@@ -31,7 +31,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <BrowserRouter>
       <Routes>

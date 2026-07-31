@@ -1,5 +1,6 @@
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react';
-import { axe, type AxeResults } from 'vitest-axe';
+import { axe } from 'vitest-axe';
+import type { AxeResults } from 'axe-core';
 import type { ReactElement, ReactNode } from 'react';
 import { vi } from 'vitest';
 
@@ -25,8 +26,7 @@ export function setupDesktopViewport(width = 1280): void {
       const minWidth = query.match(/\(min-width:\s*(\d+)px\)/);
       const maxWidth = query.match(/\(max-width:\s*(\d+)px\)/);
       const matches =
-        (!minWidth || width >= Number(minWidth[1])) &&
-        (!maxWidth || width <= Number(maxWidth[1]));
+        (!minWidth || width >= Number(minWidth[1])) && (!maxWidth || width <= Number(maxWidth[1]));
 
       return {
         matches,

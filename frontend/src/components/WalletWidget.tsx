@@ -17,13 +17,13 @@ function truncateAddress(key: string): string {
   return `${key.slice(0, 4)}…${key.slice(-4)}`;
 }
 
-export function WalletWidget({ 
-  status, 
-  publicKey, 
-  walletName, 
-  error, 
-  network, 
-  onConnect, 
+export function WalletWidget({
+  status,
+  publicKey,
+  walletName,
+  error,
+  network,
+  onConnect,
   onDisconnect,
   onSwitchWallet,
 }: WalletWidgetProps) {

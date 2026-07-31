@@ -114,9 +114,7 @@ export function ContributorProfile() {
             <span className="mono">{address.slice(0, 16)}...</span>
             <CopyButton value={address} ariaLabel="Copy address" />
           </div>
-          <p className="hero-copy muted">
-            This address hasn&apos;t backed any campaigns yet.
-          </p>
+          <p className="hero-copy muted">This address hasn&apos;t backed any campaigns yet.</p>
           <Link to="/" className="btn-primary" style={{ display: 'inline-block', marginTop: 16 }}>
             Browse campaigns
           </Link>
@@ -166,16 +164,26 @@ export function ContributorProfile() {
       {profile.badges.length > 0 && (
         <div style={{ marginBottom: 40 }}>
           <div className="section-heading">
-            <h2><Award size={20} /> Badges Earned</h2>
-            <p className="muted">{profile.badges.length} badge{profile.badges.length !== 1 ? 's' : ''}</p>
+            <h2>
+              <Award size={20} /> Badges Earned
+            </h2>
+            <p className="muted">
+              {profile.badges.length} badge{profile.badges.length !== 1 ? 's' : ''}
+            </p>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
             {profile.badges.map((badge) => (
-              <div key={badge.name} className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div
+                key={badge.name}
+                className="card"
+                style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 12 }}
+              >
                 <span style={{ fontSize: '1.5rem' }}>{badge.icon}</span>
                 <div>
                   <div style={{ fontWeight: 600 }}>{badge.name}</div>
-                  <div className="muted" style={{ fontSize: '0.85rem' }}>{badge.description}</div>
+                  <div className="muted" style={{ fontSize: '0.85rem' }}>
+                    {badge.description}
+                  </div>
                   <div className="muted" style={{ fontSize: '0.75rem', marginTop: 2 }}>
                     Earned {formatTimestamp(badge.earnedAt)}
                   </div>
@@ -188,8 +196,13 @@ export function ContributorProfile() {
 
       <div style={{ marginBottom: 40 }}>
         <div className="section-heading">
-          <h2><TrendingUp size={20} /> Backed Campaigns</h2>
-          <p className="muted">{profile.backedCampaigns.length} campaign{profile.backedCampaigns.length !== 1 ? 's' : ''}</p>
+          <h2>
+            <TrendingUp size={20} /> Backed Campaigns
+          </h2>
+          <p className="muted">
+            {profile.backedCampaigns.length} campaign
+            {profile.backedCampaigns.length !== 1 ? 's' : ''}
+          </p>
         </div>
         {profile.backedCampaigns.length === 0 ? (
           <EmptyState message="No backed campaigns." />
@@ -200,21 +213,38 @@ export function ContributorProfile() {
                 key={campaign.campaignId}
                 to={`/campaigns/${campaign.campaignId}`}
                 className="card"
-                style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', textDecoration: 'none', color: 'inherit' }}
+                style={{
+                  padding: '16px 20px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
                   <Wallet size={18} className="muted" style={{ flexShrink: 0 }} />
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
                       {campaign.title}
                     </div>
                     <div className="muted" style={{ fontSize: '0.85rem' }}>
-                      Pledged {formatAmount(campaign.pledgedAmount, campaign.assetCode)} · {formatTimestamp(campaign.pledgedAt)}
+                      Pledged {formatAmount(campaign.pledgedAmount, campaign.assetCode)} ·{' '}
+                      {formatTimestamp(campaign.pledgedAt)}
                     </div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                  <span className={`badge badge-${campaign.status}`}>{STATUS_LABELS[campaign.status]}</span>
+                  <span className={`badge badge-${campaign.status}`}>
+                    {STATUS_LABELS[campaign.status]}
+                  </span>
                   {campaign.refundedAmount > 0 && (
                     <span className="muted" style={{ fontSize: '0.8rem' }}>
                       Refunded {formatAmount(campaign.refundedAmount, campaign.assetCode)}
@@ -231,15 +261,24 @@ export function ContributorProfile() {
       {profile.refundHistory.length > 0 && (
         <div style={{ marginBottom: 40 }}>
           <div className="section-heading">
-            <h2><History size={20} /> Refund History</h2>
-            <p className="muted">{profile.refundHistory.length} refund{profile.refundHistory.length !== 1 ? 's' : ''}</p>
+            <h2>
+              <History size={20} /> Refund History
+            </h2>
+            <p className="muted">
+              {profile.refundHistory.length} refund{profile.refundHistory.length !== 1 ? 's' : ''}
+            </p>
           </div>
           <div style={{ display: 'grid', gap: 8 }}>
             {profile.refundHistory.map((refund, index) => (
               <div
                 key={`${refund.campaignId}-${refund.refundedAt}-${index}`}
                 className="card"
-                style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                style={{
+                  padding: '12px 20px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
               >
                 <div>
                   <span style={{ fontWeight: 500 }}>{refund.title}</span>

@@ -34,8 +34,14 @@ const envSchema = z.object({
     .regex(/^\d+$/, 'DEFAULT_MAX_PER_CONTRIBUTOR must be a non-negative integer')
     .optional()
     .describe('default: 0 (no limit)'),
-  WEBHOOK_URL: z.string().optional().describe('Configurable webhook URL for status change notifications'),
-  WEBHOOK_SECRET: z.string().optional().describe('Secret used to compute HMAC-SHA256 signature in X-GoalVault-Signature header'),
+  WEBHOOK_URL: z
+    .string()
+    .optional()
+    .describe('Configurable webhook URL for status change notifications'),
+  WEBHOOK_SECRET: z
+    .string()
+    .optional()
+    .describe('Secret used to compute HMAC-SHA256 signature in X-GoalVault-Signature header'),
 });
 
 export function validateEnv(): void {
