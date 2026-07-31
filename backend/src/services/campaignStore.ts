@@ -265,23 +265,6 @@ export function initCampaignStore(): void {
   initDb();
 }
 
-function checkContributorLimit(
-  campaign: CampaignRecord,
-  contributor: string,
-  amount: number,
-): void {
-  if (campaign.maxPerContributor !== undefined && campaign.maxPerContributor > 0) {
-    const existingPledged = getContributorPledgedTotal(campaign.id, contributor);
-    if (existingPledged + amount > campaign.maxPerContributor) {
-      throw toServiceError(
-        'Pledge exceeds maximum allowed per contributor.',
-        400,
-        'MAX_PER_CONTRIBUTOR_EXCEEDED',
-      );
-    }
-  }
-}
-
 /**
  * Derives the current progress and lifecycle state of a campaign.
  *

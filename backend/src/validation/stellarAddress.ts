@@ -42,6 +42,7 @@ function base32Decode(input: string): Uint8Array | null {
     if (bitsLeft >= 8) {
       bitsLeft -= 8;
       output[outIdx++] = (buffer >> bitsLeft) & 0xff;
+      buffer &= (1 << bitsLeft) - 1; // clear consumed bits to prevent 32-bit overflow
     }
   }
 
