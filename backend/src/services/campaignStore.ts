@@ -138,6 +138,51 @@ function round(value: number): number {
   return Number(value.toFixed(2));
 }
 
+function levenshtein(a: string, b: string): number {
+  const an = a.length;
+  const bn = b.length;
+  if (an === 0) return bn;
+  if (bn === 0) return an;
+  const matrix: number[] = new Array(bn + 1);
+  for (let i = 0; i <= bn; i++) matrix[i] = i;
+  for (let i = 1; i <= an; i++) {
+    let prev = i;
+    for (let j = 1; j <= bn; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const val = Math.min(
+        prev + 1,
+        matrix[j] + 1,
+        matrix[j - 1] + cost,
+      );
+      matrix[j - 1] = prev;
+      prev = val;
+    }
+    matrix[bn] = prev;
+  }
+  return matrix[bn];
+}
+
+export function findNearDuplicate(
+  title: string,
+  creator: string,
+): { campaignId: string; title: string; distance: number } | undefined {
+  const db = getDb();
+  const twentyFourHoursAgo = nowInSeconds() - 60 * 60 * 24;
+  const rows = db
+    .prepare(
+      `SELECT id, title FROM campaigns WHERE creator = ? AND created_at >= ? AND deleted_at IS NULL`,
+    )
+    .all(creator, twentyFourHoursAgo) as Array<{ id: string; title: string }>;
+
+  for (const row of rows) {
+    const distance = levenshtein(title.trim().toLowerCase(), row.title.trim().toLowerCase());
+    if (distance < 5) {
+      return { campaignId: row.id, title: row.title, distance };
+    }
+  }
+  return undefined;
+}
+
 function rowToCampaign(row: CampaignRow): CampaignRecord {
   const acceptedTokens = JSON.parse(row.accepted_tokens_json);
   return {
