@@ -991,8 +991,13 @@ function isErrorWithType(error: unknown, type: string): boolean {
   return typeof error === 'object' && error !== null && (error as { type?: string }).type === type;
 }
 
+import opentelemetry from '@opentelemetry/api';
+
 app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) => {
   void next;
+  const currentSpan = opentelemetry.trace.getSpan(opentelemetry.context.active());
+  const traceId = currentSpan?.spanContext().traceId;
+
   if (isErrorWithType(err, 'entity.too.large')) {
     return res.status(413).json({
       success: false,
@@ -1024,6 +1029,7 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
       code,
       message: isErrorWithMessage(err) ? err.message : 'An unexpected error occurred',
       requestId: (req as RequestWithId).requestId,
+      traceId,
     },
   };
 
@@ -1041,6 +1047,7 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
     {
       event: 'request_error',
       requestId: (req as RequestWithId).requestId,
+      traceId,
       method: req.method,
       path: req.originalUrl || req.path,
       status: statusCode,
