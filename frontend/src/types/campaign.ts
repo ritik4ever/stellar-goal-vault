@@ -1,5 +1,19 @@
 export type CampaignStatus = 'open' | 'funded' | 'claimed' | 'failed';
 
+export type NotificationType = 'new_pledge' | 'campaign_funded' | 'refund_available' | 'creator_update';
+
+export interface NotificationItem {
+  id: number;
+  campaignId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  targetWallet: string;
+  actorWallet?: string;
+  isRead: boolean;
+  createdAt: number;
+}
+
 export interface CampaignProgress {
   status: CampaignStatus;
   percentFunded: number;

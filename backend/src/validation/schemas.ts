@@ -612,3 +612,43 @@ export function normalizeQueryValue(value: unknown): string | undefined {
   const trimmed = value.trim();
   return trimmed === '' ? undefined : trimmed;
 }
+
+export const COMMENT_ID_REGEX = /^[1-9]\d*$/;
+
+export const commentIdSchema = z
+  .string()
+  .trim()
+  .regex(COMMENT_ID_REGEX, 'Comment ID must be a positive integer.');
+
+export const createCommentPayloadSchema = z.object({
+  author: stellarAccountIdSchema,
+  content: z
+    .string()
+    .trim()
+    .min(1, 'Comment content cannot be empty.')
+    .max(500, 'Comment content cannot exceed 500 characters.'),
+});
+
+export const deleteCommentPayloadSchema = z.object({
+  requestor: stellarAccountIdSchema,
+});
+
+export function parseCommentListPaginationQuery(query: {
+  page?: unknown;
+  limit?: unknown;
+}): { ok: true; page: number; limit: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const parsedPage = parsePositiveIntegerQueryParam(query.page, 'page');
+  const parsedLimit = parsePositiveIntegerQueryParam(query.limit, 'limit', 100);
+  const issues: z.core.$ZodIssue[] = [];
+
+  if (!parsedPage.ok) issues.push(...parsedPage.issues);
+  if (!parsedLimit.ok) issues.push(...parsedLimit.issues);
+
+  if (issues.length > 0) return { ok: false, issues };
+
+  return {
+    ok: true,
+    page: parsedPage.ok ? (parsedPage.value ?? 1) : 1,
+    limit: parsedLimit.ok ? (parsedLimit.value ?? 20) : 20,
+  };
+}

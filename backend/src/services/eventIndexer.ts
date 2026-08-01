@@ -41,8 +41,7 @@ function getLastProcessedLedger(): number {
   try {
     const db = getDb();
     const row = db.prepare(`SELECT value FROM kv_store WHERE key = ?`).get(LAST_LEDGER_KEY) as
-      | { value: string }
-      | undefined;
+      { value: string } | undefined;
     return row ? Number(row.value) : 0;
   } catch {
     return 0;
@@ -169,9 +168,7 @@ function parseSorobanEvent(event: SorobanEvent): ParsedEvent | null {
   if (event.type !== 'contract' || event.contract_id !== CONTRACT_ID) return null;
 
   // Determine event type from topics
-  const topics: string[] = Array.isArray(event.topic)
-    ? event.topic.map((t) => String(t))
-    : [];
+  const topics: string[] = Array.isArray(event.topic) ? event.topic.map((t) => String(t)) : [];
 
   let eventType: CampaignEventType | undefined;
   for (const topic of topics) {
@@ -244,12 +241,18 @@ function parseSorobanEvent(event: SorobanEvent): ParsedEvent | null {
 function handleParsedEvent(parsed: ParsedEvent): void {
   try {
     if (parsed.eventType === 'metadata_updated') {
-      const newMetadata = String((parsed.metadata as { new_metadata?: unknown })?.new_metadata ?? '');
+      const newMetadata = String(
+        (parsed.metadata as { new_metadata?: unknown })?.new_metadata ?? '',
+      );
       if (newMetadata && parsed.campaignId) {
         try {
           updateCampaignMetadata(parsed.campaignId, newMetadata);
         } catch (err) {
-          logError(err, { event: 'soroban_metadata_update_error', campaignId: parsed.campaignId }, config.logLevel);
+          logError(
+            err,
+            { event: 'soroban_metadata_update_error', campaignId: parsed.campaignId },
+            config.logLevel,
+          );
         }
       }
     }
@@ -283,7 +286,11 @@ function handleParsedEvent(parsed: ParsedEvent): void {
           // TRANSACTION_HASH_CONFLICT means already reconciled — that's fine
           const errorWithCode = reconcileErr as { code?: string };
           if (errorWithCode?.code !== 'TRANSACTION_HASH_CONFLICT') {
-            logError(reconcileErr, { event: 'soroban_reconcile_error', campaignId: parsed.campaignId }, config.logLevel);
+            logError(
+              reconcileErr,
+              { event: 'soroban_reconcile_error', campaignId: parsed.campaignId },
+              config.logLevel,
+            );
           }
           return; // Don't double-record the event
         }
@@ -316,7 +323,11 @@ function handleParsedEvent(parsed: ParsedEvent): void {
   } catch (err) {
     logError(
       err,
-      { event: 'soroban_event_handle_error', campaignId: parsed.campaignId, eventType: parsed.eventType },
+      {
+        event: 'soroban_event_handle_error',
+        campaignId: parsed.campaignId,
+        eventType: parsed.eventType,
+      },
       config.logLevel,
     );
   }

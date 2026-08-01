@@ -45,8 +45,8 @@ export function validateEnv(): void {
     const missing = result.error.issues.map(
       (issue) => `  - ${issue.path.join('.')}: ${issue.message}`,
     );
-    // eslint-disable-next-line no-console
-    console.error(
+    const { logger } = require('./logger');
+    logger.error(
       `\n[startup] Environment validation failed. Fix the following before starting:\n${missing.join('\n')}\n`,
     );
     process.exit(1);

@@ -51,6 +51,9 @@ Architecture decision records
 - See `adr/0001-sqlite-off-chain-mvp.md` for the SQLite off-chain MVP decision.
 - See `adr/0002-react-express-mvp.md` for the React + Express + Soroban MVP architecture decision.
 - See `adr/0003-freighter-wallet-integration.md` for the Freighter wallet signing approach.
+- See `adr/0004-sqlite-mvp-postgresql-migration.md` for the SQLite / PostgreSQL database decision.
+- See `adr/0005-soroban-smart-contract-platform.md` for the Soroban smart contract platform decision.
+- See `adr/0006-multi-token-design.md` for the multi-token campaign design decision.
 
 ## TypeScript Bindings
 

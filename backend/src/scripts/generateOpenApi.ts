@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { stringify } from 'yaml';
 import { generateOpenApiDocument } from '../openapi';
+import { logger } from '../logger';
 
 const distDir = path.resolve(__dirname, '..', '..', 'dist');
 const docsDir = path.resolve(__dirname, '..', '..', '..', 'docs');

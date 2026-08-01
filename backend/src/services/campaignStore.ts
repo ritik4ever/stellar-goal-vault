@@ -1,5 +1,6 @@
 import { getDb, initDb } from './db';
 import { getCampaignHistory, recordEvent, BlockchainMetadata } from './eventHistory';
+import { createNotification } from './notificationService';
 import { dispatchWebhook } from './webhookService';
 
 export type CampaignStatus = 'open' | 'funded' | 'claimed' | 'failed';
@@ -23,6 +24,7 @@ export interface PledgeInput {
   contributor: string;
   amount: number;
   assetCode?: string; // Optional for backward compatibility if only one token
+  tokenId?: string; // Canonical token identifier (code:issuer for classic; contract addr for native). Falls back to assetCode if missing.
 }
 
 export interface ReconciledPledgeInput extends PledgeInput {
@@ -69,6 +71,7 @@ export interface PledgeRecord {
   contributor: string;
   amount: number;
   assetCode: string;
+  tokenId?: string; // Canonical token identifier
   createdAt: number;
   refundedAt?: number;
   transactionHash?: string;
@@ -109,6 +112,7 @@ interface PledgeRow {
   contributor: string;
   amount: number;
   asset_code: string;
+  token_id: string | null;
   created_at: number;
   refunded_at: number | null;
   transaction_hash: string | null;
@@ -166,6 +170,7 @@ function rowToPledge(row: PledgeRow): PledgeRecord {
     contributor: row.contributor,
     amount: row.amount,
     assetCode: row.asset_code,
+    tokenId: row.token_id ?? row.asset_code,
     createdAt: row.created_at,
     refundedAt: row.refunded_at ?? undefined,
     transactionHash: row.transaction_hash ?? undefined,
@@ -360,39 +365,41 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const whereClauses: string[] = [];
   const params: (string | number)[] = [];
 
-if (options?.searchQuery && options.searchQuery.trim()) {
-  const rawQuery = options.searchQuery.trim();
-  
-  // Fixes CodeRabbit: Sanitize/escape special characters so FTS5 MATCH doesn't syntax crash
-  const cleanQuery = rawQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
-  const ftsMatchTerm = cleanQuery ? `${cleanQuery}*` : '';
+  if (options?.searchQuery && options.searchQuery.trim()) {
+    const rawQuery = options.searchQuery.trim();
 
-  // Fixes CodeRabbit: Use exact matching for creator public key instead of a slow LIKE scan
-  const creatorExactTerm = rawQuery; 
-  const exactTerm = rawQuery;
+    // Fixes CodeRabbit: Sanitize/escape special characters so FTS5 MATCH doesn't syntax crash
+    const cleanQuery = rawQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
+    const ftsMatchTerm = cleanQuery ? `${cleanQuery}*` : '';
 
-  if (ftsMatchTerm) {
-    whereClauses.push(`(
+    // Fixes CodeRabbit: Use exact matching for creator public key instead of a slow LIKE scan
+    const creatorExactTerm = rawQuery;
+    const exactTerm = rawQuery;
+
+    if (ftsMatchTerm) {
+      whereClauses.push(`(
       campaigns.id IN (SELECT id FROM campaigns_fts WHERE campaigns_fts MATCH ?)
       OR LOWER(campaigns.creator) = LOWER(?)
       OR campaigns.id = ?
     )`);
-    params.push(ftsMatchTerm, creatorExactTerm, exactTerm);
-  } else {
-    // Fallback if cleaning the query stripped all characters
-    whereClauses.push(`(LOWER(campaigns.creator) = LOWER(?) OR campaigns.id = ?)`);
-    params.push(creatorExactTerm, exactTerm);
+      params.push(ftsMatchTerm, creatorExactTerm, exactTerm);
+    } else {
+      // Fallback if cleaning the query stripped all characters
+      whereClauses.push(`(LOWER(campaigns.creator) = LOWER(?) OR campaigns.id = ?)`);
+      params.push(creatorExactTerm, exactTerm);
+    }
   }
-}
   if (options?.assetCode) {
     whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);
   }
 
   if (options?.assetCodes && options.assetCodes.length > 0) {
-    const conditions = options.assetCodes.map(() => `campaigns.accepted_tokens_json LIKE ?`).join(' OR ');
+    const conditions = options.assetCodes
+      .map(() => `campaigns.accepted_tokens_json LIKE ?`)
+      .join(' OR ');
     whereClauses.push(`(${conditions})`);
-    options.assetCodes.forEach(code => {
+    options.assetCodes.forEach((code) => {
       params.push(`%${code.toUpperCase()}%`);
     });
   }
@@ -479,21 +486,18 @@ if (options?.searchQuery && options.searchQuery.trim()) {
     void _pledgeCount;
 
     const now = nowInMilliseconds();
-    if (
-      campaignRow.claimed_at === null &&
-      campaignRow.pledged_amount < campaignRow.target_amount &&
-      now > campaignRow.deadline * 1000 &&
-      campaignRow.failed_at === null
-    ) {
-        campaignRow.failed_at = campaignRow.deadline;
-        db.prepare(`UPDATE campaigns SET failed_at = ? WHERE id = ?`).run(campaignRow.deadline, campaignRow.id);
-        void dispatchWebhook('campaign_failed', campaignRow.id, {
-          pledgedAmount: campaignRow.pledged_amount,
-          targetAmount: campaignRow.target_amount,
-          deadline: campaignRow.deadline,
-        });
+    const failResult = db.prepare(
+      `UPDATE campaigns SET failed_at = ? WHERE id = ? AND failed_at IS NULL AND claimed_at IS NULL AND pledged_amount < target_amount AND deadline * 1000 < ?`,
+    ).run(campaignRow.deadline, campaignRow.id, now);
+    if (failResult.changes === 1) {
+      campaignRow.failed_at = campaignRow.deadline;
+      void dispatchWebhook('campaign_failed', campaignRow.id, {
+        pledgedAmount: campaignRow.pledged_amount,
+        targetAmount: campaignRow.target_amount,
+        deadline: campaignRow.deadline,
+      });
     }
-    
+
     return rowToCampaign(campaignRow as CampaignRow);
   });
 
@@ -513,24 +517,20 @@ if (options?.searchQuery && options.searchQuery.trim()) {
 export function getCampaign(campaignId: string): CampaignRecord | undefined {
   const db = getDb();
   const row = db.prepare(`SELECT * FROM campaigns WHERE id = ?`).get(campaignId) as
-    | CampaignRow
-    | undefined;
+    CampaignRow | undefined;
 
   if (row) {
     const now = nowInMilliseconds();
-    if (
-      row.claimed_at === null &&
-      row.pledged_amount < row.target_amount &&
-      now > row.deadline * 1000 &&
-      row.failed_at === null
-    ) {
-        row.failed_at = row.deadline;
-        db.prepare(`UPDATE campaigns SET failed_at = ? WHERE id = ?`).run(row.deadline, row.id);
-        void dispatchWebhook('campaign_failed', row.id, {
-          pledgedAmount: row.pledged_amount,
-          targetAmount: row.target_amount,
-          deadline: row.deadline,
-        });
+    const failResult = db.prepare(
+      `UPDATE campaigns SET failed_at = ? WHERE id = ? AND failed_at IS NULL AND claimed_at IS NULL AND pledged_amount < target_amount AND deadline * 1000 < ?`,
+    ).run(row.deadline, row.id, now);
+    if (failResult.changes === 1) {
+      row.failed_at = row.deadline;
+      void dispatchWebhook('campaign_failed', row.id, {
+        pledgedAmount: row.pledged_amount,
+        targetAmount: row.target_amount,
+        deadline: row.deadline,
+      });
     }
     const campaign = rowToCampaign(row);
     campaign.tokenBalances = getCampaignTokenBalances(campaignId);
@@ -597,9 +597,7 @@ export function listCampaignPledges(
  * @returns An array of {@link ContributorSummary} objects sorted by total pledged (descending),
  *          or an empty array if the campaign does not exist.
  */
-export function getContributorSummary(
-  campaignId: string,
-): ContributorSummary[] {
+export function getContributorSummary(campaignId: string): ContributorSummary[] {
   const db = getDb();
   const rows = db
     .prepare(
@@ -689,7 +687,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     title: input.title.trim(),
     description: input.description.trim(),
     acceptedTokens,
-    assetCode: acceptedTokens[0] || "",
+    assetCode: acceptedTokens[0] || '',
     targetAmount: round(input.targetAmount),
     pledgedAmount: 0,
     deadline: input.deadline,
@@ -758,10 +756,21 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
   }
 
   const assetCode = (input.assetCode || campaign.assetCode).toUpperCase();
+  const tokenId = input.tokenId || assetCode;
 
-  if (!campaign.acceptedTokens.includes(assetCode)) {
+  const isTokenAccepted = campaign.acceptedTokens.some((accepted) => {
+    // Direct canonical token ID match (CODE:ISSUER or contract address)
+    if (accepted === tokenId) return true;
+    // If accepted entry has no issuer component (legacy asset-code-only), fall back to assetCode
+    if (!accepted.includes(':')) {
+      return accepted === assetCode;
+    }
+    // Match by asset code portion of canonical ID for backward compatibility
+    return accepted.split(':')[0] === assetCode;
+  });
+  if (!isTokenAccepted) {
     throw toServiceError(
-      `Asset ${assetCode} is not accepted by this campaign.`,
+      `Token ${tokenId} is not accepted by this campaign.`,
       400,
       'INVALID_ASSET',
     );
@@ -892,15 +901,33 @@ export function reconcileOnChainPledge(
     throw toServiceError('Campaign not found.', 404, 'NOT_FOUND');
   }
 
+  const db = getDb();
+  const createdAt = input.confirmedAt ?? nowInSeconds();
+  const roundedAmount = round(input.amount);
+  const assetCode = (input.assetCode || campaign.assetCode).toUpperCase();
+  const tokenId = input.tokenId || assetCode;
+
+  const isTokenAccepted = campaign.acceptedTokens.some((accepted) => {
+    if (accepted === tokenId) return true;
+    if (!accepted.includes(':')) {
+      return accepted === assetCode;
+    }
+    return accepted.split(':')[0] === assetCode;
+  });
+  if (!isTokenAccepted) {
+    throw toServiceError(
+      `Token ${tokenId} is not accepted by this campaign.`,
+      400,
+      'INVALID_ASSET',
+    );
+  }
+
   const progress = calculateProgress(campaign);
   if (!progress.canPledge) {
     throw toServiceError('Campaign is no longer accepting pledges.', 400, 'INVALID_CAMPAIGN_STATE');
   }
 
-  const db = getDb();
-  const createdAt = input.confirmedAt ?? nowInSeconds();
-  const roundedAmount = round(input.amount);
-  const assetCode = (input.assetCode || campaign.assetCode).toUpperCase();
+
 
   const insertedNewPledge = db.transaction(() => {
     // Re-check contributor limit within transaction to prevent race conditions
@@ -930,14 +957,15 @@ export function reconcileOnChainPledge(
     const result = db
       .prepare(
         `INSERT OR IGNORE INTO pledges (
-          campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash
-        ) VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+          campaign_id, contributor, amount, asset_code, token_id, created_at, refunded_at, transaction_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
       )
       .run(
         campaignId,
         input.contributor,
         roundedAmount,
         assetCode,
+        tokenId,
         createdAt,
         input.transactionHash,
       );
@@ -986,6 +1014,17 @@ export function reconcileOnChainPledge(
       } as BlockchainMetadata,
     );
 
+    if (campaign.creator !== input.contributor) {
+      createNotification({
+        campaignId,
+        type: 'new_pledge',
+        title: `New on-chain pledge on "${campaign.title}"`,
+        body: `${input.contributor.slice(0, 8)}… pledged ${roundedAmount} ${assetCode} (on-chain)`,
+        targetWallet: campaign.creator,
+        actorWallet: input.contributor,
+      });
+    }
+
     const wasFunded = campaign.pledgedAmount >= campaign.targetAmount;
     const isFunded = nextPledgedAmount >= campaign.targetAmount;
     if (!wasFunded && isFunded) {
@@ -994,6 +1033,13 @@ export function reconcileOnChainPledge(
         targetAmount: campaign.targetAmount,
         assetCode,
         onChain: true,
+      });
+      createNotification({
+        campaignId,
+        type: 'campaign_funded',
+        title: `"${campaign.title}" is funded!`,
+        body: `Campaign reached its goal of ${campaign.targetAmount} ${assetCode}`,
+        targetWallet: campaign.creator,
       });
     }
 
@@ -1022,7 +1068,8 @@ export function getGlobalStats(at = nowInMilliseconds()): GlobalStats {
         SUM(CASE WHEN claimed_at IS NULL AND pledged_amount >= target_amount THEN 1 ELSE 0 END) AS funded_count,
         SUM(CASE WHEN claimed_at IS NULL AND pledged_amount < target_amount AND deadline * 1000 < ? THEN 1 ELSE 0 END) AS failed_count,
         SUM(CASE WHEN claimed_at IS NULL AND pledged_amount < target_amount AND deadline * 1000 >= ? THEN 1 ELSE 0 END) AS open_count,
-        COALESCE(SUM(pledged_amount), 0) AS total_pledged
+        COALESCE(SUM(pledged_amount), 0) AS total_pledged,
+        COALESCE(AVG(CASE WHEN target_amount > 0 THEN (pledged_amount / target_amount) * 100 ELSE NULL END), 0) AS avg_funding_rate_pct
       FROM campaigns`,
     )
     .get(at, at) as {
@@ -1277,6 +1324,13 @@ export function refundContributor(
     refundedPledgeCount: refundablePledges.length,
     refundedAt,
   });
+  createNotification({
+    campaignId,
+    type: 'refund_available',
+    title: `Refund processed for "${campaign.title}"`,
+    body: `${refundedAmount} ${campaign.assetCode} has been refunded to your wallet`,
+    targetWallet: contributor,
+  });
 
   return {
     campaign: getCampaign(campaignId)!,
@@ -1298,16 +1352,16 @@ export function getCampaignTokenBalances(campaignId: string): Record<string, num
   const db = getDb();
   const rows = db
     .prepare(
-      `SELECT asset_code, COALESCE(SUM(amount), 0) AS balance
+      `SELECT COALESCE(token_id, asset_code) AS token_id, COALESCE(SUM(amount), 0) AS balance
        FROM pledges
        WHERE campaign_id = ? AND refunded_at IS NULL
-       GROUP BY asset_code`,
+       GROUP BY COALESCE(token_id, asset_code)`,
     )
-    .all(campaignId) as Array<{ asset_code: string; balance: number }>;
+    .all(campaignId) as Array<{ token_id: string; balance: number }>;
 
   const result: Record<string, number> = {};
   for (const row of rows) {
-    result[row.asset_code] = round(row.balance);
+    result[row.token_id] = round(row.balance);
   }
   return result;
 }
@@ -1323,7 +1377,9 @@ export function updateCampaign(
   const db = getDb();
   const campaign = getCampaign(campaignId);
   if (!campaign) {
-    throw Object.assign(new Error(`Campaign ${campaignId} not found`), { code: 'CAMPAIGN_NOT_FOUND' });
+    throw Object.assign(new Error(`Campaign ${campaignId} not found`), {
+      code: 'CAMPAIGN_NOT_FOUND',
+    });
   }
 
   const updates: string[] = [];

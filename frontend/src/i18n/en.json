@@ -1,0 +1,22 @@
+{
+  "app": {
+    "eyebrow": "Stellar Goal Vault",
+    "title": "Campaign control center",
+    "description": "Create campaigns, manage pledges, and track funding milestones as they move through the Stellar goal vault lifecycle.",
+    "metrics": {
+      "total": "Total campaigns",
+      "open": "Open campaigns",
+      "funded": "Funded campaigns",
+      "claimed": "Claimed campaigns",
+      "pledged": "Total pledged"
+    },
+    "controls": {
+      "lightMode": "Light mode",
+      "darkMode": "Dark mode",
+      "shortcuts": "Shortcuts"
+    },
+    "footer": {
+      "language": "Language"
+    }
+  }
+}

@@ -10,21 +10,42 @@ function noop() {}
 describe('WalletWidget', () => {
   it('shows detecting state while checking', () => {
     render(
-      <WalletWidget status="checking" publicKey={null} error={null} network={null} onConnect={noop} onDisconnect={noop} />,
+      <WalletWidget
+        status="checking"
+        publicKey={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+      />,
     );
     expect(screen.getByText(/Detecting wallet/i)).toBeTruthy();
   });
 
   it('shows install link when freighter is unavailable', () => {
     render(
-      <WalletWidget status="unavailable" publicKey={null} error={null} network={null} onConnect={noop} onDisconnect={noop} />,
+      <WalletWidget
+        status="unavailable"
+        publicKey={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+      />,
     );
     expect(screen.getByText(/Install Freighter/i)).toBeTruthy();
   });
 
   it('shows connect button when available and not connected', () => {
     render(
-      <WalletWidget status="available" publicKey={null} error={null} network={null} onConnect={noop} onDisconnect={noop} />,
+      <WalletWidget
+        status="available"
+        publicKey={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+      />,
     );
     expect(screen.getByRole('button', { name: /Connect Freighter/i })).toBeTruthy();
   });
@@ -32,7 +53,14 @@ describe('WalletWidget', () => {
   it('calls onConnect when connect button is clicked', () => {
     const onConnect = vi.fn();
     render(
-      <WalletWidget status="available" publicKey={null} error={null} network={null} onConnect={onConnect} onDisconnect={noop} />,
+      <WalletWidget
+        status="available"
+        publicKey={null}
+        error={null}
+        network={null}
+        onConnect={onConnect}
+        onDisconnect={noop}
+      />,
     );
     fireEvent.click(screen.getByRole('button', { name: /Connect Freighter/i }));
     expect(onConnect).toHaveBeenCalledTimes(1);
@@ -40,7 +68,14 @@ describe('WalletWidget', () => {
 
   it('renders connected pill with truncated address and network badge', () => {
     render(
-      <WalletWidget status="connected" publicKey={PUBLIC_KEY} error={null} network="Testnet" onConnect={noop} onDisconnect={noop} />,
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        error={null}
+        network="Testnet"
+        onConnect={noop}
+        onDisconnect={noop}
+      />,
     );
     expect(screen.getByText('GBBD…LFLA')).toBeTruthy();
     expect(screen.getByText('Testnet')).toBeTruthy();
@@ -48,7 +83,14 @@ describe('WalletWidget', () => {
 
   it('renders mainnet badge with mainnet passphrase', () => {
     render(
-      <WalletWidget status="connected" publicKey={PUBLIC_KEY} error={null} network="Mainnet" onConnect={noop} onDisconnect={noop} />,
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        error={null}
+        network="Mainnet"
+        onConnect={noop}
+        onDisconnect={noop}
+      />,
     );
     const badge = screen.getByText('Mainnet');
     expect(badge.className).toContain('wallet-widget__network-badge--mainnet');
@@ -56,7 +98,14 @@ describe('WalletWidget', () => {
 
   it('renders disconnect button that is keyboard accessible', () => {
     render(
-      <WalletWidget status="connected" publicKey={PUBLIC_KEY} error={null} network="Testnet" onConnect={noop} onDisconnect={noop} />,
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        error={null}
+        network="Testnet"
+        onConnect={noop}
+        onDisconnect={noop}
+      />,
     );
     const btn = screen.getByRole('button', { name: /Disconnect wallet/i });
     expect(btn).toBeTruthy();
@@ -65,7 +114,14 @@ describe('WalletWidget', () => {
   it('calls onDisconnect when disconnect button is clicked', () => {
     const onDisconnect = vi.fn();
     render(
-      <WalletWidget status="connected" publicKey={PUBLIC_KEY} error={null} network="Testnet" onConnect={noop} onDisconnect={onDisconnect} />,
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        error={null}
+        network="Testnet"
+        onConnect={noop}
+        onDisconnect={onDisconnect}
+      />,
     );
     fireEvent.click(screen.getByRole('button', { name: /Disconnect wallet/i }));
     expect(onDisconnect).toHaveBeenCalledTimes(1);
@@ -73,7 +129,14 @@ describe('WalletWidget', () => {
 
   it('shows error message alongside connect button', () => {
     render(
-      <WalletWidget status="available" publicKey={null} error="Wallet error occurred" network={null} onConnect={noop} onDisconnect={noop} />,
+      <WalletWidget
+        status="available"
+        publicKey={null}
+        error="Wallet error occurred"
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+      />,
     );
     expect(screen.getByText(/Wallet error occurred/i)).toBeTruthy();
   });

@@ -27,11 +27,7 @@ export function useToast() {
   }, []);
 
   const addToast = useCallback(
-    (
-      message: string,
-      variant: ToastVariant = 'info',
-      link?: { href: string; label: string },
-    ) => {
+    (message: string, variant: ToastVariant = 'info', link?: { href: string; label: string }) => {
       const id = crypto.randomUUID();
       setToasts((prev) => {
         const next = [...prev, { id, message, variant, link }];
