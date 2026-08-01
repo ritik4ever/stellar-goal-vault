@@ -14,21 +14,11 @@ function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max - 1) + '…' : text;
 }
 
-function loadImage(url: string): Promise<HTMLImageElement | null> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
-}
-
-async function drawCard(
+function drawCard(
   ctx: CanvasRenderingContext2D,
   campaign: Campaign,
   brandLogoUrl?: string,
-): Promise<void> {
+): void {
   const w = CANVAS_W;
   const h = CANVAS_H;
 
@@ -63,14 +53,17 @@ async function drawCard(
   ctx.fillText('STELLAR GOAL VAULT', barX, 60);
 
   if (brandLogoUrl) {
-    const img = await loadImage(brandLogoUrl);
-    if (img) {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = brandLogoUrl;
       ctx.save();
       ctx.beginPath();
       ctx.arc(w - 60, 60, 24, 0, Math.PI * 2);
       ctx.clip();
       ctx.drawImage(img, w - 84, 36, 48, 48);
       ctx.restore();
+    } catch {
     }
   }
 
@@ -156,50 +149,38 @@ async function drawCard(
 export function useCampaignShareCard() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const generate = useCallback(
-    async (campaign: Campaign, brandLogoUrl?: string): Promise<HTMLCanvasElement> => {
-      const canvas = document.createElement('canvas');
-      canvas.width = CANVAS_W;
-      canvas.height = CANVAS_H;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Canvas 2D context unavailable');
-      await drawCard(ctx, campaign, brandLogoUrl);
-      canvasRef.current = canvas;
-      return canvas;
-    },
-    [],
-  );
+  const generate = useCallback((campaign: Campaign, brandLogoUrl?: string): HTMLCanvasElement => {
+    const canvas = document.createElement('canvas');
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D context unavailable');
+    drawCard(ctx, campaign, brandLogoUrl);
+    canvasRef.current = canvas;
+    return canvas;
+  }, []);
 
-  const downloadPng = useCallback(
-    async (campaign: Campaign, brandLogoUrl?: string): Promise<void> => {
-      const canvas = await generate(campaign, brandLogoUrl);
-      const link = document.createElement('a');
-      link.download = `campaign_share_${campaign.id}.png`;
-      link.href = canvas.toDataURL('image/png');
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    },
-    [generate],
-  );
+  const downloadPng = useCallback((campaign: Campaign, brandLogoUrl?: string) => {
+    const canvas = generate(campaign, brandLogoUrl);
+    const link = document.createElement('a');
+    link.download = `campaign_share_${campaign.id}.png`;
+    link.href = canvas.toDataURL('image/png');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [generate]);
 
-  const toDataUrl = useCallback(
-    async (campaign: Campaign, brandLogoUrl?: string): Promise<string> => {
-      const canvas = await generate(campaign, brandLogoUrl);
-      return canvas.toDataURL('image/png');
-    },
-    [generate],
-  );
+  const toDataUrl = useCallback((campaign: Campaign, brandLogoUrl?: string): string => {
+    const canvas = generate(campaign, brandLogoUrl);
+    return canvas.toDataURL('image/png');
+  }, [generate]);
 
-  const toBlob = useCallback(
-    async (campaign: Campaign, brandLogoUrl?: string): Promise<Blob | null> => {
-      const canvas = await generate(campaign, brandLogoUrl);
-      return new Promise((resolve) => {
-        canvas.toBlob((blob) => resolve(blob), 'image/png');
-      });
-    },
-    [generate],
-  );
+  const toBlob = useCallback(async (campaign: Campaign, brandLogoUrl?: string): Promise<Blob | null> => {
+    const canvas = generate(campaign, brandLogoUrl);
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), 'image/png');
+    });
+  }, [generate]);
 
   return { generate, downloadPng, toDataUrl, toBlob };
 }

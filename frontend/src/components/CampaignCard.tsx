@@ -3,6 +3,7 @@ import { Link } from 'lucide-react';
 import { Campaign } from '../types/campaign';
 import AddressAvatar from './AddressAvatar';
 import CopyButton from './CopyButton';
+import { Countdown } from './Countdown';
 
 interface CampaignCardProps {
   campaign: Campaign;
@@ -30,15 +31,16 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
     setImageError(false);
   }, [campaign.id]);
 
-  const formatTimestamp = (unixSeconds: number) => new Date(unixSeconds * 1000).toLocaleString();
-
   const handleShareCampaign = () => {
     const deepLinkUrl = `${window.location.origin}${window.location.pathname}?campaign=${campaign.id}`;
-    navigator.clipboard.writeText(deepLinkUrl).then(() => {
-      // Share action complete
-    }).catch(() => {
-      // Copy failed
-    });
+    navigator.clipboard
+      .writeText(deepLinkUrl)
+      .then(() => {
+        // Share action complete
+      })
+      .catch(() => {
+        // Copy failed
+      });
   };
 
   return (
@@ -77,11 +79,7 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
             <strong className="campaign-title">{campaign.title}</strong>
             <div className="muted" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span>#{campaign.id}</span>
-              <CopyButton
-                value={campaign.id}
-                ariaLabel="Copy campaign ID"
-                className="small"
-              />
+              <CopyButton value={campaign.id} ariaLabel="Copy campaign ID" className="small" />
               <button
                 type="button"
                 onClick={handleShareCampaign}
@@ -132,9 +130,10 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
             <div className="token-progress-list" aria-label="Per-token progress">
               {campaign.acceptedTokens.map((token) => {
                 const balance = campaign.tokenBalances![token] ?? 0;
-                const pct = campaign.targetAmount > 0
-                  ? Math.min(Math.round((balance / campaign.targetAmount) * 100), 100)
-                  : 0;
+                const pct =
+                  campaign.targetAmount > 0
+                    ? Math.min(Math.round((balance / campaign.targetAmount) * 100), 100)
+                    : 0;
                 return (
                   <div key={token} className="token-progress-row">
                     <span className="token-label muted">{token}</span>
@@ -163,7 +162,7 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
           <span className={`badge badge-${campaign.progress.status}`}>
             {campaign.progress.status}
           </span>
-          <div className="muted">{formatTimestamp(campaign.deadline)}</div>
+          <div className="muted"><Countdown deadline={campaign.deadline} /></div>
         </div>
       </div>
 
@@ -180,10 +179,7 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
   );
 }
 
-function areEqual(
-  prevProps: CampaignCardProps,
-  nextProps: CampaignCardProps,
-): boolean {
+function areEqual(prevProps: CampaignCardProps, nextProps: CampaignCardProps): boolean {
   return (
     prevProps.campaign.id === nextProps.campaign.id &&
     prevProps.campaign.pledgedAmount === nextProps.campaign.pledgedAmount &&

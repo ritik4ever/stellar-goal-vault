@@ -1,7 +1,7 @@
 
 
 import { FormEvent, useState, useEffect, useCallback } from 'react';
-import { MousePointer2, Download, LinkIcon } from 'lucide-react';
+import { MousePointer2, Download, Link as LinkIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Campaign, AppConfig } from '../types/campaign';
 import CopyButton from './CopyButton';
@@ -9,7 +9,9 @@ import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
 import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
+import { Countdown } from './Countdown';
 import { useCampaignShareCard } from './CampaignShareCard';
+import { useToast } from '../hooks/useToast';
 import { ShareButtons } from './ShareButtons';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 import type { ToastVariant } from '../hooks/useToast';
@@ -37,21 +39,21 @@ interface CampaignDetailPanelProps {
 }
 
 const FEE_ESTIMATION_ERROR_CODES = new Set([
-  "SIMULATION_FAILED",
-  "SIMULATION_PREPARE_FAILED",
-  "SOURCE_ACCOUNT_LOAD_FAILED",
-  "STATE_RESTORE_REQUIRED",
+  'SIMULATION_FAILED',
+  'SIMULATION_PREPARE_FAILED',
+  'SOURCE_ACCOUNT_LOAD_FAILED',
+  'STATE_RESTORE_REQUIRED',
 ]);
 
 function describePledgeError(error: unknown): string {
   const code = (error as { code?: string } | null)?.code;
   if (code && FEE_ESTIMATION_ERROR_CODES.has(code)) {
-    return "Could not estimate fee. Check your connection and retry.";
+    return 'Could not estimate fee. Check your connection and retry.';
   }
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
   }
-  return "The pledge could not be completed. Please try again.";
+  return 'The pledge could not be completed. Please try again.';
 }
 
 function networkName(config: AppConfig | null | undefined): string {
@@ -92,39 +94,24 @@ export function CampaignDetailPanel({
   const [pledgeError, setPledgeError] = useState<string | null>(null);
   const [bannerImageError, setBannerImageError] = useState(false);
   const walletReady = appConfig?.walletIntegrationReady ?? false;
-  const { downloadPng } = useCampaignShareCard();
-  const notify = onToast ?? (() => {});
+  const { downloadPng, toDataUrl } = useCampaignShareCard();
+  const { addToast } = useToast();
 
-  const handleDownloadPng = useCallback(async () => {
+  const handleDownloadPng = useCallback(() => {
     if (!campaign) return;
-    await downloadPng(campaign, campaign.metadata?.imageUrl);
-    notify('Campaign card downloaded as PNG.', 'success');
-  }, [campaign, downloadPng, notify]);
+    downloadPng(campaign, campaign.metadata?.imageUrl);
+    addToast('Campaign card downloaded as PNG.', 'success');
+  }, [campaign, downloadPng, addToast]);
 
-  const handleCopyLink = useCallback(async () => {
+  const handleCopyLink = useCallback(() => {
     if (!campaign) return;
     const url = `${window.location.origin}/campaigns/${campaign.id}`;
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(url);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = url;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      }
-      notify('Campaign link copied to clipboard.', 'success', {
-        href: url,
-        label: url.slice(0, 40) + '…',
-      });
-    } catch {
-      notify('Failed to copy link.', 'error');
-    }
-  }, [campaign, notify]);
+    navigator.clipboard.writeText(url).then(() => {
+      addToast('Campaign link copied to clipboard.', 'success', { href: url, label: url.slice(0, 40) + '…' });
+    }).catch(() => {
+      addToast('Failed to copy link.', 'error');
+    });
+  }, [campaign, addToast]);
 
   useEffect(() => {
     setBannerImageError(false);
@@ -339,6 +326,10 @@ export function CampaignDetailPanel({
           <span>Active pledges</span>
           <strong>{activeCampaign.progress.pledgeCount}</strong>
         </article>
+        <article className="detail-stat">
+          <span>Time left</span>
+          <strong><Countdown deadline={activeCampaign.deadline} /></strong>
+        </article>
       </div>
 
       <ContributorSummary
@@ -368,11 +359,7 @@ export function CampaignDetailPanel({
         {activeCampaign.acceptedTokens?.length > 1 && (
           <label className="field-group">
             <span>Token</span>
-            <select
-              value={selectedToken}
-              onChange={(e) => setPledgeToken(e.target.value)}
-              required
-            >
+            <select value={selectedToken} onChange={(e) => setPledgeToken(e.target.value)} required>
               {activeCampaign.acceptedTokens.map((token) => (
                 <option key={token} value={token}>
                   {token}
@@ -493,11 +480,11 @@ export function CampaignDetailPanel({
       ) : null}
 
       <div className="share-actions">
-        <button className="btn-ghost" type="button" onClick={() => { void handleDownloadPng(); }}>
+        <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
           <Download size={16} />
           Download PNG
         </button>
-        <button className="btn-ghost" type="button" onClick={() => { void handleCopyLink(); }}>
+        <button className="btn-ghost" type="button" onClick={handleCopyLink}>
           <LinkIcon size={16} />
           Copy link
         </button>
