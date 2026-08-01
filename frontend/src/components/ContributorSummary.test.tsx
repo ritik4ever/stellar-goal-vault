@@ -46,9 +46,7 @@ describe('ContributorSummary', () => {
   it('renders loading skeleton when isLoading is true', () => {
     render(<ContributorSummary campaignId="1" assetCode="USDC" isLoading={true} />);
     expect(screen.getByText('Contributors')).toBeInTheDocument();
-    expect(screen.getByLabelText('Contributor summary')).toHaveClass(
-      'contributor-summary-loading',
-    );
+    expect(screen.getByLabelText('Contributor summary')).toHaveClass('contributor-summary-loading');
   });
 
   it('renders empty state when no contributors exist', async () => {
@@ -122,19 +120,17 @@ describe('ContributorSummary', () => {
   });
 
   it('polls for updated contributors every 30 seconds', async () => {
-    mockApiRequest
-      .mockResolvedValueOnce({ data: mockContributors })
-      .mockResolvedValueOnce({
-        data: [
-          ...mockContributors,
-          {
-            contributor: 'GNEW999888777666555444333222111000999888777666555444333222',
-            totalPledged: 200,
-            refundedAmount: 0,
-            isFullyRefunded: false,
-          },
-        ],
-      });
+    mockApiRequest.mockResolvedValueOnce({ data: mockContributors }).mockResolvedValueOnce({
+      data: [
+        ...mockContributors,
+        {
+          contributor: 'GNEW999888777666555444333222111000999888777666555444333222',
+          totalPledged: 200,
+          refundedAmount: 0,
+          isFullyRefunded: false,
+        },
+      ],
+    });
 
     render(<ContributorSummary campaignId="1" assetCode="USDC" />);
 
