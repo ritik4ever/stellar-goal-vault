@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: visual-regression-${{ github.head_ref }}
+  cancel-in-progress: true
+
 jobs:
   visual-regression:
     name: Visual regression
@@ -17,18 +21,50 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
           cache: 'npm'
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps
+        run: npx playwright install --with-deps chromium
 
       - name: Run visual regression tests
         run: npm run test:visual
+
+      - name: Generate visual diff report
+        if: failure()
+        id: visual-diff
+        run: |
+          echo 'diff_found=true' >> "$GITHUB_OUTPUT"
+          echo '### Visual Regression Results' > /tmp/visual-report.md
+          echo '' >> /tmp/visual-report.md
+          echo '| Test | Status |' >> /tmp/visual-report.md
+          echo '|------|--------|' >> /tmp/visual-report.md
+          for f in test-results/**/*.png; do
+            if [ -f "$f" ]; then
+              name=$(basename "$f" .png)
+              echo "| $name | :x: Diff detected |" >> /tmp/visual-report.md
+            fi
+          done
+          echo '' >> /tmp/visual-report.md
+          echo 'Review the uploaded artifacts for full screenshot diffs.' >> /tmp/visual-report.md
+
+      - name: Comment PR with visual diff summary
+        if: failure() && steps.visual-diff.outputs.diff_found == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/visual-report.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
 
       - name: Upload visual regression artifacts on failure
         if: failure()
