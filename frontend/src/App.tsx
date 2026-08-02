@@ -772,6 +772,7 @@ function App() {
             onClaim={handleClaim}
             onSoftDelete={handleSoftDelete}
             onRefund={handleRefund}
+            onToast={addToast}
           />
         </ErrorBoundary>
       </section>
