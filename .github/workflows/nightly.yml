@@ -1,0 +1,243 @@
+name: Nightly Integration Tests
+
+on:
+  schedule:
+    # Run at 02:00 UTC daily
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      network:
+        description: 'Stellar network to test against'
+        required: false
+        default: 'testnet'
+        type: choice
+        options:
+          - testnet
+          - futurenet
+
+jobs:
+  nightly-integration-tests:
+    runs-on: ubuntu-latest
+    name: Nightly Testnet Integration Tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: "npm"
+          cache-dependency-path: "backend/package-lock.json"
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          npm ci
+
+      - name: Run backend integration tests
+        id: backend-tests
+        run: |
+          cd backend
+          npm test -- --coverage --reporter=verbose
+        env:
+          NODE_ENV: test
+          STELLAR_NETWORK: ${{ inputs.network || 'testnet' }}
+          DB_PATH: /tmp/stellar-goal-vault-nightly.db
+        continue-on-error: true
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run frontend tests
+        id: frontend-tests
+        run: |
+          cd frontend
+          npm test -- --run
+        env:
+          NODE_ENV: test
+        continue-on-error: true
+
+      - name: Install Rust for contract tests
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Run contract tests
+        id: contract-tests
+        working-directory: contracts
+        run: cargo test --verbose
+        continue-on-error: true
+
+      - name: Collect test results
+        id: collect-results
+        if: always()
+        run: |
+          echo "## Test Results Summary" > test-summary.md
+          echo "" >> test-summary.md
+          echo "**Run Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> test-summary.md
+          echo "**Network:** ${{ inputs.network || 'testnet' }}" >> test-summary.md
+          echo "**Workflow Run:** [${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> test-summary.md
+          echo "" >> test-summary.md
+          
+          # Backend tests
+          if [ "${{ steps.backend-tests.outcome }}" == "success" ]; then
+            echo "- ✅ Backend tests: **PASSED**" >> test-summary.md
+          else
+            echo "- ❌ Backend tests: **FAILED**" >> test-summary.md
+          fi
+          
+          # Frontend tests
+          if [ "${{ steps.frontend-tests.outcome }}" == "success" ]; then
+            echo "- ✅ Frontend tests: **PASSED**" >> test-summary.md
+          else
+            echo "- ❌ Frontend tests: **FAILED**" >> test-summary.md
+          fi
+          
+          # Contract tests
+          if [ "${{ steps.contract-tests.outcome }}" == "success" ]; then
+            echo "- ✅ Contract tests: **PASSED**" >> test-summary.md
+          else
+            echo "- ❌ Contract tests: **FAILED**" >> test-summary.md
+          fi
+          
+          echo "" >> test-summary.md
+          
+          # Determine overall status
+          if [ "${{ steps.backend-tests.outcome }}" != "success" ] || \
+             [ "${{ steps.frontend-tests.outcome }}" != "success" ] || \
+             [ "${{ steps.contract-tests.outcome }}" != "success" ]; then
+            echo "test_failed=true" >> $GITHUB_OUTPUT
+            echo "**Overall Status:** ❌ FAILED" >> test-summary.md
+          else
+            echo "test_failed=false" >> $GITHUB_OUTPUT
+            echo "**Overall Status:** ✅ PASSED" >> test-summary.md
+          fi
+          
+          cat test-summary.md
+
+      - name: Upload test coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-test-coverage
+          path: |
+            backend/coverage/
+            frontend/coverage/
+          retention-days: 7
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-test-logs
+          path: |
+            test-summary.md
+          retention-days: 30
+
+      - name: Create issue on test failure
+        if: failure() && steps.collect-results.outputs.test_failed == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const testSummary = fs.readFileSync('test-summary.md', 'utf8');
+            
+            const issueBody = `${testSummary}
+            
+            ## Details
+            
+            The nightly integration tests failed. Please review the test logs and fix any issues.
+            
+            ### Actions to Take
+            1. Review the [workflow run logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            2. Check the uploaded test coverage and logs artifacts
+            3. Fix failing tests
+            4. Re-run the workflow manually to verify fixes
+            
+            ### Test Environment
+            - **Stellar Network:** ${{ inputs.network || 'testnet' }}
+            - **Node Version:** 20.x
+            - **Runner:** ubuntu-latest
+            
+            ---
+            *This issue was automatically created by the nightly integration tests workflow.*
+            `;
+            
+            // Check if there's already an open issue for nightly test failures
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'nightly-test-failure',
+              state: 'open'
+            });
+            
+            if (existingIssues.data.length > 0) {
+              // Add a comment to the existing issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssues.data[0].number,
+                body: `## New Failure Detected\n\n${issueBody}`
+              });
+              
+              console.log(`Added comment to existing issue #${existingIssues.data[0].number}`);
+            } else {
+              // Create a new issue
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Nightly Integration Tests Failed - ${new Date().toISOString().split('T')[0]}`,
+                body: issueBody,
+                labels: ['nightly-test-failure', 'bug', 'automated']
+              });
+              
+              console.log(`Created issue #${issue.data.number}`);
+            }
+
+      - name: Clean up test databases
+        if: always()
+        run: |
+          rm -f /tmp/stellar-goal-vault-*.db
+
+  notify-success:
+    runs-on: ubuntu-latest
+    needs: nightly-integration-tests
+    if: success()
+    
+    steps:
+      - name: Close related issues on success
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Find open nightly test failure issues
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'nightly-test-failure',
+              state: 'open'
+            });
+            
+            // Add success comment and close them
+            for (const issue of issues.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `✅ Nightly integration tests are now passing!\n\n**Workflow Run:** https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nClosing this issue automatically.`
+              });
+              
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+              
+              console.log(`Closed issue #${issue.number}`);
+            }

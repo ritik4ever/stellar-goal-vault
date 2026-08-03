@@ -117,6 +117,12 @@ function getSystemTheme(): ThemeMode {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+function getNetworkName(networkPassphrase: string): string {
+  if (networkPassphrase === MAINNET_PASSPHRASE) return "Mainnet";
+  if (networkPassphrase === DEFAULT_NETWORK_PASSPHRASE) return "Testnet";
+  return "Custom";
+}
+
 /**
  * Returns a Stellar Expert deep-link for a confirmed transaction hash.
  * Uses testnet explorer for the testnet passphrase, mainnet otherwise.
@@ -691,6 +697,14 @@ function App() {
             <div className="eyebrow">{t('app.eyebrow')}</div>
             <h1>{t('app.title')}</h1>
           </div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              className="btn-ghost"
+              type="button"
+              onClick={() => navigate('/discover')}
+            >
+              Discover
+            </button>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <WalletWidget
               status={wallet.status}

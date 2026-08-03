@@ -9,6 +9,7 @@ import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
 import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
+import { DonationQRCode } from './DonationQRCode';
 import { Countdown } from './Countdown';
 import { useCampaignShareCard } from './CampaignShareCard';
 import { useToast } from '../hooks/useToast';
@@ -458,6 +459,15 @@ export function CampaignDetailPanel({
           reconciles the result.
         </p>
       ) : null}
+
+      {activeCampaign.metadata?.imageUrl ? (
+        <CampaignImage url={activeCampaign.metadata.imageUrl} alt={activeCampaign.title} />
+      ) : null}
+
+      <DonationQRCode 
+        stellarAddress={activeCampaign.creator} 
+        campaignTitle={activeCampaign.title}
+      />
 
       {activeCampaign.metadata?.externalLink ? (
         <div className="external-link-container">

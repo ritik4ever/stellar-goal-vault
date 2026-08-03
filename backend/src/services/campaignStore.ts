@@ -291,6 +291,10 @@ export function calculateProgress(
 export type CampaignSortField = 'createdAt' | 'deadline' | 'pledgedAmount' | 'targetAmount';
 export type SortOrder = 'asc' | 'desc';
 
+// Whitelist of valid sort fields to prevent SQL injection
+const VALID_SORT_FIELDS: readonly CampaignSortField[] = ['createdAt', 'deadline', 'pledgedAmount', 'targetAmount'] as const;
+const VALID_SORT_ORDERS: readonly SortOrder[] = ['asc', 'desc'] as const;
+
 export interface ListCampaignsOptions {
   searchQuery?: string;
   assetCode?: string;
@@ -449,8 +453,18 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const totalCount = (db.prepare(countQuery).get(...params) as { total: number }).total;
 
   // Build ORDER BY clause from sort options
+  // Validate sort field against whitelist to prevent SQL injection
   const sortField = options?.sort ?? 'createdAt';
+  if (!VALID_SORT_FIELDS.includes(sortField)) {
+    throw toServiceError('Invalid sort field', 400, 'INVALID_INPUT');
+  }
+
+  // Validate sort order against whitelist
   const sortOrder = options?.order ?? 'desc';
+  if (!VALID_SORT_ORDERS.includes(sortOrder)) {
+    throw toServiceError('Invalid sort order', 400, 'INVALID_INPUT');
+  }
+
   const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
   let orderByClause: string;
   switch (sortField) {
