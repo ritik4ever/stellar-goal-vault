@@ -1,4 +1,18 @@
-export type CampaignStatus = "open" | "funded" | "claimed" | "failed";
+export type CampaignStatus = 'open' | 'funded' | 'claimed' | 'failed';
+
+export type NotificationType = 'new_pledge' | 'campaign_funded' | 'refund_available' | 'creator_update';
+
+export interface NotificationItem {
+  id: number;
+  campaignId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  targetWallet: string;
+  actorWallet?: string;
+  isRead: boolean;
+  createdAt: number;
+}
 
 export interface CampaignProgress {
   status: CampaignStatus;
@@ -16,6 +30,7 @@ export interface Pledge {
   campaignId: string;
   contributor: string;
   amount: number;
+  assetCode: string;
   createdAt: number;
   refundedAt?: number;
   transactionHash?: string;
@@ -26,18 +41,22 @@ export interface Campaign {
   creator: string;
   title: string;
   description: string;
-  assetCode: string;
+  acceptedTokens: string[];
+  assetCode: string; // Backward compatibility
   targetAmount: number;
   pledgedAmount: number;
   deadline: number;
   createdAt: number;
   claimedAt?: number;
+  deletedAt?: number;
+  isDeleted?: boolean;
   progress: CampaignProgress;
   pledges?: Pledge[];
   metadata?: {
     imageUrl?: string;
     externalLink?: string;
   };
+  tokenBalances?: Record<string, number>;
 }
 
 export interface BlockchainMetadata {
@@ -46,13 +65,13 @@ export interface BlockchainMetadata {
   ledgerCloseTime?: number;
   eventIndex?: number;
   contractId?: string;
-  source?: "local" | "soroban";
+  source?: 'local' | 'soroban';
 }
 
 export interface CampaignEvent {
   id: number;
   campaignId: string;
-  eventType: "created" | "pledged" | "claimed" | "refunded";
+  eventType: 'created' | 'pledged' | 'claimed' | 'refunded' | 'metadata_updated';
   timestamp: number;
   actor?: string;
   amount?: number;
@@ -85,18 +104,20 @@ export interface CreateCampaignPayload {
   creator: string;
   title: string;
   description: string;
-  assetCode: string;
+  acceptedTokens: string[];
   targetAmount: number;
   deadline: number;
   metadata?: {
     imageUrl?: string;
     externalLink?: string;
   };
+  maxPerContributor?: number;
 }
 
 export interface CreatePledgePayload {
   contributor: string;
   amount: number;
+  assetCode: string;
 }
 
 export interface ReconcilePledgePayload extends CreatePledgePayload {
@@ -117,6 +138,7 @@ export interface AppConfig {
   networkPassphrase: string;
   contractAmountDecimals: number;
   walletIntegrationReady: boolean;
+  assetAddresses: Record<string, string>;
 }
 
 export interface WalletConnection {
@@ -135,8 +157,59 @@ export interface OpenIssue {
   title: string;
   labels: string[];
   summary: string;
-  complexity: "Trivial" | "Medium" | "High";
+  complexity: 'Trivial' | 'Medium' | 'High';
   points: 100 | 150 | 200;
+}
+
+export interface ContributorSummary {
+  contributor: string;
+  totalPledged: number;
+  refundedAmount: number;
+  isFullyRefunded: boolean;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  contributor: string;
+  totalPledged: number;
+  campaignCount: number;
+  averagePledgeAmount: number;
+}
+
+export interface ContributorProfile {
+  address: string;
+  totalPledged: number;
+  refundedAmount: number;
+  campaignCount: number;
+  rank: number;
+  badges: ContributorBadge[];
+  backedCampaigns: ContributorBackedCampaign[];
+  refundHistory: ContributorRefundEntry[];
+}
+
+export interface ContributorBadge {
+  name: string;
+  description: string;
+  earnedAt: number;
+  icon: string;
+}
+
+export interface ContributorBackedCampaign {
+  campaignId: string;
+  title: string;
+  status: CampaignStatus;
+  pledgedAmount: number;
+  refundedAmount: number;
+  assetCode: string;
+  pledgedAt: number;
+}
+
+export interface ContributorRefundEntry {
+  campaignId: string;
+  title: string;
+  amount: number;
+  assetCode: string;
+  refundedAt: number;
 }
 
 export interface ApiError {
@@ -144,4 +217,12 @@ export interface ApiError {
   code?: string;
   details?: Array<{ field: string; message: string }>;
   requestId?: string;
+}
+
+export interface CampaignUpdate {
+  id: number;
+  campaignId: string;
+  creator: string;
+  content: string;
+  createdAt: number;
 }

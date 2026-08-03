@@ -9,7 +9,7 @@ export const MAX_TITLE_LENGTH = 80;
 export const MIN_DESCRIPTION_LENGTH = 20;
 export const MAX_DESCRIPTION_LENGTH = 500;
 export const MIN_TARGET_AMOUNT = 0.01;
-export const MIN_DEADLINE_HOURS = 1;
+export const MIN_DEADLINE_HOURS = 0.0001;
 
 export interface ValidationError {
   field: string;
@@ -20,8 +20,11 @@ export interface FormErrors {
   creator?: string;
   title?: string;
   description?: string;
+  acceptedTokens?: string;
   targetAmount?: string;
   deadlineHours?: string;
+  category?: string;
+  maxPerContributor?: string;
 }
 
 /**
@@ -29,20 +32,20 @@ export interface FormErrors {
  */
 export function validateStellarAccount(value: string): string | null {
   if (!value || !value.trim()) {
-    return "Creator account is required";
+    return 'Creator account is required';
   }
 
   const trimmed = value.trim();
   if (trimmed.length !== 56) {
-    return "Stellar account must be exactly 56 characters";
+    return 'Stellar account must be exactly 56 characters';
   }
 
-  if (!trimmed.startsWith("G")) {
+  if (!trimmed.startsWith('G')) {
     return "Stellar account must start with 'G'";
   }
 
   if (!STELLAR_ACCOUNT_REGEX.test(trimmed)) {
-    return "Invalid Stellar account format (must contain only A-Z and 2-7)";
+    return 'Invalid Stellar account format (must contain only A-Z and 2-7)';
   }
 
   return null;
@@ -53,7 +56,7 @@ export function validateStellarAccount(value: string): string | null {
  */
 export function validateTitle(value: string): string | null {
   if (!value || !value.trim()) {
-    return "Campaign title is required";
+    return 'Campaign title is required';
   }
 
   const trimmed = value.trim();
@@ -73,7 +76,7 @@ export function validateTitle(value: string): string | null {
  */
 export function validateDescription(value: string): string | null {
   if (!value || !value.trim()) {
-    return "Campaign description is required";
+    return 'Campaign description is required';
   }
 
   const trimmed = value.trim();
@@ -93,17 +96,17 @@ export function validateDescription(value: string): string | null {
  */
 export function validateTargetAmount(value: string | number): string | null {
   if (!value && value !== 0) {
-    return "Target amount is required";
+    return 'Target amount is required';
   }
 
-  const amount = typeof value === "string" ? parseFloat(value) : value;
+  const amount = typeof value === 'string' ? parseFloat(value) : value;
 
   if (isNaN(amount)) {
-    return "Amount must be a valid number";
+    return 'Amount must be a valid number';
   }
 
   if (amount <= 0) {
-    return "Amount must be greater than zero";
+    return 'Amount must be greater than zero';
   }
 
   if (amount < MIN_TARGET_AMOUNT) {
@@ -118,22 +121,58 @@ export function validateTargetAmount(value: string | number): string | null {
  */
 export function validateDeadlineHours(value: string | number): string | null {
   if (!value && value !== 0) {
-    return "Deadline is required";
+    return 'Deadline is required';
   }
 
-  const hours = typeof value === "string" ? parseInt(value, 10) : value;
+  const hours = typeof value === 'string' ? parseFloat(value) : value;
 
   if (isNaN(hours)) {
-    return "Deadline must be a whole number";
+    return 'Deadline must be a valid number';
   }
 
   if (hours < MIN_DEADLINE_HOURS) {
-    return `Deadline must be at least ${MIN_DEADLINE_HOURS} hour`;
+    return `Deadline must be at least ${MIN_DEADLINE_HOURS} hours`;
   }
 
   if (hours > 8760) {
     // 365 days
-    return "Deadline cannot exceed 365 days";
+    return 'Deadline cannot exceed 365 days';
+  }
+
+  return null;
+}
+
+/**
+ * Validates the campaign category.
+ */
+export function validateCategory(value: string): string | null {
+  if (!value || !value.trim()) {
+    return 'Category is required';
+  }
+
+  return null;
+}
+
+/**
+ * Validates the optional maximum-per-contributor cap.
+ */
+export function validateMaxPerContributor(value: string): string | null {
+  if (!value || !value.trim()) {
+    return null;
+  }
+
+  const amount = Number(value);
+
+  if (isNaN(amount)) {
+    return 'Max per contributor must be a valid number';
+  }
+
+  if (!Number.isInteger(amount)) {
+    return 'Max per contributor must be a whole number';
+  }
+
+  if (amount <= 0) {
+    return 'Max per contributor must be greater than zero';
   }
 
   return null;
@@ -146,6 +185,7 @@ export function validateForm(formData: {
   creator: string;
   title: string;
   description: string;
+  acceptedTokens: string[];
   targetAmount: string;
   deadlineHours: string;
 }): FormErrors {
@@ -164,6 +204,10 @@ export function validateForm(formData: {
   const descriptionError = validateDescription(formData.description);
   if (descriptionError) {
     errors.description = descriptionError;
+  }
+
+  if (!formData.acceptedTokens || formData.acceptedTokens.length === 0) {
+    errors.acceptedTokens = 'At least one accepted token is required';
   }
 
   const amountError = validateTargetAmount(formData.targetAmount);

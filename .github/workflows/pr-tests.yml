@@ -1,0 +1,63 @@
+name: PR Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run backend tests (with coverage)
+        working-directory: backend
+        run: npx vitest run --coverage
+        env:
+          NODE_ENV: test
+          DB_PATH: /tmp/stellar-goal-vault-test.db
+      - name: Upload backend coverage HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-html
+          path: backend/coverage
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+

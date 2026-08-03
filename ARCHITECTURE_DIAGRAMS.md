@@ -386,3 +386,48 @@ This comprehensive architecture ensures:
 - ✅ Perfect database isolation
 - ✅ Production safety
 - ✅ Full CI/CD automation
+
+## Freighter Pledge Signing Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant Freighter Wallet
+    participant Soroban RPC
+    participant Smart Contract
+
+    User->>Frontend: Click "Pledge" & Enter Amount
+    Frontend->>Freighter Wallet: Request Signature (XDR)
+    Freighter Wallet-->>User: Prompt for Approval
+    User->>Freighter Wallet: Approve Transaction
+    Freighter Wallet-->>Frontend: Return Signed Transaction
+    Frontend->>Soroban RPC: Submit Transaction
+    Soroban RPC->>Smart Contract: Execute Pledge
+    Smart Contract-->>Soroban RPC: Transaction Success (Events)
+    Soroban RPC-->>Frontend: Return TxHash & Success
+    Frontend-->>User: Display Success Notification
+```
+
+![Pledge Flow Fallback](https://raw.githubusercontent.com/temitope-007/stellar-goal-vault/main/docs/assets/pledge_flow.png)
+
+## Refund Flow
+
+```mermaid
+sequenceDiagram
+    participant Contributor
+    participant Frontend
+    participant Soroban RPC
+    participant Smart Contract
+
+    Note over Contributor, Smart Contract: Campaign Deadline Passed & Funding Failed
+    Contributor->>Frontend: Click "Refund"
+    Frontend->>Soroban RPC: Submit Refund Transaction
+    Soroban RPC->>Smart Contract: Execute Refund Call
+    Smart Contract->>Smart Contract: Verify Failed State & Contributor Amount
+    Smart Contract-->>Soroban RPC: Transfer Asset Back & Return Success
+    Soroban RPC-->>Frontend: Return TxHash
+    Frontend-->>Contributor: Display Refund Success Notification
+```
+
+![Refund Flow Fallback](https://raw.githubusercontent.com/temitope-007/stellar-goal-vault/main/docs/assets/refund_flow.png)

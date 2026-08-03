@@ -1,0 +1,101 @@
+name: Lighthouse CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  lighthouse:
+    name: Lighthouse CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          configPath: ./frontend/lighthouserc.json
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+
+      - name: Comment PR with Lighthouse scores
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const resultsPath = './lhr.json';
+            
+            if (!fs.existsSync(resultsPath)) {
+              console.log('Lighthouse results not found');
+              return;
+            }
+            
+            const results = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+            const { categories } = results;
+            
+            const scores = {
+              'Performance': categories.performance.score * 100,
+              'Accessibility': categories.accessibility.score * 100,
+              'Best Practices': categories['best-practices'].score * 100,
+              'SEO': categories.seo.score * 100,
+            };
+            
+            const thresholds = {
+              'Performance': 80,
+              'Accessibility': 90,
+              'Best Practices': 90,
+            };
+            
+            let comment = '## ⚡ Lighthouse CI Results\n\n';
+            comment += '| Category | Score | Threshold | Status |\n';
+            comment += '|----------|-------|-----------|--------|\n';
+            
+            let allPassed = true;
+            Object.entries(scores).forEach(([category, score]) => {
+              const threshold = thresholds[category];
+              const status = threshold ? (score >= threshold ? '✅' : '❌') : '⏭️';
+              const displayScore = `${Math.round(score)}`;
+              const displayThreshold = threshold ? `${threshold}` : 'N/A';
+              
+              if (threshold && score < threshold) {
+                allPassed = false;
+              }
+              
+              comment += `| ${category} | ${displayScore} | ${displayThreshold} | ${status} |\n`;
+            });
+            
+            comment += '\n';
+            if (allPassed) {
+              comment += '✨ All performance budgets met!';
+            } else {
+              comment += '⚠️ Some performance budgets were not met. Please review and optimize.';
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment,
+            });

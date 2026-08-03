@@ -1,9 +1,19 @@
-import { FormEvent, useEffect, useState } from "react";
-import { MousePointer2 } from "lucide-react";
-import { AppConfig, Campaign } from "../types/campaign";
-import { ContributorSummary } from "./ContributorSummary";
-import { CopyButton } from "./CopyButton";
-import { EmptyState } from "./EmptyState";
+
+
+import { FormEvent, useState, useEffect, useCallback } from 'react';
+import { MousePointer2, Download, Link as LinkIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Campaign, AppConfig } from '../types/campaign';
+import CopyButton from './CopyButton';
+import { AddressAvatar } from './AddressAvatar';
+import { EmptyState } from './EmptyState';
+import { ContributorSummary } from './ContributorSummary';
+import { CampaignImage } from './CampaignImage';
+import { Countdown } from './Countdown';
+import { useCampaignShareCard } from './CampaignShareCard';
+import { useToast } from '../hooks/useToast';
+import { ShareButtons } from './ShareButtons';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -12,26 +22,48 @@ interface CampaignDetailPanelProps {
   isConnectingWallet?: boolean;
   isLoading?: boolean;
   isPledgePending?: boolean;
+  notFoundCampaignId?: string | null;
   onConnectWallet?: () => Promise<void>;
-  onPledge?: (campaignId: string, amount: number) => Promise<void>;
+  onDisconnectWallet?: () => void;
+  onPledge?: (campaignId: string, amount: number, assetCode: string) => Promise<void>;
   onClaim?: (campaign: Campaign) => Promise<void>;
+  onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
+  onClose?: () => void;
+}
+
+const FEE_ESTIMATION_ERROR_CODES = new Set([
+  'SIMULATION_FAILED',
+  'SIMULATION_PREPARE_FAILED',
+  'SOURCE_ACCOUNT_LOAD_FAILED',
+  'STATE_RESTORE_REQUIRED',
+]);
+
+function describePledgeError(error: unknown): string {
+  const code = (error as { code?: string } | null)?.code;
+  if (code && FEE_ESTIMATION_ERROR_CODES.has(code)) {
+    return 'Could not estimate fee. Check your connection and retry.';
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return 'The pledge could not be completed. Please try again.';
 }
 
 function networkName(config: AppConfig | null | undefined): string {
   const passphrase = config?.networkPassphrase ?? config?.soroban?.networkPassphrase;
 
   if (!passphrase) {
-    return "Configured network";
+    return 'Configured network';
   }
-  if (passphrase === "Test SDF Network ; September 2015") {
-    return "Stellar Testnet";
+  if (passphrase === 'Test SDF Network ; September 2015') {
+    return 'Stellar Testnet';
   }
-  if (passphrase === "Public Global Stellar Network ; September 2015") {
-    return "Stellar Mainnet";
+  if (passphrase === 'Public Global Stellar Network ; September 2015') {
+    return 'Stellar Mainnet';
   }
 
-  return "Configured network";
+  return 'Configured network';
 }
 
 export function CampaignDetailPanel({
@@ -41,38 +73,57 @@ export function CampaignDetailPanel({
   isConnectingWallet = false,
   isLoading = false,
   isPledgePending = false,
+  notFoundCampaignId = null,
   onConnectWallet = async () => {},
+  onDisconnectWallet = () => {},
   onPledge = async () => {},
   onClaim = async () => {},
   onRefund = async () => {},
 }: CampaignDetailPanelProps) {
-  const [pledgeAmount, setPledgeAmount] = useState("25");
-  const [refundContributor, setRefundContributor] = useState("");
+  const [pledgeAmount, setPledgeAmount] = useState('25');
+  const [pledgeToken, setPledgeToken] = useState('');
+  const [refundContributor, setRefundContributor] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pledgeError, setPledgeError] = useState<string | null>(null);
+  const [bannerImageError, setBannerImageError] = useState(false);
+  const walletReady = appConfig?.walletIntegrationReady ?? false;
+  const { downloadPng, toDataUrl } = useCampaignShareCard();
+  const { addToast } = useToast();
+
+  const handleDownloadPng = useCallback(() => {
+    if (!campaign) return;
+    downloadPng(campaign, campaign.metadata?.imageUrl);
+    addToast('Campaign card downloaded as PNG.', 'success');
+  }, [campaign, downloadPng, addToast]);
+
+  const handleCopyLink = useCallback(() => {
+    if (!campaign) return;
+    const url = `${window.location.origin}/campaigns/${campaign.id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      addToast('Campaign link copied to clipboard.', 'success', { href: url, label: url.slice(0, 40) + '…' });
+    }).catch(() => {
+      addToast('Failed to copy link.', 'error');
+    });
+  }, [campaign, addToast]);
 
   useEffect(() => {
-    setPledgeAmount("25");
-    setRefundContributor(connectedWallet ?? "");
+    setBannerImageError(false);
   }, [campaign?.id, connectedWallet]);
 
-  const walletReady = Boolean(
-    appConfig?.walletIntegrationReady ?? appConfig?.soroban?.enabled,
-  );
 
-  if (isLoading) {
+
+  const showSkeleton = useMinDisplayTime(isLoading);
+  if (showSkeleton) {
     return (
-      <section className="card detail-panel">
+      <section className="card detail-panel" aria-busy="true" aria-label="Loading campaign details">
         <div className="section-heading">
           <h2>
             <div className="skeleton skeleton-line" style={{ width: 220 }} />
           </h2>
-          <div
-            className="skeleton skeleton-line"
-            style={{ width: 320, height: 14 }}
-          />
+          <div className="skeleton skeleton-line" style={{ width: 320, height: 14 }} />
         </div>
         <div className="detail-grid">
-          {Array.from({ length: 4 }).map((_, index) => (
+          {Array.from({ length: 5 }).map((_, index) => (
             <article key={index} className="detail-stat">
               <div className="skeleton skeleton-line" style={{ width: 120 }} />
               <div
@@ -81,6 +132,24 @@ export function CampaignDetailPanel({
               />
             </article>
           ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (notFoundCampaignId) {
+    return (
+      <section className="card detail-panel">
+        <div className="section-heading">
+          <h2>Campaign not found</h2>
+          <p className="muted">
+            The campaign <code>#{notFoundCampaignId}</code> does not exist or may have been removed.
+          </p>
+        </div>
+        <div style={{ marginTop: 24 }}>
+          <Link to="/" className="btn-ghost">
+            Back to campaigns
+          </Link>
         </div>
       </section>
     );
@@ -99,14 +168,28 @@ export function CampaignDetailPanel({
 
   const activeCampaign = campaign;
 
-  async function handlePledge(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  // Simulation is run (and the network fee estimated) before the preview modal
+  // opens. If that simulation fails, surface a retry-able error next to the
+  // pledge button instead of only relying on the toast.
+  const selectedToken = pledgeToken || activeCampaign.assetCode;
+
+  async function submitPledge() {
+    setPledgeError(null);
     setIsSubmitting(true);
     try {
-      await onPledge(activeCampaign.id, Number(pledgeAmount));
+      await onPledge(activeCampaign.id, Number(pledgeAmount), selectedToken);
+      setPledgeAmount('25');
+      setPledgeToken('');
+    } catch (error) {
+      setPledgeError(describePledgeError(error));
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handlePledge(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void submitPledge();
   }
 
   async function handleRefund() {
@@ -129,6 +212,35 @@ export function CampaignDetailPanel({
 
   return (
     <section className="card detail-panel">
+      {/* Full-width Campaign Banner */}
+      <div
+        style={{
+          width: 'calc(100% + 2rem)',
+          marginLeft: '-1rem',
+          marginRight: '-1rem',
+          marginTop: '-1rem',
+          height: '240px',
+          overflow: 'hidden',
+          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+          position: 'relative',
+          marginBottom: '1.5rem',
+        }}
+      >
+        {activeCampaign.metadata?.imageUrl && !bannerImageError ? (
+          <img
+            src={activeCampaign.metadata.imageUrl}
+            alt={activeCampaign.title}
+            onError={() => setBannerImageError(true)}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        ) : null}
+      </div>
+
       <div className="section-heading">
         <h2>{activeCampaign.title}</h2>
         <p className="muted">{activeCampaign.description}</p>
@@ -140,38 +252,59 @@ export function CampaignDetailPanel({
           <p className="muted">
             {connectedWallet
               ? `Connected to ${networkName(appConfig)}`
-              : `Connect Freighter for ${networkName(appConfig)}`}
+              : `Not connected — connect a wallet to take actions`}
           </p>
         </div>
         <div className="wallet-connected">
           {connectedWallet ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <strong className="mono">{connectedWallet.slice(0, 16)}...</strong>
-              <CopyButton
-                value={connectedWallet}
-                ariaLabel="Copy connected wallet address"
-              />
-            </div>
-          ) : null}
-          <button
-            className="btn-ghost"
-            type="button"
-            onClick={() => {
-              void onConnectWallet();
-            }}
-            disabled={isSubmitting || isConnectingWallet}
-          >
-            {isConnectingWallet ? "Connecting..." : "Connect Freighter"}
-          </button>
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <AddressAvatar address={connectedWallet} size={28} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <strong className="mono">{connectedWallet.slice(0, 16)}...</strong>
+                  <CopyButton value={connectedWallet} ariaLabel="Copy connected wallet address" />
+                </div>
+              </div>
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={onDisconnectWallet}
+                disabled={isSubmitting}
+              >
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <button
+              className="btn-ghost"
+              type="button"
+              onClick={() => {
+                void onConnectWallet();
+              }}
+              disabled={isSubmitting || isConnectingWallet}
+            >
+              {isConnectingWallet ? 'Connecting...' : 'Connect Wallet'}
+            </button>
+          )}
         </div>
       </div>
 
       <div className="detail-grid">
         <article className="detail-stat">
+          <span>Campaign ID</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <strong className="mono">{activeCampaign.id}</strong>
+            <CopyButton value={activeCampaign.id} ariaLabel="Copy campaign ID" />
+          </div>
+        </article>
+        <article className="detail-stat">
           <span>Creator</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
-            <CopyButton value={activeCampaign.creator} ariaLabel="Copy creator address" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <AddressAvatar address={activeCampaign.creator} size={28} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
+              <CopyButton value={activeCampaign.creator} ariaLabel="Copy creator address" />
+            </div>
           </div>
         </article>
         <article className="detail-stat">
@@ -186,18 +319,22 @@ export function CampaignDetailPanel({
           <span>Active pledges</span>
           <strong>{activeCampaign.progress.pledgeCount}</strong>
         </article>
+        <article className="detail-stat">
+          <span>Time left</span>
+          <strong><Countdown deadline={activeCampaign.deadline} /></strong>
+        </article>
       </div>
 
       <ContributorSummary
-        pledges={activeCampaign.pledges}
+        campaignId={activeCampaign.id}
         assetCode={activeCampaign.assetCode}
         isLoading={isLoading}
       />
 
       {!walletReady ? (
         <p className="pending-note">
-          Wallet integration is not fully configured yet. Freighter actions that
-          require Soroban contract calls may stay disabled until backend config is set.
+          Wallet integration is not fully configured yet. Freighter actions that require Soroban
+          contract calls may stay disabled until backend config is set.
         </p>
       ) : null}
 
@@ -206,11 +343,24 @@ export function CampaignDetailPanel({
           <span>Connected contributor</span>
           <input
             type="text"
-            value={connectedWallet ?? ""}
-            placeholder="Connect Freighter to use the pledge flow"
+            value={connectedWallet ?? ''}
+            placeholder="Connect a wallet to use the pledge flow"
             readOnly
           />
         </label>
+
+        {activeCampaign.acceptedTokens?.length > 1 && (
+          <label className="field-group">
+            <span>Token</span>
+            <select value={selectedToken} onChange={(e) => setPledgeToken(e.target.value)} required>
+              {activeCampaign.acceptedTokens.map((token) => (
+                <option key={token} value={token}>
+                  {token}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <label className="field-group">
           <span>Pledge amount</span>
@@ -235,7 +385,7 @@ export function CampaignDetailPanel({
               !connectedWallet
             }
           >
-            {isPledgePending ? "Submitting..." : "Add pledge"}
+            {isPledgePending ? 'Submitting...' : 'Add pledge'}
           </button>
 
           <button
@@ -255,6 +405,22 @@ export function CampaignDetailPanel({
             Claim vault
           </button>
         </div>
+
+        {pledgeError ? (
+          <div className="pledge-error" role="alert">
+            <p className="error-text">{pledgeError}</p>
+            <button
+              className="btn-ghost"
+              type="button"
+              disabled={isSubmitting || isPledgePending}
+              onClick={() => {
+                void submitPledge();
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
       </form>
 
       <div className="form-grid" style={{ marginTop: 16 }}>
@@ -288,19 +454,9 @@ export function CampaignDetailPanel({
 
       {isPledgePending ? (
         <p className="pending-note">
-          The pledge transaction is in flight. Campaign state will refresh after
-          the backend reconciles the result.
+          The pledge transaction is in flight. Campaign state will refresh after the backend
+          reconciles the result.
         </p>
-      ) : null}
-
-      {activeCampaign.metadata?.imageUrl ? (
-        <div className="campaign-image-container">
-          <img
-            src={activeCampaign.metadata.imageUrl}
-            alt={activeCampaign.title}
-            className="campaign-image"
-          />
-        </div>
       ) : null}
 
       {activeCampaign.metadata?.externalLink ? (
@@ -315,6 +471,18 @@ export function CampaignDetailPanel({
           </a>
         </div>
       ) : null}
+
+      <div className="share-actions">
+        <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
+          <Download size={16} />
+          Download PNG
+        </button>
+        <button className="btn-ghost" type="button" onClick={handleCopyLink}>
+          <LinkIcon size={16} />
+          Copy link
+        </button>
+      </div>
+      <ShareButtons campaign={activeCampaign} />
     </section>
   );
 }

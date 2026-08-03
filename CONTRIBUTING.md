@@ -1,154 +1,172 @@
-# Contributing to Stellar Goal Vault
+# Contributing
 
-First off, thank you for considering contributing to Stellar Goal Vault! It's people like you that make the open-source community such an amazing place to learn, inspire, and create.
+Thank you for your interest in contributing to **Stellar Goal Vault**!
 
-Stellar Goal Vault is a lightweight crowdfunding MVP for the Stellar ecosystem, and we welcome contributions of all kinds: from bug fixes and documentation to new features and UI improvements.
+## Quick start
 
----
+1. **Fork** the repository on GitHub.
+2. **Clone** your fork: `git clone https://github.com/YOUR_USERNAME/stellar-goal-vault.git`
+3. **Install dependencies:** `npm run install:all`
+4. **Create a branch:** `git checkout -b feature/my-feature`
+5. Make your changes and test them.
+6. **Commit** using conventional commits (e.g., `feat: add new endpoint`).
+7. **Push** and open a **Pull Request** against the `main` branch.
 
-## Table of Contents
+## Before you start
 
-1. [Getting Started](#getting-started)
-2. [Local Development Setup](#local-development-setup)
-3. [Testing](#testing)
-4. [Contribution Workflow](#contribution-workflow)
-5. [Style & Branch Naming](#style--branch-naming)
-6. [Issue Labeling](#issue-labeling)
-7. [Pull Request Expectations](#pull-request-expectations)
+- Read the [README.md](./README.md) for project overview and architecture.
+- Check the [FAQ.md](./FAQ.md) for answers to common questions.
+- See the [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for solutions to common development issues.
+- Browse `OPEN_SOURCE_ISSUES.md` for curated contribution ideas.
+- To test the pledge flow with a real wallet, follow the [Freighter Pledge Signing Walkthrough](./docs/FREIGHTER_GUIDE.md).
 
----
-
-## Getting Started
-
-1. **Fork the repository** on GitHub.
-2. **Clone your fork** locally:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/stellar-goal-vault.git
-   cd stellar-goal-vault
-   ```
-3. **Set up the upstream remote** to stay synced with the main project:
-   ```bash
-   git remote add upstream https://github.com/SamixYasuke/stellar-goal-vault.git
-   ```
+## Backend Development
 
 ### Prerequisites
 
-- **Node.js 18+**
-- **npm 9+**
-- (Optional) **Rust & Soroban CLI** (if you're working on smart contracts)
+- **Node.js** 18+ (check with `node --version`)
+- **npm** 9+ (comes with Node.js)
 
----
-
-## Local Development Setup
-
-The project is split into three main parts: `frontend`, `backend`, and `contracts`.
-
-### 1. Install All Dependencies
-
-From the repository root, you can install dependencies for both the frontend and backend using:
-
-```bash
-npm run install:all
-```
-
-### 2. Backend Setup
-
-The backend uses **Express** and **SQLite**.
+### Setup
 
 1. Navigate to the backend directory:
    ```bash
    cd backend
    ```
-2. Create/copy a `.env` file (if needed, see `README.md` for defaults).
-3. Run the development server:
+
+2. Install dependencies:
    ```bash
-   npm run dev
+   npm install
    ```
-   The API will be available at `http://localhost:3001`.
 
-### 3. Frontend Setup
-
-The frontend is built with **React + Vite**.
-
-1. Navigate to the frontend directory:
+3. Copy the environment file:
    ```bash
-   cd frontend
+   cp .env.example .env
    ```
-2. Run the development server:
-   ```bash
-   npm run dev
-   ```
-   The dashboard will be available at `http://localhost:3000`.
 
----
+4. Configure environment variables in `.env`:
+   - `DB_PATH`: Path to SQLite database file (default: `../../data/campaigns.db`)
+   - `NODE_ENV`: Set to `development` for local development
+   - `PORT`: Server port (default: 3000)
+   - `CORS_ALLOWED_ORIGINS`: Comma-separated list of allowed origins
+   - `CONTRACT_ID`: Stellar contract ID (required for pledge operations)
+   - `SOROBAN_RPC_URL`: URL to Soroban RPC endpoint
+   - `NETWORK_PASSPHRASE`: Stellar network (default: `Test SDF Network ; September 2015` for testnet)
+
+### Running the Backend
+
+- **Development mode** (with auto-reload):
+  ```bash
+  npm run dev
+  ```
+  Server listens on `http://localhost:3000` by default.
+
+- **Production mode** (build and run):
+  ```bash
+  npm run build
+  npm start
+  ```
+
+- **Watch mode** (for editing and testing):
+  ```bash
+  npm run dev
+  ```
+
+### Testing
+
+- **Run all tests once**:
+  ```bash
+  npm test
+  ```
+
+- **Run tests in watch mode** (re-run on file changes):
+  ```bash
+  npm run test:watch
+  ```
+
+- **Run with coverage**:
+  ```bash
+  npm test -- --coverage
+  ```
+
+### Database
+
+- **Seeding**: The application automatically initializes the SQLite database with the schema on first run. To seed deterministic test campaigns:
+  ```bash
+  npm test -- tests/services/seedDeterministic.test.ts
+  ```
+
+- **Viewing the database**:
+  - Use SQLite CLI: `sqlite3 ../../data/campaigns.db`
+  - Or use a GUI tool like [DB Browser for SQLite](https://sqlitebrowser.org/)
+
+- **Resetting the database** (for testing):
+  - Delete the database file: `rm ../../data/campaigns.db`
+  - Next run will recreate it with the schema
+
+### Troubleshooting
+
+See the [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for a comprehensive list of common issues.
+
+#### "SQLITE_CANTOPEN" or database file not found
+- Ensure the directory specified in `DB_PATH` exists
+- Check file permissions on the database directory
+- If the directory doesn't exist, create it: `mkdir -p data`
+
+#### Tests fail with "database is locked"
+- This indicates concurrent access issues. Ensure only one test process is running.
+- Try clearing the test database: `rm test-temp-*.db*`
+- Run tests serially: `npm test -- --no-coverage`
+
+#### "Cannot find module" errors
+- Run `npm install` in the `backend` directory
+- Clear node_modules and reinstall: `rm -rf node_modules && npm install`
+
+#### Port already in use
+- Change the `PORT` in `.env` to an available port (e.g., 3001)
+- Or kill the process on the current port
+
+#### Environment variable not picked up
+- Ensure `.env` file is in the `backend` directory
+- Restart the development server after editing `.env`
+- Check for syntax errors in `.env` (no spaces around `=`)
 
 ## Testing
 
-We use **Vitest** for testing both the frontend and backend.
+- Backend: `cd backend && npm test`
+- Contract: `cd contracts && cargo test`
+- E2E: `npm run test:e2e`
 
-- **Frontend tests:** Run `npm run test` inside the `/frontend` directory.
-- **Backend tests:** Run `npm run test` inside the `/backend` directory.
+## Code style
 
-Before submitting a PR, please ensure that all tests pass.
+- TypeScript: ESLint + Prettier (pre-commit via Husky + lint-staged)
+- Rust: `cargo fmt`
 
----
+## Adding new open issues
 
-## Contribution Workflow
+The `GET /api/open-issues` endpoint serves a statically seeded list of contribution ideas
+that are displayed in the frontend **Contribution Backlog** panel.
 
-1. **Find an Issue:** Look for issues labeled `help wanted` or `good first issue`. If you have a new idea, please open an issue first to discuss it.
-2. **Assign Yourself:** Comment on the issue to let others know you're working on it.
-3. **Create a Branch:** (See [Style & Branch Naming](#style--branch-naming)).
-4. **Implementation:** Write your code, following existing patterns and styles.
-5. **Add Tests:** If you're adding a feature or fixing a bug, please include tests.
-6. **Submit a PR:** Push your branch and open a Pull Request against the `main` branch.
+To add a new issue:
 
----
+1. Open [`backend/src/services/openIssues.ts`](./backend/src/services/openIssues.ts).
+2. Append a new entry to the `seededIssues` array:
+   ```ts
+   {
+     id: 'SGV-4',                                    // continue the SGV-N sequence
+     title: 'Short, descriptive title',
+     labels: ['frontend', 'good first issue'],
+     summary: 'One or two sentences describing the work.',
+     complexity: 'Trivial',                          // Trivial | Medium | High
+     points: 100,                                    // 100 | 150 | 200
+   }
+   ```
+3. Match `points` to `complexity`: Trivial → 100, Medium → 150, High → 200.
+4. No migration or server restart is needed — the endpoint reads the array directly.
 
-## Style & Branch Naming
+Full endpoint documentation (example response, field table, complexity/points enum):
+[docs/API.md — GET /api/open-issues](./docs/API.md#get-apiopen-issues)
 
-### Branch Naming Conventions
+## Questions?
 
-To keep the repository organized, please use the following prefixes for your branches:
-
-- `feat/` — For new features (e.g., `feat/add-freighter-signing`)
-- `fix/` — For bug fixes (e.g., `fix/sqlite-connection-leak`)
-- `docs/` — For documentation changes (e.g., `docs/update-api-reference`)
-- `refactor/` — For code cleanup or restructuring
-- `test/` — For adding or improving tests
-
-### Coding Standards
-
-- Use **TypeScript** for both frontend and backend.
-- Follow **standard Prettier/ESLint rules** (automated linting runs in CI).
-- Keep components small and modular.
-
----
-
-## Issue Labeling
-
-We use labels to categorize issues and make it easier for contributors to find tasks:
-
-- `good first issue` — Perfect for new contributors. Usually small, well-defined tasks.
-- `help wanted` — Tasks we need help with but might be more complex.
-- `bug` — Something isn't working as expected.
-- `enhancement` — New features or improvements.
-- `frontend` / `backend` / `soroban` — Indicates which part of the stack is involved.
-- `ux` — Focuses on user interface and experience improvements.
-- `indexer` — Related to the on-chain event indexing logic.
-
----
-
-## Pull Request Expectations
-
-When you open a PR, please fill out the provided template (if available) or ensure it includes:
-
-- **What changed?** A clear summary of your work.
-- **Why?** Link to the issue being addressed.
-- **How was it tested?** Detail your manual and automated testing.
-- **Screenshots?** Highly recommended for any frontend/UI changes.
-
----
-
-## Thank You!
-
-Your contributions make this project better for everyone in the Stellar ecosystem. If you have any questions, feel free to reach out via GitHub Issues.
+Check the [FAQ.md](./FAQ.md) before opening an issue. If your question isn't covered there, feel free to open a GitHub Discussion.

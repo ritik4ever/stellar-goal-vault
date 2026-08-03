@@ -6,11 +6,21 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib"]
 
+# Feature flags
+# ------------
+# `testutils` – enables soroban-sdk's test helpers (mock ledger, StellarAssetClient,
+#   Address::generate, etc.).  This feature MUST NOT be enabled for production/release
+#   WASM builds; it is only activated during `cargo test` (via dev-dependencies) and
+#   when explicitly requested with `--features testutils`.
+[features]
+testutils = ["soroban-sdk/testutils"]
+
 [dependencies]
-soroban-sdk = "21.0.0"
+soroban-sdk = "27.0.2"
 
 [dev-dependencies]
-soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+soroban-sdk = { version = "27.0.2", features = ["testutils"] }
+proptest = "1.4"
 
 [profile.release]
 opt-level = "z"

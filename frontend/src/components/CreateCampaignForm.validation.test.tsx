@@ -1,228 +1,188 @@
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { CreateCampaignForm } from "./CreateCampaignForm";
-import { vi } from "vitest";
+import { render, screen, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { CreateCampaignForm } from './CreateCampaignForm';
+import { vi } from 'vitest';
 
-describe("CreateCampaignForm Validation", () => {
+describe('CreateCampaignForm Validation', () => {
   const mockOnCreate = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  describe("Field Error Display", () => {
-    it("displays creator account error for invalid Stellar address", async () => {
+  describe('Step 1 field errors', () => {
+    it('displays creator account error for invalid Stellar address', async () => {
       const user = userEvent.setup();
-      render(
-        <CreateCampaignForm
-          onCreate={mockOnCreate}
-          allowedAssets={["USDC"]}
-        />,
-      );
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
 
       const creatorInput = screen.getByPlaceholderText(/G\.\.\. creator public key/i);
-      await user.type(creatorInput, "invalid");
-      await user.type(creatorInput, "{Backspace}"); // Trigger validation
+      await user.type(creatorInput, 'invalid');
+      fireEvent.blur(creatorInput);
 
       expect(
-        screen.getByText(/Invalid Stellar account format/i),
+        screen.getByText(/Stellar account must be exactly 56 characters/i),
       ).toBeInTheDocument();
     });
 
-    it("displays title error for too short title", async () => {
+    it('displays title error for too short title', async () => {
       const user = userEvent.setup();
-      render(
-        <CreateCampaignForm
-          onCreate={mockOnCreate}
-          allowedAssets={["USDC"]}
-        />,
-      );
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
 
       const titleInput = screen.getByPlaceholderText(/Stellar community design sprint/i);
-      await user.type(titleInput, "Bad");
+      await user.type(titleInput, 'Bad');
+      fireEvent.blur(titleInput);
 
-      expect(
-        screen.getByText(/at least 4 characters/i),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/at least 4 characters/i)).toBeInTheDocument();
     });
 
-    it("displays description error for too short description", async () => {
+    it('displays description error for too short description', async () => {
       const user = userEvent.setup();
-      render(
-        <CreateCampaignForm
-          onCreate={mockOnCreate}
-          allowedAssets={["USDC"]}
-        />,
-      );
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
 
-      const descInput = screen.getByPlaceholderText(
-        /Describe what the campaign funds/i,
-      );
-      await user.type(descInput, "Short");
+      const descInput = screen.getByPlaceholderText(/Describe what the campaign funds/i);
+      await user.type(descInput, 'Short');
+      fireEvent.blur(descInput);
 
-      expect(
-        screen.getByText(/at least 20 characters/i),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/at least 20 characters/i)).toBeInTheDocument();
     });
 
-    it("displays amount error for negative or zero amount", async () => {
+    it('displays category error when left unselected', async () => {
       const user = userEvent.setup();
-      render(
-        <CreateCampaignForm
-          onCreate={mockOnCreate}
-          allowedAssets={["USDC"]}
-        />,
-      );
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
 
-      const amountInputs = screen.getAllByDisplayValue("250");
-      const amountInput = amountInputs[0]; // Target amount field
+      const categorySelect = screen.getByRole('combobox');
+      await user.click(categorySelect);
+      fireEvent.blur(categorySelect);
 
-      await user.clear(amountInput);
-      await user.type(amountInput, "0");
-
-      expect(
-        screen.getByText(/Amount must be greater than zero/i),
-      ).toBeInTheDocument();
+      expect(screen.getByText('Category is required')).toBeInTheDocument();
     });
 
-    it("displays deadline error for zero hours", async () => {
+    it('applies input-error class to fields with validation errors', async () => {
       const user = userEvent.setup();
-      render(
-        <CreateCampaignForm
-          onCreate={mockOnCreate}
-          allowedAssets={["USDC"]}
-        />,
-      );
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
 
-      const deadlineInputs = screen.getAllByDisplayValue("72");
-      const deadlineInput = deadlineInputs[0]; // Deadline hours field
+      const creatorInput = screen.getByPlaceholderText(
+        /G\.\.\. creator public key/i,
+      ) as HTMLInputElement;
+      await user.type(creatorInput, 'invalid');
+      fireEvent.blur(creatorInput);
 
-      await user.clear(deadlineInput);
-      await user.type(deadlineInput, "0");
+      expect(creatorInput).toHaveClass('input-error');
+    });
 
-      expect(
-        screen.getByText(/at least 1 hour/i),
-      ).toBeInTheDocument();
+    it('removes input-error class when field becomes valid', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
+
+      const creatorInput = screen.getByPlaceholderText(
+        /G\.\.\. creator public key/i,
+      ) as HTMLInputElement;
+
+      await user.type(creatorInput, 'invalid');
+      fireEvent.blur(creatorInput);
+      expect(creatorInput).toHaveClass('input-error');
+
+      await user.clear(creatorInput);
+      await user.type(creatorInput, 'G' + 'A'.repeat(55));
+
+      expect(creatorInput).not.toHaveClass('input-error');
+      expect(screen.queryByText(/Invalid Stellar account format/i)).not.toBeInTheDocument();
+    });
+
+    it('validates on field change, not just on step submit', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
+
+      const titleInput = screen.getByPlaceholderText(/Stellar community design sprint/i);
+
+      await user.type(titleInput, 'Bad');
+      fireEvent.blur(titleInput);
+      expect(screen.getByText(/at least 4 characters/i)).toBeInTheDocument();
+
+      await user.type(titleInput, 's');
+      expect(screen.queryByText(/at least 4 characters/i)).not.toBeInTheDocument();
+    });
+
+    it('blocks advancing to Funding while Step 1 is invalid', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
+
+      const creatorInput = screen.getByPlaceholderText(/G\.\.\. creator public key/i);
+      await user.type(creatorInput, 'invalid');
+      await user.click(screen.getByRole('button', { name: /^next$/i }));
+
+      expect(mockOnCreate).not.toHaveBeenCalled();
+      expect(screen.getByPlaceholderText(/G\.\.\. creator public key/i)).toBeInTheDocument();
     });
   });
 
-  describe("Submit Button State", () => {
-    it("disables submit button when form has validation errors", async () => {
-      const user = userEvent.setup();
-      render(
-        <CreateCampaignForm
-          onCreate={mockOnCreate}
-          allowedAssets={["USDC"]}
-        />,
-      );
-
-      const submitButton = screen.getByRole("button", { name: /Create campaign/i });
-
-      // Initially disabled because form is empty
-      expect(submitButton).toBeDisabled();
-
-      // Add invalid data
-      const creatorInput = screen.getByPlaceholderText(/G\.\.\. creator public key/i);
-      await user.type(creatorInput, "invalid");
-
-      // Button should still be disabled due to errors
-      expect(submitButton).toBeDisabled();
-    });
-
-    it("enables submit button when all required fields are valid", async () => {
-      const user = userEvent.setup();
-      render(
-        <CreateCampaignForm
-          onCreate={mockOnCreate}
-          allowedAssets={["USDC"]}
-        />,
-      );
-
-      const submitButton = screen.getByRole("button", { name: /Create campaign/i });
-
-      // Fill in valid data
+  describe('Step 2 field errors', () => {
+    async function goToFunding(user: ReturnType<typeof userEvent.setup>) {
       await user.type(
         screen.getByPlaceholderText(/G\.\.\. creator public key/i),
-        "G" + "A".repeat(55),
+        'G' + 'A'.repeat(55),
       );
       await user.type(
         screen.getByPlaceholderText(/Stellar community design sprint/i),
-        "My Valid Campaign Title",
+        'My Valid Campaign Title',
       );
       await user.type(
         screen.getByPlaceholderText(/Describe what the campaign funds/i),
-        "This is a valid campaign description with enough content.",
+        'This is a valid campaign description with enough content.',
       );
+      await user.selectOptions(screen.getByRole('combobox'), 'Community');
+      await user.click(screen.getByRole('button', { name: /^next$/i }));
+    }
 
-      // Button should be enabled
-      expect(submitButton).toBeEnabled();
-    });
-  });
-
-  describe("Error Styling", () => {
-    it("applies input-error class to fields with validation errors", async () => {
+    it('displays amount error for negative or zero amount', async () => {
       const user = userEvent.setup();
-      render(
-        <CreateCampaignForm
-          onCreate={mockOnCreate}
-          allowedAssets={["USDC"]}
-        />,
-      );
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
+      await goToFunding(user);
 
-      const creatorInput = screen.getByPlaceholderText(/G\.\.\. creator public key/i) as HTMLInputElement;
-      await user.type(creatorInput, "invalid");
-      await user.type(creatorInput, "{Backspace}");
+      const amountInput = screen.getByLabelText(/target amount/i);
+      await user.clear(amountInput);
+      await user.type(amountInput, '0');
+      fireEvent.blur(amountInput);
 
-      expect(creatorInput).toHaveClass("input-error");
+      expect(screen.getByText(/Amount must be greater than zero/i)).toBeInTheDocument();
     });
 
-    it("removes input-error class when field becomes valid", async () => {
+    it('displays deadline error for zero hours', async () => {
       const user = userEvent.setup();
-      render(
-        <CreateCampaignForm
-          onCreate={mockOnCreate}
-          allowedAssets={["USDC"]}
-        />,
-      );
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
+      await goToFunding(user);
 
-      const creatorInput = screen.getByPlaceholderText(/G\.\.\. creator public key/i) as HTMLInputElement;
+      const deadlineInput = screen.getByLabelText(/deadline in hours/i);
+      await user.clear(deadlineInput);
+      await user.type(deadlineInput, '0');
+      fireEvent.blur(deadlineInput);
 
-      // Add invalid value
-      await user.type(creatorInput, "invalid");
-      expect(creatorInput).toHaveClass("input-error");
-
-      // Clear and add valid value
-      await user.clear(creatorInput);
-      await user.type(creatorInput, "G" + "A".repeat(55));
-
-      expect(creatorInput).not.toHaveClass("input-error");
-      expect(screen.queryByText(/Invalid Stellar account format/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/at least 0.0001 hours/i)).toBeInTheDocument();
     });
-  });
 
-  describe("Real-time Validation", () => {
-    it("validates on field change, not just on submit", async () => {
+    it('displays an error when max per contributor is not a whole number', async () => {
       const user = userEvent.setup();
-      render(
-        <CreateCampaignForm
-          onCreate={mockOnCreate}
-          allowedAssets={["USDC"]}
-        />,
-      );
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
+      await goToFunding(user);
 
-      const titleInput = screen.getByPlaceholderText(/Stellar community design sprint/i);
+      const maxPerContributorInput = screen.getByLabelText(/max per contributor/i);
+      await user.type(maxPerContributorInput, '1.5');
+      fireEvent.blur(maxPerContributorInput);
 
-      // Type too-short title
-      await user.type(titleInput, "Bad");
+      expect(screen.getByText('Max per contributor must be a whole number')).toBeInTheDocument();
+    });
 
-      // Error should appear immediately
-      expect(screen.getByText(/at least 4 characters/i)).toBeInTheDocument();
+    it('treats an empty max per contributor as valid (no cap)', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={mockOnCreate} allowedAssets={['USDC']} />);
+      await goToFunding(user);
 
-      // Add one more character
-      await user.type(titleInput, "s");
+      const maxPerContributorInput = screen.getByLabelText(/max per contributor/i);
+      fireEvent.blur(maxPerContributorInput);
 
-      // Error should disappear
-      expect(screen.queryByText(/at least 4 characters/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/Max per contributor must be/i),
+      ).not.toBeInTheDocument();
     });
   });
 });

@@ -1,0 +1,54 @@
+import { z } from 'zod';
+
+const envSchema = z.object({
+  // Required
+  CONTRACT_ID: z.string().min(1, 'CONTRACT_ID is required for Soroban pledge signing'),
+
+  // Optional with documented defaults
+  PORT: z.string().optional().describe('default: 3001'),
+  NODE_ENV: z.string().optional().describe('default: development'),
+  LOG_LEVEL: z
+    .enum(['debug', 'info', 'warn', 'error', 'silent'])
+    .optional()
+    .describe('default: info'),
+  DB_PATH: z.string().optional().describe('default: backend/data/campaigns.db'),
+  SOROBAN_RPC_URL: z
+    .string()
+    .url()
+    .optional()
+    .describe('default: testnet RPC in non-production; required in production'),
+  SOROBAN_NETWORK_PASSPHRASE: z
+    .string()
+    .optional()
+    .describe('default: testnet passphrase in non-production; required in production'),
+  ALLOWED_ASSETS: z.string().optional().describe('default: USDC,XLM'),
+  ALLOWED_ORIGINS: z.string().optional().describe('default: (empty — all origins allowed in dev)'),
+  ASSET_ADDRESSES: z.string().optional().describe('default: XLM and USDC testnet addresses'),
+  CONTRACT_AMOUNT_DECIMALS: z
+    .string()
+    .regex(/^\d+$/, 'CONTRACT_AMOUNT_DECIMALS must be a non-negative integer')
+    .optional()
+    .describe('default: 2'),
+  DEFAULT_MAX_PER_CONTRIBUTOR: z
+    .string()
+    .regex(/^\d+$/, 'DEFAULT_MAX_PER_CONTRIBUTOR must be a non-negative integer')
+    .optional()
+    .describe('default: 0 (no limit)'),
+  WEBHOOK_URL: z.string().optional().describe('Configurable webhook URL for status change notifications'),
+  WEBHOOK_SECRET: z.string().optional().describe('Secret used to compute HMAC-SHA256 signature in X-GoalVault-Signature header'),
+});
+
+export function validateEnv(): void {
+  const result = envSchema.safeParse(process.env);
+
+  if (!result.success) {
+    const missing = result.error.issues.map(
+      (issue) => `  - ${issue.path.join('.')}: ${issue.message}`,
+    );
+    const { logger } = require('./logger');
+    logger.error(
+      `\n[startup] Environment validation failed. Fix the following before starting:\n${missing.join('\n')}\n`,
+    );
+    process.exit(1);
+  }
+}

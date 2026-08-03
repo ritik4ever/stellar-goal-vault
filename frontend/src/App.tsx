@@ -1,12 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { FundedConfetti } from "./components/FundedConfetti";
+import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
+import { NotificationBell } from "./components/NotificationBell";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
+import { CreatorAnalytics } from "./components/CreatorAnalytics";
 import { IssueBacklog } from "./components/IssueBacklog";
-import { ToastContainer } from "./components/ToastContainer";
+import { InstallPrompt } from "./components/InstallPrompt";
+import { OfflineBanner } from "./components/OfflineBanner";
 import {
-  addPledge,
+  TransactionPreviewModal,
+  TransactionPreviewData,
+} from "./components/TransactionPreviewModal";
+import { ToastContainer } from "./components/ToastContainer";
+import { WalletWidget } from "./components/WalletWidget";
+import { WalletPickerModal } from "./components/WalletPickerModal";
+import {
   claimCampaign,
   createCampaign,
   getAppConfig,
@@ -16,14 +29,19 @@ import {
   listOpenIssues,
   reconcilePledge,
   refundCampaign,
-} from "./services/api";
+  softDeleteCampaign,
+} from './services/api';
 import {
-  connectFreighterWallet,
   submitFreighterClaim,
   submitFreighterPledge,
 } from "./services/freighter";
 import { submitRefundTransaction } from "./services/soroban";
+import { useWallet } from "./hooks/useWallet";
+import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useToast } from "./hooks/useToast";
+import { useOpenGraph } from "./hooks/useOpenGraph";
+import { useCampaignShareCard } from "./components/CampaignShareCard";
+import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
 import {
   ApiError,
   AppConfig,
@@ -33,39 +51,47 @@ import {
 } from "./types/campaign";
 
 const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
+const MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
+const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
+const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
+const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
+const LIST_STATE_KEY = "sgv-list-state";
+const CAMPAIGN_PAGE_SIZE = 20;
+
+type SavedListState = {
+  scrollY: number;
+  pages: number;
+  search: string;
+};
+
+type ThemeMode = 'light' | 'dark';
+
+type TransactionPreviewState = {
+  data: TransactionPreviewData;
+  resolve: (approved: boolean) => void;
+};
+
+type ConfettiBurst = {
+  id: number;
+  campaignTitle: string;
+};
 
 function round(value: number): number {
   return Number(value.toFixed(2));
 }
 
-function getCampaignIdFromUrl(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("campaign");
-}
-
-function setCampaignIdInUrl(campaignId: string | null): void {
-  const url = new URL(window.location.href);
-  if (campaignId) {
-    url.searchParams.set("campaign", campaignId);
-  } else {
-    url.searchParams.delete("campaign");
-  }
-  window.history.replaceState(null, "", url.toString());
-}
-
 function getErrorMessage(error: unknown): string {
-  if (error && typeof error === "object") {
-    const maybeError = error as Error;
-    return maybeError.message || "Something went wrong.";
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
   }
-  if (typeof error === "string") {
+  if (typeof error === 'string' && error.trim().length > 0) {
     return error;
   }
-  return "Something went wrong.";
+  return 'Something went wrong.';
 }
 
 function toApiError(error: unknown): ApiError {
-  if (error && typeof error === "object") {
+  if (error && typeof error === 'object') {
     const maybeError = error as Error & {
       code?: string;
       details?: Array<{ field: string; message: string }>;
@@ -73,59 +99,197 @@ function toApiError(error: unknown): ApiError {
     };
 
     return {
-      message: maybeError.message || "Something went wrong.",
+      message: maybeError.message || 'Something went wrong.',
       code: maybeError.code,
       details: maybeError.details,
       requestId: maybeError.requestId,
     };
   }
 
-  if (typeof error === "string") {
+  if (typeof error === 'string') {
     return { message: error };
   }
 
-  return { message: "Something went wrong." };
+  return { message: 'Something went wrong.' };
+}
+
+function getSystemTheme(): ThemeMode {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+/**
+ * Returns a Stellar Expert deep-link for a confirmed transaction hash.
+ * Uses testnet explorer for the testnet passphrase, mainnet otherwise.
+ */
+function stellarExpertTxUrl(txHash: string, networkPassphrase: string | undefined): string {
+  const network = networkPassphrase === MAINNET_PASSPHRASE ? 'public' : 'testnet';
+  return `https://stellar.expert/explorer/${network}/tx/${txHash}`;
+}
+
+function getNetworkName(networkPassphrase: string): string {
+  if (networkPassphrase === 'Test SDF Network ; September 2015') {
+    return 'Testnet';
+  }
+  if (networkPassphrase === 'Public Global Stellar Network ; September 2015') {
+    return 'Mainnet';
+  }
+  return networkPassphrase;
 }
 
 function App() {
+  const { id: paramId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const wallet = useWallet();
+  const { toasts, addToast, dismiss } = useToast();
+  const connectedWallet = wallet.publicKey;
+
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaignPage, setCampaignPage] = useState(1);
+  const [hasMoreCampaigns, setHasMoreCampaigns] = useState(false);
+  const [isLoadingMoreCampaigns, setIsLoadingMoreCampaigns] = useState(false);
+  const activeSearchRef = useRef('');
+  const activeSortRef = useRef<string>('newest');
+  const activeOrderRef = useRef<string>('desc');
+  const [searchParams] = useSearchParams();
+  const campaignParam = searchParams.get('campaign');
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(() =>
-    getCampaignIdFromUrl(),
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(
+    paramId ?? campaignParam ?? null,
   );
-  const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(
-    null,
-  );
+  const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(null);
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
-  const [isIssuesLoading, setIsIssuesLoading] = useState(false);
+  const [isIssuesLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [themeMode, setThemeMode] = useLocalStorage<ThemeMode>(THEME_STORAGE_KEY, getSystemTheme());
+  useLocalStorage<string>(SORT_ORDER_KEY, 'default');
+  useLocalStorage<string[]>(FILTER_STATE_KEY, []);
   const [createError, setCreateError] = useState<ApiError | null>(null);
-  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(
+  const [actionError, setActionError] = useState<ApiError | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
+  const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
+  const [transactionPreview, setTransactionPreview] = useState<TransactionPreviewState | null>(
     null,
   );
-  const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
-  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
-  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+  const [confettiBurst, setConfettiBurst] = useState<ConfettiBurst | null>(null);
 
-  const { toasts, addToast, dismiss } = useToast();
+  const handleTransactionPreview = (data: TransactionPreviewData): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setTransactionPreview({ data, resolve });
+    });
+  };
 
   useEffect(() => {
-    setCampaignIdInUrl(selectedCampaignId);
-  }, [selectedCampaignId]);
+    document.documentElement.setAttribute('data-theme', themeMode);
+  }, [themeMode]);
 
-  async function refreshCampaigns(nextSelectedId?: string | null) {
-    setIsCampaignsLoading(true);
+  useEffect(() => {
+    setSelectedCampaignId(paramId ?? campaignParam ?? null);
+  }, [paramId, campaignParam]);
+
+  async function fetchCampaignPage(
+    page: number,
+    searchQuery = '',
+    append = false,
+    sort = activeSortRef.current,
+    order = activeOrderRef.current,
+  ): Promise<Awaited<ReturnType<typeof listCampaigns>>> {
+    const response = await listCampaigns({
+      search: searchQuery,
+      page,
+      limit: CAMPAIGN_PAGE_SIZE,
+      sort,
+      order,
+    });
+
+    setCampaigns((current) => (append ? [...current, ...response.data] : response.data));
+    setCampaignPage(page);
+    setHasMoreCampaigns(page < response.pagination.totalPages);
+
+    return response;
+  }
+
+  async function loadInitialCampaignPages(
+    searchQuery: string,
+    pagesToLoad: number,
+  ): Promise<Campaign[]> {
+    let combined: Campaign[] = [];
+    let lastResponse: Awaited<ReturnType<typeof listCampaigns>> | null = null;
+
+    for (let page = 1; page <= pagesToLoad; page += 1) {
+      lastResponse = await listCampaigns({
+        search: searchQuery,
+        page,
+        limit: CAMPAIGN_PAGE_SIZE,
+      });
+      combined = [...combined, ...lastResponse.data];
+    }
+
+    setCampaigns(combined);
+    if (lastResponse) {
+      setCampaignPage(pagesToLoad);
+      setHasMoreCampaigns(pagesToLoad < lastResponse.pagination.totalPages);
+    }
+
+    return combined;
+  }
+
+  async function loadMoreCampaigns() {
+    if (!hasMoreCampaigns || isLoadingMoreCampaigns || isCampaignsLoading) {
+      return;
+    }
+
+    setIsLoadingMoreCampaigns(true);
     try {
-      const data = await listCampaigns();
-      setCampaigns(data);
+      await fetchCampaignPage(campaignPage + 1, activeSearchRef.current, true);
+    } catch (error) {
+      addToast(getErrorMessage(error), 'error');
+    } finally {
+      setIsLoadingMoreCampaigns(false);
+    }
+  }
+
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === '?' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        setIsShortcutsOpen((current) => !current);
+      }
+
+      if (event.key === 'Escape') {
+        setIsShortcutsOpen(false);
+        if (transactionPreview) {
+          transactionPreview.resolve(false);
+          setTransactionPreview(null);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeydown);
+    return () => {
+      window.removeEventListener('keydown', handleKeydown);
+    };
+  }, [transactionPreview]);
+
+  async function refreshCampaigns(
+    searchQuery: string = '',
+    nextSelectedId?: string | null,
+  ): Promise<Campaign[]> {
+    setIsCampaignsLoading(true);
+    activeSearchRef.current = searchQuery;
+    try {
+      const response = await fetchCampaignPage(1, searchQuery, false);
+      const data = response.data;
 
       const requestedId = nextSelectedId ?? selectedCampaignId;
       const nextId = requestedId ?? data[0]?.id ?? null;
       const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
-      const resolvedId = exists ? nextId : data[0]?.id ?? null;
+      const resolvedId = exists ? nextId : (data[0]?.id ?? null);
 
       setInvalidUrlCampaignId(requestedId && !exists ? requestedId : null);
       setSelectedCampaignId(resolvedId);
@@ -134,6 +298,8 @@ function App() {
         setSelectedCampaignDetails(null);
         setHistory([]);
       }
+
+      return data;
     } finally {
       setIsCampaignsLoading(false);
     }
@@ -164,60 +330,78 @@ function App() {
     }
   }
 
-  async function refreshIssues() {
-    setIsIssuesLoading(true);
-    try {
-      const data = await listOpenIssues();
-      setIssues(data);
-    } finally {
-      setIsIssuesLoading(false);
-    }
-  }
-
   async function refreshSelectedData(campaignId: string | null) {
     await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
   }
+
+  const { toDataUrl } = useCampaignShareCard();
+
+  const initialParamIdRef = useRef(paramId);
 
   useEffect(() => {
     let cancelled = false;
 
     async function bootstrap() {
-      const requestedCampaignId = getCampaignIdFromUrl();
+      const requestedCampaignId = initialParamIdRef.current ?? null;
       setInitialLoad(true);
 
-      const [configResult, issuesResult, campaignsResult] = await Promise.allSettled([
+      const restoredRaw = sessionStorage.getItem(LIST_STATE_KEY);
+      sessionStorage.removeItem(LIST_STATE_KEY);
+      let restoredState: SavedListState | null = null;
+      if (restoredRaw) {
+        try {
+          restoredState = JSON.parse(restoredRaw) as SavedListState;
+        } catch {
+          restoredState = null;
+        }
+      }
+
+      const [configResult, issuesResult] = await Promise.allSettled([
         getAppConfig(),
         listOpenIssues(),
-        listCampaigns(),
       ]);
+
+      let data: Campaign[] = [];
+      try {
+        if (restoredState && !requestedCampaignId) {
+          data = await loadInitialCampaignPages(
+            restoredState.search,
+            Math.max(1, restoredState.pages),
+          );
+          requestAnimationFrame(() => {
+            window.scrollTo(0, restoredState?.scrollY ?? 0);
+          });
+        } else {
+          const response = await fetchCampaignPage(1, '', false);
+          data = response.data;
+        }
+      } catch (error) {
+        addToast(getErrorMessage(error), 'error');
+      }
 
       if (cancelled) {
         return;
       }
 
-      if (configResult.status === "fulfilled") {
+      if (configResult.status === 'fulfilled') {
         setAppConfig(configResult.value);
       } else {
-        addToast(getErrorMessage(configResult.reason), "error");
+        addToast(getErrorMessage(configResult.reason), 'error');
       }
 
-      if (issuesResult.status === "fulfilled") {
+      if (issuesResult.status === 'fulfilled') {
         setIssues(issuesResult.value);
       }
 
-      if (campaignsResult.status === "fulfilled") {
-        const data = campaignsResult.value;
-        setCampaigns(data);
+      const nextId = requestedCampaignId ?? data[0]?.id ?? null;
+      const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
+      const resolvedId = exists ? nextId : (data[0]?.id ?? null);
 
-        const nextId = requestedCampaignId ?? data[0]?.id ?? null;
-        const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
-        const resolvedId = exists ? nextId : data[0]?.id ?? null;
-
-        setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
-        setSelectedCampaignId(resolvedId);
-      } else {
-        addToast(getErrorMessage(campaignsResult.reason), "error");
+      if (requestedCampaignId && !exists) {
+        navigate('/not-found', { replace: true });
       }
+      setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
+      setSelectedCampaignId(resolvedId);
 
       setInitialLoad(false);
     }
@@ -227,13 +411,13 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [addToast, navigate]);
 
   useEffect(() => {
     void refreshSelectedData(selectedCampaignId).catch((error) => {
-      addToast(getErrorMessage(error), "error");
+      addToast(getErrorMessage(error), 'error');
     });
-  }, [selectedCampaignId]);
+  }, [addToast, selectedCampaignId]);
 
   const selectedCampaign = useMemo(() => {
     const summaryCampaign =
@@ -254,10 +438,24 @@ function App() {
     };
   }, [campaigns, selectedCampaignDetails, selectedCampaignId]);
 
+  const ogMeta = useMemo(() => {
+    const c = selectedCampaign;
+    if (!c) return null;
+    const baseUrl = window.location.origin;
+    return {
+      title: `${c.title} — Stellar Goal Vault`,
+      description: c.description.slice(0, 200),
+      image: c.metadata?.imageUrl ?? undefined,
+      url: `${baseUrl}/campaigns/${c.id}`,
+    };
+  }, [selectedCampaign]);
+
+  useOpenGraph(ogMeta);
+
   const metrics = useMemo(() => {
-    const open = campaigns.filter((campaign) => campaign.progress.status === "open").length;
-    const funded = campaigns.filter((campaign) => campaign.progress.status === "funded").length;
-    const claimed = campaigns.filter((campaign) => campaign.progress.status === "claimed").length;
+    const open = campaigns.filter((campaign) => campaign.progress.status === 'open').length;
+    const funded = campaigns.filter((campaign) => campaign.progress.status === 'funded').length;
+    const claimed = campaigns.filter((campaign) => campaign.progress.status === 'claimed').length;
     const pledged = campaigns.reduce((sum, campaign) => sum + campaign.pledgedAmount, 0);
 
     return {
@@ -276,62 +474,97 @@ function App() {
       const campaign = await createCampaign(payload);
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
-      addToast(`Campaign #${campaign.id} is live and ready for pledges.`, "success");
+      navigate('/campaigns/' + campaign.id);
+      addToast(`Campaign #${campaign.id} is live and ready for pledges.`, 'success');
     } catch (error) {
-      setCreateError(toApiError(error));
+      const apiError = toApiError(error);
+      setCreateError(apiError);
+      addToast(apiError.message, 'error');
     }
   }
 
-  async function handleConnectWallet() {
+  async function handleConnectWallet(walletType: string) {
+    const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
     setIsConnectingWallet(true);
-
     try {
-      const wallet = await connectFreighterWallet(
-        appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE,
-      );
-      setConnectedWallet(wallet.publicKey);
-      addToast(`Wallet connected: ${wallet.publicKey.slice(0, 16)}...`, "success");
-    } catch (error) {
-      addToast(getErrorMessage(error), "error");
+      await wallet.connect(walletType as any, networkPassphrase);
+      addToast(`Wallet connected: ${wallet.publicKey?.slice(0, 16)}...`, "success");
     } finally {
       setIsConnectingWallet(false);
     }
   }
 
-  async function handlePledge(campaignId: string, amount: number) {
+  function handleDisconnectWallet() {
+    wallet.disconnect();
+    addToast("Wallet disconnected.", "success");
+  }
+
+  // Account watching is handled by individual wallet adapters
+
+  async function handlePledge(campaignId: string, amount: number, assetCode: string) {
     if (!connectedWallet) {
-      addToast("Connect Freighter before submitting a pledge.", "error");
+      addToast('Connect Freighter before submitting a pledge.', 'error');
       return;
     }
+
+    if (!appConfig) {
+      addToast('App configuration is still loading. Try again in a moment.', 'error');
+      return;
+    }
+
+    const previousCampaign =
+      campaigns.find((campaign) => campaign.id === campaignId) ??
+      (selectedCampaign?.id === campaignId ? selectedCampaign : null);
 
     setPendingPledgeCampaignId(campaignId);
 
     try {
-      if (appConfig?.walletIntegrationReady && appConfig.contractId && appConfig.sorobanRpcUrl) {
-        const transactionResult = await submitFreighterPledge({
-          campaignId,
-          contributor: connectedWallet,
-          amount,
-          config: appConfig,
-        });
+      const transactionResult = await submitFreighterPledge({
+        campaignId,
+        contributor: connectedWallet,
+        amount,
+        assetCode,
+        config: appConfig,
+        onPreview: handleTransactionPreview,
+      });
 
-        await reconcilePledge(campaignId, {
-          contributor: connectedWallet,
-          amount,
-          transactionHash: transactionResult.transactionHash,
-          confirmedAt: transactionResult.confirmedAt,
-        });
+      await reconcilePledge(campaignId, {
+        contributor: connectedWallet,
+        amount,
+        assetCode,
+        transactionHash: transactionResult.transactionHash,
+        confirmedAt: transactionResult.confirmedAt,
+      });
 
-        addToast("Pledge confirmed on-chain and reconciled.", "success");
-      } else {
-        await addPledge(campaignId, { contributor: connectedWallet, amount });
-        addToast("Pledge recorded in the local goal vault.", "success");
+      const refreshedCampaigns = await refreshCampaigns(campaignId);
+      const refreshedCampaign =
+        refreshedCampaigns.find((campaign) => campaign.id === campaignId) ?? null;
+
+      if (didCampaignBecomeFunded(previousCampaign, refreshedCampaign)) {
+        setConfettiBurst({
+          id: Date.now(),
+          campaignTitle: refreshedCampaign?.title ?? 'Campaign',
+        });
       }
 
-      await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
+      addToast(
+        `Pledged ${amount} ${assetCode}. Tx: ${transactionResult.transactionHash.slice(0, 12)}…`,
+        "success",
+        {
+          href: stellarExpertTxUrl(transactionResult.transactionHash, appConfig?.networkPassphrase),
+          label: 'View on Stellar Expert',
+        },
+      );
     } catch (error) {
-      addToast(getErrorMessage(error), "error");
+      if (
+        error &&
+        typeof error === 'object' &&
+        (error as { code?: string }).code === 'USER_CANCELLED'
+      ) {
+        return;
+      }
+      addToast(getErrorMessage(error), 'error');
     } finally {
       setPendingPledgeCampaignId(null);
     }
@@ -339,17 +572,17 @@ function App() {
 
   async function handleClaim(campaign: Campaign) {
     if (!appConfig?.walletIntegrationReady) {
-      addToast("Wallet signing is not configured on the backend yet.", "error");
+      addToast('Wallet signing is not configured on the backend yet.', 'error');
       return;
     }
 
     if (!connectedWallet) {
-      addToast("Connect Freighter before claiming campaign funds.", "error");
+      addToast('Connect Freighter before claiming campaign funds.', 'error');
       return;
     }
 
     if (connectedWallet !== campaign.creator) {
-      addToast("Only the campaign creator can claim funds.", "error");
+      addToast('Only the campaign creator can claim funds.', 'error');
       return;
     }
 
@@ -358,6 +591,7 @@ function App() {
         campaignId: campaign.id,
         creator: connectedWallet,
         config: appConfig,
+        onPreview: handleTransactionPreview,
       });
 
       await claimCampaign(
@@ -369,95 +603,209 @@ function App() {
 
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
-      addToast("Campaign claimed successfully.", "success");
+      addToast('Campaign claimed successfully.', 'success');
     } catch (error) {
-      addToast(getErrorMessage(error), "error");
+      if (
+        error &&
+        typeof error === 'object' &&
+        (error as { code?: string }).code === 'USER_CANCELLED'
+      ) {
+        return;
+      }
+      addToast(getErrorMessage(error), 'error');
+    }
+  }
+
+  async function handleSoftDelete(campaignId: string) {
+    if (
+      !window.confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)
+    ) {
+      return;
+    }
+
+    setActionError(null);
+    setActionMessage('Soft deleting...');
+
+    try {
+      await softDeleteCampaign(campaignId);
+      await refreshCampaigns();
+      navigate('/');
+      setActionMessage('Campaign soft deleted.');
+    } catch (error) {
+      setActionError(toApiError(error));
+      setActionMessage(null);
     }
   }
 
   async function handleRefund(campaignId: string, contributor: string) {
+    setActionError(null);
+    setActionMessage('Preparing Soroban refund transaction...');
+
     try {
       const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
       await refundCampaign(campaignId, contributor, sorobanReceipt);
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
-      addToast("Contributor refunded successfully.", "success");
+      setActionMessage(null);
+      addToast('Contributor refunded successfully.', 'success');
     } catch (error) {
-      addToast(getErrorMessage(error), "error");
+      setActionError(toApiError(error));
+      setActionMessage(null);
+      addToast(getErrorMessage(error), 'error');
     }
   }
 
   function handleSelect(campaignId: string) {
+    sessionStorage.setItem(
+      LIST_STATE_KEY,
+      JSON.stringify({
+        scrollY: window.scrollY,
+        pages: campaignPage,
+        search: activeSearchRef.current,
+      } satisfies SavedListState),
+    );
     setInvalidUrlCampaignId(null);
     setSelectedCampaignId(campaignId);
+    navigate('/campaigns/' + campaignId);
+  }
+
+  function handleThemeToggle() {
+    setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'));
   }
 
   return (
     <div className="app-shell">
-      <header className="hero">
-        <p className="eyebrow">Soroban crowdfunding MVP</p>
-        <h1>Stellar Goal Vault</h1>
-        <p className="hero-copy">
-          Create funding goals, collect pledges, and reconcile claim and refund flows
-          against the backend contract integration.
-        </p>
-      </header>
+      <OfflineBanner />
+      <InstallPrompt />
+      {confettiBurst ? (
+        <FundedConfetti
+          key={confettiBurst.id}
+          campaignTitle={confettiBurst.campaignTitle}
+          onComplete={() => setConfettiBurst(null)}
+        />
+      ) : null}
+
+      <section className="hero animate-fade-in">
+        <div className="hero-topline">
+          <div>
+            <div className="eyebrow">{t('app.eyebrow')}</div>
+            <h1>{t('app.title')}</h1>
+          </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <WalletWidget
+              status={wallet.status}
+              publicKey={wallet.publicKey}
+              walletName={wallet.walletName}
+              error={wallet.error}
+              network={getNetworkName(appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE)}
+              onConnect={wallet.openPicker}
+              onDisconnect={handleDisconnectWallet}
+              onSwitchWallet={wallet.openPicker}
+            />
+            <NotificationBell wallet={connectedWallet} campaignId={selectedCampaignId} />
+            <button className="btn-ghost" type="button" onClick={handleThemeToggle}>
+              {themeMode === 'dark' ? t('app.controls.lightMode') : t('app.controls.darkMode')}
+            </button>
+            <button className="btn-ghost" type="button" onClick={() => setIsShortcutsOpen(true)}>
+              {t('app.controls.shortcuts')}
+            </button>
+          </div>
+        </div>
+        <p className="hero-copy">{t('app.description')}</p>
+        {actionError ? <p className="form-error">{actionError.message}</p> : null}
+        {actionMessage ? <p className="form-success">{actionMessage}</p> : null}
+      </section>
 
       <section className="metric-grid animate-fade-in">
         <article className="metric-card">
-          <span>Total campaigns</span>
+          <span>{t('app.metrics.total')}</span>
           <strong>{metrics.total}</strong>
         </article>
         <article className="metric-card">
-          <span>Open campaigns</span>
+          <span>{t('app.metrics.open')}</span>
           <strong>{metrics.open}</strong>
         </article>
         <article className="metric-card">
-          <span>Funded campaigns</span>
+          <span>{t('app.metrics.funded')}</span>
           <strong>{metrics.funded}</strong>
         </article>
         <article className="metric-card">
-          <span>Claimed campaigns</span>
+          <span>{t('app.metrics.claimed')}</span>
           <strong>{metrics.claimed}</strong>
         </article>
         <article className="metric-card">
-          <span>Total pledged</span>
+          <span>{t('app.metrics.pledged')}</span>
           <strong>{metrics.pledged}</strong>
         </article>
       </section>
 
-      <section
-        className="layout-grid animate-fade-in"
-        style={{ animationDelay: "0.2s" }}
-      >
+      {selectedCampaign && (
+        <section className="animate-fade-in" style={{ animationDelay: '0.1s' }}>
+          <ErrorBoundary componentName="CreatorAnalytics">
+            <CreatorAnalytics
+              creatorAddress={selectedCampaign.creator}
+              campaigns={campaigns}
+              isLoading={isCampaignsLoading || initialLoad}
+            />
+          </ErrorBoundary>
+        </section>
+      )}
+
+      <section className="layout-grid animate-fade-in" style={{ animationDelay: '0.2s' }}>
         <CreateCampaignForm
           onCreate={handleCreate}
           apiError={createError}
           allowedAssets={appConfig?.allowedAssets ?? []}
         />
-        <CampaignDetailPanel
-          campaign={selectedCampaign}
-          appConfig={appConfig}
-          connectedWallet={connectedWallet}
-          isConnectingWallet={isConnectingWallet}
-          isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
-          isLoading={isSelectedLoading || initialLoad}
-          onConnectWallet={handleConnectWallet}
-          onPledge={handlePledge}
-          onClaim={handleClaim}
-          onRefund={handleRefund}
-        />
+        <ErrorBoundary componentName="CampaignDetailPanel">
+          <CampaignDetailPanel
+            campaign={selectedCampaign}
+            appConfig={appConfig}
+            connectedWallet={connectedWallet}
+            isConnectingWallet={isConnectingWallet}
+            isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+            isLoading={isSelectedLoading || initialLoad}
+            notFoundCampaignId={invalidUrlCampaignId}
+            onConnectWallet={handleConnectWallet}
+            onDisconnectWallet={handleDisconnectWallet}
+            onPledge={handlePledge}
+            onClaim={handleClaim}
+            onSoftDelete={handleSoftDelete}
+            onRefund={handleRefund}
+          />
+        </ErrorBoundary>
       </section>
 
       <section className="secondary-grid">
-        <CampaignsTable
-          campaigns={campaigns}
-          selectedCampaignId={selectedCampaignId}
-          onSelect={handleSelect}
-          isLoading={isCampaignsLoading || initialLoad}
-          invalidUrlCampaignId={invalidUrlCampaignId}
+        <ErrorBoundary componentName="CampaignsTable">
+          <CampaignsTable
+            campaigns={campaigns}
+            selectedCampaignId={selectedCampaignId}
+            onSelect={handleSelect}
+            onSearchChange={(query) => {
+              void refreshCampaigns(query);
+            }}
+            onSortChange={(sort, order) => {
+              activeSortRef.current = sort;
+              activeOrderRef.current = order;
+              void refreshCampaigns(activeSearchRef.current);
+            }}
+            onLoadMore={() => {
+              void loadMoreCampaigns();
+            }}
+            hasMore={hasMoreCampaigns}
+            isLoadingMore={isLoadingMoreCampaigns}
+            isLoading={isCampaignsLoading || initialLoad}
+            invalidUrlCampaignId={invalidUrlCampaignId}
+          />
+        </ErrorBoundary>
+
+        <CampaignTimeline
+          history={history}
+          isLoading={isSelectedLoading || initialLoad}
+          targetAmount={selectedCampaign?.targetAmount}
+          pledgedAmount={selectedCampaign?.pledgedAmount}
         />
-        <CampaignTimeline history={history} isLoading={isSelectedLoading || initialLoad} />
       </section>
 
       <section className="section-margin">
@@ -465,6 +813,33 @@ function App() {
       </section>
 
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
+
+      {transactionPreview ? (
+        <TransactionPreviewModal
+          preview={transactionPreview.data}
+          onConfirm={() => {
+            transactionPreview.resolve(true);
+            setTransactionPreview(null);
+          }}
+          onCancel={() => {
+            transactionPreview.resolve(false);
+            setTransactionPreview(null);
+          }}
+        />
+      ) : null}
+
+      <KeyboardShortcutsOverlay
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
+      />
+
+      <WalletPickerModal
+        isOpen={wallet.isPickerOpen}
+        onClose={wallet.closePicker}
+        onSelectWallet={handleConnectWallet}
+        isConnecting={wallet.status === 'connecting'}
+        connectingWallet={wallet.walletType}
+      />
     </div>
   );
 }

@@ -1,0 +1,104 @@
+name: Load Test
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    name: Load Test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'backend/package-lock.json'
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install autocannon
+        working-directory: backend
+        run: npm install --no-save autocannon
+
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+
+      - name: Start backend (in-memory SQLite)
+        working-directory: backend
+        run: |
+          NODE_ENV=test DB_PATH=:memory: node dist/index.js &
+          BACKEND_PID=$!
+          echo "Backend PID: $BACKEND_PID"
+          echo "BACKEND_PID=$BACKEND_PID" >> $GITHUB_ENV
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3001/api/health | grep -q 200; then
+              echo "Backend is ready"
+              break
+            fi
+            echo "Waiting for backend... attempt $i"
+            sleep 2
+          done
+
+      - name: Run CI load test
+        id: load-test
+        working-directory: backend
+        run: |
+          node scripts/ci-load-test.js 2>&1 | tee load-test-output.txt
+
+      - name: Check thresholds from JSON output
+        id: check-thresholds
+        run: |
+          python3 << 'EOF'
+          import json, os
+
+          with open("backend/load-test-output.txt") as f:
+              content = f.read()
+
+          start = content.index("---JSON-START---") + len("---JSON-START---")
+          end = content.index("---JSON-END---")
+          summary = json.loads(content[start:end].strip())
+
+          p99 = summary["latency"]["p99"]
+          error_rate = summary["requests"]["errorRate"]
+          passed = summary["passed"]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"summary={json.dumps(summary)}\n")
+              out.write(f"p99={p99}\n")
+              out.write(f"error-rate={error_rate}\n")
+              out.write(f"passed={passed}\n")
+
+          print(f"p99: {p99}ms")
+          print(f"Error rate: {error_rate}%")
+          print(f"Passed: {passed}")
+
+          if not passed:
+              print("❌ Thresholds exceeded!")
+              exit(1)
+          else:
+              print("✅ All thresholds passed!")
+          EOF
+
+      - name: Upload load test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: backend/load-test-output.txt
+
+      - name: Cleanup backend
+        if: always()
+        run: |
+          if [ -n "$BACKEND_PID" ]; then
+            kill $BACKEND_PID 2>/dev/null || true
+          fi

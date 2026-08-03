@@ -2,68 +2,97 @@ import {
   AppConfig,
   Campaign,
   CampaignEvent,
+  ContributorBadge,
+  ContributorBackedCampaign,
+  ContributorProfile,
+  ContributorRefundEntry,
   CreateCampaignPayload,
   CreatePledgePayload,
+  LeaderboardEntry,
+  NotificationItem,
   OpenIssue,
+  Pledge,
   ReconcilePledgePayload,
   SorobanRefundMetadata,
-} from "../types/campaign";
+} from '../types/campaign';
+import { apiRequest } from './httpClient';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
-
-type ApiErrorBody = {
-  error?: {
-    code: string;
-    message: string;
-    details?: Array<{ field: string; message: string }>;
-    requestId?: string;
+export type CampaignListResponse = {
+  data: Campaign[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
   };
 };
 
-async function parseResponse<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch(() => ({}))) as T & ApiErrorBody;
-
-  if (!response.ok) {
-    const errorMsg = body.error?.message ?? "Unexpected API error";
-    const error = new Error(errorMsg);
-    if (body.error) {
-      (error as Error & { code?: string }).code = body.error.code;
-      (
-        error as Error & { details?: Array<{ field: string; message: string }> }
-      ).details = body.error.details;
-      (error as Error & { requestId?: string }).requestId = body.error.requestId;
-    }
-    throw error;
+export async function listCampaigns(filters?: {
+  includeDeleted?: boolean;
+  search?: string;
+  asset?: string;
+  status?: string;
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: string;
+}): Promise<CampaignListResponse> {
+  const params = new URLSearchParams();
+  if (filters?.includeDeleted) {
+    params.set('includeDeleted', 'true');
+  }
+  if (filters?.search?.trim()) {
+    params.set('search', filters.search.trim());
+  }
+  if (filters?.asset) {
+    params.set('asset', filters.asset);
+  }
+  if (filters?.status) {
+    params.set('status', filters.status);
+  }
+  if (filters?.page !== undefined) {
+    params.set('page', String(filters.page));
+  }
+  if (filters?.limit !== undefined) {
+    params.set('limit', String(filters.limit));
+  }
+  if (filters?.sort) {
+    params.set('sort', filters.sort);
+  }
+  if (filters?.order) {
+    params.set('order', filters.order);
   }
 
-  return body;
-}
-
-export async function listCampaigns(): Promise<Campaign[]> {
-  const response = await fetch(`${API_BASE}/campaigns`);
-  const body = await parseResponse<{ data: Campaign[] }>(response);
-  return body.data;
+  const query = params.toString();
+  return apiRequest<CampaignListResponse>({
+    url: `/campaigns${query ? `?${query}` : ''}`,
+    method: 'GET',
+  });
 }
 
 export async function getCampaign(campaignId: string): Promise<Campaign> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}`);
-  const body = await parseResponse<{ data: Campaign }>(response);
+  const body = await apiRequest<{ data: Campaign }>({
+    url: `/campaigns/${campaignId}`,
+    method: 'GET',
+  });
   return body.data;
 }
 
 export async function getAppConfig(): Promise<AppConfig> {
-  const response = await fetch(`${API_BASE}/config`);
-  const body = await parseResponse<{ data: AppConfig }>(response);
+  const body = await apiRequest<{ data: AppConfig }>({
+    url: '/config',
+    method: 'GET',
+  });
   return body.data;
 }
 
 export async function createCampaign(payload: CreateCampaignPayload): Promise<Campaign> {
-  const response = await fetch(`${API_BASE}/campaigns`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+  const body = await apiRequest<{ data: Campaign }>({
+    url: '/campaigns',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    data: payload,
   });
-  const body = await parseResponse<{ data: Campaign }>(response);
   return body.data;
 }
 
@@ -71,12 +100,12 @@ export async function addPledge(
   campaignId: string,
   payload: CreatePledgePayload,
 ): Promise<Campaign> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/pledges`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+  const body = await apiRequest<{ data: Campaign }>({
+    url: `/campaigns/${campaignId}/pledges`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    data: payload,
   });
-  const body = await parseResponse<{ data: Campaign }>(response);
   return body.data;
 }
 
@@ -84,14 +113,14 @@ export async function reconcilePledge(
   campaignId: string,
   payload: ReconcilePledgePayload,
 ): Promise<{ campaign: Campaign; transactionHash: string }> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/pledges/reconcile`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const body = await parseResponse<{
+  const body = await apiRequest<{
     data: { campaign: Campaign; transactionHash: string };
-  }>(response);
+  }>({
+    url: `/campaigns/${campaignId}/pledges/reconcile`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    data: payload,
+  });
   return body.data;
 }
 
@@ -101,13 +130,21 @@ export async function claimCampaign(
   transactionHash: string,
   confirmedAt: number,
 ): Promise<Campaign> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/claim`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ creator, transactionHash, confirmedAt }),
+  const body = await apiRequest<{ data: Campaign }>({
+    url: `/campaigns/${campaignId}/claim`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    data: { creator, transactionHash, confirmedAt },
   });
-  const body = await parseResponse<{ data: Campaign }>(response);
   return body.data;
+}
+
+export async function softDeleteCampaign(campaignId: string): Promise<void> {
+  const response = await apiRequest<unknown>({
+    url: `/campaigns/${campaignId}/soft-delete`,
+    method: 'POST',
+  });
+  void response;
 }
 
 export async function refundCampaign(
@@ -115,23 +152,234 @@ export async function refundCampaign(
   contributor: string,
   soroban: SorobanRefundMetadata,
 ): Promise<Campaign> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/refund`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contributor, soroban }),
+  const body = await apiRequest<{ data: Campaign }>({
+    url: `/campaigns/${campaignId}/refund`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    data: { contributor, soroban },
   });
-  const body = await parseResponse<{ data: Campaign }>(response);
   return body.data;
 }
 
 export async function getCampaignHistory(campaignId: string): Promise<CampaignEvent[]> {
-  const response = await fetch(`${API_BASE}/campaigns/${campaignId}/history`);
-  const body = await parseResponse<{ data: CampaignEvent[] }>(response);
-  return body.data;
+  const allEvents: CampaignEvent[] = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore) {
+    const body = await apiRequest<{
+      data: CampaignEvent[];
+      hasMore: boolean;
+    }>({
+      url: `/campaigns/${campaignId}/history`,
+      method: 'GET',
+      params: { page, pageSize: 100 },
+    });
+
+    allEvents.push(...body.data);
+    hasMore = body.hasMore;
+    page += 1;
+  }
+
+  return allEvents.sort((left, right) => left.timestamp - right.timestamp || left.id - right.id);
 }
 
 export async function listOpenIssues(): Promise<OpenIssue[]> {
-  const response = await fetch(`${API_BASE}/open-issues`);
-  const body = await parseResponse<{ data: OpenIssue[] }>(response);
+  const body = await apiRequest<{ data: OpenIssue[] }>({
+    url: '/open-issues',
+    method: 'GET',
+  });
   return body.data;
+}
+
+export async function getDistinctAssetCodes(): Promise<string[]> {
+  const body = await apiRequest<{ data: string[] }>({
+    url: '/campaigns/assets',
+    method: 'GET',
+  });
+  return body.data;
+}
+
+export async function listNotifications(wallet: string, options?: {
+  limit?: number; offset?: number;
+}): Promise<{ data: NotificationItem[]; total: number; unreadCount: number }> {
+  const params = new URLSearchParams({ wallet });
+  if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.offset) params.set('offset', String(options.offset));
+  return apiRequest({
+    url: `/notifications?${params.toString()}`,
+    method: 'GET',
+  });
+}
+
+export async function getUnreadNotificationCount(wallet: string): Promise<number> {
+  const body = await apiRequest<{ unreadCount: number }>({
+    url: `/notifications/unread-count?wallet=${encodeURIComponent(wallet)}`,
+    method: 'GET',
+  });
+  return body.unreadCount;
+}
+
+export async function markAllNotificationsRead(wallet: string): Promise<void> {
+  await apiRequest({
+    url: '/notifications/mark-all-read',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    data: { wallet },
+  });
+}
+
+export async function getLeaderboard(limit = 50): Promise<LeaderboardEntry[]> {
+  const body = await apiRequest<{ data: LeaderboardEntry[] }>({
+    url: `/leaderboard?limit=${limit}`,
+    method: 'GET',
+  });
+  return body.data;
+}
+
+function buildBadges(profile: {
+  campaignCount: number;
+  totalPledged: number;
+  refundedAmount: number;
+  rank: number;
+}): ContributorBadge[] {
+  const badges: ContributorBadge[] = [];
+  const now = Math.floor(Date.now() / 1000);
+
+  if (profile.campaignCount >= 1) {
+    badges.push({
+      name: 'First Backer',
+      description: 'Backed their first campaign',
+      earnedAt: now,
+      icon: '🎯',
+    });
+  }
+  if (profile.campaignCount >= 5) {
+    badges.push({
+      name: 'Serial Supporter',
+      description: 'Backed 5 or more campaigns',
+      earnedAt: now,
+      icon: '⭐',
+    });
+  }
+  if (profile.campaignCount >= 10) {
+    badges.push({
+      name: 'Campaign Veteran',
+      description: 'Backed 10 or more campaigns',
+      earnedAt: now,
+      icon: '🏆',
+    });
+  }
+  if (profile.totalPledged >= 1000) {
+    badges.push({
+      name: 'Whale Pledger',
+      description: 'Pledged over 1,000 tokens total',
+      earnedAt: now,
+      icon: '🐋',
+    });
+  }
+  if (profile.rank > 0 && profile.rank <= 10) {
+    badges.push({
+      name: 'Top 10 Contributor',
+      description: 'Ranked in the global top 10',
+      earnedAt: now,
+      icon: '👑',
+    });
+  }
+  if (profile.refundedAmount > 0 && profile.refundedAmount < profile.totalPledged) {
+    badges.push({
+      name: 'Mixed Portfolio',
+      description: 'Has both active pledges and refunds',
+      earnedAt: now,
+      icon: '🔄',
+    });
+  }
+
+  return badges;
+}
+
+export async function getContributorProfile(address: string): Promise<ContributorProfile> {
+  const leaderboard = await getLeaderboard(100);
+  const entry = leaderboard.find((e) => e.contributor === address);
+  const rank = entry?.rank ?? 0;
+
+  const { data: campaigns } = await apiRequest<{ data: Campaign[] }>({
+    url: '/campaigns?limit=100',
+    method: 'GET',
+  });
+
+  const backedCampaigns: ContributorBackedCampaign[] = [];
+  const refundHistory: ContributorRefundEntry[] = [];
+  let totalPledged = 0;
+  let refundedAmount = 0;
+
+  for (const campaign of campaigns) {
+    let pledges: Pledge[] = [];
+    if (campaign.pledges) {
+      pledges = campaign.pledges.filter((p) => p.contributor === address);
+    } else {
+      try {
+        const body = await apiRequest<{ data: Pledge[] }>({
+          url: `/campaigns/${campaign.id}/pledges`,
+          method: 'GET',
+          params: { limit: 500 },
+        });
+        pledges = body.data.filter((p) => p.contributor === address);
+      } catch {
+        // skip campaigns where pledges can't be fetched
+        continue;
+      }
+    }
+
+    if (pledges.length === 0) continue;
+
+    let campaignPledged = 0;
+    let campaignRefunded = 0;
+    let earliestPledgeAt = Infinity;
+
+    for (const pledge of pledges) {
+      if (pledge.refundedAt) {
+        campaignRefunded += pledge.amount;
+        refundHistory.push({
+          campaignId: campaign.id,
+          title: campaign.title,
+          amount: pledge.amount,
+          assetCode: pledge.assetCode,
+          refundedAt: pledge.refundedAt,
+        });
+      } else {
+        campaignPledged += pledge.amount;
+      }
+      if (pledge.createdAt < earliestPledgeAt) {
+        earliestPledgeAt = pledge.createdAt;
+      }
+    }
+
+    totalPledged += campaignPledged + campaignRefunded;
+    refundedAmount += campaignRefunded;
+
+    backedCampaigns.push({
+      campaignId: campaign.id,
+      title: campaign.title,
+      status: campaign.progress.status,
+      pledgedAmount: campaignPledged,
+      refundedAmount: campaignRefunded,
+      assetCode: campaign.assetCode,
+      pledgedAt: earliestPledgeAt === Infinity ? 0 : earliestPledgeAt,
+    });
+  }
+
+  const campaignCount = backedCampaigns.length;
+  const badges = buildBadges({ campaignCount, totalPledged, refundedAmount, rank });
+
+  return {
+    address,
+    totalPledged,
+    refundedAmount,
+    campaignCount,
+    rank,
+    badges,
+    backedCampaigns: backedCampaigns.sort((a, b) => b.pledgedAt - a.pledgedAt),
+    refundHistory: refundHistory.sort((a, b) => b.refundedAt - a.refundedAt),
+  };
 }

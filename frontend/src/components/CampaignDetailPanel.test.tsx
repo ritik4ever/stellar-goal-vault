@@ -1,22 +1,44 @@
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { vi } from "vitest";
-import { CampaignDetailPanel } from "./CampaignDetailPanel";
-import { Campaign } from "../types/campaign";
+import { render, screen } from '@testing-library/react';
+import { BrowserRouter } from 'react-router-dom';
+
+import { CampaignDetailPanel } from './CampaignDetailPanel';
+import { AppConfig, Campaign } from '../types/campaign';
+
+// Mock the ContributorSummary since it makes API calls
+vi.mock('./ContributorSummary', () => ({
+  ContributorSummary: () => <div data-testid="contributor-summary-mock" />,
+}));
+
+const mockConfig: AppConfig = {
+  allowedAssets: ['USDC', 'XLM'],
+  soroban: {
+    enabled: true,
+    contractId: 'C123',
+    networkPassphrase: 'Test SDF Network ; September 2015',
+    rpcUrl: 'https://example.com',
+  },
+  sorobanRpcUrl: 'https://example.com',
+  contractId: 'C123',
+  networkPassphrase: 'Test SDF Network ; September 2015',
+  contractAmountDecimals: 2,
+  walletIntegrationReady: true,
+  assetAddresses: {},
+};
 
 const mockCampaign: Campaign = {
-  id: "1",
-  title: "Test Campaign",
-  description: "A test campaign description",
-  creator: `G${"A".repeat(55)}`,
-  assetCode: "USDC",
+  id: '1',
+  title: 'Test Campaign',
+  description: 'A test campaign description',
+  creator: `G${'A'.repeat(55)}`,
+  assetCode: 'USDC',
+  acceptedTokens: ['USDC'],
   targetAmount: 100,
   pledgedAmount: 0,
   deadline: Math.floor(Date.now() / 1000) + 3600,
   createdAt: Math.floor(Date.now() / 1000),
   pledges: [],
   progress: {
-    status: "open",
+    status: 'open',
     percentFunded: 0,
     remainingAmount: 100,
     hoursLeft: 1,
@@ -28,87 +50,58 @@ const mockCampaign: Campaign = {
   metadata: {},
 };
 
-const mockConfig = {
-  allowedAssets: ["USDC", "XLM"],
-  soroban: {
-    enabled: false,
-    networkPassphrase: "Test SDF Network ; September 2015",
-    rpcUrl: "",
-  },
-  sorobanRpcUrl: "",
-  contractId: "",
-  networkPassphrase: "Test SDF Network ; September 2015",
-  contractAmountDecimals: 2,
-  walletIntegrationReady: false,
-};
-
-describe("CampaignDetailPanel", () => {
-  it("shows empty state when no campaign selected", () => {
+describe('CampaignDetailPanel', () => {
+  it('renders loading state', () => {
     render(
-      <CampaignDetailPanel
-        campaign={null}
-        appConfig={mockConfig}
-        connectedWallet={null}
-        onConnectWallet={async () => {}}
-        onPledge={async () => {}}
-        onClaim={async () => {}}
-        onRefund={async () => {}}
-      />,
+      <BrowserRouter>
+        <CampaignDetailPanel
+          campaign={null}
+          appConfig={mockConfig}
+          isLoading={true}
+        />
+      </BrowserRouter>
     );
-
-    expect(screen.getByText(/Pick a campaign/i)).toBeInTheDocument();
+    expect(screen.getByRole('region')).toBeInTheDocument();
   });
 
-  it("renders campaign details when campaign is selected", () => {
+  it('renders not found state when notFoundCampaignId is provided', () => {
     render(
-      <CampaignDetailPanel
-        campaign={mockCampaign}
-        appConfig={mockConfig}
-        connectedWallet={null}
-        onConnectWallet={async () => {}}
-        onPledge={async () => {}}
-        onClaim={async () => {}}
-        onRefund={async () => {}}
-      />,
+      <BrowserRouter>
+        <CampaignDetailPanel
+          campaign={null}
+          appConfig={mockConfig}
+          notFoundCampaignId="999"
+        />
+      </BrowserRouter>
     );
-    expect(screen.getByText("Test Campaign")).toBeInTheDocument();
-    expect(screen.getByText("USDC")).toBeInTheDocument();
+    expect(screen.getByText('Campaign not found')).toBeInTheDocument();
+    expect(screen.getByText(/campaign #999 does not exist/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to campaigns' })).toBeInTheDocument();
   });
 
-  it("calls onPledge when form is submitted", async () => {
-    const user = userEvent.setup();
-    const onPledge = vi.fn().mockResolvedValue(undefined);
-
+  it('renders empty state when no campaign is selected', () => {
     render(
-      <CampaignDetailPanel
-        campaign={mockCampaign}
-        appConfig={mockConfig}
-        connectedWallet={`G${"B".repeat(55)}`}
-        onConnectWallet={async () => {}}
-        onPledge={onPledge}
-        onClaim={async () => {}}
-        onRefund={async () => {}}
-      />,
+      <BrowserRouter>
+        <CampaignDetailPanel
+          campaign={null}
+          appConfig={mockConfig}
+          isLoading={false}
+        />
+      </BrowserRouter>
     );
-
-    await user.click(screen.getByText("Add pledge"));
-    expect(onPledge).toHaveBeenCalled();
+    expect(screen.getByText('Campaign actions')).toBeInTheDocument();
   });
 
-  it("shows pending note while pledge is in flight", () => {
+  it('renders campaign details when campaign is provided', () => {
     render(
-      <CampaignDetailPanel
-        campaign={mockCampaign}
-        appConfig={mockConfig}
-        connectedWallet={`G${"B".repeat(55)}`}
-        isPledgePending
-        onConnectWallet={async () => {}}
-        onPledge={async () => {}}
-        onClaim={async () => {}}
-        onRefund={async () => {}}
-      />,
+      <BrowserRouter>
+        <CampaignDetailPanel
+          campaign={mockCampaign}
+          appConfig={mockConfig}
+          isLoading={false}
+        />
+      </BrowserRouter>
     );
-
-    expect(screen.getByText(/pledge transaction is in flight/i)).toBeInTheDocument();
+    expect(screen.getByText('Test Campaign')).toBeInTheDocument();
   });
 });

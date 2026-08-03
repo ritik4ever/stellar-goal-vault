@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState } from 'react';
 
 interface CopyButtonProps {
   value: string;
@@ -6,11 +6,7 @@ interface CopyButtonProps {
   className?: string;
 }
 
-export function CopyButton({
-  value,
-  ariaLabel = "Copy value",
-  className = "",
-}: CopyButtonProps) {
+export function CopyButton({ value, ariaLabel = 'Copy value', className = '' }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -20,14 +16,14 @@ export function CopyButton({
       window.setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       // navigator.clipboard may be unavailable in some embedded contexts; fallback
-      const ta = document.createElement("textarea");
+      const ta = document.createElement('textarea');
       ta.value = value;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
       document.body.appendChild(ta);
       ta.select();
       try {
-        document.execCommand("copy");
+        document.execCommand('copy');
         setCopied(true);
         window.setTimeout(() => setCopied(false), 2000);
       } catch (e) {
@@ -44,9 +40,9 @@ export function CopyButton({
       className={`btn-ghost btn-copy ${className}`}
       onClick={handleCopy}
       aria-label={ariaLabel}
-      title={copied ? "Copied!" : "Copy full address"}
+      title={copied ? 'Copied!' : 'Copy full address'}
     >
-      {copied ? "Copied" : "Copy"}
+      {copied ? 'Copied' : 'Copy'}
     </button>
   );
 }

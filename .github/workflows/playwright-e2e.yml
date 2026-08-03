@@ -1,0 +1,146 @@
+name: Playwright E2E Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  playwright:
+    name: Playwright E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      # Redis service for backend caching
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Create backend .env for CI
+        working-directory: backend
+        run: |
+          cat > .env << 'EOF'
+          PORT=3001
+          LOG_LEVEL=info
+          NODE_ENV=test
+          CONTRACT_ID=CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5V3NN
+          ALLOWED_ASSETS=USDC,XLM,ARS
+          ALLOWED_ORIGINS=http://localhost:3000
+          SOROBAN_RPC_URL=https://soroban-testnet.stellar.org:443
+          SOROBAN_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+          CONTRACT_AMOUNT_DECIMALS=2
+          DEFAULT_MAX_PER_CONTRIBUTOR=0
+          REDIS_URL=redis://redis:6379
+          EOF
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start services with docker-compose
+        run: |
+          docker-compose up -d
+          echo "Waiting for services to be healthy..."
+          
+          # Wait for backend to be healthy
+          for i in {1..60}; do
+            if curl -f http://localhost:3001/api/health > /dev/null 2>&1; then
+              echo "Backend is healthy"
+              break
+            fi
+            echo "Waiting for backend... (attempt $i/60)"
+            sleep 2
+          done
+          
+          # Wait for frontend to be healthy
+          for i in {1..60}; do
+            if curl -f http://localhost:3000 > /dev/null 2>&1; then
+              echo "Frontend is healthy"
+              break
+            fi
+            echo "Waiting for frontend... (attempt $i/60)"
+            sleep 2
+          done
+        env:
+          REDIS_URL: redis://redis:6379
+          VITE_API_URL: http://localhost:3001/api
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+
+      - name: Run Playwright tests
+        run: npm run test:e2e
+        env:
+          CI: true
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+      - name: Upload test videos on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-videos
+          path: test-results/
+          retention-days: 7
+
+      - name: Stop services
+        if: always()
+        run: docker-compose down -v
+
+      - name: Collect docker logs on failure
+        if: failure()
+        run: |
+          mkdir -p docker-logs
+          docker-compose logs > docker-logs/docker-compose.log 2>&1 || true
+
+      - name: Upload docker logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-logs
+          path: docker-logs/
+          retention-days: 7
