@@ -45,6 +45,7 @@ import {
   restoreCampaign,
   softDeleteCampaign,
   SortOrder,
+  updateCampaign,
 } from './services/campaignStore';
 import { checkDbHealth } from './services/db';
 import { getCampaignTimeline, listCampaignHistory } from './services/eventHistory';
@@ -72,6 +73,7 @@ import {
   parseTimelineQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
+  updateMetadataPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
   parseCampaignListQuery,
@@ -631,6 +633,42 @@ app.post(
   },
 );
 
+app.patch(
+  '/api/campaigns/:id/metadata',
+  applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(updateMetadataPayloadSchema),
+  async (req: Request, res: Response, next: express.NextFunction) => {
+    try {
+      const parsedId = parseCampaignId(req.params.id);
+      if (!parsedId.ok) {
+        sendValidationError(parsedId.issues);
+      }
+
+      const campaign = getCampaign(parsedId.value);
+      if (!campaign) {
+        throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+      }
+
+      const body = req.body as z.infer<typeof updateMetadataPayloadSchema>;
+
+      // Merge incoming metadata over existing so omitted keys are preserved
+      const mergedMetadata =
+        body.metadata !== undefined
+          ? { ...campaign.metadata, ...body.metadata }
+          : campaign.metadata;
+
+      const updated = updateCampaign(parsedId.value, {
+        ...body,
+        metadata: mergedMetadata,
+      });
+      await invalidateCampaignCache();
+      res.json({ data: { ...updated, progress: calculateProgress(updated) } });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 app.post(
   '/api/campaigns/:id/pledges',
   applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
@@ -904,7 +942,7 @@ app.get('/api/leaderboard', (req: Request, res: Response) => {
   }
 });
 
-// ── Notification Routes ───────────────────────────────────────────────────────
+// ΓöÇΓöÇ Notification Routes ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 app.get('/api/notifications', (req: Request, res: Response) => {
   const wallet = normalizeQueryValue(req.query.wallet);
