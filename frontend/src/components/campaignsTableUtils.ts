@@ -54,11 +54,7 @@ export function searchCampaigns(campaigns: Campaign[], searchQuery: string): Cam
  *
  * For search filtering, use {@link searchCampaigns} separately.
  */
-export function applyFilters(
-  campaigns: Campaign[],
-  assetCode: string,
-  status: string,
-): Campaign[] {
+export function applyFilters(campaigns: Campaign[], assetCode: string, status: string): Campaign[] {
   return campaigns.filter((c) => {
     const matchesAsset = assetCode === '' || c.assetCode === assetCode;
     const matchesStatus = status === '' || c.progress.status === status;

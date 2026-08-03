@@ -1,0 +1,22 @@
+{
+  "app": {
+    "eyebrow": "Stellar Goal Vault",
+    "title": "Centro de controle de campanhas",
+    "description": "Crie campanhas, gerencie contribuições e acompanhe os marcos de financiamento.",
+    "metrics": {
+      "total": "Total de campanhas",
+      "open": "Campanhas abertas",
+      "funded": "Campanhas financiadas",
+      "claimed": "Campanhas resgatadas",
+      "pledged": "Total prometido"
+    },
+    "controls": {
+      "lightMode": "Modo claro",
+      "darkMode": "Modo escuro",
+      "shortcuts": "Atalhos"
+    },
+    "footer": {
+      "language": "Idioma"
+    }
+  }
+}

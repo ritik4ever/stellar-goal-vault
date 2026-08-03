@@ -153,10 +153,7 @@ export function isPrivateOrLoopbackHost(hostname: string): boolean {
 
 function isPrivateOrLoopbackIPv4(ip: string): boolean {
   const parts = ip.split('.').map((p) => Number.parseInt(p, 10));
-  if (
-    parts.length !== 4 ||
-    parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)
-  ) {
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
     return false;
   }
   const [a, b] = parts;
@@ -256,7 +253,7 @@ function isPrivateOrLoopbackIPv6(ip: string): boolean {
  * `null` if the input cannot be parsed by `net.isIPv6`.
  */
 function expandIPv6(ip: string): string | null {
-  if (net.isIPv6(ip) === 0) return null;
+  if (!net.isIPv6(ip)) return null;
 
   // Strip zone identifier (e.g. `fe80::1%eth0`).
   const zoneIndex = ip.indexOf('%');
@@ -291,9 +288,7 @@ function expandIPv6(ip: string): string | null {
   if (tokens.length !== 8) return null;
   if (tokens.some((g) => !/^[0-9a-f]{1,4}$/i.test(g))) return null;
 
-  return tokens
-    .map((g) => Number.parseInt(g, 16).toString(16).padStart(4, '0'))
-    .join(':');
+  return tokens.map((g) => Number.parseInt(g, 16).toString(16).padStart(4, '0')).join(':');
 }
 
 /**
@@ -359,8 +354,7 @@ export const httpsOnlyUrlSchema = z
     if (parsed.hasUserinfo) {
       ctx.addIssue({
         code: 'custom',
-        message:
-          'URLs containing userinfo (username or password) are not permitted.',
+        message: 'URLs containing userinfo (username or password) are not permitted.',
       });
     }
 
