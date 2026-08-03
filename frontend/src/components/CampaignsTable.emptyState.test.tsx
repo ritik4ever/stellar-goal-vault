@@ -46,9 +46,51 @@ const makeCampaign = (overrides: Partial<Campaign> & Pick<Campaign, 'id' | 'titl
 
 /** Three campaigns spanning two assets and two statuses. */
 const mockCampaigns: Campaign[] = [
-  makeCampaign({ id: 'c1', title: 'Rocket Ship', assetCode: 'USDC', progress: { status: 'open', percentFunded: 50, remainingAmount: 5000, pledgeCount: 2, hoursLeft: 24, canPledge: true, canClaim: false, canRefund: false } }),
-  makeCampaign({ id: 'c2', title: 'Solar Farm',  assetCode: 'XLM',  progress: { status: 'funded', percentFunded: 100, remainingAmount: 0, pledgeCount: 10, hoursLeft: 0, canPledge: false, canClaim: true, canRefund: false } }),
-  makeCampaign({ id: 'c3', title: 'Book Club',   assetCode: 'USDC', progress: { status: 'open', percentFunded: 30, remainingAmount: 7000, pledgeCount: 1, hoursLeft: 48, canPledge: true, canClaim: false, canRefund: false } }),
+  makeCampaign({
+    id: 'c1',
+    title: 'Rocket Ship',
+    assetCode: 'USDC',
+    progress: {
+      status: 'open',
+      percentFunded: 50,
+      remainingAmount: 5000,
+      pledgeCount: 2,
+      hoursLeft: 24,
+      canPledge: true,
+      canClaim: false,
+      canRefund: false,
+    },
+  }),
+  makeCampaign({
+    id: 'c2',
+    title: 'Solar Farm',
+    assetCode: 'XLM',
+    progress: {
+      status: 'funded',
+      percentFunded: 100,
+      remainingAmount: 0,
+      pledgeCount: 10,
+      hoursLeft: 0,
+      canPledge: false,
+      canClaim: true,
+      canRefund: false,
+    },
+  }),
+  makeCampaign({
+    id: 'c3',
+    title: 'Book Club',
+    assetCode: 'USDC',
+    progress: {
+      status: 'open',
+      percentFunded: 30,
+      remainingAmount: 7000,
+      pledgeCount: 1,
+      hoursLeft: 48,
+      canPledge: true,
+      canClaim: false,
+      canRefund: false,
+    },
+  }),
 ];
 
 // ---------------------------------------------------------------------------
@@ -90,9 +132,7 @@ describe('EmptyState – search produces zero results', () => {
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'zzznomatch');
     vi.advanceTimersByTime(350);
 
-    expect(
-      screen.getByText('No campaigns match your search.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('No campaigns match your search.')).toBeInTheDocument();
   });
 
   it('shows "Clear Search" CTA button', async () => {
@@ -102,9 +142,7 @@ describe('EmptyState – search produces zero results', () => {
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'zzznomatch');
     vi.advanceTimersByTime(350);
 
-    expect(
-      screen.getByRole('button', { name: 'Clear Search' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear Search' })).toBeInTheDocument();
   });
 
   it('does NOT show EmptyState while loading', () => {
@@ -144,12 +182,8 @@ describe('EmptyState – asset filter produces zero results', () => {
     const openTab = screen.getByRole('button', { name: /Open/ });
     fireEvent.click(openTab);
 
-    expect(
-      screen.getByText('No campaigns match the selected filters.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Clear Filters' }),
-    ).toBeInTheDocument();
+    expect(screen.getByText('No campaigns match the selected filters.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
   });
 });
 
@@ -164,9 +198,7 @@ describe('EmptyState – status filter produces zero results', () => {
     const claimedTab = screen.getByRole('button', { name: /Claimed/ });
     fireEvent.click(claimedTab);
 
-    expect(
-      screen.getByText('No campaigns match the selected filters.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('No campaigns match the selected filters.')).toBeInTheDocument();
   });
 
   it('shows "Clear Filters" CTA button when status has zero campaigns', () => {
@@ -175,9 +207,7 @@ describe('EmptyState – status filter produces zero results', () => {
     const failedTab = screen.getByRole('button', { name: /Failed/ });
     fireEvent.click(failedTab);
 
-    expect(
-      screen.getByRole('button', { name: 'Clear Filters' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
   });
 
   it('renders EmptyState with role="status" for screen-reader accessibility', () => {
@@ -205,12 +235,8 @@ describe('EmptyState – multiple filters produce zero results', () => {
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'rocket');
     vi.advanceTimersByTime(350);
 
-    expect(
-      screen.getByText('No campaigns match the selected filters.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Clear Filters' }),
-    ).toBeInTheDocument();
+    expect(screen.getByText('No campaigns match the selected filters.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
   });
 
   it('search + status filter → shows "No campaigns match the selected filters."', async () => {
@@ -224,12 +250,8 @@ describe('EmptyState – multiple filters produce zero results', () => {
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'book');
     vi.advanceTimersByTime(350);
 
-    expect(
-      screen.getByText('No campaigns match the selected filters.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Clear Filters' }),
-    ).toBeInTheDocument();
+    expect(screen.getByText('No campaigns match the selected filters.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
   });
 
   it('asset + status filter → shows "No campaigns match the selected filters."', () => {
@@ -241,12 +263,8 @@ describe('EmptyState – multiple filters produce zero results', () => {
     const openTab = screen.getByRole('button', { name: /Open/ });
     fireEvent.click(openTab);
 
-    expect(
-      screen.getByText('No campaigns match the selected filters.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Clear Filters' }),
-    ).toBeInTheDocument();
+    expect(screen.getByText('No campaigns match the selected filters.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
   });
 
   it('search + asset + status filter → shows "No campaigns match the selected filters."', async () => {
@@ -262,12 +280,8 @@ describe('EmptyState – multiple filters produce zero results', () => {
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'anything');
     vi.advanceTimersByTime(350);
 
-    expect(
-      screen.getByText('No campaigns match the selected filters.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Clear Filters' }),
-    ).toBeInTheDocument();
+    expect(screen.getByText('No campaigns match the selected filters.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
   });
 });
 

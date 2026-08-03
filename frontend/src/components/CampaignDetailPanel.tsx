@@ -1,10 +1,7 @@
 
 
-
-
-
-import { FormEvent, useState, useEffect } from 'react';
-import { MousePointer2, AlertCircle } from 'lucide-react';
+import { FormEvent, useState, useEffect, useCallback } from 'react';
+import { MousePointer2, Download, Link as LinkIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Campaign, AppConfig } from '../types/campaign';
 import CopyButton from './CopyButton';
@@ -12,6 +9,9 @@ import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
 import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
+import { Countdown } from './Countdown';
+import { useCampaignShareCard } from './CampaignShareCard';
+import { useToast } from '../hooks/useToast';
 import { ShareButtons } from './ShareButtons';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
@@ -33,21 +33,21 @@ interface CampaignDetailPanelProps {
 }
 
 const FEE_ESTIMATION_ERROR_CODES = new Set([
-  "SIMULATION_FAILED",
-  "SIMULATION_PREPARE_FAILED",
-  "SOURCE_ACCOUNT_LOAD_FAILED",
-  "STATE_RESTORE_REQUIRED",
+  'SIMULATION_FAILED',
+  'SIMULATION_PREPARE_FAILED',
+  'SOURCE_ACCOUNT_LOAD_FAILED',
+  'STATE_RESTORE_REQUIRED',
 ]);
 
 function describePledgeError(error: unknown): string {
   const code = (error as { code?: string } | null)?.code;
   if (code && FEE_ESTIMATION_ERROR_CODES.has(code)) {
-    return "Could not estimate fee. Check your connection and retry.";
+    return 'Could not estimate fee. Check your connection and retry.';
   }
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
   }
-  return "The pledge could not be completed. Please try again.";
+  return 'The pledge could not be completed. Please try again.';
 }
 
 function networkName(config: AppConfig | null | undefined): string {
@@ -87,6 +87,24 @@ export function CampaignDetailPanel({
   const [pledgeError, setPledgeError] = useState<string | null>(null);
   const [bannerImageError, setBannerImageError] = useState(false);
   const walletReady = appConfig?.walletIntegrationReady ?? false;
+  const { downloadPng, toDataUrl } = useCampaignShareCard();
+  const { addToast } = useToast();
+
+  const handleDownloadPng = useCallback(() => {
+    if (!campaign) return;
+    downloadPng(campaign, campaign.metadata?.imageUrl);
+    addToast('Campaign card downloaded as PNG.', 'success');
+  }, [campaign, downloadPng, addToast]);
+
+  const handleCopyLink = useCallback(() => {
+    if (!campaign) return;
+    const url = `${window.location.origin}/campaigns/${campaign.id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      addToast('Campaign link copied to clipboard.', 'success', { href: url, label: url.slice(0, 40) + '…' });
+    }).catch(() => {
+      addToast('Failed to copy link.', 'error');
+    });
+  }, [campaign, addToast]);
 
   useEffect(() => {
     setBannerImageError(false);
@@ -301,6 +319,10 @@ export function CampaignDetailPanel({
           <span>Active pledges</span>
           <strong>{activeCampaign.progress.pledgeCount}</strong>
         </article>
+        <article className="detail-stat">
+          <span>Time left</span>
+          <strong><Countdown deadline={activeCampaign.deadline} /></strong>
+        </article>
       </div>
 
       <ContributorSummary
@@ -330,11 +352,7 @@ export function CampaignDetailPanel({
         {activeCampaign.acceptedTokens?.length > 1 && (
           <label className="field-group">
             <span>Token</span>
-            <select
-              value={selectedToken}
-              onChange={(e) => setPledgeToken(e.target.value)}
-              required
-            >
+            <select value={selectedToken} onChange={(e) => setPledgeToken(e.target.value)} required>
               {activeCampaign.acceptedTokens.map((token) => (
                 <option key={token} value={token}>
                   {token}
@@ -454,6 +472,16 @@ export function CampaignDetailPanel({
         </div>
       ) : null}
 
+      <div className="share-actions">
+        <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
+          <Download size={16} />
+          Download PNG
+        </button>
+        <button className="btn-ghost" type="button" onClick={handleCopyLink}>
+          <LinkIcon size={16} />
+          Copy link
+        </button>
+      </div>
       <ShareButtons campaign={activeCampaign} />
     </section>
   );

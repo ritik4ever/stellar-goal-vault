@@ -1,4 +1,3 @@
-
 import fs from 'fs';
 import { Server } from 'http';
 import path from 'path';
@@ -119,7 +118,7 @@ describe('Campaign Lifecycle API', () => {
     const pledgeRes = await post(`/api/campaigns/${campaignId}/pledges`, {
       contributor: CONTRIBUTOR,
       amount: 100,
-      assetCode: "USDC",
+      assetCode: 'USDC',
     });
     expect(pledgeRes.status).toBe(201);
     expect(pledgeRes.data.data.progress.status).toBe('funded');
@@ -181,7 +180,7 @@ describe('Campaign Lifecycle API', () => {
     const pledgeRes = await post(`/api/campaigns/${campaignId}/pledges`, {
       contributor: CONTRIBUTOR,
       amount: 50,
-      assetCode: "XLM",
+      assetCode: 'XLM',
     });
     expect(pledgeRes.status).toBe(201);
 
@@ -216,18 +215,20 @@ describe('Campaign Lifecycle API', () => {
     expect(refundRes.data.data.pledgedAmount).toBe(0); // Pledged amount reduces to 0
   });
 
-  it("sanitizes HTML tags in title and description during campaign creation", async () => {
-    const createRes = await post("/api/campaigns", {
+  it('sanitizes HTML tags in title and description during campaign creation', async () => {
+    const createRes = await post('/api/campaigns', {
       creator: CREATOR,
-      title: "<h1>Test</h1>",
-      description: "<h1>Test</h1> with at least 20 characters",
-      acceptedTokens: ["USDC"],
+      title: '<h1>Test</h1>',
+      description: '<h1>Test</h1> with at least 20 characters',
+      acceptedTokens: ['USDC'],
       targetAmount: 100,
       deadline: Math.floor(Date.now() / 1000) + 3600,
     });
     expect(createRes.status).toBe(201);
-    expect(createRes.data.data.title).toBe("&lt;h1&gt;Test&lt;&sol;h1&gt;");
-    expect(createRes.data.data.description).toBe("&lt;h1&gt;Test&lt;&sol;h1&gt; with at least 20 characters");
+    expect(createRes.data.data.title).toBe('&lt;h1&gt;Test&lt;&sol;h1&gt;');
+    expect(createRes.data.data.description).toBe(
+      '&lt;h1&gt;Test&lt;&sol;h1&gt; with at least 20 characters',
+    );
   });
 });
 
@@ -299,7 +300,9 @@ describe('Campaign List Query Parameter Validation', () => {
   });
 
   it('accepts valid ISO 8601 timestamps', async () => {
-    const res = await get('/api/campaigns?createdAfter=2024-01-01T00:00:00Z&createdBefore=2024-12-31T23:59:59Z');
+    const res = await get(
+      '/api/campaigns?createdAfter=2024-01-01T00:00:00Z&createdBefore=2024-12-31T23:59:59Z',
+    );
     expect(res.status).toBe(200);
     expect(res.data.data).toBeDefined();
   });
@@ -447,7 +450,9 @@ describe('Campaign maxPerContributor Field', () => {
     const listRes = await get('/api/campaigns?page=1&limit=10');
     expect(listRes.status).toBe(200);
 
-    const campaign = listRes.data.data.find((c: { id: string; maxPerContributor?: number }) => c.id === campaignId);
+    const campaign = listRes.data.data.find(
+      (c: { id: string; maxPerContributor?: number }) => c.id === campaignId,
+    );
     expect(campaign).toBeDefined();
     expect(campaign.maxPerContributor).toBe(50);
   });
