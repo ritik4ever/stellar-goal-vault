@@ -2,7 +2,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { ZodError, ZodIssue, ZodType } from 'zod';
 
 /**
- * Shape of a 400 response emitted by the validation middleware. The
+ * Shape of a 422 response emitted by the validation middleware. The
  * `details` array is the raw `ZodIssue[]` so callers see the exact path,
  * code, and message for every offending field without the middleware
  * needing to map them into a project-specific shape.
@@ -17,7 +17,7 @@ export interface ValidationErrorResponse {
  * Zod schema. On success, `req.body` is replaced with the parsed (and
  * potentially transformed or stripped) value so downstream handlers see
  * the validated shape. On failure, the middleware short-circuits with a
- * 400 response of the form `{ error: 'Validation failed', details: [...] }`.
+ * 422 response of the form `{ error: 'Validation failed', details: [...] }`.
  *
  * Uses `safeParseAsync` so the middleware works with schemas that include
  * async refinements or transforms; plain synchronous schemas resolve in a
@@ -36,7 +36,7 @@ export function validateBody<TSchema extends ZodType>(schema: TSchema): RequestH
         error: 'Validation failed',
         details: (parsed.error as ZodError).issues,
       };
-      res.status(400).json(body);
+      res.status(422).json(body);
       return;
     }
 

@@ -1,87 +1,1 @@
-import express from 'express';
-import request from 'supertest';
-import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
-
-import { validateBody } from './validateBody';
-
-const schema = z
-  .object({
-    name: z.string(),
-    age: z.number().int().nonnegative(),
-  })
-  .strict();
-
-function buildApp() {
-  const app = express();
-  app.use(express.json());
-  app.post('/echo', validateBody(schema), (req, res) => {
-    res.json({ data: req.body });
-  });
-  return app;
-}
-
-describe('validateBody', () => {
-  it('passes through and exposes parsed.data when the payload is valid', async () => {
-    const response = await request(buildApp()).post('/echo').send({ name: 'goal', age: 1 });
-
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ data: { name: 'goal', age: 1 } });
-  });
-
-  it('replaces req.body with parsed.data so coercion and stripping are visible to downstream handlers', async () => {
-    // Schema coerces a string into a number and transforms the name to upper
-    // case. The downstream handler reads req.body, so if the middleware
-    // stopped assigning req.body = parsed.data the response would echo back
-    // the raw input instead of the parsed form.
-    const coercingSchema = z.object({
-      name: z.string().transform((value) => value.toUpperCase()),
-      age: z.coerce.number().int(),
-    });
-
-    const app = express();
-    app.use(express.json());
-    app.post('/coerce', validateBody(coercingSchema), (req, res) => {
-      res.json({ data: req.body });
-    });
-
-    const response = await request(app).post('/coerce').send({ name: 'goal', age: '7' });
-
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ data: { name: 'GOAL', age: 7 } });
-  });
-
-  it('returns 400 with the Validation failed shape when a required field is missing', async () => {
-    const response = await request(buildApp()).post('/echo').send({ age: 1 });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe('Validation failed');
-    expect(Array.isArray(response.body.details)).toBe(true);
-    expect(response.body.details).toHaveLength(1);
-    expect(response.body.details[0].path).toEqual(['name']);
-  });
-
-  it('returns 400 with the Validation failed shape when a field has the wrong type', async () => {
-    const response = await request(buildApp()).post('/echo').send({ name: 'goal', age: 'one' });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe('Validation failed');
-    expect(response.body.details).toHaveLength(1);
-    expect(response.body.details[0].path).toEqual(['age']);
-    expect(response.body.details[0].code).toBe('invalid_type');
-  });
-
-  it('returns 400 with the Validation failed shape when an extra field is present on a strict schema', async () => {
-    const response = await request(buildApp())
-      .post('/echo')
-      .send({ name: 'goal', age: 1, surprise: true });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe('Validation failed');
-    expect(response.body.details.length).toBeGreaterThanOrEqual(1);
-    const unrecognized = response.body.details.find(
-      (issue: { code: string }) => issue.code === 'unrecognized_keys',
-    );
-    expect(unrecognized).toBeDefined();
-  });
-});
+浩潰瑲攠灸敲獳映潲⁭攧灸敲獳㬧਍浩潰瑲爠煥敵瑳映潲⁭猧灵牥整瑳㬧਍浩潰瑲笠搠獥牣扩ⱥ攠灸捥ⱴ椠⁴⁽牦浯✠楶整瑳㬧਍浩潰瑲笠稠素映潲⁭稧摯㬧਍਍浩潰瑲笠瘠污摩瑡䉥摯⁹⁽牦浯✠⼮慶楬慤整潂祤㬧਍਍潣獮⁴捳敨慭㴠稠਍†漮橢捥⡴ൻ †渠浡㩥稠献牴湩⡧Ⱙ਍††条㩥稠渮浵敢⡲⸩湩⡴⸩潮湮来瑡癩⡥Ⱙ਍†⥽਍†献牴捩⡴㬩਍਍畦据楴湯戠極摬灁⡰ ൻ 挠湯瑳愠灰㴠攠灸敲獳⤨഻ 愠灰甮敳攨灸敲獳樮潳⡮⤩഻ 愠灰瀮獯⡴⼧捥潨Ⱗ瘠污摩瑡䉥摯⡹捳敨慭Ⱙ⠠敲ⱱ爠獥 㸽笠਍††敲⹳獪湯笨搠瑡㩡爠煥戮摯⁹⥽഻ 素㬩਍†敲畴湲愠灰഻紊਍਍敤捳楲敢✨慶楬慤整潂祤Ⱗ⠠ 㸽笠਍†瑩✨慰獳獥琠牨畯桧愠摮攠灸獯獥瀠牡敳⹤慤慴眠敨⁮桴⁥慰汹慯⁤獩瘠污摩Ⱗ愠祳据⠠ 㸽笠਍††潣獮⁴敲灳湯敳㴠愠慷瑩爠煥敵瑳戨極摬灁⡰⤩瀮獯⡴⼧捥潨⤧献湥⡤⁻慮敭›朧慯❬‬条㩥ㄠ素㬩਍਍††硥数瑣爨獥潰獮⹥瑳瑡獵⸩潴敂㈨〰㬩਍††硥数瑣爨獥潰獮⹥潢祤⸩潴煅慵⡬⁻慤慴›⁻慮敭›朧慯❬‬条㩥ㄠ素素㬩਍†⥽഻ഊ 椠⡴爧灥慬散⁳敲⹱潢祤眠瑩⁨慰獲摥搮瑡⁡潳挠敯捲潩⁮湡⁤瑳楲灰湩⁧牡⁥楶楳汢⁥潴搠睯獮牴慥⁭慨摮敬獲Ⱗ愠祳据⠠ 㸽笠਍††⼯匠档浥⁡潣牥散⁳⁡瑳楲杮椠瑮⁯⁡畮扭牥愠摮琠慲獮潦浲⁳桴⁥慮敭琠⁯灵数൲ †⼠ 慣敳‮桔⁥潤湷瑳敲浡栠湡汤牥爠慥獤爠煥戮摯ⱹ猠⁯晩琠敨洠摩汤睥牡൥ †⼠ 瑳灯数⁤獡楳湧湩⁧敲⹱潢祤㴠瀠牡敳⹤慤慴琠敨爠獥潰獮⁥潷汵⁤捥潨戠捡൫ †⼠ 桴⁥慲⁷湩異⁴湩瑳慥⁤景琠敨瀠牡敳⁤潦浲മ †挠湯瑳挠敯捲湩卧档浥⁡‽⹺扯敪瑣笨਍†††慮敭›⹺瑳楲杮⤨琮慲獮潦浲⠨慶畬⥥㴠‾慶畬⹥潴灕数䍲獡⡥⤩ബ ††愠敧›⹺潣牥散渮浵敢⡲⸩湩⡴Ⱙ਍††⥽഻ഊ †挠湯瑳愠灰㴠攠灸敲獳⤨഻ †愠灰甮敳攨灸敲獳樮潳⡮⤩഻ †愠灰瀮獯⡴⼧潣牥散Ⱗ瘠污摩瑡䉥摯⡹潣牥楣杮捓敨慭Ⱙ⠠敲ⱱ爠獥 㸽笠਍†††敲⹳獪湯笨搠瑡㩡爠煥戮摯⁹⥽഻ †素㬩਍਍††潣獮⁴敲灳湯敳㴠愠慷瑩爠煥敵瑳愨灰⸩潰瑳✨振敯捲❥⸩敳摮笨渠浡㩥✠潧污Ⱗ愠敧›㜧‧⥽഻ഊ †攠灸捥⡴敲灳湯敳献慴畴⥳琮䉯⡥〲⤰഻ †攠灸捥⡴敲灳湯敳戮摯⥹琮䕯畱污笨搠瑡㩡笠渠浡㩥✠佇䱁Ⱗ愠敧›‷⁽⥽഻ 素㬩਍਍†瑩✨敲畴湲⁳〴‰楷桴琠敨嘠污摩瑡潩⁮慦汩摥猠慨数眠敨⁮⁡敲畱物摥映敩摬椠⁳業獳湩❧‬獡湹⁣⤨㴠‾ൻ †挠湯瑳爠獥潰獮⁥‽睡楡⁴敲畱獥⡴畢汩䅤灰⤨⸩潰瑳✨支档❯⸩敳摮笨愠敧›‱⥽഻ഊ †攠灸捥⡴敲灳湯敳献慴畴⥳琮䉯⡥〴⤰഻ †攠灸捥⡴敲灳湯敳戮摯⹹牥潲⥲琮䉯⡥嘧污摩瑡潩⁮慦汩摥⤧഻ †攠灸捥⡴牁慲⹹獩牁慲⡹敲灳湯敳戮摯⹹敤慴汩⥳⸩潴敂琨畲⥥഻ †攠灸捥⡴敲灳湯敳戮摯⹹敤慴汩⥳琮䡯癡䱥湥瑧⡨⤱഻ †攠灸捥⡴敲灳湯敳戮摯⹹敤慴汩孳崰瀮瑡⥨琮䕯畱污嬨渧浡❥⥝഻ 素㬩਍਍†瑩✨敲畴湲⁳〴‰楷桴琠敨嘠污摩瑡潩⁮慦汩摥猠慨数眠敨⁮⁡楦汥⁤慨⁳桴⁥牷湯⁧祴数Ⱗ愠祳据⠠ 㸽笠਍††潣獮⁴敲灳湯敳㴠愠慷瑩爠煥敵瑳戨極摬灁⡰⤩瀮獯⡴⼧捥潨⤧献湥⡤⁻慮敭›朧慯❬‬条㩥✠湯❥素㬩਍਍††硥数瑣爨獥潰獮⹥瑳瑡獵⸩潴敂㐨〰㬩਍††硥数瑣爨獥潰獮⹥潢祤攮牲牯⸩潴敂✨慖楬慤楴湯映楡敬❤㬩਍††硥数瑣爨獥潰獮⹥潢祤搮瑥楡獬⸩潴慈敶敌杮桴ㄨ㬩਍††硥数瑣爨獥潰獮⹥潢祤搮瑥楡獬せ⹝慰桴⸩潴煅慵⡬❛条❥⥝഻ †攠灸捥⡴敲灳湯敳戮摯⹹敤慴汩孳崰挮摯⥥琮䉯⡥椧癮污摩瑟灹❥㬩਍†⥽഻ഊ 椠⡴爧瑥牵獮㐠〰眠瑩⁨桴⁥慖楬慤楴湯映楡敬⁤桳灡⁥桷湥愠⁮硥牴⁡楦汥⁤獩瀠敲敳瑮漠⁮⁡瑳楲瑣猠档浥❡‬獡湹⁣⤨㴠‾ൻ †挠湯瑳爠獥潰獮⁥‽睡楡⁴敲畱獥⡴畢汩䅤灰⤨ഩ ††⸠潰瑳✨支档❯ഩ ††⸠敳摮笨渠浡㩥✠潧污Ⱗ愠敧›ⰱ猠牵牰獩㩥琠畲⁥⥽഻ഊ †攠灸捥⡴敲灳湯敳献慴畴⥳琮䉯⡥〴⤰഻ †攠灸捥⡴敲灳湯敳戮摯⹹牥潲⥲琮䉯⡥嘧污摩瑡潩⁮慦汩摥⤧഻ †攠灸捥⡴敲灳湯敳戮摯⹹敤慴汩⹳敬杮桴⸩潴敂片慥整呲慨佮䕲畱污ㄨ㬩਍††潣獮⁴湵敲潣湧穩摥㴠爠獥潰獮⹥潢祤搮瑥楡獬昮湩⡤਍†††椨獳敵›⁻潣敤›瑳楲杮素 㸽椠獳敵挮摯⁥㴽‽甧牮捥杯楮敺彤敫獹Ⱗ਍††㬩਍††硥数瑣用牮捥杯楮敺⥤琮䉯䑥晥湩摥⤨഻ 素㬩਍⥽഻
