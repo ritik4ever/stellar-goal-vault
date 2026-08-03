@@ -1,7 +1,6 @@
-import { getDb, initDb } from './db';
-import { getCampaignHistory, recordEvent, BlockchainMetadata } from './eventHistory';
-import { createNotification } from './notificationService';
-import { dispatchWebhook } from './webhookService';
+import { getDb, initDb } from "./db";
+import { getCampaignHistory, recordEvent, BlockchainMetadata } from "./eventHistory";
+import { notifyContributorsOnUpdate } from "./notificationService";
 
 export type CampaignStatus = 'open' | 'funded' | 'claimed' | 'failed';
 
@@ -89,6 +88,21 @@ export interface RefundReconciliationInput {
   source?: 'local' | 'soroban-contract';
 }
 
+export interface CreateCampaignUpdateInput {
+  creatorAddress: string;
+  content: string;
+}
+
+export interface CampaignUpdateRecord {
+  id: number;
+  campaignId: string;
+  creatorAddress: string;
+  creator_address: string;
+  content: string;
+  createdAt: number;
+  created_at: number;
+}
+
 interface CampaignRow {
   id: string;
   creator: string;
@@ -116,6 +130,14 @@ interface PledgeRow {
   created_at: number;
   refunded_at: number | null;
   transaction_hash: string | null;
+}
+
+interface CampaignUpdateRow {
+  id: number;
+  campaign_id: string;
+  creator_address: string;
+  content: string;
+  created_at: number;
 }
 
 type ServiceError = Error & {
@@ -174,6 +196,18 @@ function rowToPledge(row: PledgeRow): PledgeRecord {
     createdAt: row.created_at,
     refundedAt: row.refunded_at ?? undefined,
     transactionHash: row.transaction_hash ?? undefined,
+  };
+}
+
+function rowToUpdate(row: CampaignUpdateRow): CampaignUpdateRecord {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    creatorAddress: row.creator_address,
+    creator_address: row.creator_address,
+    content: row.content,
+    createdAt: row.created_at,
+    created_at: row.created_at,
   };
 }
 
@@ -1338,202 +1372,80 @@ export function refundContributor(
   };
 }
 
-/**
- * Retrieves the top contributors globally, ranked by total pledged amount.
- *
- * @param limit - Maximum number of top contributors to return (default: 10).
- * @returns An array of {@link LeaderboardEntry} objects sorted by total pledged amount (descending).
- */
-/**
- * Returns per-token pledged balances for a campaign (non-refunded only).
- * Maps asset_code → total pledged amount for that token.
- */
-export function getCampaignTokenBalances(campaignId: string): Record<string, number> {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT COALESCE(token_id, asset_code) AS token_id, COALESCE(SUM(amount), 0) AS balance
-       FROM pledges
-       WHERE campaign_id = ? AND refunded_at IS NULL
-       GROUP BY COALESCE(token_id, asset_code)`,
-    )
-    .all(campaignId) as Array<{ token_id: string; balance: number }>;
-
-  const result: Record<string, number> = {};
-  for (const row of rows) {
-    result[row.token_id] = round(row.balance);
-  }
-  return result;
-}
-
-/**
- * Partially updates a campaign record (title, description, metadata).
- * Used internally and by the event indexer to apply on-chain metadata changes.
- */
-export function updateCampaign(
+export function createCampaignUpdate(
   campaignId: string,
-  patch: Partial<Pick<CampaignRecord, 'title' | 'description' | 'metadata'>>,
-): CampaignRecord {
-  const db = getDb();
+  input: CreateCampaignUpdateInput,
+): CampaignUpdateRecord {
   const campaign = getCampaign(campaignId);
   if (!campaign) {
-    throw Object.assign(new Error(`Campaign ${campaignId} not found`), {
-      code: 'CAMPAIGN_NOT_FOUND',
-    });
+    throw toServiceError("Campaign not found.", 404, "NOT_FOUND");
   }
 
-  const updates: string[] = [];
-  const params: unknown[] = [];
-
-  if (patch.title !== undefined) {
-    updates.push('title = ?');
-    params.push(patch.title);
-  }
-  if (patch.description !== undefined) {
-    updates.push('description = ?');
-    params.push(patch.description);
-  }
-  if (patch.metadata !== undefined) {
-    updates.push('metadata_json = ?');
-    params.push(JSON.stringify(patch.metadata));
+  if (campaign.creator !== input.creatorAddress) {
+    throw toServiceError(
+      "Only the campaign creator can post updates.",
+      403,
+      "FORBIDDEN",
+    );
   }
 
-  if (updates.length > 0) {
-    params.push(campaignId);
-    db.prepare(`UPDATE campaigns SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-  }
-
-  return getCampaign(campaignId)!;
-}
-
-/**
- * Updates the campaign's metadata string as recorded on-chain.
- * Called by the event indexer when a MetadataUpdated event is received.
- */
-export function updateCampaignMetadata(campaignId: string, newMetadata: string): void {
+  const createdAt = nowInSeconds();
   const db = getDb();
-  const campaign = getCampaign(campaignId);
-  if (!campaign) return;
 
-  const existing = campaign.metadata ?? {};
-  const updated = { ...existing, onChainMetadata: newMetadata };
-  db.prepare(`UPDATE campaigns SET metadata_json = ? WHERE id = ?`).run(
-    JSON.stringify(updated),
+  const info = db
+    .prepare(
+      `INSERT INTO campaign_updates (campaign_id, creator_address, content, created_at)
+       VALUES (?, ?, ?, ?)`,
+    )
+    .run(campaignId, input.creatorAddress, input.content, createdAt);
+
+  const updateId = info.lastInsertRowid as number;
+
+  recordEvent(
     campaignId,
+    "update_posted",
+    createdAt,
+    input.creatorAddress,
+    undefined,
+    {
+      updateId,
+      contentPreview: input.content.slice(0, 50),
+    },
+    { source: "local" } as BlockchainMetadata,
   );
-}
 
-export interface TrendingCampaignEntry {
-  campaign: CampaignRecord;
-  progress: CampaignProgress;
-  pledgeVelocity: number; // pledges in last 24h / hours the campaign has been open
-  recentPledgeCount: number; // raw count of non-refunded pledges in last 24h
-}
-
-/**
- * Returns the top 10 open campaigns ranked by pledge velocity.
- *
- * Velocity = (non-refunded pledges in last 24h) / hours the campaign has been open.
- * Only campaigns that are currently open (not funded, claimed, or failed) are included.
- *
- * @param limit - Maximum number of trending campaigns to return (default: 10).
- * @returns An array of {@link TrendingCampaignEntry} objects sorted by velocity descending.
- */
-export function getTrendingCampaigns(limit = 10): TrendingCampaignEntry[] {
-  const db = getDb();
-  const now = nowInSeconds();
-  const window24h = now - 86400; // 24 hours ago in unix seconds
-
-  // Fetch open campaigns with their 24h pledge counts in one query.
-  // "Open" = deadline in the future, not claimed, not yet at target (funded).
-  // deleted_at IS NULL is always enforced.
-  const rows = db
-    .prepare(
-      `SELECT
-         c.*,
-         COUNT(p.id) AS recent_pledge_count
-       FROM campaigns c
-       LEFT JOIN pledges p
-         ON p.campaign_id = c.id
-         AND p.refunded_at IS NULL
-         AND p.created_at >= ?
-       WHERE c.deleted_at IS NULL
-         AND c.claimed_at IS NULL
-         AND c.pledged_amount < c.target_amount
-         AND c.deadline > ?
-       GROUP BY c.id
-       ORDER BY recent_pledge_count DESC, c.pledged_amount DESC
-       LIMIT ?`,
-    )
-    .all(window24h, now, limit) as Array<CampaignRow & { recent_pledge_count: number }>;
-
-  return rows.map((row) => {
-    const { recent_pledge_count, ...campaignRow } = row;
-    const campaign = rowToCampaign(campaignRow as CampaignRow);
-
-    // hoursOpen: at least 1 hour floor to avoid division-by-zero on brand-new campaigns
-    const hoursOpen = Math.max(1, (now - campaign.createdAt) / 3600);
-    const pledgeVelocity = Number((recent_pledge_count / hoursOpen).toFixed(4));
-
-    return {
-      campaign,
-      progress: calculateProgress(campaign, now),
-      pledgeVelocity,
-      recentPledgeCount: recent_pledge_count,
-    };
+  notifyContributorsOnUpdate({
+    id: updateId,
+    campaignId,
+    creatorAddress: input.creatorAddress,
+    content: input.content,
+    createdAt,
   });
-}
-
-export function getTopContributors(limit: number = 10): LeaderboardEntry[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT 
-         contributor,
-         COALESCE(SUM(amount), 0) AS total_pledged,
-         COUNT(DISTINCT campaign_id) AS campaign_count,
-         COALESCE(AVG(amount), 0) AS avg_pledge
-       FROM pledges
-       WHERE refunded_at IS NULL
-       GROUP BY contributor
-       ORDER BY total_pledged DESC
-       LIMIT ?`,
-    )
-    .all(limit) as Array<{
-    contributor: string;
-    total_pledged: number;
-    campaign_count: number;
-    avg_pledge: number;
-  }>;
-
-  return rows.map((row, index) => ({
-    rank: index + 1,
-    contributor: row.contributor,
-    totalPledged: round(row.total_pledged),
-    campaignCount: row.campaign_count,
-    averagePledgeAmount: round(row.avg_pledge),
-  }));
-}
-
-export interface CampaignAnalytics {
-  fundingGap: number;
-}
-
-/**
- * Computes basic analytics for a campaign.
- *
- * @param campaignId - The unique campaign identifier.
- * @returns A {@link CampaignAnalytics} object with computed metrics, or undefined if campaign doesn't exist.
- */
-export function getCampaignAnalytics(campaignId: string): CampaignAnalytics | undefined {
-  const campaign = getCampaign(campaignId);
-  if (!campaign) {
-    return undefined;
-  }
-
-  const fundingGap = round(Math.max(0, campaign.targetAmount - campaign.pledgedAmount));
 
   return {
-    fundingGap,
+    id: updateId,
+    campaignId,
+    creatorAddress: input.creatorAddress,
+    creator_address: input.creatorAddress,
+    content: input.content,
+    createdAt,
+    created_at: createdAt,
   };
 }
+
+export function getCampaignUpdates(campaignId: string): CampaignUpdateRecord[] {
+  const campaign = getCampaign(campaignId);
+  if (!campaign) {
+    throw toServiceError("Campaign not found.", 404, "NOT_FOUND");
+  }
+
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT * FROM campaign_updates WHERE campaign_id = ? ORDER BY created_at DESC, id DESC`,
+    )
+    .all(campaignId) as CampaignUpdateRow[];
+
+  return rows.map(rowToUpdate);
+}
+

@@ -1,126 +1,101 @@
-import { getDb } from './db';
+import { logInfo } from "../logger";
+import { getDb } from "./db";
 
-export type NotificationType = 'new_pledge' | 'campaign_funded' | 'refund_available' | 'creator_update';
-
-export interface Notification {
-  id: number;
+export interface NotificationPayload {
   campaignId: string;
-  type: NotificationType;
-  title: string;
-  body: string;
-  targetWallet: string;
-  actorWallet?: string;
-  isRead: boolean;
+  updateId: number;
+  creatorAddress: string;
+  content: string;
   createdAt: number;
+  recipients: string[];
 }
 
-interface NotificationRow {
-  id: number;
-  campaign_id: string;
-  type: NotificationType;
-  title: string;
-  body: string;
-  target_wallet: string;
-  actor_wallet: string | null;
-  is_read: number;
-  created_at: number;
-}
+export type NotificationHandler = (payload: NotificationPayload) => Promise<void> | void;
 
-function rowToNotification(row: NotificationRow): Notification {
-  return {
-    id: row.id,
-    campaignId: row.campaign_id,
-    type: row.type,
-    title: row.title,
-    body: row.body,
-    targetWallet: row.target_wallet,
-    actorWallet: row.actor_wallet ?? undefined,
-    isRead: row.is_read === 1,
-    createdAt: row.created_at,
+const notificationHandlers: NotificationHandler[] = [];
+
+/**
+ * Registers a handler for campaign update notifications (useful for tests or custom webhooks/emails).
+ */
+export function registerNotificationHandler(handler: NotificationHandler): () => void {
+  notificationHandlers.push(handler);
+  return () => {
+    const index = notificationHandlers.indexOf(handler);
+    if (index !== -1) {
+      notificationHandlers.splice(index, 1);
+    }
   };
 }
 
-export function createNotification(params: {
-  campaignId: string;
-  type: NotificationType;
-  title: string;
-  body: string;
-  targetWallet: string;
-  actorWallet?: string;
-}): Notification {
-  const db = getDb();
-  const now = Math.floor(Date.now() / 1000);
-  const stmt = db.prepare(`
-    INSERT INTO notifications (campaign_id, type, title, body, target_wallet, actor_wallet, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  const result = stmt.run(
-    params.campaignId,
-    params.type,
-    params.title,
-    params.body,
-    params.targetWallet,
-    params.actorWallet ?? null,
-    now,
-  );
-  return {
-    id: result.lastInsertRowid as number,
-    campaignId: params.campaignId,
-    type: params.type,
-    title: params.title,
-    body: params.body,
-    targetWallet: params.targetWallet,
-    actorWallet: params.actorWallet,
-    isRead: false,
-    createdAt: now,
-  };
+/**
+ * Clears all registered notification handlers (useful for unit testing).
+ */
+export function clearNotificationHandlers(): void {
+  notificationHandlers.length = 0;
 }
 
-export function listNotifications(
-  wallet: string,
-  options: { limit?: number; offset?: number } = {},
-): { data: Notification[]; total: number } {
+/**
+ * Gets unique contributor account IDs for a campaign.
+ */
+export function getCampaignContributors(campaignId: string): string[] {
   const db = getDb();
-  const limit = options.limit ?? 50;
-  const offset = options.offset ?? 0;
-
-  const countRow = db
-    .prepare('SELECT COUNT(*) as total FROM notifications WHERE target_wallet = ?')
-    .get(wallet) as { total: number };
-
   const rows = db
     .prepare(
-      'SELECT * FROM notifications WHERE target_wallet = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      `SELECT DISTINCT contributor FROM pledges WHERE campaign_id = ? AND refunded_at IS NULL`,
     )
-    .all(wallet, limit, offset) as NotificationRow[];
+    .all(campaignId) as Array<{ contributor: string }>;
 
-  return {
-    data: rows.map(rowToNotification),
-    total: countRow.total,
-  };
-}
-
-export function getUnreadCount(wallet: string): number {
-  const db = getDb();
-  const row = db
-    .prepare(
-      'SELECT COUNT(*) as count FROM notifications WHERE target_wallet = ? AND is_read = 0',
-    )
-    .get(wallet) as { count: number };
-  return row.count;
-}
-
-export function markAllRead(wallet: string): void {
-  const db = getDb();
-  db.prepare('UPDATE notifications SET is_read = 1 WHERE target_wallet = ? AND is_read = 0').run(
-    wallet,
-  );
-}
-
-export function getContributorsForCampaign(campaignId: string): string[] {
-  const db = getDb();
-  const rows = db
-    .prepare('SELECT DISTINCT contributor FROM pledges WHERE campaign_id = ? AND refunded_at IS NULL')
-    .all(campaignId) as { contributor: string }[];
   return rows.map((r) => r.contributor);
+}
+
+/**
+ * Sends notifications (webhook/email) to all contributors of a campaign when a new update is posted.
+ */
+export async function notifyContributorsOnUpdate(update: {
+  id: number;
+  campaignId: string;
+  creatorAddress: string;
+  content: string;
+  createdAt: number;
+}): Promise<NotificationPayload> {
+  const recipients = getCampaignContributors(update.campaignId);
+
+  const payload: NotificationPayload = {
+    campaignId: update.campaignId,
+    updateId: update.id,
+    creatorAddress: update.creatorAddress,
+    content: update.content,
+    createdAt: update.createdAt,
+    recipients,
+  };
+
+  logInfo("campaign_update_notification_sent", {
+    campaignId: update.campaignId,
+    updateId: update.id,
+    recipientCount: recipients.length,
+    recipients,
+  });
+
+  // Dispatch to registered handlers (webhooks, email dispatchers, etc.)
+  for (const handler of notificationHandlers) {
+    try {
+      await handler(payload);
+    } catch (err) {
+      // Log error but don't prevent update creation
+      console.error("Notification handler error:", err);
+    }
+  }
+
+  // Webhook integration: if WEBHOOK_URL environment variable is set, fire HTTP POST
+  const webhookUrl = process.env.WEBHOOK_URL;
+  if (webhookUrl) {
+    try {
+      const axios = require("axios");
+      await axios.post(webhookUrl, payload, { timeout: 5000 });
+    } catch (err) {
+      console.error("Failed to deliver update notification webhook:", err);
+    }
+  }
+
+  return payload;
 }

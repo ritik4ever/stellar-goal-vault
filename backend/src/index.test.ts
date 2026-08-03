@@ -12,25 +12,22 @@ type CampaignStoreModule = typeof import('./services/campaignStore');
 type DbModule = typeof import('./services/db');
 type ValidationModule = typeof import('./validation/schemas');
 
-let listCampaigns: CampaignStoreModule['listCampaigns'];
-let parseCampaignListFilters: IndexModule['parseCampaignListFilters'];
-let parseCampaignListQuery: ValidationModule['parseCampaignListQuery'];
-let createCampaign: CampaignStoreModule['createCampaign'];
-let addPledge: CampaignStoreModule['addPledge'];
-let calculateProgress: CampaignStoreModule['calculateProgress'];
-let initCampaignStore: CampaignStoreModule['initCampaignStore'];
-let getDb: DbModule['getDb'];
+let parseCampaignListFilters: IndexModule["parseCampaignListFilters"];
+let listCampaigns: CampaignStoreModule["listCampaigns"];
+let initCampaignStore: CampaignStoreModule["initCampaignStore"];
+let createCampaign: CampaignStoreModule["createCampaign"];
+let addPledge: CampaignStoreModule["addPledge"];
+let calculateProgress: CampaignStoreModule["calculateProgress"];
+let getDb: DbModule["getDb"];
 
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR = `G${'B'.repeat(55)}`;
 
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
-  ({ parseCampaignListFilters } = await import('./index'));
-  ({ getDb } = await import('./services/db'));
-  ({ parseCampaignListQuery } = await import('./validation/schemas'));
-  ({ initCampaignStore, listCampaigns, createCampaign, addPledge, calculateProgress } =
-    await import('./services/campaignStore'));
+  ({ parseCampaignListFilters } = await import("./index"));
+  ({ listCampaigns, createCampaign, addPledge, calculateProgress, initCampaignStore } = await import("./services/campaignStore"));
+  ({ getDb } = await import("./services/db"));
   initCampaignStore();
 }, 20000);
 
