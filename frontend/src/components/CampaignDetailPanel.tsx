@@ -1,7 +1,8 @@
 
 
-import { FormEvent, useState, useEffect } from 'react';
-import { MousePointer2 } from 'lucide-react';
+import { FormEvent, useState, useEffect, useCallback } from 'react';
+import { MousePointer2, Download, Link as LinkIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Campaign, AppConfig } from '../types/campaign';
 import CopyButton from './CopyButton';
 import { AddressAvatar } from './AddressAvatar';
@@ -9,6 +10,11 @@ import { EmptyState } from './EmptyState';
 import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
 import { DonationQRCode } from './DonationQRCode';
+import { Countdown } from './Countdown';
+import { useCampaignShareCard } from './CampaignShareCard';
+import { useToast } from '../hooks/useToast';
+import { ShareButtons } from './ShareButtons';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -17,6 +23,7 @@ interface CampaignDetailPanelProps {
   isConnectingWallet?: boolean;
   isLoading?: boolean;
   isPledgePending?: boolean;
+  notFoundCampaignId?: string | null;
   onConnectWallet?: () => Promise<void>;
   onDisconnectWallet?: () => void;
   onPledge?: (campaignId: string, amount: number, assetCode: string) => Promise<void>;
@@ -27,21 +34,21 @@ interface CampaignDetailPanelProps {
 }
 
 const FEE_ESTIMATION_ERROR_CODES = new Set([
-  "SIMULATION_FAILED",
-  "SIMULATION_PREPARE_FAILED",
-  "SOURCE_ACCOUNT_LOAD_FAILED",
-  "STATE_RESTORE_REQUIRED",
+  'SIMULATION_FAILED',
+  'SIMULATION_PREPARE_FAILED',
+  'SOURCE_ACCOUNT_LOAD_FAILED',
+  'STATE_RESTORE_REQUIRED',
 ]);
 
 function describePledgeError(error: unknown): string {
   const code = (error as { code?: string } | null)?.code;
   if (code && FEE_ESTIMATION_ERROR_CODES.has(code)) {
-    return "Could not estimate fee. Check your connection and retry.";
+    return 'Could not estimate fee. Check your connection and retry.';
   }
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
   }
-  return "The pledge could not be completed. Please try again.";
+  return 'The pledge could not be completed. Please try again.';
 }
 
 function networkName(config: AppConfig | null | undefined): string {
@@ -67,6 +74,7 @@ export function CampaignDetailPanel({
   isConnectingWallet = false,
   isLoading = false,
   isPledgePending = false,
+  notFoundCampaignId = null,
   onConnectWallet = async () => {},
   onDisconnectWallet = () => {},
   onPledge = async () => {},
@@ -78,17 +86,37 @@ export function CampaignDetailPanel({
   const [refundContributor, setRefundContributor] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pledgeError, setPledgeError] = useState<string | null>(null);
+  const [bannerImageError, setBannerImageError] = useState(false);
   const walletReady = appConfig?.walletIntegrationReady ?? false;
+  const { downloadPng, toDataUrl } = useCampaignShareCard();
+  const { addToast } = useToast();
+
+  const handleDownloadPng = useCallback(() => {
+    if (!campaign) return;
+    downloadPng(campaign, campaign.metadata?.imageUrl);
+    addToast('Campaign card downloaded as PNG.', 'success');
+  }, [campaign, downloadPng, addToast]);
+
+  const handleCopyLink = useCallback(() => {
+    if (!campaign) return;
+    const url = `${window.location.origin}/campaigns/${campaign.id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      addToast('Campaign link copied to clipboard.', 'success', { href: url, label: url.slice(0, 40) + '…' });
+    }).catch(() => {
+      addToast('Failed to copy link.', 'error');
+    });
+  }, [campaign, addToast]);
 
   useEffect(() => {
-
+    setBannerImageError(false);
   }, [campaign?.id, connectedWallet]);
 
 
 
-  if (isLoading) {
+  const showSkeleton = useMinDisplayTime(isLoading);
+  if (showSkeleton) {
     return (
-      <section className="card detail-panel">
+      <section className="card detail-panel" aria-busy="true" aria-label="Loading campaign details">
         <div className="section-heading">
           <h2>
             <div className="skeleton skeleton-line" style={{ width: 220 }} />
@@ -96,7 +124,7 @@ export function CampaignDetailPanel({
           <div className="skeleton skeleton-line" style={{ width: 320, height: 14 }} />
         </div>
         <div className="detail-grid">
-          {Array.from({ length: 4 }).map((_, index) => (
+          {Array.from({ length: 5 }).map((_, index) => (
             <article key={index} className="detail-stat">
               <div className="skeleton skeleton-line" style={{ width: 120 }} />
               <div
@@ -105,6 +133,24 @@ export function CampaignDetailPanel({
               />
             </article>
           ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (notFoundCampaignId) {
+    return (
+      <section className="card detail-panel">
+        <div className="section-heading">
+          <h2>Campaign not found</h2>
+          <p className="muted">
+            The campaign <code>#{notFoundCampaignId}</code> does not exist or may have been removed.
+          </p>
+        </div>
+        <div style={{ marginTop: 24 }}>
+          <Link to="/" className="btn-ghost">
+            Back to campaigns
+          </Link>
         </div>
       </section>
     );
@@ -133,6 +179,8 @@ export function CampaignDetailPanel({
     setIsSubmitting(true);
     try {
       await onPledge(activeCampaign.id, Number(pledgeAmount), selectedToken);
+      setPledgeAmount('25');
+      setPledgeToken('');
     } catch (error) {
       setPledgeError(describePledgeError(error));
     } finally {
@@ -165,6 +213,35 @@ export function CampaignDetailPanel({
 
   return (
     <section className="card detail-panel">
+      {/* Full-width Campaign Banner */}
+      <div
+        style={{
+          width: 'calc(100% + 2rem)',
+          marginLeft: '-1rem',
+          marginRight: '-1rem',
+          marginTop: '-1rem',
+          height: '240px',
+          overflow: 'hidden',
+          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+          position: 'relative',
+          marginBottom: '1.5rem',
+        }}
+      >
+        {activeCampaign.metadata?.imageUrl && !bannerImageError ? (
+          <img
+            src={activeCampaign.metadata.imageUrl}
+            alt={activeCampaign.title}
+            onError={() => setBannerImageError(true)}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        ) : null}
+      </div>
+
       <div className="section-heading">
         <h2>{activeCampaign.title}</h2>
         <p className="muted">{activeCampaign.description}</p>
@@ -176,7 +253,7 @@ export function CampaignDetailPanel({
           <p className="muted">
             {connectedWallet
               ? `Connected to ${networkName(appConfig)}`
-              : `Not connected — connect Freighter to take actions`}
+              : `Not connected — connect a wallet to take actions`}
           </p>
         </div>
         <div className="wallet-connected">
@@ -207,7 +284,7 @@ export function CampaignDetailPanel({
               }}
               disabled={isSubmitting || isConnectingWallet}
             >
-              {isConnectingWallet ? 'Connecting...' : 'Connect Freighter'}
+              {isConnectingWallet ? 'Connecting...' : 'Connect Wallet'}
             </button>
           )}
         </div>
@@ -243,6 +320,10 @@ export function CampaignDetailPanel({
           <span>Active pledges</span>
           <strong>{activeCampaign.progress.pledgeCount}</strong>
         </article>
+        <article className="detail-stat">
+          <span>Time left</span>
+          <strong><Countdown deadline={activeCampaign.deadline} /></strong>
+        </article>
       </div>
 
       <ContributorSummary
@@ -264,7 +345,7 @@ export function CampaignDetailPanel({
           <input
             type="text"
             value={connectedWallet ?? ''}
-            placeholder="Connect Freighter to use the pledge flow"
+            placeholder="Connect a wallet to use the pledge flow"
             readOnly
           />
         </label>
@@ -272,11 +353,7 @@ export function CampaignDetailPanel({
         {activeCampaign.acceptedTokens?.length > 1 && (
           <label className="field-group">
             <span>Token</span>
-            <select
-              value={selectedToken}
-              onChange={(e) => setPledgeToken(e.target.value)}
-              required
-            >
+            <select value={selectedToken} onChange={(e) => setPledgeToken(e.target.value)} required>
               {activeCampaign.acceptedTokens.map((token) => (
                 <option key={token} value={token}>
                   {token}
@@ -404,6 +481,18 @@ export function CampaignDetailPanel({
           </a>
         </div>
       ) : null}
+
+      <div className="share-actions">
+        <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
+          <Download size={16} />
+          Download PNG
+        </button>
+        <button className="btn-ghost" type="button" onClick={handleCopyLink}>
+          <LinkIcon size={16} />
+          Copy link
+        </button>
+      </div>
+      <ShareButtons campaign={activeCampaign} />
     </section>
   );
 }

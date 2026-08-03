@@ -1,14 +1,22 @@
 import { getDb } from './db';
 
-
-
+export type CampaignEventType =
+  | 'created'
+  | 'pledged'
+  | 'claimed'
+  | 'refunded'
+  | 'updated'
+  | 'metadata_updated'
+  | 'pledge_limit_reached'
+  | 'archived'
+  | 'restored';
 export interface BlockchainMetadata {
   txHash?: string;
   ledgerNumber?: number;
   ledgerCloseTime?: number;
   eventIndex?: number;
   contractId?: string;
-  source?: "local" | "soroban";
+  source?: 'local' | 'soroban';
 }
 
 export interface CampaignEvent {
@@ -79,9 +87,7 @@ export function recordEvent(
     actor: actor ?? null,
     amount: amount ?? null,
     metadata: metadata ? JSON.stringify(metadata) : null,
-    blockchainMetadata: blockchainMetadata
-      ? JSON.stringify(blockchainMetadata)
-      : null,
+    blockchainMetadata: blockchainMetadata ? JSON.stringify(blockchainMetadata) : null,
   });
 }
 
@@ -174,15 +180,193 @@ export function getEventsByLedger(ledgerNumber: number): CampaignEvent[] {
   return rows.map(rowToEvent);
 }
 
+// ── Unified Timeline ────────────────────────────────────────────────────────
+
+export type TimelineItemType = 'pledge' | 'status_change' | 'update' | 'comment';
+
+export interface TimelineItem {
+  id: string;
+  campaignId: string;
+  type: TimelineItemType;
+  timestamp: number;
+  actor?: string;
+  amount?: number;
+  assetCode?: string;
+  metadata?: Record<string, unknown>;
+  eventType?: string;
+}
+
+interface TimelineRow {
+  source: string;
+  source_id: number;
+  campaign_id: string;
+  timestamp: number;
+  actor: string | null;
+  amount: number | null;
+  asset_code: string | null;
+  event_type: string | null;
+  metadata: string | null;
+}
+
+export interface TimelinePage {
+  data: TimelineItem[];
+  nextCursor?: string;
+  hasMore: boolean;
+}
+
+/**
+ * Returns a unified timeline for a campaign, merging pledge records and
+ * campaign lifecycle events into a single sorted stream.
+ *
+ * Cursor-based pagination: the cursor encodes the last-seen timestamp and
+ * source ID as `{timestamp}:{source}:{source_id}`. New items inserted with
+ * the same timestamp will still appear correctly because the cursor is
+ * decoded into an anchor point, not a row number.
+ */
+export function getCampaignTimeline(
+  campaignId: string,
+  options: { cursor?: string; limit?: number } = {},
+): TimelinePage {
+  const limit = Math.min(options.limit ?? 20, 100);
+  const db = getDb();
+
+  let cursorTimestamp: number | undefined;
+  let cursorSource: string | undefined;
+  let cursorId: number | undefined;
+
+  if (options.cursor) {
+    try {
+      const decoded = Buffer.from(options.cursor, 'base64').toString('utf-8');
+      const parts = decoded.split(':');
+      cursorTimestamp = Number(parts[0]);
+      cursorSource = parts[1];
+      cursorId = Number(parts[2]);
+    } catch {
+      cursorTimestamp = undefined;
+    }
+  }
+
+  const rows = db
+    .prepare(
+      `
+      WITH combined AS (
+        SELECT
+          'pledge' AS source,
+          p.id AS source_id,
+          p.campaign_id,
+          p.created_at AS timestamp,
+          p.contributor AS actor,
+          p.amount AS amount,
+          p.asset_code AS asset_code,
+          NULL AS event_type,
+          NULL AS metadata
+        FROM pledges p
+        WHERE p.campaign_id = ?
+
+        UNION ALL
+
+        SELECT
+          'event' AS source,
+          e.id AS source_id,
+          e.campaign_id,
+          e.timestamp,
+          e.actor,
+          e.amount,
+          NULL AS asset_code,
+          e.event_type,
+          e.metadata
+        FROM campaign_events e
+        WHERE e.campaign_id = ?
+      )
+      SELECT * FROM combined
+      WHERE (? IS NULL
+        OR timestamp < ?
+        OR (timestamp = ? AND source > ?)
+        OR (timestamp = ? AND source = ? AND source_id < ?))
+      ORDER BY timestamp DESC, source ASC, source_id DESC
+      LIMIT ?
+    `,
+    )
+    .all(
+      campaignId,
+      campaignId,
+      cursorTimestamp ?? null,
+      cursorTimestamp ?? null,
+      cursorTimestamp ?? null,
+      cursorSource ?? null,
+      cursorTimestamp ?? null,
+      cursorSource ?? null,
+      cursorId ?? null,
+      limit + 1,
+    ) as TimelineRow[];
+
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit).map(rowToTimelineItem);
+
+  let nextCursor: string | undefined;
+  if (hasMore && rows.length > 0) {
+    const lastRow = rows[limit - 1];
+    const raw = `${lastRow.timestamp}:${lastRow.source}:${lastRow.source_id}`;
+    nextCursor = Buffer.from(raw).toString('base64');
+  }
+
+  return { data: items, nextCursor, hasMore };
+}
+
+function rowToTimelineItem(row: TimelineRow): TimelineItem {
+  const isPledge = row.source === 'pledge';
+
+  let type: TimelineItemType;
+  let parsedMetadata: Record<string, unknown> | undefined;
+
+  if (isPledge) {
+    type = 'pledge';
+    parsedMetadata = undefined;
+  } else {
+    parsedMetadata = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined;
+
+    switch (row.event_type) {
+      case 'created':
+      case 'claimed':
+      case 'refunded':
+        type = 'status_change';
+        break;
+      case 'metadata_updated':
+        type = 'update';
+        break;
+      case 'pledged':
+        type = 'pledge';
+        break;
+      case 'pledge_limit_reached':
+        type = 'status_change';
+        break;
+      default:
+        type = 'status_change';
+    }
+  }
+
+  const id = `${row.source}:${row.source_id}`;
+
+  return {
+    id,
+    campaignId: row.campaign_id,
+    type,
+    timestamp: row.timestamp,
+    actor: row.actor ?? undefined,
+    amount: row.amount ?? undefined,
+    assetCode: row.asset_code ?? undefined,
+    metadata: parsedMetadata,
+    eventType: row.event_type ?? undefined,
+  };
+}
+
 /**
  * Returns all events originating from a given source (local backend or Soroban chain).
  *
  * @param source - `"local"` for off-chain events, `"soroban"` for on-chain events.
  * @returns An array of {@link CampaignEvent} objects in chronological order.
  */
-export function getEventsBySource(
-  source: "local" | "soroban",
-): CampaignEvent[] {
+export function getEventsBySource(source: 'local' | 'soroban'): CampaignEvent[] {
   const db = getDb();
   const rows = db
     .prepare(

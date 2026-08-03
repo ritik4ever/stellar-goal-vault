@@ -23,6 +23,8 @@ export interface FormErrors {
   acceptedTokens?: string;
   targetAmount?: string;
   deadlineHours?: string;
+  category?: string;
+  maxPerContributor?: string;
 }
 
 /**
@@ -135,6 +137,42 @@ export function validateDeadlineHours(value: string | number): string | null {
   if (hours > 8760) {
     // 365 days
     return 'Deadline cannot exceed 365 days';
+  }
+
+  return null;
+}
+
+/**
+ * Validates the campaign category.
+ */
+export function validateCategory(value: string): string | null {
+  if (!value || !value.trim()) {
+    return 'Category is required';
+  }
+
+  return null;
+}
+
+/**
+ * Validates the optional maximum-per-contributor cap.
+ */
+export function validateMaxPerContributor(value: string): string | null {
+  if (!value || !value.trim()) {
+    return null;
+  }
+
+  const amount = Number(value);
+
+  if (isNaN(amount)) {
+    return 'Max per contributor must be a valid number';
+  }
+
+  if (!Number.isInteger(amount)) {
+    return 'Max per contributor must be a whole number';
+  }
+
+  if (amount <= 0) {
+    return 'Max per contributor must be greater than zero';
   }
 
   return null;
