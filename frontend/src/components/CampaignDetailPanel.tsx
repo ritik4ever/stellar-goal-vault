@@ -11,6 +11,7 @@ import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
 import { Countdown } from './Countdown';
 import { useCampaignShareCard } from './CampaignShareCard';
+import { formatAmount } from '../utils/formatCurrency';
 import { useToast } from '../hooks/useToast';
 import { ShareButtons } from './ShareButtons';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
@@ -313,7 +314,7 @@ export function CampaignDetailPanel({
         </article>
         <article className="detail-stat">
           <span>Remaining</span>
-          <strong>{activeCampaign.progress.remainingAmount}</strong>
+          <strong>{formatAmount(activeCampaign.progress.remainingAmount, activeCampaign.assetCode)}</strong>
         </article>
         <article className="detail-stat">
           <span>Active pledges</span>

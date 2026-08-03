@@ -3,6 +3,7 @@ import { CampaignEvent } from '../types/campaign';
 import { EmptyState } from './EmptyState';
 import { SkeletonTimeline } from './SkeletonTimeline';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
+import { formatAmount } from '../utils/formatCurrency';
 
 const MILESTONES = [25, 50, 75] as const;
 
@@ -49,7 +50,7 @@ function getMetadataLines(event: CampaignEvent): string[] {
   }
 
   if (typeof event.amount === 'number') {
-    lines.push(`Amount: ${event.amount}`);
+    lines.push(`Amount: ${formatAmount(event.amount)}`);
   }
 
   if (typeof metadata.refundedPledgeCount === 'number') {
@@ -143,12 +144,12 @@ export function CampaignTimeline({
                   key={pct}
                   className="timeline-milestone-tick"
                   style={{ left: `${pct}%` }}
-                  aria-label={`${pct}% milestone: ${milestoneAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} target`}
+                  aria-label={`${pct}% milestone: ${formatAmount(milestoneAmount)} target`}
                   role="img"
                 >
                   <span className="timeline-milestone-tooltip">
                     {pct}%&nbsp;&mdash;&nbsp;
-                    {milestoneAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    {formatAmount(milestoneAmount)}
                   </span>
                 </div>
               );
