@@ -1,6 +1,8 @@
 import { History } from 'lucide-react';
 import { CampaignEvent } from '../types/campaign';
 import { EmptyState } from './EmptyState';
+import { SkeletonTimeline } from './SkeletonTimeline';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 const MILESTONES = [25, 50, 75] as const;
 
@@ -92,20 +94,12 @@ export function CampaignTimeline({
   pledgedAmount,
 }: CampaignTimelineProps) {
   const percentFunded =
-    targetAmount && targetAmount > 0
-      ? Math.min((pledgedAmount ?? 0) / targetAmount, 1) * 100
-      : 0;
+    targetAmount && targetAmount > 0 ? Math.min((pledgedAmount ?? 0) / targetAmount, 1) * 100 : 0;
 
   const showProgress = typeof targetAmount === 'number' && targetAmount > 0;
-  if (isLoading) {
-    return (
-      <section className="card">
-        <div className="section-heading">
-          <h2>Timeline</h2>
-          <p className="muted">Loading campaign activity...</p>
-        </div>
-      </section>
-    );
+  const showSkeleton = useMinDisplayTime(isLoading);
+  if (showSkeleton) {
+    return <SkeletonTimeline />;
   }
 
   if (history.length === 0) {
@@ -139,10 +133,7 @@ export function CampaignTimeline({
             aria-valuemax={100}
             aria-label={`Campaign funded ${Math.round(percentFunded)}%`}
           >
-            <div
-              className="timeline-progress-fill"
-              style={{ width: `${percentFunded}%` }}
-            />
+            <div className="timeline-progress-fill" style={{ width: `${percentFunded}%` }} />
             {MILESTONES.map((pct) => {
               const milestoneAmount = (targetAmount! * pct) / 100;
               const isExceeded = (pledgedAmount ?? 0) >= milestoneAmount;
@@ -163,12 +154,9 @@ export function CampaignTimeline({
               );
             })}
           </div>
-          <span className="timeline-progress-label muted">
-            {Math.round(percentFunded)}% funded
-          </span>
+          <span className="timeline-progress-label muted">{Math.round(percentFunded)}% funded</span>
         </div>
       )}
-
 
       <div className="timeline">
         {history.map((event) => {
