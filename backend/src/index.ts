@@ -482,6 +482,71 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
   }
 });
 
+app.get('/api/campaigns/export.csv', async (req: Request, res: Response, next: express.NextFunction) => {
+  try {
+    const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
+    if (!queryResult.ok) {
+      sendValidationError(queryResult.issues);
+    }
+
+    const params = queryResult.data;
+    const listOptions: ListCampaignsOptions = {
+      searchQuery: params.search || params.q,
+      assetCodes: params.asset,
+      status: params.status,
+      includeDeleted: params.includeDeleted,
+      sort: params.sort,
+      order: params.order,
+      createdAfter: params.createdAfter,
+      createdBefore: params.createdBefore,
+    };
+
+    const { campaigns, pledgeCounts } = listCampaigns(listOptions);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="campaigns.csv"');
+    res.setHeader('Cache-Control', 'no-cache');
+
+    // CSV header row
+    res.write('id,title,creator,asset,target,pledged,status,deadline,contributor_count,created_at\n');
+
+    // Stream each campaign row
+    for (const campaign of campaigns) {
+      const progress = calculateProgress(campaign, undefined, pledgeCounts[campaign.id]);
+      const createdAt = new Date(campaign.createdAt * 1000).toISOString();
+      const deadline = new Date(campaign.deadline * 1000).toISOString();
+
+      // Escape CSV fields that may contain commas or quotes
+      const csvRow = [
+        campaign.id,
+        escapeCSV(campaign.title),
+        campaign.creator,
+        campaign.assetCode,
+        String(campaign.targetAmount),
+        String(campaign.pledgedAmount),
+        progress.status,
+        deadline,
+        String(progress.pledgeCount),
+        createdAt,
+      ].join(',');
+
+      res.write(csvRow + '\n');
+    }
+
+    res.end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Escape a field value for CSV (RFC 4180). */
+function escapeCSV(field: string): string {
+  if (field.includes(',') || field.includes('"') || field.includes('\n')) {
+    return '"' + field.replace(/"/g, '""') + '"';
+  }
+  return field;
+}
+
 app.get('/api/campaigns/trending', (req: Request, res: Response) => {
   const cached = getTrendingCacheEntry();
   if (cached) {
