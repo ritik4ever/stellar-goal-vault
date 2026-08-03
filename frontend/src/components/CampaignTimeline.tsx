@@ -3,6 +3,7 @@ import { CampaignEvent } from '../types/campaign';
 import { EmptyState } from './EmptyState';
 import { SkeletonTimeline } from './SkeletonTimeline';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
+import { formatAmount } from '../utils/formatCurrency';
 
 const MILESTONES = [25, 50, 75] as const;
 

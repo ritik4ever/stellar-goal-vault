@@ -11,6 +11,7 @@ import { ContributorSummary } from './ContributorSummary';
 import { CampaignImage } from './CampaignImage';
 import { Countdown } from './Countdown';
 import { useCampaignShareCard } from './CampaignShareCard';
+import { formatAmount } from '../utils/formatCurrency';
 import { useToast } from '../hooks/useToast';
 import { ShareButtons } from './ShareButtons';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';

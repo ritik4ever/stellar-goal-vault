@@ -7,6 +7,7 @@ import { ContributorSummary as ContributorSummaryData } from '../types/campaign'
 import { apiRequest } from '../services/httpClient';
 import { buildContributorCsv, downloadCsv } from '../utils/exportCsv';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
+import { formatAmount } from '../utils/formatCurrency';
 
 const POLL_INTERVAL_MS = 30_000;
 
