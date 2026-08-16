@@ -1,5 +1,13 @@
 # Stellar Goal Vault
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Stellar-Smart%20Contracts-blue" alt="Stellar" />
+  <img src="https://img.shields.io/badge/Soroban-Rust-orange" alt="Soroban" />
+  <img src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-61dafb" alt="Frontend" />
+  <img src="https://img.shields.io/badge/Backend-Node.js-green" alt="Backend" />
+  <img src="https://img.shields.io/badge/license-MIT-brightgreen" alt="License" />
+</p>
+
 Stellar Goal Vault is a lightweight crowdfunding MVP for the Stellar ecosystem.
 
 It includes:
