@@ -999,6 +999,207 @@ use soroban_sdk::{
         );
     }
 
+    // ── #532: update_campaign_metadata (title, description) tests ─────────────
+
+    #[test]
+    fn test_update_campaign_metadata_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "metadata field unused here"),
+            &0_i128,
+        );
+
+        // Starts empty until explicitly set.
+        let before = client.get_campaign(&campaign_id);
+        assert_eq!(before.title, String::from_str(&env, ""));
+        assert_eq!(before.description, String::from_str(&env, ""));
+
+        client.update_campaign_metadata(
+            &campaign_id,
+            &creator,
+            &String::from_str(&env, "New Title"),
+            &String::from_str(&env, "New description text"),
+        );
+
+        let after = client.get_campaign(&campaign_id);
+        assert_eq!(after.title, String::from_str(&env, "New Title"));
+        assert_eq!(after.description, String::from_str(&env, "New description text"));
+    }
+
+    #[test]
+    fn test_update_campaign_metadata_does_not_touch_financial_fields() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let target: i128 = 1_000;
+        let deadline = env.ledger().timestamp() + 1_000;
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "metadata field unused here"),
+            &0_i128,
+        );
+
+        client.update_campaign_metadata(
+            &campaign_id,
+            &creator,
+            &String::from_str(&env, "New Title"),
+            &String::from_str(&env, "New description"),
+        );
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.target_amount, target);
+        assert_eq!(campaign.deadline, deadline);
+        assert_eq!(campaign.accepted_tokens.len(), 1);
+        assert_eq!(campaign.accepted_tokens.get(0).unwrap(), token);
+    }
+
+    #[test]
+    #[should_panic(expected = "creator mismatch")]
+    fn test_update_campaign_metadata_rejects_non_creator() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "metadata field unused here"),
+            &0_i128,
+        );
+
+        client.update_campaign_metadata(
+            &campaign_id,
+            &attacker,
+            &String::from_str(&env, "Hacked Title"),
+            &String::from_str(&env, "Hacked description"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign deadline reached")]
+    fn test_update_campaign_metadata_rejects_after_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "metadata field unused here"),
+            &0_i128,
+        );
+
+        advance_time(&env, deadline_offset + 1);
+
+        client.update_campaign_metadata(
+            &campaign_id,
+            &creator,
+            &String::from_str(&env, "Too Late"),
+            &String::from_str(&env, "too late"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign canceled")]
+    fn test_update_campaign_metadata_rejects_canceled_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "metadata field unused here"),
+            &0_i128,
+        );
+
+        client.cancel_campaign(&campaign_id, &creator);
+        client.update_campaign_metadata(
+            &campaign_id,
+            &creator,
+            &String::from_str(&env, "New Title"),
+            &String::from_str(&env, "New description"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign already claimed")]
+    fn test_update_campaign_metadata_rejects_after_claim() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 1_000;
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "metadata field unused here"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        advance_time(&env, deadline_offset + 1);
+        client.claim(&campaign_id, &creator);
+
+        client.update_campaign_metadata(
+            &campaign_id,
+            &creator,
+            &String::from_str(&env, "New Title"),
+            &String::from_str(&env, "New description"),
+        );
+    }
+
     // ── #192: deadline extension governance tests ─────────────────────────────
 
     #[test]
@@ -1229,6 +1430,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1242,6 +1444,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_recipient_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
