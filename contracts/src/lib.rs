@@ -972,3 +972,8 @@ fn refund_contributor(
     total_refunded
 }
 
+#[cfg(test)]
+mod test;
+
+#[cfg(test)]
+mod tests;
