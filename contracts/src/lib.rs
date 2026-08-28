@@ -3,8 +3,8 @@
 
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token::Client as TokenClient, Address, Env,
-    String, Vec,
+    contract, contractevent, contractimpl, contracttype, symbol_short, token::Client as TokenClient,
+    xdr::ToXdr, Address, BytesN, Env, String, Vec,
 };
 
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -66,6 +66,14 @@ pub enum DataKey {
     /// Address that receives platform fees on campaign claims. When absent no
     /// fee is deducted regardless of [`PlatformFeeBps`].
     FeeRecipient,
+    /// Anonymous pledge amount per (campaign_id, contributor_hash, token).
+    /// The hash is sha256 of the contributor's XDR address; the raw address
+    /// is never stored, so it cannot be read back from public queries
+    /// (issue #539).
+    AnonContribution(u64, BytesN<32>, Address),
+    /// Tracks whether a contributor (identified by hash) has already made an
+    /// anonymous pledge, so contributor_count is not double counted.
+    HasContributedAnon(u64, BytesN<32>),
 }
 
 #[contracttype]
@@ -168,6 +176,30 @@ pub struct FeeCollected {
     pub token: Address,
     pub fee_amount: i128,
     pub fee_recipient: Address,
+}
+
+/// Emitted for an anonymous pledge. Contains the contributor hash instead of
+/// the raw address so the pledger's identity is not exposed on-chain (issue #539).
+#[contractevent(topics = ["Goal"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnonymousPledged {
+    #[topic]
+    pub contributor_hash: BytesN<32>,
+    pub campaign_id: u64,
+    pub token: Address,
+    pub amount: i128,
+}
+
+/// Emitted when an anonymous pledge is refunded. Uses the contributor hash,
+/// never the raw address (issue #539).
+#[contractevent(topics = ["Goal"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnonymousRefunded {
+    #[topic]
+    pub contributor_hash: BytesN<32>,
+    pub campaign_id: u64,
+    pub token: Address,
+    pub amount: i128,
 }
 
 #[contract]
@@ -407,6 +439,36 @@ impl StellarGoalVaultContract {
     }
 
     pub fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, amount: i128) {
+        Self::contribute_internal(env, campaign_id, contributor, token, amount, false);
+    }
+
+    /// Same as [`Self::contribute`] but the pledge is recorded under a hash of
+    /// the contributor's address instead of the raw address, so the address is
+    /// never exposed by public queries or events (issue #539).
+    ///
+    /// The contributor can still claim a refund through [`Self::refund`] using
+    /// their real address: authentication with that address is the proof of
+    /// ownership, and the contract recomputes the hash to find the stored
+    /// pledge. Anonymous pledges are not refunded by [`Self::refund_all`] since
+    /// the contract deliberately does not know who made them.
+    pub fn contribute_anonymous(
+        env: Env,
+        campaign_id: u64,
+        contributor: Address,
+        token: Address,
+        amount: i128,
+    ) {
+        Self::contribute_internal(env, campaign_id, contributor, token, amount, true);
+    }
+
+    fn contribute_internal(
+        env: Env,
+        campaign_id: u64,
+        contributor: Address,
+        token: Address,
+        amount: i128,
+        anonymous: bool,
+    ) {
         require_not_paused(&env);
         contributor.require_auth();
 
@@ -443,47 +505,106 @@ impl StellarGoalVaultContract {
         // Update campaign pledged amount (valuation)
         campaign.pledged_amount += amount;
 
-        // Only increment contributor_count on first-time pledge
-        let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
-        let has_contributed: bool = env.storage().persistent().get(&has_contributed_key).unwrap_or(false);
-        if !has_contributed {
-            campaign.contributor_count += 1;
-            env.storage().persistent().set(&has_contributed_key, &true);
-            // Track contributor for refund_all
-            let contributors_key = DataKey::Contributors(campaign_id);
-            let mut contributors: Vec<Address> = env.storage().persistent().get(&contributors_key).unwrap_or_else(|| Vec::new(&env));
-            contributors.push_back(contributor.clone());
-            env.storage().persistent().set(&contributors_key, &contributors);
-        }
+        if anonymous {
+            // Anonymous path: everything is keyed by the sha256 of the
+            // contributor's XDR address. The raw address is never persisted and
+            // never appears in events, so it cannot be recovered from public
+            // queries. The contributor's authentication during refund() acts as
+            // the proof of ownership.
+            let contributor_hash = contributor_hash(&env, &contributor);
 
+            // Only increment contributor_count on first-time anonymous pledge
+            let has_contributed_key = DataKey::HasContributedAnon(campaign_id, contributor_hash.clone());
+            let has_contributed: bool = env
+                .storage()
+                .persistent()
+                .get(&has_contributed_key)
+                .unwrap_or(false);
+            if !has_contributed {
+                campaign.contributor_count += 1;
+                env.storage().persistent().set(&has_contributed_key, &true);
+                // Deliberately NOT added to DataKey::Contributors: refund_all
+                // must never see the raw address. Anonymous contributors refund
+                // themselves through refund().
+            }
 
+            // Write updated campaign back to storage
+            env.storage()
+                .persistent()
+                .set(&DataKey::Campaign(campaign_id), &campaign);
 
-        // Write updated campaign back to storage
-        env.storage()
-            .persistent()
-            .set(&DataKey::Campaign(campaign_id), &campaign);
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&balance_key, &(current_balance + amount));
 
-        let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
-        let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&balance_key, &(current_balance + amount));
+            let contribution_key =
+                DataKey::AnonContribution(campaign_id, contributor_hash.clone(), token.clone());
+            let current_contribution: i128 = env
+                .storage()
+                .persistent()
+                .get(&contribution_key)
+                .unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&contribution_key, &(current_contribution + amount));
 
-        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-        let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&contribution_key, &(current_contribution + amount));
-
-        env.events().publish(
-            (symbol_short!("Goal"), symbol_short!("Pledge")),
-            CampaignPledged {
+            env.events().publish_event(&AnonymousPledged {
                 campaign_id,
-                contributor,
+                contributor_hash,
                 token,
                 amount,
-            },
-        );
+            });
+        } else {
+            // Only increment contributor_count on first-time pledge
+            let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
+            let has_contributed: bool = env
+                .storage()
+                .persistent()
+                .get(&has_contributed_key)
+                .unwrap_or(false);
+            if !has_contributed {
+                campaign.contributor_count += 1;
+                env.storage().persistent().set(&has_contributed_key, &true);
+                // Track contributor for refund_all
+                let contributors_key = DataKey::Contributors(campaign_id);
+                let mut contributors: Vec<Address> = env
+                    .storage()
+                    .persistent()
+                    .get(&contributors_key)
+                    .unwrap_or_else(|| Vec::new(&env));
+                contributors.push_back(contributor.clone());
+                env.storage().persistent().set(&contributors_key, &contributors);
+            }
+
+            // Write updated campaign back to storage
+            env.storage()
+                .persistent()
+                .set(&DataKey::Campaign(campaign_id), &campaign);
+
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&balance_key, &(current_balance + amount));
+
+            let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+            let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&contribution_key, &(current_contribution + amount));
+
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Pledge")),
+                CampaignPledged {
+                    campaign_id,
+                    contributor,
+                    token,
+                    amount,
+                },
+            );
+        }
     }
 
     /// Updates the campaign metadata. Only the original creator can call this,
@@ -739,7 +860,12 @@ impl StellarGoalVaultContract {
             panic!("funded campaigns cannot be refunded");
         }
 
-        let total_refunded = refund_contributor(&env, &mut campaign, campaign_id, &contributor);
+        // Refund both public and anonymous pledges. For anonymous pledges the
+        // caller's authentication with their real address is the proof of
+        // ownership; the contract recomputes the hash to locate the pledge.
+        let contributor_hash = contributor_hash(&env, &contributor);
+        let total_refunded = refund_contributor(&env, &mut campaign, campaign_id, &contributor)
+            + refund_anonymous_contributor(&env, &mut campaign, campaign_id, &contributor, &contributor_hash);
 
         if total_refunded == 0 {
             panic!("nothing to refund");
@@ -935,6 +1061,51 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .unwrap_or_else(|| panic!("campaign not found"))
 }
 
+/// Returns the sha256 of a contributor's XDR-encoded address. Anonymous
+/// pledges are stored under this hash so the raw address is never persisted
+/// or exposed by public queries (issue #539).
+fn contributor_hash(env: &Env, contributor: &Address) -> BytesN<32> {
+    env.crypto().sha256(&contributor.clone().to_xdr(env)).into()
+}
+
+/// Refunds the anonymous pledges of `contributor` (identified by their hash)
+/// for every accepted token. Returns the total amount refunded. Events publish
+/// the hash, never the raw address.
+fn refund_anonymous_contributor(
+    env: &Env,
+    campaign: &mut Campaign,
+    campaign_id: u64,
+    contributor: &Address,
+    contributor_hash: &BytesN<32>,
+) -> i128 {
+    let mut total_refunded = 0_i128;
+    let contract_address = env.current_contract_address();
+    for token in campaign.accepted_tokens.iter() {
+        let contribution_key =
+            DataKey::AnonContribution(campaign_id, contributor_hash.clone(), token.clone());
+        let amount: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+        if amount > 0 {
+            let token_client = TokenClient::new(env, &token);
+            token_client.transfer(&contract_address, contributor, &amount);
+            env.storage().persistent().set(&contribution_key, &0_i128);
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&balance_key, &(balance - amount));
+            campaign.pledged_amount -= amount;
+            total_refunded += amount;
+            env.events().publish_event(&AnonymousRefunded {
+                campaign_id,
+                contributor_hash: contributor_hash.clone(),
+                token: token.clone(),
+                amount,
+            });
+        }
+    }
+    total_refunded
+}
+
 fn refund_contributor(
     env: &Env,
     campaign: &mut Campaign,
@@ -971,4 +1142,7 @@ fn refund_contributor(
     }
     total_refunded
 }
+
+#[cfg(test)]
+mod test;
 

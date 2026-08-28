@@ -1,9 +1,14 @@
 
 #[cfg(test)]
 mod tests {
+// The contract crate is `#![no_std]`, but the test harness links std, so we
+// opt back into it here for assertions that need heap-allocated containers.
+extern crate std;
+
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
+    testutils::{Address as _, Events, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
+    xdr::{ToXdr, WriteXdr},
     Address, Env, String,
 };
 
@@ -1229,6 +1234,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1242,6 +1248,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_recipient_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1473,6 +1480,206 @@ use soroban_sdk::{
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 1_000);
         assert_eq!(token_client.balance(&fee_recipient), 0);
+    }
+
+    // ── anonymous pledges (issue #539) ────────────────────────────────────────
+
+    fn setup_pledge_env(env: &Env) -> (StellarGoalVaultContractClient<'_>, Address, Address, Address, Address, i128, u64) {
+        env.mock_all_auths();
+        let creator = Address::generate(env);
+        let contributor = Address::generate(env);
+        let admin = Address::generate(env);
+        let target: i128 = 1_000;
+        let deadline = env.ledger().timestamp() + 100_000;
+        let token = deploy_token(env, &admin, &contributor, 2_000);
+        let client = deploy_contract(env);
+        client.initialize(&admin, &100_i128);
+        (client, creator, contributor, admin, token, target, deadline)
+    }
+
+    #[test]
+    fn test_anonymous_pledge_hides_address_from_public_query() {
+        let env = Env::default();
+        let (client, creator, contributor, _admin, token, target, deadline) = setup_pledge_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "anon test"),
+            &0_i128,
+        );
+
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &300);
+
+        // Campaign state updated…
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.pledged_amount, 300);
+        assert_eq!(campaign.contributor_count, 1);
+
+        // …but the address is NOT readable through the public contribution query
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "nothing to refund")]
+    fn test_anonymous_pledge_not_in_contributors_list_for_refund_all() {
+        let env = Env::default();
+        let (client, creator, contributor, _admin, token, target, deadline) = setup_pledge_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "anon refund_all test"),
+            &0_i128,
+        );
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &300);
+
+        // The raw address must not be discoverable: refund_all has nobody to
+        // refund because anonymous contributors are deliberately not tracked.
+        // (They refund themselves through refund().)
+        client.cancel_campaign(&campaign_id, &creator);
+        client.refund_all(&campaign_id);
+    }
+
+    #[test]
+    fn test_anonymous_refund_with_real_address() {
+        let env = Env::default();
+        let (client, creator, contributor, _admin, token, target, deadline) = setup_pledge_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "anon refund test"),
+            &0_i128,
+        );
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &300);
+
+        client.cancel_campaign(&campaign_id, &creator);
+        client.refund(&campaign_id, &contributor);
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.pledged_amount, 0);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token), 0);
+
+        // Tokens actually returned to the anonymous contributor
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&contributor), 2_000);
+    }
+
+    #[test]
+    fn test_anonymous_pledge_counts_contributor_once() {
+        let env = Env::default();
+        let (client, creator, contributor, _admin, token, target, deadline) = setup_pledge_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "anon count test"),
+            &0_i128,
+        );
+
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &200);
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &100);
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.contributor_count, 1);
+        assert_eq!(campaign.pledged_amount, 300);
+    }
+
+    #[test]
+    fn test_mixed_public_and_anonymous_refund() {
+        let env = Env::default();
+        let (client, creator, contributor, _admin, token, target, deadline) = setup_pledge_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "mixed refund test"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &200);
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &150);
+
+        client.cancel_campaign(&campaign_id, &creator);
+        client.refund(&campaign_id, &contributor);
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.pledged_amount, 0);
+        // Public contribution is zeroed, anonymous is not visible via the query
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token), 0);
+
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&contributor), 2_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_anonymous_pledge_blocked_when_paused() {
+        let env = Env::default();
+        let (client, creator, contributor, admin, token, target, deadline) = setup_pledge_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "anon pause test"),
+            &0_i128,
+        );
+        client.set_paused(&admin, &true);
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &200);
+    }
+
+    #[test]
+    fn test_anonymous_pledge_event_does_not_leak_address() {
+        let env = Env::default();
+        let (client, creator, contributor, _admin, token, target, deadline) = setup_pledge_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "anon event test"),
+            &0_i128,
+        );
+
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &300);
+
+        // Serialize the contributor address exactly as it would appear inside a
+        // contract event (ScVal XDR) and make sure no event *published by the
+        // vault contract* contains it. Events are filtered to this contract
+        // because the underlying token contract legitimately emits its own
+        // `transfer` events that include the sender's address — that is
+        // inherent to the token layer and outside the vault's control. The
+        // anonymity guarantee is that the vault contract itself never stores
+        // or publishes the raw address.
+        let contributor_bytes: std::vec::Vec<u8> = contributor.clone().to_xdr(&env).into_iter().collect();
+        let vault_events = env.events().all().filter_by_contract(&client.address);
+        assert!(
+            !vault_events.events().is_empty(),
+            "expected at least the AnonymousPledged event"
+        );
+        for event in vault_events.events() {
+            let raw = event
+                .to_xdr(soroban_sdk::xdr::Limits::none())
+                .expect("event serialization failed");
+            let leaked = raw
+                .windows(contributor_bytes.len())
+                .any(|w| w == contributor_bytes.as_slice());
+            assert!(!leaked, "anonymous pledge event leaked the contributor address");
+        }
     }
 
 }
