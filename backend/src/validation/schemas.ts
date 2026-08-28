@@ -31,16 +31,16 @@ export const imageUrlSchema = z
         if (!dataUrlMatch) {
           return false;
         }
-        
+
         // Estimate decoded size (base64 adds ~33% overhead)
         // A base64 string of length N encodes roughly N * 0.75 bytes
         const base64Data = dataUrlMatch[2];
         const estimatedBytes = (base64Data.length * 3) / 4;
         const maxBytes = 2 * 1024 * 1024; // 2MB
-        
+
         return estimatedBytes <= maxBytes;
       }
-      
+
       // For HTTPS URLs, delegate to httpsOnlyUrlSchema
       try {
         httpsOnlyUrlSchema.parse(value);
@@ -552,9 +552,7 @@ export function parseCampaignListQuery(
 export function parseTimelineQuery(query: {
   cursor?: unknown;
   limit?: unknown;
-}):
-  | { ok: true; cursor?: string; limit: number }
-  | { ok: false; issues: z.core.$ZodIssue[] } {
+}): { ok: true; cursor?: string; limit: number } | { ok: false; issues: z.core.$ZodIssue[] } {
   const issues: z.core.$ZodIssue[] = [];
 
   let cursor: string | undefined;
@@ -648,6 +646,106 @@ export function parseCommentListPaginationQuery(query: {
 
   return {
     ok: true,
+    page: parsedPage.ok ? (parsedPage.value ?? 1) : 1,
+    limit: parsedLimit.ok ? (parsedLimit.value ?? 20) : 20,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Campaign abuse reports (issue #565)
+// ---------------------------------------------------------------------------
+
+export const CAMPAIGN_REPORT_REASONS = ['fraud', 'spam', 'duplicate'] as const;
+export const CAMPAIGN_REPORT_STATUS_FILTERS = ['pending', 'dismissed', 'actioned', 'all'] as const;
+
+export const REPORT_ID_REGEX = /^[1-9]\d*$/;
+
+export const reportIdSchema = z
+  .string()
+  .trim()
+  .regex(REPORT_ID_REGEX, 'Report ID must be a positive integer.');
+
+export const createCampaignReportPayloadSchema = z.object({
+  reporter: stellarAccountIdSchema,
+  reason: z.enum(CAMPAIGN_REPORT_REASONS, {
+    message: `reason must be one of: ${CAMPAIGN_REPORT_REASONS.join(', ')}.`,
+  }),
+  details: z
+    .string()
+    .trim()
+    .max(500, 'Report details cannot exceed 500 characters.')
+    .refine((val) => !containsScriptTag(val), 'Report details cannot contain script tags.')
+    .optional(),
+});
+
+export const resolveCampaignReportPayloadSchema = z.object({
+  action: z.enum(['dismiss', 'act'], {
+    message: 'action must be either "dismiss" or "act".',
+  }),
+  admin: stellarAccountIdSchema.optional(),
+});
+
+/**
+ * Parses the query string for `GET /api/admin/reports`:
+ *   - `status`  one of pending | dismissed | actioned | all (default: pending)
+ *   - `campaignId` optional campaign filter
+ *   - `page` / `limit` standard 1-based pagination (default: page 1, limit 20)
+ */
+export function parseCampaignReportListQuery(query: {
+  status?: unknown;
+  campaignId?: unknown;
+  page?: unknown;
+  limit?: unknown;
+}):
+  | {
+      ok: true;
+      status: (typeof CAMPAIGN_REPORT_STATUS_FILTERS)[number];
+      campaignId?: string;
+      page: number;
+      limit: number;
+    }
+  | { ok: false; issues: z.core.$ZodIssue[] } {
+  const issues: z.core.$ZodIssue[] = [];
+
+  const rawStatus = singleCampaignListQueryParam(query.status);
+  let status: (typeof CAMPAIGN_REPORT_STATUS_FILTERS)[number] = 'pending';
+  if (rawStatus !== undefined) {
+    if ((CAMPAIGN_REPORT_STATUS_FILTERS as readonly string[]).includes(rawStatus)) {
+      status = rawStatus as (typeof CAMPAIGN_REPORT_STATUS_FILTERS)[number];
+    } else {
+      issues.push({
+        code: 'custom',
+        message: `status must be one of: ${CAMPAIGN_REPORT_STATUS_FILTERS.join(', ')}.`,
+        path: ['status'],
+      });
+    }
+  }
+
+  const rawCampaignId = singleCampaignListQueryParam(query.campaignId);
+  let campaignId: string | undefined;
+  if (rawCampaignId !== undefined) {
+    if (CAMPAIGN_ID_REGEX.test(rawCampaignId)) {
+      campaignId = rawCampaignId;
+    } else {
+      issues.push({
+        code: 'custom',
+        message: 'campaignId must be a positive integer.',
+        path: ['campaignId'],
+      });
+    }
+  }
+
+  const parsedPage = parsePositiveIntegerQueryParam(query.page, 'page');
+  const parsedLimit = parsePositiveIntegerQueryParam(query.limit, 'limit', 100);
+  if (!parsedPage.ok) issues.push(...parsedPage.issues);
+  if (!parsedLimit.ok) issues.push(...parsedLimit.issues);
+
+  if (issues.length > 0) return { ok: false, issues };
+
+  return {
+    ok: true,
+    status,
+    campaignId,
     page: parsedPage.ok ? (parsedPage.value ?? 1) : 1,
     limit: parsedLimit.ok ? (parsedLimit.value ?? 20) : 20,
   };

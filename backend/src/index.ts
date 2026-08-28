@@ -9,12 +9,19 @@ import { validateEnv } from './validateEnv';
 import { z } from 'zod';
 import path from 'path';
 import { config, walletIntegrationReady } from './config';
+import { adminAuthMiddleware } from './middleware/adminAuth';
 import { apiKeyAuthMiddleware } from './middleware/apiKeyAuth';
 import { cacheMiddleware } from './middleware/cacheMiddleware';
+import { idempotencyMiddleware } from './middleware/idempotencyMiddleware';
 import { requestIdMiddleware } from './middleware/requestId';
 import { validateBody } from './middleware/validateBody';
 import type { RequestWithId } from './middleware/types';
 import { initRedisCache } from './services/cache';
+import {
+  createCampaignReport,
+  listCampaignReports,
+  resolveCampaignReport,
+} from './services/campaignReports';
 
 import swaggerUi from 'swagger-ui-express';
 
@@ -27,8 +34,6 @@ import {
   CampaignStatus,
   claimCampaign,
   createCampaign,
-  createComment,
-  deleteComment,
   getCampaign,
   getCampaignWithProgress,
   getContributorSummary,
@@ -38,7 +43,6 @@ import {
   initCampaignStore,
   listCampaignPledges,
   listCampaigns,
-  listComments,
   type ListCampaignsOptions,
   reconcileOnChainPledge,
   refundContributor,
@@ -61,17 +65,17 @@ import { AppError, ApiErrorResponse } from './types/errors';
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
-  commentIdSchema,
   createCampaignPayloadSchema,
-  createCommentPayloadSchema,
+  createCampaignReportPayloadSchema,
   createPledgePayloadSchema,
-  deleteCommentPayloadSchema,
-  parseCommentListPaginationQuery,
+  parseCampaignReportListQuery,
   parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
   parseTimelineQuery,
   reconcilePledgePayloadSchema,
   refundPayloadSchema,
+  reportIdSchema,
+  resolveCampaignReportPayloadSchema,
   zodIssuesToErrorMessage,
   zodIssuesToValidationIssues,
   parseCampaignListQuery,
@@ -504,11 +508,12 @@ app.get('/api/campaigns/trending', (req: Request, res: Response) => {
   res.send(responseBody);
 });
 
-app.get('/api/campaigns/:id', (req: Request, res: Response) => {
-  const parsedId = parseCampaignId(req.params.id);
-  if (!parsedId.ok) {
-    sendValidationError(parsedId.issues);
-  }
+app.get('/api/campaigns/:id', async (req: Request, res: Response, next: express.NextFunction) => {
+  try {
+    const parsedId = parseCampaignId(req.params.id);
+    if (!parsedId.ok) {
+      sendValidationError(parsedId.issues);
+    }
 
     const cacheKey = `campaigns:detail:${parsedId.value}`;
     const cached = await getCampaignCacheEntry(cacheKey);
@@ -803,6 +808,94 @@ app.get('/api/campaigns/:id/timeline', (req: Request, res: Response) => {
 
   res.json({ data: result.data, pagination: { nextCursor: result.nextCursor, hasMore: result.hasMore } });
 });
+
+// ── Abuse reporting ──────────────────────────────────────────────────────────
+
+app.post(
+  '/api/campaigns/:id/report',
+  applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(createCampaignReportPayloadSchema),
+  (req: Request, res: Response, next: express.NextFunction) => {
+    try {
+      const parsedId = parseCampaignId(req.params.id);
+      if (!parsedId.ok) {
+        sendValidationError(parsedId.issues);
+      }
+
+      const body = req.body as z.infer<typeof createCampaignReportPayloadSchema>;
+      const result = createCampaignReport(parsedId.value, {
+        reporter: body.reporter,
+        reason: body.reason,
+        details: body.details,
+      });
+
+      res.status(201).json({
+        data: {
+          report: result.report,
+          reportCount: result.reportCount,
+          autoFlagThreshold: result.threshold,
+          autoFlagged: result.autoFlagged,
+          flaggedForReview: result.flaggedForReview,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+// ── Admin abuse-report moderation ────────────────────────────────────────────
+
+app.get('/api/admin/reports', adminAuthMiddleware, (req: Request, res: Response) => {
+  const parsed = parseCampaignReportListQuery(req.query as Record<string, unknown>);
+  if (!parsed.ok) {
+    sendValidationError(parsed.issues);
+  }
+
+  const { reports, totalCount } = listCampaignReports({
+    status: parsed.status,
+    campaignId: parsed.campaignId,
+    page: parsed.page,
+    limit: parsed.limit,
+  });
+  const totalPages = Math.max(1, Math.ceil(totalCount / parsed.limit));
+
+  res.setHeader('X-Total-Count', String(totalCount));
+  res.json({
+    data: reports,
+    pagination: {
+      total: totalCount,
+      page: parsed.page,
+      limit: parsed.limit,
+      totalPages,
+    },
+  });
+});
+
+app.patch(
+  '/api/admin/reports/:reportId',
+  adminAuthMiddleware,
+  applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
+  validateBody(resolveCampaignReportPayloadSchema),
+  (req: Request, res: Response, next: express.NextFunction) => {
+    try {
+      const parsedReportId = reportIdSchema.safeParse(req.params.reportId);
+      if (!parsedReportId.success) {
+        sendValidationError(parsedReportId.error.issues);
+      }
+
+      const body = req.body as z.infer<typeof resolveCampaignReportPayloadSchema>;
+      const report = resolveCampaignReport(Number(parsedReportId.data), {
+        action: body.action,
+        admin: body.admin,
+      });
+
+      res.json({ data: report });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 app.get('/api/open-issues', async (_req: Request, res: Response) => {
   const data = await fetchOpenIssues();
