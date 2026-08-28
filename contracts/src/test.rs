@@ -1229,6 +1229,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1242,6 +1243,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_recipient_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1473,6 +1475,700 @@ use soroban_sdk::{
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 1_000);
         assert_eq!(token_client.balance(&fee_recipient), 0);
+    }
+
+    // ── #526: milestone tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_set_milestones_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "milestone test"),
+            &0_i128,
+        );
+
+        // Set 3 milestones: 30%, 30%, 40%
+        let percentages = soroban_sdk::vec![&env, 3000, 3000, 4000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+
+        assert_eq!(client.get_milestone_count(&campaign_id), 3);
+
+        let m0 = client.get_milestone(&campaign_id, &0);
+        assert_eq!(m0.percentage_bps, 3000);
+        assert!(!m0.completed);
+        assert!(!m0.claimed);
+
+        let m1 = client.get_milestone(&campaign_id, &1);
+        assert_eq!(m1.percentage_bps, 3000);
+
+        let m2 = client.get_milestone(&campaign_id, &2);
+        assert_eq!(m2.percentage_bps, 4000);
+    }
+
+    #[test]
+    #[should_panic(expected = "milestone percentages must sum to 10000")]
+    fn test_set_milestones_rejects_wrong_sum() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "milestone bad sum"),
+            &0_i128,
+        );
+
+        // 30% + 30% = 60%, not 100%
+        let percentages = soroban_sdk::vec![&env, 3000, 3000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+    }
+
+    #[test]
+    #[should_panic(expected = "milestone count must be 1-5")]
+    fn test_set_milestones_rejects_too_many() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "milestone too many"),
+            &0_i128,
+        );
+
+        // 6 milestones is too many
+        let percentages = soroban_sdk::vec![&env, 2000, 2000, 2000, 2000, 1000, 1000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+    }
+
+    #[test]
+    #[should_panic(expected = "creator mismatch")]
+    fn test_set_milestones_rejects_non_creator() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "milestone mismatch"),
+            &0_i128,
+        );
+
+        let percentages = soroban_sdk::vec![&env, 10000];
+        client.set_milestones(&campaign_id, &attacker, &percentages);
+    }
+
+    #[test]
+    fn test_complete_milestone_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "milestone complete"),
+            &0_i128,
+        );
+
+        let percentages = soroban_sdk::vec![&env, 5000, 5000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+
+        client.complete_milestone(&campaign_id, &0, &creator);
+
+        let m0 = client.get_milestone(&campaign_id, &0);
+        assert!(m0.completed);
+        assert!(m0.completion_time.is_some());
+        assert!(m0.dispute_window_end.is_some());
+    }
+
+    #[test]
+    #[should_panic(expected = "milestone already completed")]
+    fn test_complete_milestone_already_completed() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "milestone double complete"),
+            &0_i128,
+        );
+
+        let percentages = soroban_sdk::vec![&env, 10000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+
+        client.complete_milestone(&campaign_id, &0, &creator);
+        client.complete_milestone(&campaign_id, &0, &creator);
+    }
+
+    #[test]
+    fn test_dispute_milestone_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "milestone dispute"),
+            &0_i128,
+        );
+
+        let percentages = soroban_sdk::vec![&env, 10000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+
+        client.complete_milestone(&campaign_id, &0, &creator);
+
+        // Dispute within window
+        client.dispute_milestone(&campaign_id, &0, &contributor);
+    }
+
+    #[test]
+    #[should_panic(expected = "dispute window has expired")]
+    fn test_dispute_milestone_after_window() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000_000),
+            &String::from_str(&env, "milestone dispute late"),
+            &0_i128,
+        );
+
+        let percentages = soroban_sdk::vec![&env, 10000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+
+        client.complete_milestone(&campaign_id, &0, &creator);
+
+        // Advance past dispute window (48h = 172800s)
+        advance_time(&env, 172801);
+
+        client.dispute_milestone(&campaign_id, &0, &contributor);
+    }
+
+    #[test]
+    #[should_panic(expected = "dispute window still active")]
+    fn test_claim_milestone_during_window() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000_000),
+            &String::from_str(&env, "milestone early claim"),
+            &0_i128,
+        );
+
+        let percentages = soroban_sdk::vec![&env, 10000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+
+        client.complete_milestone(&campaign_id, &0, &creator);
+
+        // Try to claim immediately (still in dispute window)
+        client.claim_milestone(&campaign_id, &0, &creator);
+    }
+
+    #[test]
+    fn test_claim_milestone_after_window_no_dispute() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+        client.set_fee(&admin, &0); // No fee
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000_000),
+            &String::from_str(&env, "milestone claim success"),
+            &0_i128,
+        );
+
+        // Contribute
+        client.contribute(&campaign_id, &creator, &token, &1_000);
+
+        let percentages = soroban_sdk::vec![&env, 10000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+
+        client.complete_milestone(&campaign_id, &0, &creator);
+
+        // Advance past dispute window
+        advance_time(&env, 172801);
+
+        client.claim_milestone(&campaign_id, &0, &creator);
+
+        let token_client = TokenClient::new(&env, &token);
+        // Creator should receive 100% of 1000 = 1000
+        assert_eq!(token_client.balance(&creator), 1_000);
+    }
+
+    #[test]
+    fn test_claim_milestone_partial_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+        client.set_fee(&admin, &0); // No fee
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000_000),
+            &String::from_str(&env, "milestone partial"),
+            &0_i128,
+        );
+
+        // Contribute
+        client.contribute(&campaign_id, &creator, &token, &1_000);
+
+        // 30% + 70%
+        let percentages = soroban_sdk::vec![&env, 3000, 7000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+
+        // Complete first milestone
+        client.complete_milestone(&campaign_id, &0, &creator);
+        advance_time(&env, 172801);
+        client.claim_milestone(&campaign_id, &0, &creator);
+
+        let token_client = TokenClient::new(&env, &token);
+        // 30% of 1000 = 300
+        assert_eq!(token_client.balance(&creator), 300);
+
+        // Complete second milestone
+        client.complete_milestone(&campaign_id, &1, &creator);
+        advance_time(&env, 172801);
+        client.claim_milestone(&campaign_id, &1, &creator);
+
+        // 300 + 700 = 1000
+        assert_eq!(token_client.balance(&creator), 1_000);
+    }
+
+    #[test]
+    fn test_admin_resolve_milestone_approved() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+        client.set_fee(&admin, &0);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000_000),
+            &String::from_str(&env, "admin resolve"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &creator, &token, &1_000);
+
+        let percentages = soroban_sdk::vec![&env, 10000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+
+        client.complete_milestone(&campaign_id, &0, &creator);
+
+        // Dispute
+        client.dispute_milestone(&campaign_id, &0, &contributor);
+
+        // Admin approves - sets dispute_window_end to 0 so claim can proceed
+        client.admin_resolve_milestone(&campaign_id, &0, &admin, &true);
+
+        // Now creator can claim (dispute window is set to 0, so now > 0 always)
+        client.claim_milestone(&campaign_id, &0, &creator);
+
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&creator), 1_000);
+    }
+
+    #[test]
+    fn test_admin_resolve_milestone_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000_000),
+            &String::from_str(&env, "admin reject"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &creator, &token, &1_000);
+
+        let percentages = soroban_sdk::vec![&env, 10000];
+        client.set_milestones(&campaign_id, &creator, &percentages);
+
+        client.complete_milestone(&campaign_id, &0, &creator);
+
+        // Dispute
+        client.dispute_milestone(&campaign_id, &0, &contributor);
+
+        // Admin rejects
+        client.admin_resolve_milestone(&campaign_id, &0, &admin, &false);
+
+        // Milestone is now claimed (rejected)
+        let m0 = client.get_milestone(&campaign_id, &0);
+        assert!(m0.claimed);
+    }
+
+    // ── #534: featured / spotlight campaigns ─────────────────────────────────
+
+    #[test]
+    fn test_feature_campaign_sets_flag() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "feature test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+
+        assert!(client.is_campaign_featured(&campaign_id));
+        let featured = client.get_featured_campaigns();
+        assert_eq!(featured.len(), 1);
+        assert_eq!(featured.get(0).unwrap(), campaign_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
+    fn test_feature_campaign_admin_only() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "feature admin test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&attacker, &campaign_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign not found")]
+    fn test_feature_campaign_requires_existing_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        // Campaign 1 does not exist yet
+        client.feature_campaign(&admin, &1);
+    }
+
+    #[test]
+    fn test_featured_flag_expires_after_7_days() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000_000),
+            &String::from_str(&env, "expiry test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+        assert!(client.is_campaign_featured(&campaign_id));
+
+        // 7 days + 1 second later the flag is expired with no admin action
+        advance_time(&env, 7 * 24 * 60 * 60 + 1);
+
+        assert!(!client.is_campaign_featured(&campaign_id));
+        assert_eq!(client.get_featured_campaigns().len(), 0);
+    }
+
+    #[test]
+    fn test_unfeature_campaign_removes_flag() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "unfeature test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+        client.unfeature_campaign(&admin, &campaign_id);
+
+        assert!(!client.is_campaign_featured(&campaign_id));
+        assert_eq!(client.get_featured_campaigns().len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
+    fn test_unfeature_campaign_admin_only() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "unfeature admin test"),
+            &0_i128,
+        );
+
+        client.unfeature_campaign(&attacker, &campaign_id);
+    }
+
+    #[test]
+    fn test_unfeature_campaign_idempotent() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "idempotent unfeature"),
+            &0_i128,
+        );
+
+        // Un-featuring a never-featured campaign and twice in a row is a no-op
+        client.unfeature_campaign(&admin, &campaign_id);
+        client.unfeature_campaign(&admin, &campaign_id);
+        assert!(!client.is_campaign_featured(&campaign_id));
+    }
+
+    #[test]
+    fn test_get_featured_campaigns_excludes_unfeatured_and_expired() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let deadline = env.ledger().timestamp() + 1_000_000;
+        let c1 = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "featured"),
+            &0_i128,
+        );
+        let c2 = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "not featured"),
+            &0_i128,
+        );
+        let c3 = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "expired"),
+            &0_i128,
+        );
+
+        // Feature c1 and c3; leave c2 unfeatured
+        client.feature_campaign(&admin, &c1);
+        client.feature_campaign(&admin, &c3);
+
+        // Let c3's flag expire (feature everything, then expire only c3's by
+        // advancing 7 days and re-featuring c1)
+        advance_time(&env, 7 * 24 * 60 * 60 + 1);
+        assert!(!client.is_campaign_featured(&c3));
+        client.feature_campaign(&admin, &c1);
+
+        // c2 was never featured and c3's flag expired — only c1 remains
+        assert!(!client.is_campaign_featured(&c2));
+        assert!(!client.is_campaign_featured(&c3));
+        assert!(client.is_campaign_featured(&c1));
+
+        let featured = client.get_featured_campaigns();
+        assert_eq!(featured.len(), 1);
+        assert_eq!(featured.get(0).unwrap(), c1);
+    }
+
+    #[test]
+    fn test_refeature_refreshes_expiry() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000_000),
+            &String::from_str(&env, "refeature test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+        // 4 days in, re-feature (fresh 7-day window from now)
+        advance_time(&env, 4 * 24 * 60 * 60);
+        client.feature_campaign(&admin, &campaign_id);
+        // 4 more days later: 8 days since first feature, but only 4 since refresh
+        advance_time(&env, 4 * 24 * 60 * 60);
+        assert!(client.is_campaign_featured(&campaign_id));
+
+        // After the refreshed window elapses it expires again
+        advance_time(&env, 3 * 24 * 60 * 60 + 1);
+        assert!(!client.is_campaign_featured(&campaign_id));
     }
 
 }
