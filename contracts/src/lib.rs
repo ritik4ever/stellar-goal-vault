@@ -132,6 +132,13 @@ pub struct ContractUnpaused {
     pub contract_version: String,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignCloned {
+    pub source_id: u64,
+    pub new_id: u64,
+}
+
 /// Emitted when a campaign creator updates the campaign metadata (issue #185).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -400,6 +407,64 @@ impl StellarGoalVaultContract {
                 target_amount,
                 deadline,
                 metadata,
+            },
+        );
+
+        next_id
+    }
+
+    pub fn clone_campaign(
+        env: Env,
+        source_id: u64,
+        creator: Address,
+        new_deadline: u64,
+    ) -> u64 {
+        require_not_paused(&env);
+        creator.require_auth();
+
+        if new_deadline <= env.ledger().timestamp() {
+            panic!("deadline must be in the future");
+        }
+        if new_deadline - env.ledger().timestamp() > MAX_CAMPAIGN_DURATION_SECONDS {
+            panic!("deadline exceeds maximum campaign duration");
+        }
+
+        let source_campaign = read_campaign(&env, source_id);
+
+        let mut next_id: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NextCampaignId)
+            .unwrap_or(0);
+        next_id += 1;
+
+        let created_at = env.ledger().timestamp();
+
+        let new_campaign = Campaign {
+            creator: creator.clone(),
+            accepted_tokens: source_campaign.accepted_tokens.clone(),
+            target_amount: source_campaign.target_amount,
+            pledged_amount: 0,
+            deadline: new_deadline,
+            claimed: false,
+            canceled: false,
+            metadata: source_campaign.metadata.clone(),
+            contributor_count: 0,
+            created_at,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::NextCampaignId, &next_id);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(next_id), &new_campaign);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Clone")),
+            CampaignCloned {
+                source_id,
+                new_id: next_id,
             },
         );
 
