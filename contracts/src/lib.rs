@@ -3,8 +3,8 @@
 
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token::Client as TokenClient, Address, Env,
-    String, Vec,
+    contract, contractevent, contractimpl, contracttype, symbol_short, token::Client as TokenClient,
+    Address, Env, String, Vec,
 };
 
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -23,6 +23,11 @@ const MAX_ACCEPTED_TOKENS: u32 = 10;
 /// Default platform fee in basis points (50 = 0.5%). Admin can override
 /// via [`set_fee`]. Set to 0 to disable the fee mechanism entirely.
 const DEFAULT_PLATFORM_FEE_BPS: i128 = 50;
+
+/// How long a campaign stays featured after the admin features it, in
+/// seconds (7 days). The flag auto-expires without further admin action
+/// (issue #534).
+const FEATURED_DURATION_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,6 +71,9 @@ pub enum DataKey {
     /// Address that receives platform fees on campaign claims. When absent no
     /// fee is deducted regardless of [`PlatformFeeBps`].
     FeeRecipient,
+    /// Expiry ledger timestamp for a featured campaign. Absent means the
+    /// campaign is not featured (issue #534).
+    Featured(u64),
 }
 
 #[contracttype]
@@ -168,6 +176,25 @@ pub struct FeeCollected {
     pub token: Address,
     pub fee_amount: i128,
     pub fee_recipient: Address,
+}
+
+/// Emitted when the admin features a campaign (issue #534).
+#[contractevent(topics = ["Goal"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignFeatured {
+    #[topic]
+    pub admin: Address,
+    pub campaign_id: u64,
+    pub expires_at: u64,
+}
+
+/// Emitted when the admin removes the featured flag from a campaign (issue #534).
+#[contractevent(topics = ["Goal"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignUnfeatured {
+    #[topic]
+    pub admin: Address,
+    pub campaign_id: u64,
 }
 
 #[contract]
@@ -285,6 +312,87 @@ impl StellarGoalVaultContract {
     /// Returns the fee recipient address, or `None` if not set.
     pub fn get_fee_recipient(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::FeeRecipient)
+    }
+
+    /// Marks a campaign as featured (spotlight) for 7 days. Only the admin can
+    /// call this. Re-featuring an already-featured campaign refreshes the
+    /// expiry. The flag auto-expires without further admin action (issue #534).
+    pub fn feature_campaign(env: Env, admin: Address, campaign_id: u64) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"));
+        if admin != stored_admin {
+            panic!("caller is not admin");
+        }
+        // Validate the campaign exists before writing the flag.
+        read_campaign(&env, campaign_id);
+        let expires_at = env.ledger().timestamp() + FEATURED_DURATION_SECONDS;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Featured(campaign_id), &expires_at);
+        env.events().publish_event(&CampaignFeatured {
+            admin,
+            campaign_id,
+            expires_at,
+        });
+    }
+
+    /// Removes the featured flag from a campaign. Only the admin can call
+    /// this. Idempotent: un-featuring an already-unfeatured campaign is a no-op
+    /// (issue #534).
+    pub fn unfeature_campaign(env: Env, admin: Address, campaign_id: u64) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"));
+        if admin != stored_admin {
+            panic!("caller is not admin");
+        }
+        read_campaign(&env, campaign_id);
+        env.storage().persistent().remove(&DataKey::Featured(campaign_id));
+        env.events().publish_event(&CampaignUnfeatured { admin, campaign_id });
+    }
+
+    /// Returns the ids of campaigns that are currently featured (not expired).
+    /// Expired entries are filtered out but left in storage; they are cleaned
+    /// up implicitly when the admin features/unfeatures or can be ignored since
+    /// they are never returned (issue #534).
+    pub fn get_featured_campaigns(env: Env) -> Vec<u64> {
+        let count = Self::get_next_campaign_id(env.clone());
+        let now = env.ledger().timestamp();
+        let mut featured: Vec<u64> = Vec::new(&env);
+        let mut campaign_id: u64 = 1;
+        while campaign_id <= count {
+            let expires_at: Option<u64> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Featured(campaign_id));
+            if let Some(expiry) = expires_at {
+                if expiry > now {
+                    featured.push_back(campaign_id);
+                }
+            }
+            campaign_id += 1;
+        }
+        featured
+    }
+
+    /// Returns true if the campaign is currently featured (flag present and not
+    /// expired). Used by the frontend to render the featured badge (issue #534).
+    pub fn is_campaign_featured(env: Env, campaign_id: u64) -> bool {
+        let expires_at: Option<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Featured(campaign_id));
+        match expires_at {
+            Some(expiry) => expiry > env.ledger().timestamp(),
+            None => false,
+        }
     }
 
     /// Creator can cancel an active campaign, allowing contributors to refund.
@@ -971,4 +1079,7 @@ fn refund_contributor(
     }
     total_refunded
 }
+
+#[cfg(test)]
+mod test;
 
