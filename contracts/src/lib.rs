@@ -37,6 +37,12 @@ pub struct Campaign {
     pub metadata: String,
     pub contributor_count: u32,
     pub created_at: u64,
+    /// Human-readable campaign title. Empty until set via
+    /// [`StellarGoalVaultContract::update_campaign_metadata`] (issue #532).
+    pub title: String,
+    /// Human-readable campaign description. Empty until set via
+    /// [`StellarGoalVaultContract::update_campaign_metadata`] (issue #532).
+    pub description: String,
 }
 
 #[contracttype]
@@ -140,6 +146,20 @@ pub struct MetadataUpdated {
     pub creator: Address,
     pub old_metadata: String,
     pub new_metadata: String,
+}
+
+/// Emitted when a campaign creator updates the title and/or description
+/// (issue #532). Distinct from [`MetadataUpdated`] (issue #185), which
+/// covers the single freeform `metadata` field.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignMetadataUpdated {
+    pub campaign_id: u64,
+    pub creator: Address,
+    pub old_title: String,
+    pub new_title: String,
+    pub old_description: String,
+    pub new_description: String,
 }
 
 /// Stored when a contributor requests a deadline extension (issue #192).
@@ -373,6 +393,8 @@ impl StellarGoalVaultContract {
             metadata: metadata.clone(),
             contributor_count: 0,
             created_at,
+            title: String::from_str(&env, ""),
+            description: String::from_str(&env, ""),
         };
 
         env.storage()
@@ -517,6 +539,56 @@ impl StellarGoalVaultContract {
                 creator,
                 old_metadata,
                 new_metadata,
+            },
+        );
+    }
+
+    /// Updates the campaign's title and description. Only the original
+    /// creator can call this, and only before the campaign deadline.
+    /// Target amount, accepted tokens, and deadline are immutable and are
+    /// not touched here. Emits `CampaignMetadataUpdated` with both the old
+    /// and new values (issue #532).
+    pub fn update_campaign_metadata(
+        env: Env,
+        campaign_id: u64,
+        creator: Address,
+        new_title: String,
+        new_description: String,
+    ) {
+        require_not_paused(&env);
+        creator.require_auth();
+        let mut campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign canceled");
+        }
+        if env.ledger().timestamp() >= campaign.deadline {
+            panic!("campaign deadline reached");
+        }
+
+        let old_title = campaign.title.clone();
+        let old_description = campaign.description.clone();
+        campaign.title = new_title.clone();
+        campaign.description = new_description.clone();
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("CampUpd")),
+            CampaignMetadataUpdated {
+                campaign_id,
+                creator,
+                old_title,
+                new_title,
+                old_description,
+                new_description,
             },
         );
     }
@@ -971,4 +1043,7 @@ fn refund_contributor(
     }
     total_refunded
 }
+
+#[cfg(test)]
+mod test;
 
