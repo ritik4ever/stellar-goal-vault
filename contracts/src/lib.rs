@@ -40,6 +40,26 @@ pub struct Campaign {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignSummary {
+    pub title: String,
+    pub creator: Address,
+    pub asset: Address,
+    pub target: i128,
+    pub pledged: i128,
+    pub status: u32,
+    pub deadline: u64,
+    pub contributor_count: u32,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum Error {
+    NotFound = 1,
+}
+
+#[contracttype]
 pub enum DataKey {
     NextCampaignId,
     ContractVersion,
@@ -790,6 +810,40 @@ impl StellarGoalVaultContract {
 
     pub fn get_campaign(env: Env, campaign_id: u64) -> Campaign {
         read_campaign(&env, campaign_id)
+    }
+
+    pub fn get_campaign_summary(env: Env, campaign_id: u64) -> Result<CampaignSummary, Error> {
+        let campaign_opt: Option<Campaign> = env.storage().persistent().get(&DataKey::Campaign(campaign_id));
+        if campaign_opt.is_none() {
+            return Err(Error::NotFound);
+        }
+        let campaign = campaign_opt.unwrap();
+
+        let asset = campaign.accepted_tokens.get(0).unwrap();
+        
+        let status: u32 = if campaign.canceled {
+            3 // Canceled
+        } else if campaign.claimed || campaign.pledged_amount >= campaign.target_amount {
+            1 // Successful
+        } else if env.ledger().timestamp() >= campaign.deadline {
+            2 // Failed
+        } else {
+            0 // Active
+        };
+
+        let contributors_key = DataKey::Contributors(campaign_id);
+        let contributors: Vec<Address> = env.storage().persistent().get(&contributors_key).unwrap_or_else(|| Vec::new(&env));
+
+        Ok(CampaignSummary {
+            title: campaign.metadata,
+            creator: campaign.creator,
+            asset,
+            target: campaign.target_amount,
+            pledged: campaign.pledged_amount,
+            status,
+            deadline: campaign.deadline,
+            contributor_count: contributors.len(),
+        })
     }
 
     pub fn get_contribution(env: Env, campaign_id: u64, contributor: Address, token: Address) -> i128 {
