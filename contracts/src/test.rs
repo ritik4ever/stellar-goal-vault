@@ -4,7 +4,7 @@ mod tests {
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, String,
+    Address, Bytes, Env, String,
 };
 
     use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
@@ -1902,6 +1902,361 @@ use soroban_sdk::{
         // Milestone is now claimed (rejected)
         let m0 = client.get_milestone(&campaign_id, &0);
         assert!(m0.claimed);
+    }
+
+    // ── #539: anonymous pledges (stealth addresses) ───────────────────────────
+
+    fn proof(env: &Env, byte: u8) -> Bytes {
+        Bytes::from_array(env, &[byte; 32])
+    }
+
+    #[test]
+    fn test_anonymous_pledge_hides_address_from_public_queries() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "anonymous pledge test"),
+            &0_i128,
+        );
+
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &500, &proof(&env, 7));
+
+        // Address must not appear in the contributors list
+        let contributors = client.get_contributors(&campaign_id);
+        assert_eq!(contributors.len(), 0);
+
+        // Address must not have a readable identified contribution
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token), 0);
+
+        // Campaign totals still reflect the anonymous pledge
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.pledged_amount, 500);
+        assert_eq!(campaign.contributor_count, 1);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 500);
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+    }
+
+    #[test]
+    fn test_anonymous_pledge_excluded_from_identified_contributors() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let identified = Address::generate(&env);
+        let anonymous = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let asset_client = StellarAssetClient::new(&env, &token_id);
+        asset_client.mint(&identified, &600);
+        asset_client.mint(&anonymous, &600);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_id.clone()],
+            &1_200_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "mixed contributors"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &identified, &token_id, &600);
+        client.contribute_anonymous(&campaign_id, &anonymous, &token_id, &600, &proof(&env, 9));
+
+        // Only the identified contributor is listed
+        let contributors = client.get_contributors(&campaign_id);
+        assert_eq!(contributors.len(), 1);
+        assert_eq!(contributors.get(0).unwrap(), identified);
+
+        // contributor_count reflects both unique contributors
+        assert_eq!(client.get_contributor_count(&campaign_id), 2);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_200);
+    }
+
+    #[test]
+    fn test_anonymous_pledge_refund_with_proof() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "anonymous refund test"),
+            &0_i128,
+        );
+
+        let pledge_proof = proof(&env, 7);
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &500, &pledge_proof);
+        advance_time(&env, deadline_offset + 1);
+
+        // Refund using actual address + secret proof
+        client.refund_anonymous(&campaign_id, &contributor, &pledge_proof);
+
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&contributor), 1_000);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "nothing to refund")]
+    fn test_anonymous_pledge_rejects_wrong_proof() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "wrong proof test"),
+            &0_i128,
+        );
+
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &500, &proof(&env, 7));
+        advance_time(&env, deadline_offset + 1);
+
+        // A different proof hashes to a different key → nothing to refund
+        client.refund_anonymous(&campaign_id, &contributor, &proof(&env, 8));
+    }
+
+    #[test]
+    #[should_panic(expected = "anonymous proof must be at least 32 bytes")]
+    fn test_anonymous_pledge_rejects_short_proof() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "short proof test"),
+            &0_i128,
+        );
+
+        let short_proof = Bytes::from_array(&env, &[1u8; 16]);
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &500, &short_proof);
+    }
+
+    #[test]
+    fn test_anonymous_pledge_counts_once_per_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 2_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &2_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "repeat anonymous test"),
+            &0_i128,
+        );
+
+        let pledge_proof = proof(&env, 7);
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &500, &pledge_proof);
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &700, &pledge_proof);
+
+        // Same hash → counted once, amounts accumulate
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_200);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 1_200);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign deadline reached")]
+    fn test_anonymous_pledge_rejects_after_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "late anonymous test"),
+            &0_i128,
+        );
+
+        advance_time(&env, deadline_offset + 1);
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &500, &proof(&env, 7));
+    }
+
+    #[test]
+    #[should_panic(expected = "funded campaigns cannot be refunded")]
+    fn test_anonymous_pledge_refund_blocked_for_funded_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "funded anonymous test"),
+            &0_i128,
+        );
+
+        // Anonymous pledge fully funds the campaign
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &500, &proof(&env, 7));
+        advance_time(&env, deadline_offset + 1);
+
+        client.refund_anonymous(&campaign_id, &contributor, &proof(&env, 7));
+    }
+
+    #[test]
+    fn test_refund_all_skips_anonymous_pledges() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let identified = Address::generate(&env);
+        let anonymous = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let asset_client = StellarAssetClient::new(&env, &token_id);
+        asset_client.mint(&identified, &500);
+        asset_client.mint(&anonymous, &500);
+        let client = deploy_contract(&env);
+
+        // Target is above the combined pledged amount so the campaign is not
+        // "funded" and refunds remain available after the deadline.
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_id.clone()],
+            &2_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "refund_all anonymous"),
+            &0_i128,
+        );
+
+        let pledge_proof = proof(&env, 9);
+        client.contribute(&campaign_id, &identified, &token_id, &500);
+        client.contribute_anonymous(&campaign_id, &anonymous, &token_id, &500, &pledge_proof);
+        advance_time(&env, deadline_offset + 1);
+
+        client.refund_all(&campaign_id);
+
+        // Identified contributor refunded; anonymous funds remain in the vault
+        let token_client = TokenClient::new(&env, &token_id);
+        assert_eq!(token_client.balance(&identified), 500);
+        assert_eq!(token_client.balance(&anonymous), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
+
+        // Anonymous contributor can still claim their refund with the proof
+        client.refund_anonymous(&campaign_id, &anonymous, &pledge_proof);
+        assert_eq!(token_client.balance(&anonymous), 500);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+    }
+
+    #[test]
+    fn test_anonymous_pledge_refund_works_on_canceled_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 10_000),
+            &String::from_str(&env, "canceled anonymous test"),
+            &0_i128,
+        );
+
+        let pledge_proof = proof(&env, 7);
+        client.contribute_anonymous(&campaign_id, &contributor, &token, &500, &pledge_proof);
+        client.cancel_campaign(&campaign_id, &creator);
+
+        // Refund allowed immediately after cancel, before the deadline
+        client.refund_anonymous(&campaign_id, &contributor, &pledge_proof);
+
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&contributor), 1_000);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+    }
+
+    #[test]
+    fn test_get_contributors_returns_empty_for_new_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "empty contributors"),
+            &0_i128,
+        );
+
+        assert_eq!(client.get_contributors(&campaign_id).len(), 0);
     }
 
 }
