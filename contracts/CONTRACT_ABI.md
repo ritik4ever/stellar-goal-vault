@@ -113,6 +113,46 @@ fn set_paused(env: Env, caller: Address, paused: bool)
 
 ---
 
+### `set_emergency_grace_period`
+
+Sets the emergency-withdrawal grace period in seconds. Admin only. The window
+must be positive and may not exceed the 30-day default, so the admin can only
+shorten the grace period.
+
+```
+fn set_emergency_grace_period(env: Env, admin: Address, seconds: u64)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Must match the stored admin address |
+| `seconds` | `u64` | New grace period in seconds (`1`..=`30 * 24 * 60 * 60`) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller is not admin | `"caller is not admin"` | Critical | Only the admin can change the grace period |
+| Zero window | `"grace period must be positive"` | Medium | Pass a value `>= 1` second |
+| Window too long | `"grace period cannot exceed 30 days"` | Medium | Pass a value `<=` 30 days |
+
+**Gas estimate:** ~15,000 units + 20% headroom = **18,000**
+
+---
+
+### `get_emergency_grace_period`
+
+Returns the emergency-withdrawal grace period in seconds (default 30 days).
+
+```
+fn get_emergency_grace_period(env: Env) -> u64
+```
+
+**Gas estimate:** ~5,000 units + 20% headroom = **6,000**
+
+---
+
 ## Campaign Lifecycle
 
 ### `create_campaign`
@@ -187,6 +227,43 @@ fn cancel_campaign(env: Env, campaign_id: u64, creator: Address)
 **Emits:** `CampaignCanceled`
 
 **Gas estimate:** 14,000 + event ≈ 18,000 units + 20% headroom = **21,600**
+
+---
+
+### `emergency_withdraw`
+
+Creator-initiated emergency withdrawal for a stuck campaign. Available only
+after the campaign deadline plus the grace period (default 30 days, reducible
+via `set_emergency_grace_period`) has elapsed with no claim. Returns every
+pledge to its contributor and terminates the campaign so the creator can no
+longer claim it.
+
+```
+fn emergency_withdraw(env: Env, campaign_id: u64, creator: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | ID of the stuck campaign |
+| `creator` | `Address` | Must match the campaign's stored creator |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Contract paused | `"contract is paused"` | Medium | Wait for admin to unpause |
+| Campaign not found | `"campaign not found"` | High | Verify `campaign_id` exists via `get_campaign()` |
+| Creator mismatch | `"creator mismatch"` | Critical | Only the original `creator` address can withdraw |
+| Already claimed | `"campaign already claimed"` | Medium | Funds already withdrawn |
+| Already canceled | `"campaign canceled"` | Low | Campaign already terminated |
+| Before deadline | `"campaign is still active"` | Medium | Wait until the campaign deadline passes |
+| Within grace period | `"grace period not elapsed"` | Medium | Wait for the full grace window to elapse |
+| Already withdrawn | `"campaign already withdrawn"` | Low | Pledges already returned |
+| No pledges | `"nothing to withdraw"` | Low | Campaign has no contributor balances |
+
+**Emits:** `CampaignEmergencyWithdrawn` per token with a pledge balance.
+
+**Gas estimate:** ~40,000 + 5,000 per refunded contributor + event ≈ 50,000 units + 20% headroom = **60,000**
 
 ---
 
@@ -721,6 +798,26 @@ All events use the topic prefix `(symbol_short!("Goal"), ...)`.
 | `amount` | `i128` | Amount refunded |
 
 **Emitted by:** `refund`, `refund_all`
+
+---
+
+### `CampaignEmergencyWithdrawn`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Emerg"` |
+
+**Data** (`CampaignEmergencyWithdrawn`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `creator` | `Address` | Creator who triggered the withdrawal |
+| `token` | `Address` | Token whose pledges were returned |
+| `amount` | `i128` | Total pledge balance returned for this token |
+
+**Emitted by:** `emergency_withdraw`
 
 ---
 
