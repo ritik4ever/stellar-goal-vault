@@ -66,6 +66,10 @@ pub enum DataKey {
     /// Address that receives platform fees on campaign claims. When absent no
     /// fee is deducted regardless of [`PlatformFeeBps`].
     FeeRecipient,
+    /// Tracks whether a specific funding milestone has already been emitted for
+    /// a campaign, preventing duplicate events.
+    /// Key: (campaign_id, milestone_pct) where milestone_pct ∈ {25, 50, 75, 100}.
+    MilestoneReached(u64, u32),
 }
 
 #[contracttype]
@@ -168,6 +172,18 @@ pub struct FeeCollected {
     pub token: Address,
     pub fee_amount: i128,
     pub fee_recipient: Address,
+}
+
+/// Emitted when a campaign crosses a funding milestone (25 / 50 / 75 / 100 %).
+/// Each milestone is emitted at most once per campaign.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FundingMilestoneReached {
+    pub campaign_id: u64,
+    /// Milestone percentage that was crossed: 25, 50, 75, or 100.
+    pub milestone_pct: u32,
+    /// Total pledged amount at the time the milestone was crossed.
+    pub total_pledged: i128,
 }
 
 #[contract]
@@ -462,6 +478,38 @@ impl StellarGoalVaultContract {
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        // ── Milestone events ────────────────────────────────────────────
+        // Check whether this pledge crossed any of the 25 / 50 / 75 / 100 %
+        // funding thresholds. Each milestone is emitted at most once by
+        // storing a sentinel in persistent storage.
+        let milestones: [u32; 4] = [25, 50, 75, 100];
+        for milestone_pct in milestones {
+            let milestone_key = DataKey::MilestoneReached(campaign_id, milestone_pct);
+            let already_emitted: bool = env
+                .storage()
+                .persistent()
+                .get(&milestone_key)
+                .unwrap_or(false);
+            if !already_emitted {
+                // Threshold in the same units as pledged_amount / target_amount.
+                // Use scaled integer arithmetic to avoid fp: crossed when
+                // pledged_amount * 100 >= milestone_pct * target_amount.
+                let threshold = campaign.target_amount * (milestone_pct as i128);
+                if campaign.pledged_amount * 100 >= threshold {
+                    env.storage().persistent().set(&milestone_key, &true);
+                    env.events().publish(
+                        (symbol_short!("Goal"), symbol_short!("Milestone")),
+                        FundingMilestoneReached {
+                            campaign_id,
+                            milestone_pct,
+                            total_pledged: campaign.pledged_amount,
+                        },
+                    );
+                }
+            }
+        }
+        // ────────────────────────────────────────────────────────────────
 
         let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
         let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);

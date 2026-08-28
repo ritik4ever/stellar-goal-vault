@@ -144,12 +144,14 @@ const TOPIC_TO_EVENT: Record<string, CampaignEventType> = {
   CampaignClaimed: 'claimed',
   CampaignRefunded: 'refunded',
   MetadataUpdated: 'metadata_updated',
+  FundingMilestoneReached: 'milestone_reached',
   // Alternative spellings from some contract versions
   'Goal:Create': 'created',
   'Goal:Pledge': 'pledged',
   'Goal:Claim': 'claimed',
   'Goal:Refund': 'refunded',
   'Goal:MetaUpd': 'metadata_updated',
+  'Goal:Milestone': 'milestone_reached',
 };
 
 interface ParsedEvent {
@@ -202,6 +204,8 @@ function parseSorobanEvent(event: SorobanEvent): ParsedEvent | null {
     if (val.creator) actor = String(val.creator);
     if (val.contributor) actor = String(val.contributor);
     if (val.amount != null) amount = Number(val.amount);
+    // Milestone-specific fields
+    if (val.total_pledged != null) amount = Number(val.total_pledged);
     Object.assign(metadata, val);
   } catch {
     // ignore parse errors

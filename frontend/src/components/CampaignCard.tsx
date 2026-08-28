@@ -156,6 +156,33 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
             </div>
           )}
           <div className="muted">{campaign.progress.percentFunded}% funded</div>
+          {campaign.milestones && campaign.milestones.length > 0 && (
+            <div
+              className="milestone-badges"
+              aria-label="Funding milestones reached"
+              style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}
+            >
+              {[25, 50, 75, 100].map((pct) =>
+                campaign.milestones!.includes(pct) ? (
+                  <span
+                    key={pct}
+                    className="badge badge-milestone"
+                    title={`${pct}% milestone reached`}
+                    style={{
+                      fontSize: '0.7rem',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      background: pct === 100 ? '#22c55e' : '#6366f1',
+                      color: '#fff',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {pct}%
+                  </span>
+                ) : null,
+              )}
+            </div>
+          )}
         </div>
 
         <div className="campaign-meta">
@@ -184,7 +211,9 @@ function areEqual(prevProps: CampaignCardProps, nextProps: CampaignCardProps): b
     prevProps.campaign.id === nextProps.campaign.id &&
     prevProps.campaign.pledgedAmount === nextProps.campaign.pledgedAmount &&
     prevProps.campaign.progress.percentFunded === nextProps.campaign.progress.percentFunded &&
-    prevProps.selectedCampaignId === nextProps.selectedCampaignId
+    prevProps.selectedCampaignId === nextProps.selectedCampaignId &&
+    (prevProps.campaign.milestones?.join(',') ?? '') ===
+      (nextProps.campaign.milestones?.join(',') ?? '')
   );
 }
 
