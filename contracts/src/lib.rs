@@ -24,6 +24,21 @@ const MAX_ACCEPTED_TOKENS: u32 = 10;
 /// via [`set_fee`]. Set to 0 to disable the fee mechanism entirely.
 const DEFAULT_PLATFORM_FEE_BPS: i128 = 50;
 
+/// Maximum number of co-creators (additional parties) a campaign can have.
+/// The campaign creator is always one of the split recipients. With up to 3
+/// co-creators, a campaign can have at most 4 total split recipients.
+const MAX_CO_CREATORS: u32 = 3;
+
+/// A co-creator entry defining a recipient address and their split percentage
+/// (0–100). The sum of all co-creator split percentages for a campaign must
+/// equal 100. The campaign creator must always be included in the list.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CoCreator {
+    pub address: Address,
+    pub split_pct: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Campaign {
@@ -60,6 +75,9 @@ pub enum DataKey {
     MigratedId(Address, u64),
     /// Track contributor addresses for a campaign (used in refund_all).
     Contributors(u64),
+    /// Co-creators for a campaign with their split percentages.
+    /// Empty if no co-creators are configured (original creator gets 100%).
+    CoCreators(u64),
     /// Platform fee in basis points (e.g. 50 = 0.5%). Defaults to
     /// [`DEFAULT_PLATFORM_FEE_BPS`] when absent. 0 disables the fee.
     PlatformFeeBps,
@@ -168,6 +186,14 @@ pub struct FeeCollected {
     pub token: Address,
     pub fee_amount: i128,
     pub fee_recipient: Address,
+}
+
+/// Emitted when co-creators are set on a campaign (issue #538).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CoCreatorsSet {
+    pub campaign_id: u64,
+    pub co_creators: Vec<CoCreator>,
 }
 
 #[contract]
@@ -319,6 +345,7 @@ impl StellarGoalVaultContract {
         deadline: u64,
         metadata: String,
         max_per_contributor: i128,
+        co_creators: Vec<CoCreator>,
     ) -> u64 {
         creator.require_auth();
 
@@ -351,6 +378,43 @@ impl StellarGoalVaultContract {
         }
         if max_per_contributor < 0 {
             panic!("max_per_contributor must not be negative");
+        }
+
+        // Validate co-creators if provided
+        if co_creators.len() > 0 {
+            if co_creators.len() > MAX_CO_CREATORS + 1 {
+                panic!("too many co-creators");
+            }
+
+            // Validate splits sum to 100
+            let mut total_split: u32 = 0;
+            let mut has_creator = false;
+            let mut i = 0;
+            while i < co_creators.len() {
+                let cc = co_creators.get(i).unwrap();
+                if cc.split_pct == 0 || cc.split_pct > 100 {
+                    panic!("invalid split percentage");
+                }
+                total_split += cc.split_pct;
+                if cc.address == creator {
+                    has_creator = true;
+                }
+                // Check for duplicate addresses
+                let mut j = i + 1;
+                while j < co_creators.len() {
+                    if co_creators.get(i).unwrap().address == co_creators.get(j).unwrap().address {
+                        panic!("duplicate co-creator addresses");
+                    }
+                    j += 1;
+                }
+                i += 1;
+            }
+            if !has_creator {
+                panic!("creator must be a co-creator");
+            }
+            if total_split != 100 {
+                panic!("splits must sum to 100");
+            }
         }
 
         let mut next_id: u64 = env
@@ -388,6 +452,13 @@ impl StellarGoalVaultContract {
             env.storage()
                 .persistent()
                 .set(&DataKey::ContributorCap(next_id), &max_per_contributor);
+        }
+
+        // Store co-creators if provided
+        if co_creators.len() > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::CoCreators(next_id), &co_creators);
         }
 
         // For backward compatibility, publish the first token in the event
@@ -661,6 +732,22 @@ impl StellarGoalVaultContract {
             panic!("campaign is not funded");
         }
 
+        // Load co-creators for this campaign (empty Vec if none set)
+        let co_creators: Vec<CoCreator> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CoCreators(campaign_id))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        // If co-creators are configured, require auth from ALL of them (atomic).
+        if co_creators.len() > 0 {
+            let mut i = 0;
+            while i < co_creators.len() {
+                co_creators.get(i).unwrap().address.require_auth();
+                i += 1;
+            }
+        }
+
         campaign.claimed = true;
         env.storage()
             .persistent()
@@ -683,29 +770,52 @@ impl StellarGoalVaultContract {
             if balance > 0 {
                 let token_client = TokenClient::new(&env, &token);
 
-                if take_fee {
+                // Calculate fee first
+                let (fee_amount, post_fee_balance) = if take_fee {
                     if let Some(ref recipient) = fee_recipient {
-                        let fee_amount = balance * fee_bps / 10000;
-                        let creator_amount = balance - fee_amount;
-
-                        if fee_amount > 0 {
-                            token_client.transfer(&contract_address, recipient, &fee_amount);
+                        let fee = balance * fee_bps / 10000;
+                        if fee > 0 {
+                            token_client.transfer(&contract_address, recipient, &fee);
                             env.events().publish(
                                 (symbol_short!("Goal"), symbol_short!("Fee")),
                                 FeeCollected {
                                     campaign_id,
                                     token: token.clone(),
-                                    fee_amount,
+                                    fee_amount: fee,
                                     fee_recipient: recipient.clone(),
                                 },
                             );
                         }
-                        token_client.transfer(&contract_address, &creator, &creator_amount);
+                        (fee, balance - fee)
                     } else {
-                        token_client.transfer(&contract_address, &creator, &balance);
+                        (0, balance)
                     }
                 } else {
-                    token_client.transfer(&contract_address, &creator, &balance);
+                    (0, balance)
+                };
+
+                // Distribute to co-creators or single creator
+                if co_creators.len() > 0 {
+                    // Split among co-creators according to their percentages
+                    let mut remaining = post_fee_balance;
+                    let mut i = 0;
+                    while i < co_creators.len() {
+                        let cc = co_creators.get(i).unwrap();
+                        let share = if i == co_creators.len() - 1 {
+                            // Last recipient gets the remainder to avoid rounding dust
+                            remaining
+                        } else {
+                            post_fee_balance * (cc.split_pct as i128) / 100
+                        };
+                        if share > 0 {
+                            token_client.transfer(&contract_address, &cc.address, &share);
+                        }
+                        remaining -= share;
+                        i += 1;
+                    }
+                } else {
+                    // Original behavior: all to creator
+                    token_client.transfer(&contract_address, &creator, &post_fee_balance);
                 }
 
                 // Clear the balance
@@ -804,6 +914,14 @@ impl StellarGoalVaultContract {
             .persistent()
             .get(&DataKey::CampaignTokenBalance(campaign_id, token))
             .unwrap_or(0)
+    }
+
+    /// Returns the co-creators for a campaign, or an empty Vec if none are set.
+    pub fn get_co_creators(env: Env, campaign_id: u64) -> Vec<CoCreator> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CoCreators(campaign_id))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     pub fn get_contributor_count(env: Env, campaign_id: u64) -> u32 {
