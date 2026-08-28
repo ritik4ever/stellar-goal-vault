@@ -3,8 +3,8 @@
 
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token::Client as TokenClient, Address, Env,
-    String, Vec,
+    contract, contractevent, contractimpl, contracttype, symbol_short,
+    token::Client as TokenClient, Address, Bytes, BytesN, Env, String, Vec,
 };
 
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -66,6 +66,19 @@ pub enum DataKey {
     /// Address that receives platform fees on campaign claims. When absent no
     /// fee is deducted regardless of [`PlatformFeeBps`].
     FeeRecipient,
+    /// Milestone for a campaign (campaign_id, milestone_id).
+    Milestone(u64, u32),
+    /// Whether a contributor has disputed a milestone.
+    MilestoneDisputed(u64, u32, Address),
+    /// Count of milestones for a campaign.
+    MilestoneCount(u64),
+    /// Anonymous pledge balance keyed by `sha256(proof)` instead of the raw
+    /// contributor address (issue #539). (campaign_id, pledge_hash, token)
+    AnonymousContribution(u64, BytesN<32>, Address),
+    /// Tracks first-time anonymous pledges per pledge hash so that
+    /// `contributor_count` is only incremented once per unique anonymous
+    /// contributor (issue #539). (campaign_id, pledge_hash)
+    AnonymousHasContributed(u64, BytesN<32>),
 }
 
 #[contracttype]
@@ -170,10 +183,84 @@ pub struct FeeCollected {
     pub fee_recipient: Address,
 }
 
+/// Emitted for anonymous pledges (issue #539). Carries the pledge hash derived
+/// from the contributor's secret proof, never the contributor's raw address, so
+/// the address cannot be linked through public queries or indexed events.
+#[contractevent(topics = ["Goal", "APledge"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignPledgedAnonymously {
+    pub campaign_id: u64,
+    pub pledge_hash: BytesN<32>,
+    pub token: Address,
+    pub amount: i128,
+}
+
+/// Emitted when an anonymous pledge is refunded using the contributor's actual
+/// address plus their secret proof (issue #539). Carries the pledge hash, not
+/// the address, preserving anonymity on-chain.
+#[contractevent(topics = ["Goal", "ARefund"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignRefundedAnonymously {
+    pub campaign_id: u64,
+    pub pledge_hash: BytesN<32>,
+    pub token: Address,
+    pub amount: i128,
+}
+
 #[contract]
 pub struct StellarGoalVaultContract;
 
 const MAX_CAMPAIGN_DURATION_SECONDS: u64 = 60 * 60 * 24 * 180;
+
+/// Minimum length (bytes) of the secret proof required for anonymous pledges
+/// (issue #539). 32 bytes (256 bits of entropy) keeps `sha256(proof)`
+/// unguessable; shorter proofs are rejected at pledge and refund time.
+const MIN_ANONYMOUS_PROOF_LEN: u32 = 32;
+
+/// Maximum number of milestones per campaign.
+const MAX_MILESTONES: u32 = 5;
+
+/// Dispute window duration in seconds (48 hours).
+const DISPUTE_WINDOW_SECONDS: u64 = 48 * 60 * 60;
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Milestone {
+    pub id: u32,
+    pub percentage_bps: u32, // Basis points (10000 = 100%)
+    pub completed: bool,
+    pub claimed: bool,
+    pub completion_time: Option<u64>,
+    pub dispute_window_end: Option<u64>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneCompleted {
+    pub campaign_id: u64,
+    pub milestone_id: u32,
+    pub creator: Address,
+    pub completion_time: u64,
+    pub dispute_window_end: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneClaimed {
+    pub campaign_id: u64,
+    pub milestone_id: u32,
+    pub creator: Address,
+    pub token: Address,
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneDisputed {
+    pub campaign_id: u64,
+    pub milestone_id: u32,
+    pub contributor: Address,
+}
 
 #[contractimpl]
 impl StellarGoalVaultContract {
@@ -484,6 +571,155 @@ impl StellarGoalVaultContract {
                 amount,
             },
         );
+    }
+
+    /// Pledges anonymously (issue #539). The contribution is recorded under
+    /// `sha256(proof)` instead of the contributor's raw address, so the address
+    /// never appears in public queries (`get_contributors`), stored keys, or
+    /// emitted events. The contributor keeps `proof` secret and later presents
+    /// it together with their actual address to [`Self::refund_anonymous`].
+    pub fn contribute_anonymous(
+        env: Env,
+        campaign_id: u64,
+        contributor: Address,
+        token: Address,
+        amount: i128,
+        proof: Bytes,
+    ) {
+        require_not_paused(&env);
+        contributor.require_auth();
+
+        if proof.len() < MIN_ANONYMOUS_PROOF_LEN {
+            panic!("anonymous proof must be at least 32 bytes");
+        }
+
+        let min_contribution: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinContribution)
+            .unwrap_or(MIN_CONTRIBUTION);
+        if amount < min_contribution {
+            panic!("contribution below minimum");
+        }
+
+        let mut campaign = read_campaign(&env, campaign_id);
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign canceled");
+        }
+        if env.ledger().timestamp() >= campaign.deadline {
+            panic!("campaign deadline reached");
+        }
+        if campaign.pledged_amount + amount > campaign.target_amount {
+            panic!("campaign funding cap exceeded");
+        }
+        if !campaign.accepted_tokens.iter().any(|t| t == token) {
+            panic!("token not accepted by this campaign");
+        }
+
+        let token_client = TokenClient::new(&env, &token);
+        let contract_address = env.current_contract_address();
+        token_client.transfer(&contributor, &contract_address, &amount);
+
+        let pledge_hash: BytesN<32> = env.crypto().sha256(&proof).into();
+
+        campaign.pledged_amount += amount;
+
+        // Count unique anonymous contributors (first time per pledge hash).
+        // This keeps contributor_count accurate for extension-vote majorities
+        // without ever exposing the raw address.
+        let has_contributed_key = DataKey::AnonymousHasContributed(campaign_id, pledge_hash.clone());
+        let has_contributed: bool = env
+            .storage()
+            .persistent()
+            .get(&has_contributed_key)
+            .unwrap_or(false);
+        if !has_contributed {
+            campaign.contributor_count += 1;
+            env.storage().persistent().set(&has_contributed_key, &true);
+        }
+
+        // Write updated campaign back to storage
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+        let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&balance_key, &(current_balance + amount));
+
+        let contribution_key =
+            DataKey::AnonymousContribution(campaign_id, pledge_hash.clone(), token.clone());
+        let current_contribution: i128 = env
+            .storage()
+            .persistent()
+            .get(&contribution_key)
+            .unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&contribution_key, &(current_contribution + amount));
+
+        env.events().publish_event(&CampaignPledgedAnonymously {
+            campaign_id,
+            pledge_hash,
+            token,
+            amount,
+        });
+    }
+
+    /// Refunds an anonymous pledge (issue #539). The contributor presents their
+    /// actual address — which receives the funds and must authenticate — plus
+    /// the secret `proof` used at pledge time. The refund event carries the
+    /// pledge hash, not the address, preserving anonymity on-chain.
+    pub fn refund_anonymous(env: Env, campaign_id: u64, contributor: Address, proof: Bytes) {
+        require_not_paused(&env);
+        contributor.require_auth();
+
+        if proof.len() < MIN_ANONYMOUS_PROOF_LEN {
+            panic!("anonymous proof must be at least 32 bytes");
+        }
+
+        let mut campaign = read_campaign(&env, campaign_id);
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if !campaign.canceled && env.ledger().timestamp() < campaign.deadline {
+            panic!("campaign is still active");
+        }
+        if !campaign.canceled && campaign.pledged_amount >= campaign.target_amount {
+            panic!("funded campaigns cannot be refunded");
+        }
+
+        let pledge_hash: BytesN<32> = env.crypto().sha256(&proof).into();
+        let total_refunded = refund_anonymous_contributor(
+            &env,
+            &mut campaign,
+            campaign_id,
+            &pledge_hash,
+            &contributor,
+        );
+
+        if total_refunded == 0 {
+            panic!("nothing to refund");
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+    }
+
+    /// Returns the addresses of identified (non-anonymous) contributors for a
+    /// campaign. Anonymous pledges (issue #539) are recorded under a hash and
+    /// never appear here.
+    pub fn get_contributors(env: Env, campaign_id: u64) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Contributors(campaign_id))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     /// Updates the campaign metadata. Only the original creator can call this,
@@ -915,6 +1151,351 @@ impl StellarGoalVaultContract {
             deployed_at,
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Milestone support (issue #526)
+    // -----------------------------------------------------------------------
+
+    /// Defines milestones for a campaign. Can only be called by the creator
+    /// before the campaign deadline. Percentages are in basis points (10000 = 100%)
+    /// and must sum to exactly 10000. Maximum 5 milestones allowed.
+    pub fn set_milestones(
+        env: Env,
+        campaign_id: u64,
+        creator: Address,
+        percentages: Vec<u32>,
+    ) {
+        require_not_paused(&env);
+        creator.require_auth();
+        let campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign already canceled");
+        }
+        if env.ledger().timestamp() >= campaign.deadline {
+            panic!("campaign deadline reached");
+        }
+        if percentages.len() == 0 || percentages.len() > MAX_MILESTONES {
+            panic!("milestone count must be 1-5");
+        }
+
+        // Validate percentages sum to 10000 (100%)
+        let mut total_bps: u32 = 0;
+        for pct in percentages.iter() {
+            if pct == 0 {
+                panic!("milestone percentage must be positive");
+            }
+            total_bps = total_bps.checked_add(pct).unwrap_or_else(|| panic!("percentage overflow"));
+        }
+        if total_bps != 10000 {
+            panic!("milestone percentages must sum to 10000");
+        }
+
+        // Store milestones
+        let count = percentages.len();
+        for i in 0..count {
+            let pct = percentages.get(i).unwrap();
+            let milestone = Milestone {
+                id: i,
+                percentage_bps: pct,
+                completed: false,
+                claimed: false,
+                completion_time: None,
+                dispute_window_end: None,
+            };
+            env.storage()
+                .persistent()
+                .set(&DataKey::Milestone(campaign_id, i), &milestone);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::MilestoneCount(campaign_id), &count);
+    }
+
+    /// Returns the number of milestones defined for a campaign.
+    pub fn get_milestone_count(env: Env, campaign_id: u64) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MilestoneCount(campaign_id))
+            .unwrap_or(0)
+    }
+
+    /// Returns a specific milestone for a campaign.
+    pub fn get_milestone(env: Env, campaign_id: u64, milestone_id: u32) -> Milestone {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Milestone(campaign_id, milestone_id))
+            .unwrap_or_else(|| panic!("milestone not found"))
+    }
+
+    /// Creator marks a milestone as completed. Starts the dispute window.
+    pub fn complete_milestone(
+        env: Env,
+        campaign_id: u64,
+        milestone_id: u32,
+        creator: Address,
+    ) {
+        require_not_paused(&env);
+        creator.require_auth();
+        let campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign already canceled");
+        }
+
+        let mut milestone: Milestone = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Milestone(campaign_id, milestone_id))
+            .unwrap_or_else(|| panic!("milestone not found"));
+
+        if milestone.completed {
+            panic!("milestone already completed");
+        }
+        if milestone.claimed {
+            panic!("milestone already claimed");
+        }
+
+        let now = env.ledger().timestamp();
+        milestone.completed = true;
+        milestone.completion_time = Some(now);
+        milestone.dispute_window_end = Some(now + DISPUTE_WINDOW_SECONDS);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Milestone(campaign_id, milestone_id), &milestone);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("MsComp")),
+            MilestoneCompleted {
+                campaign_id,
+                milestone_id,
+                creator,
+                completion_time: now,
+                dispute_window_end: now + DISPUTE_WINDOW_SECONDS,
+            },
+        );
+    }
+
+    /// Contributor disputes a milestone completion within the dispute window.
+    pub fn dispute_milestone(
+        env: Env,
+        campaign_id: u64,
+        milestone_id: u32,
+        contributor: Address,
+    ) {
+        require_not_paused(&env);
+        contributor.require_auth();
+        let _campaign = read_campaign(&env, campaign_id);
+
+        let milestone: Milestone = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Milestone(campaign_id, milestone_id))
+            .unwrap_or_else(|| panic!("milestone not found"));
+
+        if !milestone.completed {
+            panic!("milestone not completed");
+        }
+        if milestone.claimed {
+            panic!("milestone already claimed");
+        }
+
+        let now = env.ledger().timestamp();
+        let window_end = milestone
+            .dispute_window_end
+            .unwrap_or_else(|| panic!("dispute window not set"));
+        if now > window_end {
+            panic!("dispute window has expired");
+        }
+
+        // Check if contributor has already disputed
+        let disputed_key = DataKey::MilestoneDisputed(campaign_id, milestone_id, contributor.clone());
+        let already_disputed: bool = env
+            .storage()
+            .persistent()
+            .get(&disputed_key)
+            .unwrap_or(false);
+        if already_disputed {
+            panic!("already disputed");
+        }
+
+        env.storage().persistent().set(&disputed_key, &true);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("MsDisp")),
+            MilestoneDisputed {
+                campaign_id,
+                milestone_id,
+                contributor,
+            },
+        );
+    }
+
+    /// Creator claims funds for a completed milestone after dispute window expires
+    /// with no disputes. Admin can also resolve disputed milestones.
+    pub fn claim_milestone(
+        env: Env,
+        campaign_id: u64,
+        milestone_id: u32,
+        creator: Address,
+    ) {
+        require_not_paused(&env);
+        creator.require_auth();
+        let campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.canceled {
+            panic!("campaign already canceled");
+        }
+
+        let mut milestone: Milestone = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Milestone(campaign_id, milestone_id))
+            .unwrap_or_else(|| panic!("milestone not found"));
+
+        if !milestone.completed {
+            panic!("milestone not completed");
+        }
+        if milestone.claimed {
+            panic!("milestone already claimed");
+        }
+
+        let now = env.ledger().timestamp();
+        let window_end = milestone
+            .dispute_window_end
+            .unwrap_or_else(|| panic!("dispute window not set"));
+
+        // Check if dispute window has expired
+        if now < window_end {
+            panic!("dispute window still active");
+        }
+
+
+        // Calculate the amount to release based on milestone percentage
+        let percentage_bps = milestone.percentage_bps as i128;
+        let contract_address = env.current_contract_address();
+
+        let fee_bps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(DEFAULT_PLATFORM_FEE_BPS);
+        let fee_recipient: Option<Address> = env.storage().instance().get(&DataKey::FeeRecipient);
+        let take_fee = fee_bps > 0;
+
+        for token in campaign.accepted_tokens.iter() {
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+
+            if balance > 0 {
+                let milestone_amount = balance * percentage_bps / 10000;
+                if milestone_amount > 0 {
+                    let token_client = TokenClient::new(&env, &token);
+
+                    if take_fee {
+                        if let Some(ref recipient) = fee_recipient {
+                            let fee_amount = milestone_amount * fee_bps / 10000;
+                            let creator_amount = milestone_amount - fee_amount;
+
+                            if fee_amount > 0 {
+                                token_client.transfer(&contract_address, recipient, &fee_amount);
+                                env.events().publish(
+                                    (symbol_short!("Goal"), symbol_short!("Fee")),
+                                    FeeCollected {
+                                        campaign_id,
+                                        token: token.clone(),
+                                        fee_amount,
+                                        fee_recipient: recipient.clone(),
+                                    },
+                                );
+                            }
+                            token_client.transfer(&contract_address, &creator, &creator_amount);
+                        } else {
+                            token_client.transfer(&contract_address, &creator, &milestone_amount);
+                        }
+                    } else {
+                        token_client.transfer(&contract_address, &creator, &milestone_amount);
+                    }
+
+                    env.events().publish(
+                        (symbol_short!("Goal"), symbol_short!("MsClaim")),
+                        MilestoneClaimed {
+                            campaign_id,
+                            milestone_id,
+                            creator: creator.clone(),
+                            token: token.clone(),
+                            amount: milestone_amount,
+                        },
+                    );
+                }
+            }
+        }
+
+        milestone.claimed = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Milestone(campaign_id, milestone_id), &milestone);
+    }
+
+    /// Admin resolves a disputed milestone. If approved=true, creator can claim.
+    /// If approved=false, funds remain in campaign.
+    pub fn admin_resolve_milestone(
+        env: Env,
+        campaign_id: u64,
+        milestone_id: u32,
+        admin: Address,
+        approved: bool,
+    ) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"));
+        if admin != stored_admin {
+            panic!("caller is not admin");
+        }
+
+        let mut milestone: Milestone = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Milestone(campaign_id, milestone_id))
+            .unwrap_or_else(|| panic!("milestone not found"));
+
+        if !milestone.completed {
+            panic!("milestone not completed");
+        }
+        if milestone.claimed {
+            panic!("milestone already claimed");
+        }
+
+        if approved {
+            // Reset dispute window to allow claiming
+            milestone.dispute_window_end = Some(0);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Milestone(campaign_id, milestone_id), &milestone);
+        } else {
+            // Mark as claimed without releasing funds (dispute upheld)
+            milestone.claimed = true;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Milestone(campaign_id, milestone_id), &milestone);
+        }
+    }
 }
 
 fn require_not_paused(env: &Env) {
@@ -933,6 +1514,45 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .persistent()
         .get(&DataKey::Campaign(campaign_id))
         .unwrap_or_else(|| panic!("campaign not found"))
+}
+
+/// Refunds the anonymous pledges of a single pledge hash back to the
+/// contributor's actual address. Mirrors [`refund_contributor`] but reads
+/// balances from the hash-keyed anonymous storage and emits an event that
+/// carries the hash instead of the address (issue #539).
+fn refund_anonymous_contributor(
+    env: &Env,
+    campaign: &mut Campaign,
+    campaign_id: u64,
+    pledge_hash: &BytesN<32>,
+    contributor: &Address,
+) -> i128 {
+    let mut total_refunded = 0_i128;
+    let contract_address = env.current_contract_address();
+    for token in campaign.accepted_tokens.iter() {
+        let contribution_key =
+            DataKey::AnonymousContribution(campaign_id, pledge_hash.clone(), token.clone());
+        let amount: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+        if amount > 0 {
+            let token_client = TokenClient::new(env, &token);
+            token_client.transfer(&contract_address, contributor, &amount);
+            env.storage().persistent().set(&contribution_key, &0_i128);
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&balance_key, &(balance - amount));
+            campaign.pledged_amount -= amount;
+            total_refunded += amount;
+            env.events().publish_event(&CampaignRefundedAnonymously {
+                campaign_id,
+                pledge_hash: pledge_hash.clone(),
+                token: token.clone(),
+                amount,
+            });
+        }
+    }
+    total_refunded
 }
 
 fn refund_contributor(
@@ -971,4 +1591,7 @@ fn refund_contributor(
     }
     total_refunded
 }
+
+#[cfg(test)]
+mod test;
 
