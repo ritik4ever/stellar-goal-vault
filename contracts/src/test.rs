@@ -1904,4 +1904,271 @@ use soroban_sdk::{
         assert!(m0.claimed);
     }
 
+    // ── #534: featured / spotlight campaigns ─────────────────────────────────
+
+    #[test]
+    fn test_feature_campaign_sets_flag() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "feature test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+
+        assert!(client.is_campaign_featured(&campaign_id));
+        let featured = client.get_featured_campaigns();
+        assert_eq!(featured.len(), 1);
+        assert_eq!(featured.get(0).unwrap(), campaign_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
+    fn test_feature_campaign_admin_only() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "feature admin test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&attacker, &campaign_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign not found")]
+    fn test_feature_campaign_requires_existing_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        // Campaign 1 does not exist yet
+        client.feature_campaign(&admin, &1);
+    }
+
+    #[test]
+    fn test_featured_flag_expires_after_7_days() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000_000),
+            &String::from_str(&env, "expiry test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+        assert!(client.is_campaign_featured(&campaign_id));
+
+        // 7 days + 1 second later the flag is expired with no admin action
+        advance_time(&env, 7 * 24 * 60 * 60 + 1);
+
+        assert!(!client.is_campaign_featured(&campaign_id));
+        assert_eq!(client.get_featured_campaigns().len(), 0);
+    }
+
+    #[test]
+    fn test_unfeature_campaign_removes_flag() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "unfeature test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+        client.unfeature_campaign(&admin, &campaign_id);
+
+        assert!(!client.is_campaign_featured(&campaign_id));
+        assert_eq!(client.get_featured_campaigns().len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
+    fn test_unfeature_campaign_admin_only() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "unfeature admin test"),
+            &0_i128,
+        );
+
+        client.unfeature_campaign(&attacker, &campaign_id);
+    }
+
+    #[test]
+    fn test_unfeature_campaign_idempotent() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "idempotent unfeature"),
+            &0_i128,
+        );
+
+        // Un-featuring a never-featured campaign and twice in a row is a no-op
+        client.unfeature_campaign(&admin, &campaign_id);
+        client.unfeature_campaign(&admin, &campaign_id);
+        assert!(!client.is_campaign_featured(&campaign_id));
+    }
+
+    #[test]
+    fn test_get_featured_campaigns_excludes_unfeatured_and_expired() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let deadline = env.ledger().timestamp() + 1_000_000;
+        let c1 = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "featured"),
+            &0_i128,
+        );
+        let c2 = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "not featured"),
+            &0_i128,
+        );
+        let c3 = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "expired"),
+            &0_i128,
+        );
+
+        // Feature c1 and c3; leave c2 unfeatured
+        client.feature_campaign(&admin, &c1);
+        client.feature_campaign(&admin, &c3);
+
+        // Let c3's flag expire (feature everything, then expire only c3's by
+        // advancing 7 days and re-featuring c1)
+        advance_time(&env, 7 * 24 * 60 * 60 + 1);
+        assert!(!client.is_campaign_featured(&c3));
+        client.feature_campaign(&admin, &c1);
+
+        // c2 was never featured and c3's flag expired — only c1 remains
+        assert!(!client.is_campaign_featured(&c2));
+        assert!(!client.is_campaign_featured(&c3));
+        assert!(client.is_campaign_featured(&c1));
+
+        let featured = client.get_featured_campaigns();
+        assert_eq!(featured.len(), 1);
+        assert_eq!(featured.get(0).unwrap(), c1);
+    }
+
+    #[test]
+    fn test_refeature_refreshes_expiry() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000_000),
+            &String::from_str(&env, "refeature test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+        // 4 days in, re-feature (fresh 7-day window from now)
+        advance_time(&env, 4 * 24 * 60 * 60);
+        client.feature_campaign(&admin, &campaign_id);
+        // 4 more days later: 8 days since first feature, but only 4 since refresh
+        advance_time(&env, 4 * 24 * 60 * 60);
+        assert!(client.is_campaign_featured(&campaign_id));
+
+        // After the refreshed window elapses it expires again
+        advance_time(&env, 3 * 24 * 60 * 60 + 1);
+        assert!(!client.is_campaign_featured(&campaign_id));
+    }
+
 }
