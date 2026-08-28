@@ -1229,6 +1229,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1242,6 +1243,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_recipient_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1473,6 +1475,206 @@ use soroban_sdk::{
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 1_000);
         assert_eq!(token_client.balance(&fee_recipient), 0);
+    }
+
+    // ── featured / spotlight campaigns (issue #534) ──────────────────────────
+
+    const SEVEN_DAYS_SECONDS: u64 = 7 * 24 * 60 * 60;
+
+    fn setup_featured_env(env: &Env) -> (StellarGoalVaultContractClient<'_>, Address, Address, Address, Address, i128, u64) {
+        env.mock_all_auths();
+        let creator = Address::generate(env);
+        let contributor = Address::generate(env);
+        let admin = Address::generate(env);
+        let target: i128 = 1_000;
+        let deadline = env.ledger().timestamp() + 100_000;
+        let token = deploy_token(env, &admin, &contributor, target);
+        let client = deploy_contract(env);
+        client.initialize(&admin, &100_i128);
+        (client, creator, contributor, admin, token, target, deadline)
+    }
+
+    #[test]
+    fn test_admin_can_feature_campaign() {
+        let env = Env::default();
+        let (client, creator, _contributor, admin, token, target, deadline) = setup_featured_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token],
+            &target,
+            &deadline,
+            &String::from_str(&env, "featured test"),
+            &0_i128,
+        );
+
+        assert!(!client.is_campaign_featured(&campaign_id));
+        client.feature_campaign(&admin, &campaign_id);
+        assert!(client.is_campaign_featured(&campaign_id));
+
+        let featured = client.get_featured_campaigns();
+        assert_eq!(featured.len(), 1);
+        assert_eq!(featured.get(0).unwrap(), campaign_id);
+    }
+
+    #[test]
+    fn test_featured_flag_expires_after_seven_days() {
+        let env = Env::default();
+        let (client, creator, _contributor, admin, token, target, deadline) = setup_featured_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token],
+            &target,
+            &deadline,
+            &String::from_str(&env, "expiry test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+        assert!(client.is_campaign_featured(&campaign_id));
+
+        // Still featured just before the 7-day mark
+        advance_time(&env, SEVEN_DAYS_SECONDS - 1);
+        assert!(client.is_campaign_featured(&campaign_id));
+
+        // Expires at exactly 7 days
+        advance_time(&env, 1);
+        assert!(!client.is_campaign_featured(&campaign_id));
+        assert_eq!(client.get_featured_campaigns().len(), 0);
+    }
+
+    #[test]
+    fn test_refeature_refreshes_expiry() {
+        let env = Env::default();
+        let (client, creator, _contributor, admin, token, target, deadline) = setup_featured_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token],
+            &target,
+            &deadline,
+            &String::from_str(&env, "refresh test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+        // Re-feature after 6 days: expiry must be refreshed, not left at the old value
+        advance_time(&env, SEVEN_DAYS_SECONDS - 86_400);
+        client.feature_campaign(&admin, &campaign_id);
+        // 6 days after the refresh (12 total) → still featured thanks to the refresh
+        advance_time(&env, SEVEN_DAYS_SECONDS - 86_400);
+        assert!(client.is_campaign_featured(&campaign_id));
+    }
+
+    #[test]
+    fn test_unfeature_removes_flag() {
+        let env = Env::default();
+        let (client, creator, _contributor, admin, token, target, deadline) = setup_featured_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token],
+            &target,
+            &deadline,
+            &String::from_str(&env, "unfeature test"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &campaign_id);
+        client.unfeature_campaign(&admin, &campaign_id);
+        assert!(!client.is_campaign_featured(&campaign_id));
+        assert_eq!(client.get_featured_campaigns().len(), 0);
+
+        // Un-featuring again is a no-op (idempotent)
+        client.unfeature_campaign(&admin, &campaign_id);
+        assert!(!client.is_campaign_featured(&campaign_id));
+    }
+
+    #[test]
+    fn test_get_featured_campaigns_returns_only_active() {
+        let env = Env::default();
+        let (client, creator, _contributor, admin, token, target, deadline) = setup_featured_env(&env);
+
+        let id_a = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "a"),
+            &0_i128,
+        );
+        let id_b = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "b"),
+            &0_i128,
+        );
+
+        client.feature_campaign(&admin, &id_a);
+        client.feature_campaign(&admin, &id_b);
+        client.unfeature_campaign(&admin, &id_a);
+
+        let featured = client.get_featured_campaigns();
+        assert_eq!(featured.len(), 1);
+        assert_eq!(featured.get(0).unwrap(), id_b);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
+    fn test_non_admin_cannot_feature() {
+        let env = Env::default();
+        let (client, creator, _contributor, _admin, token, target, deadline) = setup_featured_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token],
+            &target,
+            &deadline,
+            &String::from_str(&env, "auth test"),
+            &0_i128,
+        );
+        let attacker = Address::generate(&env);
+        client.feature_campaign(&attacker, &campaign_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
+    fn test_non_admin_cannot_unfeature() {
+        let env = Env::default();
+        let (client, creator, _contributor, admin, token, target, deadline) = setup_featured_env(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token],
+            &target,
+            &deadline,
+            &String::from_str(&env, "auth test"),
+            &0_i128,
+        );
+        client.feature_campaign(&admin, &campaign_id);
+        let attacker = Address::generate(&env);
+        client.unfeature_campaign(&attacker, &campaign_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign not found")]
+    fn test_feature_nonexistent_campaign_panics() {
+        let env = Env::default();
+        let (client, _creator, _contributor, admin, _token, _target, _deadline) = setup_featured_env(&env);
+        client.feature_campaign(&admin, &999);
+    }
+
+    #[test]
+    #[should_panic(expected = "not initialized")]
+    fn test_feature_requires_initialized_contract() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.feature_campaign(&admin, &1);
     }
 
 }
