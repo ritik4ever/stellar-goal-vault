@@ -24,6 +24,11 @@ const MAX_ACCEPTED_TOKENS: u32 = 10;
 /// via [`set_fee`]. Set to 0 to disable the fee mechanism entirely.
 const DEFAULT_PLATFORM_FEE_BPS: i128 = 50;
 
+/// Default grace period (seconds) after a campaign's deadline before the
+/// creator may trigger an emergency withdrawal (30 days). The admin may only
+/// shorten this window, never extend it.
+const DEFAULT_EMERGENCY_GRACE_PERIOD_SECONDS: u64 = 30 * 24 * 60 * 60;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Campaign {
@@ -66,6 +71,11 @@ pub enum DataKey {
     /// Address that receives platform fees on campaign claims. When absent no
     /// fee is deducted regardless of [`PlatformFeeBps`].
     FeeRecipient,
+    /// Grace period (seconds) after the campaign deadline before an emergency
+    /// withdrawal is allowed. Defaults to 30 days; admin may only reduce it.
+    EmergencyGracePeriod,
+    /// Marks a campaign whose pledges were returned via `emergency_withdraw`.
+    EmergencyWithdrawn(u64),
 }
 
 #[contracttype]
@@ -168,6 +178,17 @@ pub struct FeeCollected {
     pub token: Address,
     pub fee_amount: i128,
     pub fee_recipient: Address,
+}
+
+/// Emitted when a creator triggers an emergency withdrawal, returning a
+/// token's pledges to its contributors (issue #531).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignEmergencyWithdrawn {
+    pub campaign_id: u64,
+    pub creator: Address,
+    pub token: Address,
+    pub amount: i128,
 }
 
 #[contract]
@@ -285,6 +306,144 @@ impl StellarGoalVaultContract {
     /// Returns the fee recipient address, or `None` if not set.
     pub fn get_fee_recipient(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::FeeRecipient)
+    }
+
+    /// Returns the emergency-withdrawal grace period in seconds. Defaults to
+    /// 30 days ([`DEFAULT_EMERGENCY_GRACE_PERIOD_SECONDS`]).
+    pub fn get_emergency_grace_period(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::EmergencyGracePeriod)
+            .unwrap_or(DEFAULT_EMERGENCY_GRACE_PERIOD_SECONDS)
+    }
+
+    /// Sets the emergency-withdrawal grace period in seconds. Admin only.
+    /// The window must be positive and may not exceed the 30-day default, so
+    /// the admin can only shorten the grace period.
+    pub fn set_emergency_grace_period(env: Env, admin: Address, seconds: u64) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"));
+        if admin != stored_admin {
+            panic!("caller is not admin");
+        }
+        if seconds == 0 {
+            panic!("grace period must be positive");
+        }
+        if seconds > DEFAULT_EMERGENCY_GRACE_PERIOD_SECONDS {
+            panic!("grace period cannot exceed 30 days");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::EmergencyGracePeriod, &seconds);
+    }
+
+    /// Emergency withdrawal for a creator whose campaign is stuck.
+    ///
+    /// Available only after the campaign deadline plus the grace period
+    /// (default 30 days, reducible by the admin) has elapsed with no claim.
+    /// Returns every pledge to its contributor and terminates the campaign so
+    /// the creator can no longer claim it.
+    ///
+    /// # Panics
+    /// - `"campaign is still active"` — before the campaign deadline.
+    /// - `"grace period not elapsed"` — within the grace window after the deadline.
+    /// - `"campaign already withdrawn"` — the campaign was already emergency-withdrawn.
+    ///
+    /// # Events
+    /// Emits `EmergencyWithdrawn` per token that had a pledge balance.
+    pub fn emergency_withdraw(env: Env, campaign_id: u64, creator: Address) {
+        require_not_paused(&env);
+        creator.require_auth();
+
+        let mut campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign canceled");
+        }
+        if env.ledger().timestamp() < campaign.deadline {
+            panic!("campaign is still active");
+        }
+        if env
+            .storage()
+            .persistent()
+            .get::<_, bool>(&DataKey::EmergencyWithdrawn(campaign_id))
+            .unwrap_or(false)
+        {
+            panic!("campaign already withdrawn");
+        }
+
+        let grace = Self::get_emergency_grace_period(env.clone());
+        if env.ledger().timestamp() < campaign.deadline.saturating_add(grace) {
+            panic!("grace period not elapsed");
+        }
+
+        // Capture per-token pledge balances before they are returned, so the
+        // EmergencyWithdrawn events report the correct amounts.
+        let mut token_amounts: Vec<(Address, i128)> = Vec::new(&env);
+        for token in campaign.accepted_tokens.iter() {
+            let balance: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::CampaignTokenBalance(campaign_id, token.clone()))
+                .unwrap_or(0);
+            if balance > 0 {
+                token_amounts.push_back((token.clone(), balance));
+            }
+        }
+
+        // Terminate the campaign first: the creator can no longer claim, and
+        // no further contributions or refunds are possible.
+        campaign.canceled = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+        env.storage()
+            .persistent()
+            .set(&DataKey::EmergencyWithdrawn(campaign_id), &true);
+
+        let contributors_key = DataKey::Contributors(campaign_id);
+        let contributors: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&contributors_key)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut any_refunded = false;
+        for contributor in contributors.iter() {
+            let refunded = refund_contributor(&env, &mut campaign, campaign_id, &contributor);
+            if refunded > 0 {
+                any_refunded = true;
+            }
+        }
+
+        if !any_refunded {
+            panic!("nothing to withdraw");
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        for (token, amount) in token_amounts.iter() {
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Emerg")),
+                CampaignEmergencyWithdrawn {
+                    campaign_id,
+                    creator: creator.clone(),
+                    token,
+                    amount,
+                },
+            );
+        }
     }
 
     /// Creator can cancel an active campaign, allowing contributors to refund.
@@ -972,3 +1131,5 @@ fn refund_contributor(
     total_refunded
 }
 
+#[cfg(test)]
+mod test;

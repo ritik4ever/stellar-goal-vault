@@ -1229,6 +1229,8 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1237,11 +1239,13 @@ use soroban_sdk::{
         let attacker = Address::generate(&env);
         client.initialize(&admin, &100_i128);
 
-        // attacker tries to set fee — must panic
+        // attacker tries to set fee - must panic
         client.set_fee(&attacker, &100);
     }
 
     #[test]
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_recipient_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1251,7 +1255,7 @@ use soroban_sdk::{
         let recipient = Address::generate(&env);
         client.initialize(&admin, &100_i128);
 
-        // attacker tries to set fee recipient — must panic
+        // attacker tries to set fee recipient - must panic
         client.set_fee_recipient(&attacker, &recipient);
     }
 
@@ -1475,4 +1479,244 @@ use soroban_sdk::{
         assert_eq!(token_client.balance(&fee_recipient), 0);
     }
 
+    #[test]
+    fn test_emergency_withdraw_refunds_contributors() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 1_000;
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "stuck campaign"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token),
+            target
+        );
+
+        // Advance past deadline + 30-day grace period.
+        let grace = client.get_emergency_grace_period();
+        assert_eq!(grace, 30 * 24 * 60 * 60);
+        advance_time(&env, deadline_offset + grace + 1);
+
+        client.emergency_withdraw(&campaign_id, &creator);
+
+        // All pledges returned to the contributor.
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&contributor), target);
+        assert_eq!(token_client.balance(&client.address), 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+
+        // Campaign terminated and creator cannot claim.
+        let campaign = client.get_campaign(&campaign_id);
+        assert!(campaign.canceled);
+        assert_eq!(campaign.pledged_amount, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "grace period not elapsed")]
+    fn test_emergency_withdraw_within_grace_period() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 500;
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "stuck campaign"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        // Past deadline but still inside the 30-day grace period.
+        advance_time(&env, deadline_offset + 1);
+        client.emergency_withdraw(&campaign_id, &creator);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign is still active")]
+    fn test_emergency_withdraw_before_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 500;
+        let deadline = env.ledger().timestamp() + 1_000;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "active campaign"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        client.emergency_withdraw(&campaign_id, &creator);
+    }
+
+    #[test]
+    #[should_panic(expected = "creator mismatch")]
+    fn test_emergency_withdraw_creator_mismatch() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 500;
+        let deadline = env.ledger().timestamp() + 100;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "stuck campaign"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        advance_time(&env, 101 + 30 * 24 * 60 * 60);
+        client.emergency_withdraw(&campaign_id, &attacker);
+    }
+
+    #[test]
+    fn test_emergency_withdraw_creator_cannot_claim_after() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 1_000;
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "stuck campaign"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        advance_time(&env, deadline_offset + 30 * 24 * 60 * 60 + 1);
+        client.emergency_withdraw(&campaign_id, &creator);
+
+        // Creator cannot claim after emergency withdrawal.
+        let claim_result = client.try_claim(&campaign_id, &creator);
+        assert!(claim_result.is_err());
+    }
+
+    #[test]
+    #[should_panic(expected = "caller is not admin")]
+    fn test_set_emergency_grace_period_requires_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        client.set_emergency_grace_period(&non_admin, &3600);
+    }
+
+    #[test]
+    #[should_panic(expected = "grace period cannot exceed 30 days")]
+    fn test_set_emergency_grace_period_cannot_exceed_30_days() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        client.set_emergency_grace_period(&admin, &(31 * 24 * 60 * 60));
+    }
+
+    #[test]
+    fn test_emergency_withdraw_with_reduced_grace_period() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 500;
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        // Admin shortens the grace window to 1 second.
+        client.set_emergency_grace_period(&admin, &1);
+        assert_eq!(client.get_emergency_grace_period(), 1);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "stuck campaign"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        advance_time(&env, deadline_offset + 2);
+        client.emergency_withdraw(&campaign_id, &creator);
+
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&contributor), target);
+    }
 }
