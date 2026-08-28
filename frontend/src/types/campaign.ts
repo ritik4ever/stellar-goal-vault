@@ -57,6 +57,8 @@ export interface Campaign {
     externalLink?: string;
   };
   tokenBalances?: Record<string, number>;
+  /** Milestone percentages (25 / 50 / 75 / 100) that have been reached. */
+  milestones?: number[];
 }
 
 export interface BlockchainMetadata {

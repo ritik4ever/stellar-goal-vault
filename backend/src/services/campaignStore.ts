@@ -52,6 +52,8 @@ export interface CampaignRecord {
   };
   maxPerContributor?: number;
   tokenBalances?: Record<string, number>;
+  /** Milestone percentages (25 / 50 / 75 / 100) that have been reached. */
+  milestones?: number[];
 }
 
 export interface CampaignProgress {
@@ -632,6 +634,23 @@ export function getContributorSummary(campaignId: string): ContributorSummary[] 
 }
 
 /**
+ * Returns the list of milestone percentages (25 / 50 / 75 / 100) that have
+ * been recorded for a campaign via `milestone_reached` events.
+ */
+export function getMilestonesReached(campaignId: string): number[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT json_extract(metadata, '$.milestonePct') as pct
+       FROM campaign_events
+       WHERE campaign_id = ? AND event_type = 'milestone_reached'
+       ORDER BY pct ASC`,
+    )
+    .all(campaignId) as Array<{ pct: number | null }>;
+  return rows.map((r) => r.pct).filter((p): p is number => p !== null);
+}
+
+/**
  * Fetches a campaign enriched with its calculated progress, recent pledges, and event history.
  *
  * @param campaignId - The unique campaign identifier.
@@ -649,6 +668,7 @@ export function getCampaignWithProgress(campaignId: string, pledgePreviewLimit =
     progress: calculateProgress(campaign),
     pledges: getPledges(campaignId).slice(0, pledgePreviewLimit),
     history: getCampaignHistory(campaignId),
+    milestones: getMilestonesReached(campaignId),
   };
 }
 
@@ -857,6 +877,45 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
         );
       }
     }
+
+    // ── Milestone threshold checks ────────────────────────────────────────
+    // Fire a milestone_reached event the first time each of 25 / 50 / 75 /
+    // 100 % thresholds is crossed. We read the already-recorded milestones
+    // from the campaign's event history so this is idempotent across retries.
+    const MILESTONE_PCTS = [25, 50, 75, 100] as const;
+    if (campaign.targetAmount > 0) {
+      const existingMilestones = new Set(
+        db
+          .prepare(
+            `SELECT json_extract(metadata, '$.milestonePct') as pct
+             FROM campaign_events
+             WHERE campaign_id = ? AND event_type = 'milestone_reached'`,
+          )
+          .all(campaignId)
+          .map((r) => (r as { pct: number }).pct),
+      );
+
+      for (const pct of MILESTONE_PCTS) {
+        if (existingMilestones.has(pct)) continue;
+        // Threshold crossed when nextPledgedAmount * 100 >= pct * targetAmount
+        if (nextPledgedAmount * 100 >= pct * campaign.targetAmount) {
+          recordEvent(
+            campaignId,
+            'milestone_reached',
+            createdAt,
+            undefined,
+            nextPledgedAmount,
+            {
+              milestonePct: pct,
+              totalPledged: nextPledgedAmount,
+              targetAmount: campaign.targetAmount,
+            },
+            { source: 'local' } as BlockchainMetadata,
+          );
+        }
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────
   })();
 
   return getCampaign(campaignId)!;
