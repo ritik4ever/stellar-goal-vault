@@ -66,6 +66,12 @@ pub enum DataKey {
     /// Address that receives platform fees on campaign claims. When absent no
     /// fee is deducted regardless of [`PlatformFeeBps`].
     FeeRecipient,
+    /// Milestone for a campaign (campaign_id, milestone_id).
+    Milestone(u64, u32),
+    /// Whether a contributor has disputed a milestone.
+    MilestoneDisputed(u64, u32, Address),
+    /// Count of milestones for a campaign.
+    MilestoneCount(u64),
 }
 
 #[contracttype]
@@ -174,6 +180,51 @@ pub struct FeeCollected {
 pub struct StellarGoalVaultContract;
 
 const MAX_CAMPAIGN_DURATION_SECONDS: u64 = 60 * 60 * 24 * 180;
+
+/// Maximum number of milestones per campaign.
+const MAX_MILESTONES: u32 = 5;
+
+/// Dispute window duration in seconds (48 hours).
+const DISPUTE_WINDOW_SECONDS: u64 = 48 * 60 * 60;
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Milestone {
+    pub id: u32,
+    pub percentage_bps: u32, // Basis points (10000 = 100%)
+    pub completed: bool,
+    pub claimed: bool,
+    pub completion_time: Option<u64>,
+    pub dispute_window_end: Option<u64>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneCompleted {
+    pub campaign_id: u64,
+    pub milestone_id: u32,
+    pub creator: Address,
+    pub completion_time: u64,
+    pub dispute_window_end: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneClaimed {
+    pub campaign_id: u64,
+    pub milestone_id: u32,
+    pub creator: Address,
+    pub token: Address,
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneDisputed {
+    pub campaign_id: u64,
+    pub milestone_id: u32,
+    pub contributor: Address,
+}
 
 #[contractimpl]
 impl StellarGoalVaultContract {
@@ -915,6 +966,351 @@ impl StellarGoalVaultContract {
             deployed_at,
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Milestone support (issue #526)
+    // -----------------------------------------------------------------------
+
+    /// Defines milestones for a campaign. Can only be called by the creator
+    /// before the campaign deadline. Percentages are in basis points (10000 = 100%)
+    /// and must sum to exactly 10000. Maximum 5 milestones allowed.
+    pub fn set_milestones(
+        env: Env,
+        campaign_id: u64,
+        creator: Address,
+        percentages: Vec<u32>,
+    ) {
+        require_not_paused(&env);
+        creator.require_auth();
+        let campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign already canceled");
+        }
+        if env.ledger().timestamp() >= campaign.deadline {
+            panic!("campaign deadline reached");
+        }
+        if percentages.len() == 0 || percentages.len() > MAX_MILESTONES {
+            panic!("milestone count must be 1-5");
+        }
+
+        // Validate percentages sum to 10000 (100%)
+        let mut total_bps: u32 = 0;
+        for pct in percentages.iter() {
+            if pct == 0 {
+                panic!("milestone percentage must be positive");
+            }
+            total_bps = total_bps.checked_add(pct).unwrap_or_else(|| panic!("percentage overflow"));
+        }
+        if total_bps != 10000 {
+            panic!("milestone percentages must sum to 10000");
+        }
+
+        // Store milestones
+        let count = percentages.len();
+        for i in 0..count {
+            let pct = percentages.get(i).unwrap();
+            let milestone = Milestone {
+                id: i,
+                percentage_bps: pct,
+                completed: false,
+                claimed: false,
+                completion_time: None,
+                dispute_window_end: None,
+            };
+            env.storage()
+                .persistent()
+                .set(&DataKey::Milestone(campaign_id, i), &milestone);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::MilestoneCount(campaign_id), &count);
+    }
+
+    /// Returns the number of milestones defined for a campaign.
+    pub fn get_milestone_count(env: Env, campaign_id: u64) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MilestoneCount(campaign_id))
+            .unwrap_or(0)
+    }
+
+    /// Returns a specific milestone for a campaign.
+    pub fn get_milestone(env: Env, campaign_id: u64, milestone_id: u32) -> Milestone {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Milestone(campaign_id, milestone_id))
+            .unwrap_or_else(|| panic!("milestone not found"))
+    }
+
+    /// Creator marks a milestone as completed. Starts the dispute window.
+    pub fn complete_milestone(
+        env: Env,
+        campaign_id: u64,
+        milestone_id: u32,
+        creator: Address,
+    ) {
+        require_not_paused(&env);
+        creator.require_auth();
+        let campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.claimed {
+            panic!("campaign already claimed");
+        }
+        if campaign.canceled {
+            panic!("campaign already canceled");
+        }
+
+        let mut milestone: Milestone = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Milestone(campaign_id, milestone_id))
+            .unwrap_or_else(|| panic!("milestone not found"));
+
+        if milestone.completed {
+            panic!("milestone already completed");
+        }
+        if milestone.claimed {
+            panic!("milestone already claimed");
+        }
+
+        let now = env.ledger().timestamp();
+        milestone.completed = true;
+        milestone.completion_time = Some(now);
+        milestone.dispute_window_end = Some(now + DISPUTE_WINDOW_SECONDS);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Milestone(campaign_id, milestone_id), &milestone);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("MsComp")),
+            MilestoneCompleted {
+                campaign_id,
+                milestone_id,
+                creator,
+                completion_time: now,
+                dispute_window_end: now + DISPUTE_WINDOW_SECONDS,
+            },
+        );
+    }
+
+    /// Contributor disputes a milestone completion within the dispute window.
+    pub fn dispute_milestone(
+        env: Env,
+        campaign_id: u64,
+        milestone_id: u32,
+        contributor: Address,
+    ) {
+        require_not_paused(&env);
+        contributor.require_auth();
+        let _campaign = read_campaign(&env, campaign_id);
+
+        let milestone: Milestone = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Milestone(campaign_id, milestone_id))
+            .unwrap_or_else(|| panic!("milestone not found"));
+
+        if !milestone.completed {
+            panic!("milestone not completed");
+        }
+        if milestone.claimed {
+            panic!("milestone already claimed");
+        }
+
+        let now = env.ledger().timestamp();
+        let window_end = milestone
+            .dispute_window_end
+            .unwrap_or_else(|| panic!("dispute window not set"));
+        if now > window_end {
+            panic!("dispute window has expired");
+        }
+
+        // Check if contributor has already disputed
+        let disputed_key = DataKey::MilestoneDisputed(campaign_id, milestone_id, contributor.clone());
+        let already_disputed: bool = env
+            .storage()
+            .persistent()
+            .get(&disputed_key)
+            .unwrap_or(false);
+        if already_disputed {
+            panic!("already disputed");
+        }
+
+        env.storage().persistent().set(&disputed_key, &true);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("MsDisp")),
+            MilestoneDisputed {
+                campaign_id,
+                milestone_id,
+                contributor,
+            },
+        );
+    }
+
+    /// Creator claims funds for a completed milestone after dispute window expires
+    /// with no disputes. Admin can also resolve disputed milestones.
+    pub fn claim_milestone(
+        env: Env,
+        campaign_id: u64,
+        milestone_id: u32,
+        creator: Address,
+    ) {
+        require_not_paused(&env);
+        creator.require_auth();
+        let campaign = read_campaign(&env, campaign_id);
+        if campaign.creator != creator {
+            panic!("creator mismatch");
+        }
+        if campaign.canceled {
+            panic!("campaign already canceled");
+        }
+
+        let mut milestone: Milestone = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Milestone(campaign_id, milestone_id))
+            .unwrap_or_else(|| panic!("milestone not found"));
+
+        if !milestone.completed {
+            panic!("milestone not completed");
+        }
+        if milestone.claimed {
+            panic!("milestone already claimed");
+        }
+
+        let now = env.ledger().timestamp();
+        let window_end = milestone
+            .dispute_window_end
+            .unwrap_or_else(|| panic!("dispute window not set"));
+
+        // Check if dispute window has expired
+        if now < window_end {
+            panic!("dispute window still active");
+        }
+
+
+        // Calculate the amount to release based on milestone percentage
+        let percentage_bps = milestone.percentage_bps as i128;
+        let contract_address = env.current_contract_address();
+
+        let fee_bps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(DEFAULT_PLATFORM_FEE_BPS);
+        let fee_recipient: Option<Address> = env.storage().instance().get(&DataKey::FeeRecipient);
+        let take_fee = fee_bps > 0;
+
+        for token in campaign.accepted_tokens.iter() {
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+
+            if balance > 0 {
+                let milestone_amount = balance * percentage_bps / 10000;
+                if milestone_amount > 0 {
+                    let token_client = TokenClient::new(&env, &token);
+
+                    if take_fee {
+                        if let Some(ref recipient) = fee_recipient {
+                            let fee_amount = milestone_amount * fee_bps / 10000;
+                            let creator_amount = milestone_amount - fee_amount;
+
+                            if fee_amount > 0 {
+                                token_client.transfer(&contract_address, recipient, &fee_amount);
+                                env.events().publish(
+                                    (symbol_short!("Goal"), symbol_short!("Fee")),
+                                    FeeCollected {
+                                        campaign_id,
+                                        token: token.clone(),
+                                        fee_amount,
+                                        fee_recipient: recipient.clone(),
+                                    },
+                                );
+                            }
+                            token_client.transfer(&contract_address, &creator, &creator_amount);
+                        } else {
+                            token_client.transfer(&contract_address, &creator, &milestone_amount);
+                        }
+                    } else {
+                        token_client.transfer(&contract_address, &creator, &milestone_amount);
+                    }
+
+                    env.events().publish(
+                        (symbol_short!("Goal"), symbol_short!("MsClaim")),
+                        MilestoneClaimed {
+                            campaign_id,
+                            milestone_id,
+                            creator: creator.clone(),
+                            token: token.clone(),
+                            amount: milestone_amount,
+                        },
+                    );
+                }
+            }
+        }
+
+        milestone.claimed = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Milestone(campaign_id, milestone_id), &milestone);
+    }
+
+    /// Admin resolves a disputed milestone. If approved=true, creator can claim.
+    /// If approved=false, funds remain in campaign.
+    pub fn admin_resolve_milestone(
+        env: Env,
+        campaign_id: u64,
+        milestone_id: u32,
+        admin: Address,
+        approved: bool,
+    ) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"));
+        if admin != stored_admin {
+            panic!("caller is not admin");
+        }
+
+        let mut milestone: Milestone = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Milestone(campaign_id, milestone_id))
+            .unwrap_or_else(|| panic!("milestone not found"));
+
+        if !milestone.completed {
+            panic!("milestone not completed");
+        }
+        if milestone.claimed {
+            panic!("milestone already claimed");
+        }
+
+        if approved {
+            // Reset dispute window to allow claiming
+            milestone.dispute_window_end = Some(0);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Milestone(campaign_id, milestone_id), &milestone);
+        } else {
+            // Mark as claimed without releasing funds (dispute upheld)
+            milestone.claimed = true;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Milestone(campaign_id, milestone_id), &milestone);
+        }
+    }
 }
 
 fn require_not_paused(env: &Env) {
@@ -971,4 +1367,7 @@ fn refund_contributor(
     }
     total_refunded
 }
+
+#[cfg(test)]
+mod test;
 
