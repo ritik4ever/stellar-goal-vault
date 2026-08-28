@@ -57,6 +57,15 @@ export const config = {
   defaultMaxPerContributor: parseInteger(process.env.DEFAULT_MAX_PER_CONTRIBUTOR, 0),
   keepAliveTimeoutMs: parseInteger(process.env.KEEP_ALIVE_TIMEOUT_MS, 65_000),
   headersTimeoutMs: parseInteger(process.env.HEADERS_TIMEOUT_MS, 66_000),
+  redisUrl: process.env.REDIS_URL ?? '',
+  webhookUrl: process.env.WEBHOOK_URL ?? '',
+  webhookSecret: process.env.WEBHOOK_SECRET ?? '',
+  // Number of unresolved abuse reports that auto-flags a campaign for admin
+  // review. Configurable via CAMPAIGN_REPORT_AUTO_FLAG_THRESHOLD (default: 10).
+  campaignReportAutoFlagThreshold: parseInteger(
+    process.env.CAMPAIGN_REPORT_AUTO_FLAG_THRESHOLD,
+    10,
+  ),
 };
 
 export const walletIntegrationReady = Boolean(

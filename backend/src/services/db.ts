@@ -146,6 +146,16 @@ function migrate(database: SQLiteDatabase): void {
       attempts      INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS campaign_comments (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id   TEXT NOT NULL,
+      author        TEXT NOT NULL,
+      content       TEXT NOT NULL,
+      created_at    INTEGER NOT NULL,
+      deleted_at    INTEGER,
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_id ON campaign_events(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
@@ -297,4 +307,40 @@ function migrate(database: SQLiteDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_campaign_events_ledger
     ON campaign_events(json_extract(blockchain_metadata, '$.ledgerNumber'));
   `);
+
+  // Abuse reporting (issue #565): any user can report a campaign for fraud,
+  // spam, or duplicate content. A single reporter may only file one report per
+  // campaign (enforced by the unique index below).
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS campaign_reports (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id  TEXT NOT NULL,
+      reporter     TEXT NOT NULL,
+      reason       TEXT NOT NULL CHECK(reason IN ('fraud', 'spam', 'duplicate')),
+      details      TEXT,
+      status       TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'dismissed', 'actioned')),
+      created_at   INTEGER NOT NULL,
+      resolved_at  INTEGER,
+      resolved_by  TEXT,
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_reports_campaign_id
+    ON campaign_reports(campaign_id);
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_reports_status
+    ON campaign_reports(status, created_at);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_reports_reporter_unique
+    ON campaign_reports(campaign_id, reporter);
+  `);
+
+  // Campaigns accumulate reports; once the configurable threshold is reached
+  // they are flagged for admin review.
+  if (!campaignColumns.some((column) => column.name === 'flagged_for_review')) {
+    database.exec(`ALTER TABLE campaigns ADD COLUMN flagged_for_review INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!campaignColumns.some((column) => column.name === 'flagged_at')) {
+    database.exec(`ALTER TABLE campaigns ADD COLUMN flagged_at INTEGER`);
+  }
 }
