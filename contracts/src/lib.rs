@@ -1,6 +1,11 @@
 #![no_std]
-
-
+// soroban-sdk 27 deprecates `env.events().publish()` in favour of the
+// `#[contractevent]` macro. The published event schema is deliberately kept
+// stable so the off-chain indexer keeps parsing existing topics and data, so
+// the manual `publish` calls are retained here and the deprecation lint is
+// allowed crate-wide. Migrating the event system to `#[contractevent]` is
+// tracked as separate follow-up work.
+#![allow(deprecated)]
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token::Client as TokenClient, Address, Env,
@@ -24,6 +29,23 @@ const MAX_ACCEPTED_TOKENS: u32 = 10;
 /// via [`set_fee`]. Set to 0 to disable the fee mechanism entirely.
 const DEFAULT_PLATFORM_FEE_BPS: i128 = 50;
 
+/// Distinguishes the kind of asset a campaign is denominated in.
+///
+/// On Stellar, native XLM is exposed to Soroban through its own Stellar Asset
+/// Contract (SAC), so both variants ultimately move value through the standard
+/// token interface. The distinction is surfaced so integrators (and the
+/// contract itself) can tell a native XLM campaign apart from one denominated
+/// in a custom SAC / Soroban token, which affects how the asset is presented
+/// and resolved off-chain.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AssetType {
+    /// Campaign accepts the network-native XLM asset (its wrapped SAC address).
+    Native,
+    /// Campaign accepts a Stellar Asset Contract or Soroban-native token.
+    Sac,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Campaign {
@@ -37,6 +59,8 @@ pub struct Campaign {
     pub metadata: String,
     pub contributor_count: u32,
     pub created_at: u64,
+    /// Whether this campaign is denominated in native XLM or a SAC/token.
+    pub asset_type: AssetType,
 }
 
 #[contracttype]
@@ -66,6 +90,10 @@ pub enum DataKey {
     /// Address that receives platform fees on campaign claims. When absent no
     /// fee is deducted regardless of [`PlatformFeeBps`].
     FeeRecipient,
+    /// Canonical wrapped native XLM Stellar Asset Contract address. When set,
+    /// campaigns whose sole accepted token is this address are classified as
+    /// [`AssetType::Native`]. Absent means no native asset is registered.
+    NativeAsset,
 }
 
 #[contracttype]
@@ -287,6 +315,34 @@ impl StellarGoalVaultContract {
         env.storage().instance().get(&DataKey::FeeRecipient)
     }
 
+    /// Registers the canonical wrapped native XLM Stellar Asset Contract (SAC)
+    /// address for this deployment. Once set, a campaign whose sole accepted
+    /// token equals this address is classified as [`AssetType::Native`] at
+    /// creation time. Only the admin can call this.
+    ///
+    /// The native asset address is network specific and is obtained off-chain
+    /// via `stellar contract id asset --asset native`.
+    pub fn set_native_asset(env: Env, admin: Address, native_asset: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"));
+        if admin != stored_admin {
+            panic!("caller is not admin");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::NativeAsset, &native_asset);
+    }
+
+    /// Returns the registered native XLM asset address, or `None` when no
+    /// native asset has been configured for this deployment.
+    pub fn get_native_asset(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::NativeAsset)
+    }
+
     /// Creator can cancel an active campaign, allowing contributors to refund.
     pub fn cancel_campaign(env: Env, campaign_id: u64, creator: Address) {
         require_not_paused(&env);
@@ -331,7 +387,7 @@ impl StellarGoalVaultContract {
         if deadline - env.ledger().timestamp() > MAX_CAMPAIGN_DURATION_SECONDS {
             panic!("deadline exceeds maximum campaign duration");
         }
-        if accepted_tokens.len() == 0 {
+        if accepted_tokens.is_empty() {
             panic!("accepted_tokens must not be empty");
         }
 
@@ -362,6 +418,8 @@ impl StellarGoalVaultContract {
 
         let created_at = env.ledger().timestamp();
 
+        let asset_type = classify_asset_type(&env, &accepted_tokens);
+
         let campaign = Campaign {
             creator: creator.clone(),
             accepted_tokens: accepted_tokens.clone(),
@@ -373,6 +431,7 @@ impl StellarGoalVaultContract {
             metadata: metadata.clone(),
             contributor_count: 0,
             created_at,
+            asset_type,
         };
 
         env.storage()
@@ -406,6 +465,13 @@ impl StellarGoalVaultContract {
         next_id
     }
 
+    /// Records a pledge of `amount` of `token` towards a campaign.
+    ///
+    /// `token` must be one of the campaign's accepted tokens. For a native XLM
+    /// campaign this is the registered native asset address: native XLM is
+    /// moved through its Stellar Asset Contract exactly like any other SAC, so
+    /// the same [`TokenClient::transfer`] path handles both asset types and no
+    /// special-casing is required.
     pub fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, amount: i128) {
         require_not_paused(&env);
         contributor.require_auth();
@@ -935,6 +1001,22 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .unwrap_or_else(|| panic!("campaign not found"))
 }
 
+/// Classifies a campaign as native XLM or a SAC/token campaign based on the
+/// registered native asset. A campaign is [`AssetType::Native`] only when a
+/// native asset has been configured (see [`StellarGoalVaultContract::set_native_asset`])
+/// and the campaign's single accepted token equals that address. Everything
+/// else — including multi-token campaigns that merely include the native
+/// asset — is treated as [`AssetType::Sac`].
+fn classify_asset_type(env: &Env, accepted_tokens: &Vec<Address>) -> AssetType {
+    let native: Option<Address> = env.storage().instance().get(&DataKey::NativeAsset);
+    if let Some(native_asset) = native {
+        if accepted_tokens.len() == 1 && accepted_tokens.get(0).unwrap() == native_asset {
+            return AssetType::Native;
+        }
+    }
+    AssetType::Sac
+}
+
 fn refund_contributor(
     env: &Env,
     campaign: &mut Campaign,
@@ -971,4 +1053,10 @@ fn refund_contributor(
     }
     total_refunded
 }
+
+#[cfg(test)]
+mod test;
+
+#[cfg(test)]
+mod native_xlm_test;
 
