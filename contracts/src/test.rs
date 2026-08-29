@@ -1,21 +1,25 @@
-
 #[cfg(test)]
 mod tests {
-use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, String,
-};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger},
+        token::{Client as TokenClient, StellarAssetClient},
+        Address, Env, String,
+    };
 
-    use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
+    use crate::{
+        CampaignStatus, StellarGoalVaultContract, StellarGoalVaultContractClient,
+        MAX_CAMPAIGN_BATCH_SIZE,
+    };
 
     fn deploy_contract(env: &Env) -> StellarGoalVaultContractClient<'_> {
-        let contract_id = env.register_contract(None, StellarGoalVaultContract);
+        let contract_id = env.register(StellarGoalVaultContract, ());
         StellarGoalVaultContractClient::new(env, &contract_id)
     }
 
     fn deploy_token(env: &Env, admin: &Address, recipient: &Address, amount: i128) -> Address {
-        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_id = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let asset_client = StellarAssetClient::new(env, &token_id);
         asset_client.mint(recipient, &amount);
         token_id
@@ -26,7 +30,6 @@ use soroban_sdk::{
             info.timestamp += seconds;
         });
     }
-
 
     #[test]
     fn test_claim_success() {
@@ -293,7 +296,9 @@ use soroban_sdk::{
         let admin = Address::generate(&env);
 
         // Mint tokens to each contributor separately
-        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_id = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let asset_client = StellarAssetClient::new(&env, &token_id);
         asset_client.mint(&contributor1, &200);
         asset_client.mint(&contributor2, &200);
@@ -551,8 +556,10 @@ use soroban_sdk::{
         );
         client.set_paused(&admin, &true);
 
-        // All reads must succeed even when paused
         let _ = client.get_campaign(&campaign_id);
+        let batch = client.get_campaigns_batch(&soroban_sdk::vec![&env, campaign_id]);
+        assert_eq!(batch.len(), 1);
+        assert!(batch.get(0).unwrap().is_some());
         assert_eq!(client.get_campaign_count(), 1);
         assert!(client.get_paused());
         assert_eq!(client.get_admin(), admin);
@@ -726,7 +733,6 @@ use soroban_sdk::{
         client.contribute(&campaign_id, &contributor, &token, &300);
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
     }
-
 
     #[test]
     fn test_contributor_count_no_double_count_multiple_tokens() {
@@ -910,7 +916,10 @@ use soroban_sdk::{
         );
 
         let campaign = client.get_campaign(&campaign_id);
-        assert_eq!(campaign.metadata, String::from_str(&env, "updated metadata"));
+        assert_eq!(
+            campaign.metadata,
+            String::from_str(&env, "updated metadata")
+        );
     }
 
     #[test]
@@ -934,11 +943,7 @@ use soroban_sdk::{
             &0_i128,
         );
 
-        client.update_metadata(
-            &campaign_id,
-            &attacker,
-            &String::from_str(&env, "hacked"),
-        );
+        client.update_metadata(&campaign_id, &attacker, &String::from_str(&env, "hacked"));
     }
 
     #[test]
@@ -964,11 +969,7 @@ use soroban_sdk::{
 
         advance_time(&env, deadline_offset + 1);
 
-        client.update_metadata(
-            &campaign_id,
-            &creator,
-            &String::from_str(&env, "too late"),
-        );
+        client.update_metadata(&campaign_id, &creator, &String::from_str(&env, "too late"));
     }
 
     #[test]
@@ -1097,7 +1098,9 @@ use soroban_sdk::{
         let contributor2 = Address::generate(&env);
         let admin = Address::generate(&env);
 
-        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_id = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let asset_client = StellarAssetClient::new(&env, &token_id);
         asset_client.mint(&contributor1, &300);
         asset_client.mint(&contributor2, &300);
@@ -1147,7 +1150,9 @@ use soroban_sdk::{
         let contributor3 = Address::generate(&env);
         let admin = Address::generate(&env);
 
-        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_id = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let asset_client = StellarAssetClient::new(&env, &token_id);
         asset_client.mint(&contributor1, &200);
         asset_client.mint(&contributor2, &200);
@@ -1229,6 +1234,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1242,6 +1248,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_recipient_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1469,10 +1476,189 @@ use soroban_sdk::{
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &creator);
 
-        // Fee=0 → all to creator
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 1_000);
         assert_eq!(token_client.balance(&fee_recipient), 0);
     }
 
+    fn create_test_campaign(
+        env: &Env,
+        client: &StellarGoalVaultContractClient<'_>,
+        creator: &Address,
+        token: &Address,
+        metadata: &str,
+        target: i128,
+        deadline_offset: u64,
+    ) -> u64 {
+        client.create_campaign(
+            creator,
+            &soroban_sdk::vec![env, token.clone()],
+            &target,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(env, metadata),
+            &0_i128,
+        )
+    }
+
+    #[test]
+    fn test_get_campaigns_batch_empty_ids() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+
+        let results = client.get_campaigns_batch(&soroban_sdk::vec![&env]);
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_get_campaigns_batch_returns_summaries_in_request_order() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+
+        let first = create_test_campaign(&env, &client, &creator, &token, "alpha", 1_000, 1_000);
+        let second = create_test_campaign(&env, &client, &creator, &token, "beta", 2_000, 2_000);
+
+        let results = client.get_campaigns_batch(&soroban_sdk::vec![&env, second, first]);
+        assert_eq!(results.len(), 2);
+
+        let second_summary = results.get(0).unwrap().unwrap();
+        assert_eq!(second_summary.id, second);
+        assert_eq!(second_summary.creator, creator);
+        assert_eq!(second_summary.target_amount, 2_000);
+        assert_eq!(second_summary.pledged_amount, 0);
+        assert_eq!(second_summary.metadata, String::from_str(&env, "beta"));
+        assert_eq!(second_summary.status, CampaignStatus::Open);
+        assert_eq!(second_summary.contributor_count, 0);
+
+        let first_summary = results.get(1).unwrap().unwrap();
+        assert_eq!(first_summary.id, first);
+        assert_eq!(first_summary.metadata, String::from_str(&env, "alpha"));
+        assert_eq!(first_summary.target_amount, 1_000);
+        assert_eq!(first_summary.status, CampaignStatus::Open);
+    }
+
+    #[test]
+    fn test_get_campaigns_batch_unknown_ids_return_none() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+
+        let known = create_test_campaign(&env, &client, &creator, &token, "known", 500, 1_000);
+
+        let results = client.get_campaigns_batch(&soroban_sdk::vec![&env, 0u64, known, 9_999u64]);
+        assert_eq!(results.len(), 3);
+        assert!(results.get(0).unwrap().is_none());
+        assert_eq!(results.get(1).unwrap().unwrap().id, known);
+        assert!(results.get(2).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_campaigns_batch_allows_max_size() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 10_000);
+        let client = deploy_contract(&env);
+
+        let mut ids = soroban_sdk::vec![&env];
+        for i in 0..MAX_CAMPAIGN_BATCH_SIZE {
+            let id = create_test_campaign(
+                &env,
+                &client,
+                &creator,
+                &token,
+                "batch",
+                100 + i as i128,
+                1_000,
+            );
+            ids.push_back(id);
+        }
+
+        let results = client.get_campaigns_batch(&ids);
+        assert_eq!(results.len(), MAX_CAMPAIGN_BATCH_SIZE);
+        for i in 0..MAX_CAMPAIGN_BATCH_SIZE {
+            let summary = results.get(i).unwrap().unwrap();
+            assert_eq!(summary.id, ids.get(i).unwrap());
+            assert_eq!(summary.status, CampaignStatus::Open);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "batch size exceeds maximum")]
+    fn test_get_campaigns_batch_rejects_over_max_size() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+
+        let mut ids = soroban_sdk::vec![&env];
+        for i in 0..=MAX_CAMPAIGN_BATCH_SIZE {
+            ids.push_back(i as u64);
+        }
+
+        client.get_campaigns_batch(&ids);
+    }
+
+    #[test]
+    fn test_get_campaigns_batch_status_funded_claimed_failed_canceled() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 10_000);
+        let client = deploy_contract(&env);
+
+        let funded_id = create_test_campaign(&env, &client, &creator, &token, "funded", 200, 1_000);
+        client.contribute(&funded_id, &contributor, &token, &200);
+
+        let claimed_id = create_test_campaign(&env, &client, &creator, &token, "claimed", 200, 50);
+        client.contribute(&claimed_id, &contributor, &token, &200);
+
+        let failed_id = create_test_campaign(&env, &client, &creator, &token, "failed", 1_000, 50);
+        client.contribute(&failed_id, &contributor, &token, &100);
+
+        let canceled_id =
+            create_test_campaign(&env, &client, &creator, &token, "canceled", 500, 1_000);
+        client.cancel_campaign(&canceled_id, &creator);
+
+        advance_time(&env, 51);
+        client.claim(&claimed_id, &creator);
+
+        let results = client.get_campaigns_batch(&soroban_sdk::vec![
+            &env,
+            funded_id,
+            claimed_id,
+            failed_id,
+            canceled_id,
+        ]);
+
+        assert_eq!(
+            results.get(0).unwrap().unwrap().status,
+            CampaignStatus::Funded
+        );
+        assert_eq!(
+            results.get(1).unwrap().unwrap().status,
+            CampaignStatus::Claimed
+        );
+        assert_eq!(
+            results.get(2).unwrap().unwrap().status,
+            CampaignStatus::Failed
+        );
+        assert_eq!(
+            results.get(3).unwrap().unwrap().status,
+            CampaignStatus::Canceled
+        );
+    }
 }
