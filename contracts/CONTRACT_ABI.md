@@ -39,6 +39,34 @@
 | `contributor_count` | `u32` | Number of unique contributors |
 | `created_at` | `u64` | Unix timestamp of campaign creation |
 
+### `CampaignStatus`
+
+Derived campaign lifecycle state used by dashboard batch queries.
+
+| Variant | Condition |
+|---------|-----------|
+| `Open` | Active, not canceled/claimed, pledged below target, deadline not reached |
+| `Funded` | `pledged_amount >= target_amount` and not yet claimed |
+| `Claimed` | Creator has claimed funds |
+| `Failed` | Deadline passed, pledged below target, not canceled |
+| `Canceled` | Creator canceled the campaign |
+
+### `CampaignSummary`
+
+Compact campaign projection returned by `get_campaigns_batch`. Omits `accepted_tokens` to keep the RPC payload small.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `u64` | Campaign ID |
+| `creator` | `Address` | Campaign creator's Stellar address |
+| `target_amount` | `i128` | Funding goal in stroops |
+| `pledged_amount` | `i128` | Total amount pledged across all tokens |
+| `deadline` | `u64` | Unix timestamp (seconds) when the campaign ends |
+| `created_at` | `u64` | Unix timestamp of campaign creation |
+| `contributor_count` | `u32` | Number of unique contributors |
+| `metadata` | `String` | Campaign metadata string |
+| `status` | `CampaignStatus` | Derived lifecycle status |
+
 ### `DeployInfo`
 
 | Field | Type | Description |
@@ -477,6 +505,38 @@ fn get_campaign(env: Env, campaign_id: u64) -> Campaign
 
 ---
 
+### `get_campaigns_batch`
+
+Returns up to 20 campaign summaries in a single RPC call. Result length matches the input, and unknown IDs occupy their original position as `None` rather than failing the call.
+
+```
+fn get_campaigns_batch(env: Env, ids: Vec<u64>) -> Vec<Option<CampaignSummary>>
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `ids` | `Vec<u64>` | Campaign IDs to fetch (maximum 20) |
+
+**Returns:** `Vec<Option<CampaignSummary>>` — one entry per requested ID. `Some(summary)` when the campaign exists, `None` when it does not.
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| More than 20 IDs | `"batch size exceeds maximum"` | Medium | Split the request into chunks of 20 or fewer IDs |
+
+**Gas estimate:** 4,000 base + 4,500 per ID (persistent read + summary projection) + 20% headroom:
+
+| Batch size | Estimate | With 20% headroom |
+|------------|----------|-------------------|
+| 1 | 8,500 | **10,200** |
+| 10 | 49,000 | **58,800** |
+| 20 | 94,000 | **112,800** |
+
+Unknown IDs still consume a storage miss (~2,000 units) but do not panic. Compared with 20 sequential `get_campaign` calls (~120,000 with headroom), a full batch is cheaper and uses a single RPC round-trip.
+
+---
+
 ### `get_contribution`
 
 Returns the amount a specific contributor has contributed using a specific token.
@@ -864,6 +924,7 @@ All events use the topic prefix `(symbol_short!("Goal"), ...)`.
 | `"no extension request"` | `approve_extension` | Low | Call `request_deadline_extension()` first |
 | `"already voted"` | `approve_extension` | Low | Each contributor votes once per request |
 | `"source_ids and campaigns must have the same length"` | `migrate` | High | Ensure both vectors have equal length |
+| `"batch size exceeds maximum"` | `get_campaigns_batch` | Medium | Request at most 20 IDs per call |
 
 ---
 
@@ -886,6 +947,7 @@ All estimates are in Soroban **CPU instruction units**. Estimates include **20% 
 | `approve_extension` | 30,000 | **36,000** | Conditional deadline update |
 | `migrate` | 12,000 + 8,000/campaign | **105,600** (10 campaigns) | Per-campaign storage |
 | `get_campaign` | 5,000 | **6,000** | Read-only |
+| `get_campaigns_batch` | 4,000 + 4,500/id | **10,200** (1) / **112,800** (20) | Read-only; unknown IDs return `None` |
 | `get_contribution` | 5,000 | **6,000** | Read-only |
 | `get_campaign_token_balance` | 4,500 | **5,400** | Read-only |
 | `get_contributor_count` | 5,000 | **6,000** | Read-only |
@@ -1044,6 +1106,15 @@ Checking campaign state without mutation.
 //       pledged_amount: 5_000, deadline: ..., claimed: false,
 //       canceled: false, metadata: "Help build a school",
 //       contributor_count: 1, created_at: ... }
+
+// --- Batch dashboard query (max 20 IDs, unknown IDs are None) ---
+// get_campaigns_batch(ids=[1, 2, 99])
+//   → [
+//       Some({ id: 1, status: Open, pledged_amount: 5_000, ... }),
+//       Some({ id: 2, status: Funded, ... }),
+//       None
+//     ]
+//   Cost: ~10,200 (1 id) to ~112,800 (20 ids) gas units
 
 // --- Check specific contribution ---
 // get_contribution(campaign_id=1, contributor=GEFG..., token=USDC)

@@ -14,6 +14,7 @@
 | `claim` | N/A |
 | `refund` | N/A |
 | `get_campaign` | N/A |
+| `get_campaigns_batch` | N/A |
 | `get_contribution` | N/A |
 | `get_campaign_token_balance` | N/A |
 | `get_contributor_count` | N/A |

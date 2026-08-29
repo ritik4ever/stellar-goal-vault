@@ -77,6 +77,7 @@ Soroban SDK version: 21.7.7
 | `claim` | ~30 000 | 2 | 2 | 1 per token | 4 paths |
 | `refund` | ~28 000 | 3 | 3 | 1 per token | 4 paths |
 | `get_campaign` | ~8 000 | 1 | 0 | 0 | 1 path |
+| `get_campaigns_batch` | ~10 200 (1 id) / ~112 800 (20 ids) | 1 per id | 0 | 0 | 1 path (oversize) |
 | `get_contribution` | ~7 000 | 1 | 0 | 0 | 0 |
 | `get_campaign_token_balance` | ~7 000 | 1 | 0 | 0 | 0 |
 | `get_contributor_count` | ~8 000 | 1 | 0 | 0 | 1 path |
