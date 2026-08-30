@@ -799,6 +799,28 @@ impl StellarGoalVaultContract {
             .unwrap_or(0)
     }
 
+    pub fn get_refundable(env: Env, campaign_id: u64, contributor: Address) -> u128 {
+        let campaign = read_campaign(&env, campaign_id);
+
+        let is_failed = !campaign.claimed
+            && !campaign.canceled
+            && env.ledger().timestamp() >= campaign.deadline
+            && campaign.pledged_amount < campaign.target_amount;
+
+        if !is_failed {
+            return 0;
+        }
+
+        let mut total: i128 = 0;
+        for token in campaign.accepted_tokens.iter() {
+            let key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+            let amount: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            total += amount.max(0);
+        }
+
+        total.max(0) as u128
+    }
+
     pub fn get_campaign_token_balance(env: Env, campaign_id: u64, token: Address) -> i128 {
         env.storage()
             .persistent()

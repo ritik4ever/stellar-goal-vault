@@ -1469,10 +1469,169 @@ use soroban_sdk::{
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &creator);
 
-        // Fee=0 → all to creator
-        let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 1_000);
         assert_eq!(token_client.balance(&fee_recipient), 0);
+    }
+
+    // ── #537: get_refundable tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_get_refundable_returns_zero_when_deadline_not_passed() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 1_000;
+        let deadline = env.ledger().timestamp() + 1_000;
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "active campaign"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &500);
+        assert_eq!(client.get_refundable(&campaign_id, &contributor), 0);
+    }
+
+    #[test]
+    fn test_get_refundable_returns_zero_when_target_met() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let target: i128 = 1_000;
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "funded campaign"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        advance_time(&env, deadline_offset + 1);
+        assert_eq!(client.get_refundable(&campaign_id, &contributor), 0);
+    }
+
+    #[test]
+    fn test_get_refundable_returns_zero_after_full_refund() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let pledge_amount: i128 = 300;
+        let target: i128 = 1_000;
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+        let token = deploy_token(&env, &admin, &contributor, pledge_amount);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "refunded campaign"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &pledge_amount);
+        advance_time(&env, deadline_offset + 1);
+        client.refund(&campaign_id, &contributor);
+
+        assert_eq!(client.get_refundable(&campaign_id, &contributor), 0);
+    }
+
+    #[test]
+    fn test_get_refundable_returns_amount_for_failed_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let pledge_amount: i128 = 300;
+        let target: i128 = 1_000;
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+        let token = deploy_token(&env, &admin, &contributor, pledge_amount);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "failed campaign"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &pledge_amount);
+        advance_time(&env, deadline_offset + 1);
+
+        assert_eq!(
+            client.get_refundable(&campaign_id, &contributor),
+            pledge_amount as u128
+        );
+    }
+
+    #[test]
+    fn test_get_refundable_returns_zero_for_non_contributor() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let non_contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let pledge_amount: i128 = 300;
+        let target: i128 = 1_000;
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+        let token = deploy_token(&env, &admin, &contributor, pledge_amount);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "non contributor test"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &pledge_amount);
+        advance_time(&env, deadline_offset + 1);
+
+        assert_eq!(client.get_refundable(&campaign_id, &non_contributor), 0);
     }
 
 }
