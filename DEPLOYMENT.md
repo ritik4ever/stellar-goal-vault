@@ -66,6 +66,33 @@ If you want to override the default RPC endpoint or network passphrase:
 SECRET_KEY="S..." NETWORK_PASSPHRASE="Test SDF Network ; September 2015" RPC_URL="https://soroban-testnet.stellar.org:443" npm run deploy:contract
 ```
 
+### 1.5 WASM Hash Verification (Reproducible Builds)
+
+The CI pipeline computes a SHA256 hash of the release WASM binary and stores it in `contracts/wasm.sha256`. The deploy script verifies this hash before deploying to prevent accidental or unauthorized contract changes.
+
+**How it works:**
+
+1. CI builds the contract with a pinned Rust toolchain (`contracts/rust-toolchain.toml`) and stores the SHA256 hash in `contracts/wasm.sha256`.
+2. The deploy script (`scripts/deploy.sh`) recomputes the hash of the built WASM binary and compares it against `contracts/wasm.sha256`.
+3. If the hashes do not match, deployment is **aborted** with an error.
+
+**Updating the hash after intentional changes:**
+
+```bash
+# After building the contract locally
+cd contracts
+cargo build --target wasm32-unknown-unknown --release --no-default-features
+
+# Compute and store the new hash
+sha256sum target/wasm32-unknown-unknown/release/*.wasm | awk '{print $1}' > wasm.sha256
+git add wasm.sha256
+git commit -m "chore: update WASM hash after contract change"
+```
+
+**Pinned Rust toolchain:**
+
+The `contracts/rust-toolchain.toml` file pins the Rust `stable` channel with the `wasm32-unknown-unknown` target to ensure reproducible builds across environments.
+
 ---
 
 ## 2. Backend Deployment (Render)
