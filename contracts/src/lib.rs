@@ -1,6 +1,6 @@
 #![no_std]
 
-
+pub mod dao;
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token::Client as TokenClient, Address, Env,
@@ -8,6 +8,7 @@ use soroban_sdk::{
 };
 
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 
 /// Default minimum contribution in stroops (100). Overridable via initialize().
 const MIN_CONTRIBUTION: i128 = 100;
