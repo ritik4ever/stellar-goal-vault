@@ -756,6 +756,53 @@ app.get('/api/campaigns/:id/contributors', (req: Request, res: Response) => {
   res.json({ data: summary });
 });
 
+app.get('/api/campaigns/:id/contributors/export.csv', (req: Request, res: Response) => {
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  const campaign = getCampaign(parsedId.value);
+  if (!campaign) {
+    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+  }
+
+  // Creator-only access: the caller must supply a `creator` query param
+  // that matches the campaign creator address (case-insensitive).
+  const callerCreator = normalizeQueryValue(req.query.creator);
+  if (
+    !callerCreator ||
+    callerCreator.toLowerCase() !== campaign.creator.toLowerCase()
+  ) {
+    throw new AppError(
+      'Only the campaign creator can export contributors.',
+      403,
+      'FORBIDDEN',
+    );
+  }
+
+  const summary = getContributorSummary(parsedId.value);
+
+  // Build a BOM-prefixed CSV so Microsoft Excel correctly detects UTF-8
+  // encoding and renders special characters (e.g. non-ASCII addresses).
+  const BOM = '\uFEFF';
+  const csvHeader = 'contributor_address,total_pledged,refunded_amount,is_fully_refunded';
+  const csvRows = summary.map((row) => {
+    const address = row.contributor || 'Anonymous';
+    // Escape double-quotes and wrap in quotes for Excel compatibility
+    const escaped = address.replace(/"/g, '""');
+    return `${escaped},${row.totalPledged},${row.refundedAmount},${row.isFullyRefunded}`;
+  });
+  const csvContent = BOM + csvHeader + '\n' + csvRows.join('\n');
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="contributors-${parsedId.value}.csv"`,
+  );
+  res.send(csvContent);
+});
+
 app.get('/api/campaigns/:id/history', (req: Request, res: Response) => {
   const parsedId = parseCampaignId(req.params.id);
   if (!parsedId.ok) {
