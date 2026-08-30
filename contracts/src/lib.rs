@@ -40,6 +40,16 @@ pub struct Campaign {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlatformStats {
+    pub total_campaigns: u64,
+    pub total_pledged_by_token: Vec<(Address, i128)>,
+    pub campaigns_funded: u64,
+    pub campaigns_failed: u64,
+    pub unique_contributors: u32,
+}
+
+#[contracttype]
 pub enum DataKey {
     NextCampaignId,
     ContractVersion,
@@ -66,6 +76,8 @@ pub enum DataKey {
     /// Address that receives platform fees on campaign claims. When absent no
     /// fee is deducted regardless of [`PlatformFeeBps`].
     FeeRecipient,
+    PlatformStats,
+    GlobalContributor(Address),
 }
 
 #[contracttype]
@@ -177,6 +189,76 @@ const MAX_CAMPAIGN_DURATION_SECONDS: u64 = 60 * 60 * 24 * 180;
 
 #[contractimpl]
 impl StellarGoalVaultContract {
+    pub fn get_platform_stats(env: Env) -> PlatformStats {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PlatformStats)
+            .unwrap_or(PlatformStats {
+                total_campaigns: 0,
+                total_pledged_by_token: Vec::new(&env),
+                campaigns_funded: 0,
+                campaigns_failed: 0,
+                unique_contributors: 0,
+            })
+    }
+
+    fn update_platform_stats(
+        env: &Env,
+        pledge_amount: Option<(Address, i128)>,
+        campaign_created: bool,
+        campaign_funded: bool,
+        campaign_failed: bool,
+        contributor: Option<Address>,
+    ) {
+        let mut stats: PlatformStats = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PlatformStats)
+            .unwrap_or(PlatformStats {
+                total_campaigns: 0,
+                total_pledged_by_token: Vec::new(&env),
+                campaigns_funded: 0,
+                campaigns_failed: 0,
+                unique_contributors: 0,
+            });
+
+        if campaign_created {
+            stats.total_campaigns += 1;
+        }
+
+        if let Some((token, amount)) = pledge_amount {
+            let mut found = false;
+            for i in 0..stats.total_pledged_by_token.len() {
+                let (t, bal) = stats.total_pledged_by_token.get(i).unwrap();
+                if t == token {
+                    stats.total_pledged_by_token.set(i, (t, bal + amount));
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                stats.total_pledged_by_token.push_back((token, amount));
+            }
+        }
+
+        if campaign_funded {
+            stats.campaigns_funded += 1;
+        }
+
+        if campaign_failed {
+            stats.campaigns_failed += 1;
+        }
+
+        if let Some(c) = contributor {
+            if !env.storage().persistent().has(&DataKey::GlobalContributor(c.clone())) {
+                stats.unique_contributors += 1;
+                env.storage().persistent().set(&DataKey::GlobalContributor(c), &true);
+            }
+        }
+
+        env.storage().persistent().set(&DataKey::PlatformStats, &stats);
+    }
+
     /// Sets the admin address and the minimum contribution floor (in stroops).
     /// Panics if already initialized or min_contribution is not positive.
     pub fn initialize(env: Env, admin: Address, min_contribution: i128) {
@@ -309,6 +391,7 @@ impl StellarGoalVaultContract {
             (symbol_short!("Goal"), symbol_short!("Cancel")),
             CampaignCanceled { campaign_id, creator },
         );
+        Self::update_platform_stats(&env, None, false, false, true, None);
     }
 
     pub fn create_campaign(
@@ -403,6 +486,8 @@ impl StellarGoalVaultContract {
             },
         );
 
+        Self::update_platform_stats(&env, None, true, false, false, None);
+
         next_id
     }
 
@@ -479,11 +564,13 @@ impl StellarGoalVaultContract {
             (symbol_short!("Goal"), symbol_short!("Pledge")),
             CampaignPledged {
                 campaign_id,
-                contributor,
-                token,
+                contributor: contributor.clone(),
+                token: token.clone(),
                 amount,
             },
         );
+
+        Self::update_platform_stats(&env, Some((token, amount)), false, false, false, Some(contributor));
     }
 
     /// Updates the campaign metadata. Only the original creator can call this,
@@ -722,6 +809,8 @@ impl StellarGoalVaultContract {
                 );
             }
         }
+
+        Self::update_platform_stats(&env, None, false, true, false, None);
     }
 
     pub fn refund(env: Env, campaign_id: u64, contributor: Address) {
