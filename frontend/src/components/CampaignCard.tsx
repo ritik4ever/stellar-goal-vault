@@ -159,10 +159,10 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
         </div>
 
         <div className="campaign-meta">
-          <span className={`badge badge-${campaign.progress.status}`}>
+          <span className={`badge badge-${campaign.progress.status}`} aria-label={`Status: ${campaign.progress.status}`}>
             {campaign.progress.status}
           </span>
-          <div className="muted"><Countdown deadline={campaign.deadline} /></div>
+          <div className="muted" aria-live="polite"><Countdown deadline={campaign.deadline} /></div>
         </div>
       </div>
 
