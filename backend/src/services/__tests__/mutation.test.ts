@@ -52,9 +52,9 @@ let getEventsByLedger: EventHistoryModule['getEventsByLedger'];
 let getEventsBySource: EventHistoryModule['getEventsBySource'];
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
-const CONTRIBUTOR2 = `G${'C'.repeat(55)}`;
+const CREATOR = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
+const CONTRIBUTOR = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI";
+const CONTRIBUTOR2 = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
 const TX_HASH = 'b'.repeat(64);
 const TX_HASH2 = 'c'.repeat(64);
 
@@ -91,13 +91,21 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  fs.rmSync(TEST_DB_PATH, { force: true });
+  try {
+    fs.rmSync(TEST_DB_PATH, { force: true });
+  } catch {
+    // Ignore EPERM locks on Windows
+  }
 });
 
 beforeEach(() => {
   const db = getDb();
   db.prepare('DELETE FROM campaign_events').run();
   db.prepare('DELETE FROM pledges').run();
+  db.prepare('DELETE FROM notifications').run();
+  db.prepare('DELETE FROM notifications').run();
+  db.prepare('DELETE FROM notifications').run();
+  db.prepare('DELETE FROM notifications').run();
   db.prepare('DELETE FROM campaigns').run();
 });
 
@@ -147,7 +155,7 @@ describe('calculateProgress – boundary conditions', () => {
     expect(oneMillisecondAfter.canRefund).toBe(true);
   });
 
-  it('is "funded" when pledgedAmount exactly equals targetAmount before deadline', () => {
+  it('is "funded" when pledgedAmount exactly equals targetAmount before deadline', async () => {
     const campaign = createCampaign({
       creator: CREATOR,
       title: 'Exactly funded',
@@ -156,7 +164,7 @@ describe('calculateProgress – boundary conditions', () => {
       targetAmount: 50,
       deadline: future(),
     });
-    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 50 });
+    await addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 50 });
     const updated = getCampaign(campaign.id)!;
     const progress = calculateProgress(updated);
     expect(progress.status).toBe('funded');
@@ -166,7 +174,7 @@ describe('calculateProgress – boundary conditions', () => {
     expect(progress.canPledge).toBe(true);
   });
 
-  it('canClaim is true only when deadline passed AND pledgedAmount >= targetAmount', () => {
+  it('canClaim is true only when deadline passed AND pledgedAmount >= targetAmount', async () => {
     const campaign = createCampaign({
       creator: CREATOR,
       title: 'Claimable',
@@ -175,7 +183,7 @@ describe('calculateProgress – boundary conditions', () => {
       targetAmount: 50,
       deadline: future(),
     });
-    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 50 });
+    await addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 50 });
     // Manually move deadline to the past so canClaim becomes true
     getDb().prepare('UPDATE campaigns SET deadline = ? WHERE id = ?').run(past(), campaign.id);
     const updated = getCampaign(campaign.id)!;
@@ -185,7 +193,7 @@ describe('calculateProgress – boundary conditions', () => {
     expect(progress.status).toBe('funded');
   });
 
-  it('canRefund is true only when deadline passed AND pledgedAmount < targetAmount', () => {
+  it('canRefund is true only when deadline passed AND pledgedAmount < targetAmount', async () => {
     const campaign = createCampaign({
       creator: CREATOR,
       title: 'Refundable',

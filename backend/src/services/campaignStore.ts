@@ -379,7 +379,7 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
     if (ftsMatchTerm) {
       whereClauses.push(`(
       campaigns.id IN (SELECT id FROM campaigns_fts WHERE campaigns_fts MATCH ?)
-      OR LOWER(campaigns.creator) = LOWER(?)
+      OR LOWER(campaigns.creator) LIKE LOWER(?)
       OR campaigns.id = ?
     )`);
       params.push(ftsMatchTerm, creatorExactTerm, exactTerm);

@@ -1,11 +1,32 @@
 import request from 'supertest';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 // Set environment before importing app
 process.env.DB_PATH = ':memory:';
 process.env.NODE_ENV = 'test';
 process.env.CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 process.env.SOROBAN_RPC_URL = 'http://localhost:8000';
+
+import { initCampaignStore } from './services/campaignStore';
+import { config } from './config';
+
+beforeAll(() => {
+  initCampaignStore();
+  config.contractId = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  config.sorobanRpcUrl = 'http://localhost:8000';
+
+  vi.spyOn(global, 'fetch').mockImplementation(() => {
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ result: { status: 'healthy' } }),
+    } as Response);
+  });
+});
+
+afterAll(() => {
+  vi.restoreAllMocks();
+});
 
 import { app } from './index';
 

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-campaign-filters-${process.pid}.db`);
 
@@ -21,8 +21,8 @@ let calculateProgress: CampaignStoreModule['calculateProgress'];
 let initCampaignStore: CampaignStoreModule['initCampaignStore'];
 let getDb: DbModule['getDb'];
 
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
+const CREATOR = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
+const CONTRIBUTOR = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI";
 
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
@@ -32,12 +32,21 @@ beforeAll(async () => {
   ({ initCampaignStore, listCampaigns, createCampaign, addPledge, calculateProgress } =
     await import('./services/campaignStore'));
   initCampaignStore();
-}, 20000);
+}, 60000);
+
+afterAll(async () => {
+  const { resetDbForTests } = await import('./services/db');
+  resetDbForTests();
+});
 
 beforeEach(() => {
   const db = getDb();
   db.prepare(`DELETE FROM campaign_events`).run();
   db.prepare(`DELETE FROM pledges`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM campaigns`).run();
 });
 

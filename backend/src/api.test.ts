@@ -12,8 +12,8 @@ vi.hoisted(() => {
 });
 
 import { app } from './index';
-import { createCampaign, initCampaignStore } from './services/campaignStore';
-import { getDb } from './services/db';
+import { initCampaignStore } from './services/campaignStore';
+import { getDb, resetDbForTests } from './services/db';
 
 // Mock sorobanRpc to avoid real network calls during tests
 vi.mock('./services/sorobanRpc', () => ({
@@ -49,18 +49,27 @@ beforeAll(async () => {
 
 afterAll(() => {
   server.close();
-  fs.rmSync(TEST_DB_PATH, { force: true });
+  resetDbForTests();
+  try {
+    fs.rmSync(TEST_DB_PATH, { force: true });
+  } catch {
+    // Ignore EPERM locks on Windows
+  }
 });
 
 beforeEach(() => {
   const db = getDb();
   db.prepare(`DELETE FROM campaign_events`).run();
   db.prepare(`DELETE FROM pledges`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM campaigns`).run();
 });
 
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
+const CREATOR = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
+const CONTRIBUTOR = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI";
 
 async function post(apiPath: string, body: unknown) {
   const response = await fetch(`${baseUrl}${apiPath}`, {

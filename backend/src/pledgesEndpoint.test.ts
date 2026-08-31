@@ -24,9 +24,9 @@ let getContributorPledgedTotal: CampaignStoreModule['getContributorPledgedTotal'
 let getDb: DbModule['getDb'];
 let parsePledgeListPaginationQuery: ValidationModule['parsePledgeListPaginationQuery'];
 
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR_A = `G${'B'.repeat(55)}`;
-const CONTRIBUTOR_B = `G${'C'.repeat(55)}`;
+const CREATOR = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
+const CONTRIBUTOR_A = "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI";
+const CONTRIBUTOR_B = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
 
 function nowInSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -65,6 +65,10 @@ beforeEach(() => {
   const db = getDb();
   db.prepare(`DELETE FROM campaign_events`).run();
   db.prepare(`DELETE FROM pledges`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM campaigns`).run();
 });
 

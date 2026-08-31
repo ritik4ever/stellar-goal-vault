@@ -1,8 +1,9 @@
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import { config } from '../config';
-import type { CampaignStatus, CampaignSortField, SortOrder } from '../services/campaignStore';
+import { isValidStellarPublicKey } from './stellarAddress';
 import { httpsOnlyUrlSchema } from './urlSafety';
+import type { CampaignStatus, CampaignSortField, SortOrder } from "../services/campaignStore";
 
 extendZodWithOpenApi(z);
 
@@ -65,7 +66,10 @@ export const stellarAccountIdSchema = z
   .regex(
     STELLAR_ACCOUNT_REGEX,
     'Must be a valid Stellar account ID (starts with G and is exactly 56 characters).',
-  );
+  )
+  .refine(isValidStellarPublicKey, {
+    message: 'creator must be a valid Stellar public key',
+  });
 
 export const assetCodeSchema = z
   .string()
@@ -107,19 +111,20 @@ export const createCampaignPayloadSchema = z.object({
     .trim()
     .min(4, 'Title must be at least 4 characters.')
     .max(80)
-    .refine((val) => val.trim().length >= 4, 'Title cannot be only whitespace.')
-    .refine((val) => !containsScriptTag(val), 'Title cannot contain script tags.')
-    .refine((val) => !containsSqlComment(val), 'Title cannot contain SQL comment sequences.')
-    .transform((val) => sanitizeInput(val)),
+    .transform(sanitizeInput)
+    .refine((val) => !containsScriptTag(val), { message: 'Title cannot contain script tags.' })
+    .refine((val) => !containsSqlComment(val), { message: 'Title cannot contain SQL comment sequences.' }),
   description: z
     .string()
     .trim()
     .min(20, 'Description must be at least 20 characters.')
     .max(500)
-    .refine((val) => !containsScriptTag(val), 'Description cannot contain script tags.')
-    .refine((val) => !containsSqlComment(val), 'Description cannot contain SQL comment sequences.')
-    .transform((val) => sanitizeInput(val)),
-  acceptedTokens: z.array(assetCodeSchema).min(1, 'At least one accepted token is required.'),
+    .transform(sanitizeInput)
+    .refine((val) => !containsScriptTag(val), { message: 'Description cannot contain script tags.' })
+    .refine((val) => !containsSqlComment(val), { message: 'Description cannot contain SQL comment sequences.' }),
+  acceptedTokens: z
+    .array(assetCodeSchema)
+    .min(1, 'At least one accepted token is required.'),
   targetAmount: positiveAmountSchema,
   deadline: unixTimestampSchema,
   // Campaign metadata URLs are user-controllable (issue #308). The
@@ -197,29 +202,29 @@ function singleCampaignListQueryParam(value: unknown): string | undefined {
 
 function parsePositiveIntegerQueryParam(
   value: unknown,
-  field: 'page' | 'limit' | 'pageSize',
+  field: string,
   max?: number,
-): { ok: true; value?: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+): { ok: true; value?: number } | { ok: false; issues: z.ZodIssue[] } {
   const raw = singleCampaignListQueryParam(value);
   if (raw === undefined) {
     return { ok: true };
   }
 
   const parsed = Number(raw);
-  const issues: z.core.$ZodIssue[] = [];
+  const issues: z.ZodIssue[] = [];
 
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1) {
     issues.push({
       code: 'custom',
       message: `${field} must be a positive integer.`,
       path: [field],
-    });
+    } as any);
   } else if (max !== undefined && parsed > max) {
     issues.push({
       code: 'custom',
       message: `${field} must be an integer from 1 to ${max}.`,
       path: [field],
-    });
+    } as any);
   }
 
   if (issues.length > 0) {
@@ -237,7 +242,9 @@ function parsePositiveIntegerQueryParam(
 export function parseCampaignListPaginationQuery(query: {
   page?: unknown;
   limit?: unknown;
-}): { ok: true; page?: number; limit?: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+}):
+  | { ok: true; page?: number; limit?: number }
+  | { ok: false; issues: z.ZodIssue[] } {
   const pageStr = singleCampaignListQueryParam(query.page);
   const limitStr = singleCampaignListQueryParam(query.limit);
 
@@ -252,28 +259,28 @@ export function parseCampaignListPaginationQuery(query: {
           code: 'custom',
           message: 'Pagination requires both page and limit query parameters.',
           path: pageStr === undefined ? ['page'] : ['limit'],
-        },
+        } as any,
       ],
     };
   }
 
   const pageNum = Number(pageStr);
   const limitNum = Number(limitStr);
-  const issues: z.core.$ZodIssue[] = [];
+  const issues: z.ZodIssue[] = [];
 
   if (!Number.isFinite(pageNum) || !Number.isInteger(pageNum) || pageNum < 1) {
     issues.push({
       code: 'custom',
       message: 'page must be a positive integer.',
       path: ['page'],
-    });
+    } as any);
   }
   if (!Number.isFinite(limitNum) || !Number.isInteger(limitNum) || limitNum < 1 || limitNum > 100) {
     issues.push({
       code: 'custom',
       message: 'limit must be an integer from 1 to 100.',
       path: ['limit'],
-    });
+    } as any);
   }
 
   if (issues.length > 0) {
@@ -286,10 +293,10 @@ export function parseCampaignListPaginationQuery(query: {
 export function parseHistoryPaginationQuery(query: {
   page?: unknown;
   pageSize?: unknown;
-}): { ok: true; page: number; pageSize: number } | { ok: false; issues: z.core.$ZodIssue[] } {
-  const parsedPage = parsePositiveIntegerQueryParam(query.page, 'page');
-  const parsedPageSize = parsePositiveIntegerQueryParam(query.pageSize, 'pageSize', 100);
-  const issues: z.core.$ZodIssue[] = [];
+}): { ok: true; page: number; pageSize: number } | { ok: false; issues: z.ZodIssue[] } {
+  const parsedPage = parsePositiveIntegerQueryParam(query.page, "page");
+  const parsedPageSize = parsePositiveIntegerQueryParam(query.pageSize, "pageSize", 100);
+  const issues: z.ZodIssue[] = [];
 
   if (!parsedPage.ok) {
     issues.push(...parsedPage.issues);
@@ -312,10 +319,12 @@ export function parseHistoryPaginationQuery(query: {
 export function parsePledgeListPaginationQuery(query: {
   page?: unknown;
   limit?: unknown;
-}): { ok: true; page: number; limit: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+}):
+  | { ok: true; page: number; limit: number }
+  | { ok: false; issues: z.ZodIssue[] } {
   const parsedPage = parsePositiveIntegerQueryParam(query.page, 'page');
   const parsedLimit = parsePositiveIntegerQueryParam(query.limit, 'limit', 100);
-  const issues: z.core.$ZodIssue[] = [];
+  const issues: z.ZodIssue[] = [];
 
   if (!parsedPage.ok) {
     issues.push(...parsedPage.issues);
@@ -341,7 +350,11 @@ function parseIso8601Timestamp(value: unknown): number | null {
   }
 
   const timestamp = new Date(value).getTime();
-  return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : null;
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  return Math.floor(timestamp / 1000);
 }
 
 function parseAssetCodes(value: unknown): string[] | null {
@@ -349,10 +362,7 @@ function parseAssetCodes(value: unknown): string[] | null {
     return null;
   }
 
-  const codes = value
-    .split(',')
-    .map((code) => code.trim().toUpperCase())
-    .filter((code) => code.length > 0);
+  const codes = value.split(',').map(code => code.trim().toUpperCase()).filter(code => code.length > 0);
   return codes.length > 0 ? codes : null;
 }
 
@@ -370,160 +380,166 @@ export interface CampaignListQueryParams {
   createdBefore?: number;
 }
 
-export function parseCampaignListQuery(
-  query: Record<string, unknown>,
-): { ok: true; data: CampaignListQueryParams } | { ok: false; issues: z.core.$ZodIssue[] } {
-  const issues: z.core.$ZodIssue[] = [];
+export function parseCampaignListQuery(query: Record<string, unknown>):
+  { ok: true; data: CampaignListQueryParams } | { ok: false; issues: z.ZodIssue[] } {
+  const issues: z.ZodIssue[] = [];
+
   const pageStr = singleCampaignListQueryParam(query.page);
   const limitStr = singleCampaignListQueryParam(query.limit);
+
   let page: number | undefined;
   let limit: number | undefined;
 
   if (pageStr === undefined && limitStr === undefined) {
-    // Unpaginated lists are supported when both parameters are omitted.
+    page = undefined;
+    limit = undefined;
   } else if (pageStr === undefined || limitStr === undefined) {
     issues.push({
-      code: 'custom',
-      message: 'Pagination requires both page and limit query parameters.',
-      path: pageStr === undefined ? ['page'] : ['limit'],
-    });
+      code: "custom",
+      message: "Pagination requires both page and limit query parameters.",
+      path: pageStr === undefined ? ["page"] : ["limit"],
+    } as any);
   } else {
     const pageNum = Number(pageStr);
     const limitNum = Number(limitStr);
+
     if (!Number.isFinite(pageNum) || !Number.isInteger(pageNum) || pageNum < 1) {
-      issues.push({ code: 'custom', message: 'page must be a positive integer.', path: ['page'] });
+      issues.push({
+        code: "custom",
+        message: "page must be a positive integer.",
+        path: ["page"],
+      } as any);
     } else {
       page = pageNum;
     }
-    if (
-      !Number.isFinite(limitNum) ||
-      !Number.isInteger(limitNum) ||
-      limitNum < 1 ||
-      limitNum > 100
-    ) {
+
+    if (!Number.isFinite(limitNum) || !Number.isInteger(limitNum) || limitNum < 1 || limitNum > 100) {
       issues.push({
-        code: 'custom',
-        message: 'limit must be an integer from 1 to 100.',
-        path: ['limit'],
-      });
+        code: "custom",
+        message: "limit must be an integer from 1 to 100.",
+        path: ["limit"],
+      } as any);
     } else {
       limit = limitNum;
     }
   }
 
-  const search = normalizeQueryValue(query.search);
-  const q = normalizeQueryValue(query.q);
+  const searchQuery = normalizeQueryValue(query.search) || normalizeQueryValue(query.q);
+
   const assetCodes = parseAssetCodes(query.asset);
-  let asset: string[] | undefined;
+  let assetList: string[] | undefined = undefined;
   if (query.asset !== undefined && assetCodes === null) {
     issues.push({
-      code: 'custom',
-      message: 'asset must be a comma-separated list of valid asset codes.',
-      path: ['asset'],
-    });
+      code: "custom",
+      message: "asset must be a comma-separated list of valid asset codes.",
+      path: ["asset"],
+    } as any);
   } else if (assetCodes) {
-    const validCodes = assetCodes.filter((code) => config.allowedAssets.includes(code));
+    const validCodes = assetCodes.filter(code => config.allowedAssets.includes(code));
     if (validCodes.length !== assetCodes.length) {
       issues.push({
-        code: 'custom',
-        message: `Invalid asset code(s). Supported assets: ${config.allowedAssets.join(', ')}`,
-        path: ['asset'],
-      });
+        code: "custom",
+        message: `Invalid asset code(s). Supported assets: ${config.allowedAssets.join(", ")}`,
+        path: ["asset"],
+      } as any);
     } else {
-      asset = validCodes;
+      assetList = validCodes;
     }
   }
 
-  const statusValue = normalizeQueryValue(query.status)?.toLowerCase();
-  const statuses: CampaignStatus[] = ['open', 'funded', 'claimed', 'failed'];
-  let status: CampaignStatus | undefined;
-  if (statusValue !== undefined) {
-    if (!statuses.includes(statusValue as CampaignStatus)) {
+  const statusStr = normalizeQueryValue(query.status);
+  let status: CampaignStatus | undefined = undefined;
+  const VALID_STATUSES: CampaignStatus[] = ['open', 'funded', 'claimed', 'failed'];
+  if (statusStr !== undefined) {
+    const lowerStatus = statusStr.toLowerCase();
+    if (!VALID_STATUSES.includes(lowerStatus as CampaignStatus)) {
       issues.push({
-        code: 'custom',
-        message: `status must be one of: ${statuses.join(', ')}`,
-        path: ['status'],
-      });
+        code: "custom",
+        message: `status must be one of: ${VALID_STATUSES.join(", ")}`,
+        path: ["status"],
+      } as any);
     } else {
-      status = statusValue as CampaignStatus;
+      status = lowerStatus as CampaignStatus;
     }
   }
 
-  const sortValue = normalizeQueryValue(query.sort);
-  const sortFields: CampaignSortField[] = [
-    'createdAt',
-    'deadline',
-    'pledgedAmount',
-    'targetAmount',
-  ];
-  let sort: CampaignSortField | undefined;
-  if (sortValue !== undefined) {
-    if (!sortFields.includes(sortValue as CampaignSortField)) {
+  const sortStr = normalizeQueryValue(query.sort);
+  let sort: CampaignSortField | undefined = undefined;
+  const VALID_SORTS = ['newest', 'deadline', 'percentFunded', 'totalPledged', 'createdAt', 'pledgedAmount', 'targetAmount'];
+  if (sortStr !== undefined) {
+    if (!VALID_SORTS.includes(sortStr)) {
       issues.push({
-        code: 'custom',
-        message: `sort must be one of: ${sortFields.join(', ')}`,
-        path: ['sort'],
-      });
+        code: "custom",
+        message: `sort must be one of: ${VALID_SORTS.join(", ")}`,
+        path: ["sort"],
+      } as any);
     } else {
-      sort = sortValue as CampaignSortField;
+      if (sortStr === 'newest') {
+        sort = 'createdAt';
+      } else if (sortStr === 'percentFunded' || sortStr === 'totalPledged') {
+        sort = 'pledgedAmount';
+      } else {
+        sort = sortStr as CampaignSortField;
+      }
     }
   }
 
-  const orderValue = normalizeQueryValue(query.order);
-  const orders: SortOrder[] = ['asc', 'desc'];
-  let order: SortOrder | undefined;
-  if (orderValue !== undefined) {
-    if (!orders.includes(orderValue as SortOrder)) {
+  const orderStr = normalizeQueryValue(query.order);
+  let order: SortOrder | undefined = undefined;
+  const VALID_ORDERS: SortOrder[] = ['asc', 'desc'];
+  if (orderStr !== undefined) {
+    if (!VALID_ORDERS.includes(orderStr as SortOrder)) {
       issues.push({
-        code: 'custom',
-        message: `order must be one of: ${orders.join(', ')}`,
-        path: ['order'],
-      });
+        code: "custom",
+        message: `order must be one of: ${VALID_ORDERS.join(", ")}`,
+        path: ["order"],
+      } as any);
     } else {
-      order = orderValue as SortOrder;
+      order = orderStr as SortOrder;
     }
   }
 
-  // `includeDeleted` is the canonical param; `include_archived` is accepted as an
-  // alias so archived/soft-deleted campaigns can be included in the campaign list.
-  const includeDeletedValue =
-    singleCampaignListQueryParam(query.includeDeleted) ??
-    singleCampaignListQueryParam(query.include_archived);
-  let includeDeleted: boolean | undefined;
-  if (includeDeletedValue !== undefined) {
-    if (includeDeletedValue !== 'true' && includeDeletedValue !== 'false') {
+  const includeDeletedStr = singleCampaignListQueryParam(query.includeDeleted);
+  let includeDeleted: boolean | undefined = undefined;
+  if (includeDeletedStr !== undefined) {
+    if (includeDeletedStr !== 'true' && includeDeletedStr !== 'false') {
       issues.push({
-        code: 'custom',
-        message: "includeDeleted (or include_archived) must be 'true' or 'false'.",
-        path: ['includeDeleted'],
-      });
+        code: "custom",
+        message: "includeDeleted must be 'true' or 'false'.",
+        path: ["includeDeleted"],
+      } as any);
     } else {
-      includeDeleted = includeDeletedValue === 'true';
+      includeDeleted = includeDeletedStr === 'true';
     }
   }
 
-  const createdAfterValue = normalizeQueryValue(query.createdAfter);
-  const createdBeforeValue = normalizeQueryValue(query.createdBefore);
-  let createdAfter: number | undefined;
-  let createdBefore: number | undefined;
-  if (createdAfterValue !== undefined) {
-    createdAfter = parseIso8601Timestamp(createdAfterValue) ?? undefined;
-    if (createdAfter === undefined) {
+  const createdAfterStr = normalizeQueryValue(query.createdAfter);
+  let createdAfter: number | undefined = undefined;
+  if (createdAfterStr !== undefined) {
+    const timestamp = parseIso8601Timestamp(createdAfterStr);
+    if (timestamp === null) {
       issues.push({
-        code: 'custom',
-        message: 'createdAfter must be a valid ISO 8601 timestamp.',
-        path: ['createdAfter'],
-      });
+        code: "custom",
+        message: "createdAfter must be a valid ISO 8601 timestamp.",
+        path: ["createdAfter"],
+      } as any);
+    } else {
+      createdAfter = timestamp;
     }
   }
-  if (createdBeforeValue !== undefined) {
-    createdBefore = parseIso8601Timestamp(createdBeforeValue) ?? undefined;
-    if (createdBefore === undefined) {
+
+  const createdBeforeStr = normalizeQueryValue(query.createdBefore);
+  let createdBefore: number | undefined = undefined;
+  if (createdBeforeStr !== undefined) {
+    const timestamp = parseIso8601Timestamp(createdBeforeStr);
+    if (timestamp === null) {
       issues.push({
-        code: 'custom',
-        message: 'createdBefore must be a valid ISO 8601 timestamp.',
-        path: ['createdBefore'],
-      });
+        code: "custom",
+        message: "createdBefore must be a valid ISO 8601 timestamp.",
+        path: ["createdBefore"],
+      } as any);
+    } else {
+      createdBefore = timestamp;
     }
   }
 
@@ -536,9 +552,9 @@ export function parseCampaignListQuery(
     data: {
       page,
       limit,
-      q,
-      search,
-      asset,
+      q: query.q ? normalizeQueryValue(query.q) : undefined,
+      search: query.search ? normalizeQueryValue(query.search) : undefined,
+      asset: assetList,
       status,
       sort,
       order,
@@ -549,42 +565,6 @@ export function parseCampaignListQuery(
   };
 }
 
-export function parseTimelineQuery(query: {
-  cursor?: unknown;
-  limit?: unknown;
-}):
-  | { ok: true; cursor?: string; limit: number }
-  | { ok: false; issues: z.core.$ZodIssue[] } {
-  const issues: z.core.$ZodIssue[] = [];
-
-  let cursor: string | undefined;
-  if (query.cursor !== undefined) {
-    if (typeof query.cursor !== 'string' || query.cursor === '') {
-      issues.push({
-        code: 'custom',
-        message: 'Cursor must be a non-empty string.',
-        path: ['cursor'],
-      } as z.core.$ZodIssue);
-    } else {
-      cursor = query.cursor;
-    }
-  }
-
-  const parsedLimit = parsePositiveIntegerQueryParam(query.limit, 'limit', 100);
-  if (!parsedLimit.ok) {
-    issues.push(...parsedLimit.issues);
-  }
-
-  if (issues.length > 0) {
-    return { ok: false, issues };
-  }
-
-  return {
-    ok: true,
-    cursor,
-    limit: parsedLimit.ok ? (parsedLimit.value ?? 20) : 20,
-  };
-}
 
 export type ValidationIssue = {
   field: string;

@@ -22,7 +22,11 @@ describe('Event Metadata Support', () => {
     const db = getDb();
     db.prepare(`DELETE FROM campaign_events`).run();
     db.prepare(`DELETE FROM pledges`).run();
-    db.prepare(`DELETE FROM campaigns`).run();
+    db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM campaigns`).run();
   });
 
   function ensureCampaign(campaignId: string): void {
@@ -34,7 +38,7 @@ describe('Event Metadata Support', () => {
       )
       .run(
         campaignId,
-        `G${'A'.repeat(55)}`,
+        "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7",
         `Campaign ${campaignId}`,
         'Synthetic campaign record for event metadata tests.',
         JSON.stringify(['USDC']),

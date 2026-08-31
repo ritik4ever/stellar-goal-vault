@@ -100,7 +100,7 @@ export async function verifyRefundTransaction(txHash: string): Promise<VerifiedS
     // the JSON-RPC 2.0 spec; `id` is included for traceability and can be the
     // transaction hash so logs correlate easily.
     const response = await axios.post(
-      config.sorobanRpcUrl,
+      config.sorobanRpcUrl!,
       {
         jsonrpc: '2.0',
         id: txHash,

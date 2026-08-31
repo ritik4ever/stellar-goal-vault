@@ -16,7 +16,9 @@ describe('OpenAPI documentation endpoints', () => {
     initCampaignStore();
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    const { resetDbForTests } = await import('./services/db');
+    resetDbForTests();
     try {
       fs.rmSync(TEST_DB_PATH, { force: true });
     } catch {
