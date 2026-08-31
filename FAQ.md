@@ -1,387 +1,363 @@
 # Frequently Asked Questions
 
-Answers to the most common contributor and user questions about **Stellar Goal Vault**.
+Common questions about **Stellar Goal Vault** organized by audience.
 
 ---
 
 ## Table of Contents
 
-1. [How do I get testnet XLM for development and testing?](#1-how-do-i-get-testnet-xlm-for-development-and-testing)
-2. [How do I set up Freighter wallet for pledge transactions?](#2-how-do-i-set-up-freighter-wallet-for-pledge-transactions)
-3. [How do I deploy the Soroban contract?](#3-how-do-i-deploy-the-soroban-contract)
-4. [How do I reset the local development database?](#4-how-do-i-reset-the-local-development-database)
-5. [How do I run the load test script?](#5-how-do-i-run-the-load-test-script)
-6. [Why does my pledge fail?](#6-why-does-my-pledge-fail)
-7. [How do I configure environment variables?](#7-how-do-i-configure-environment-variables)
-8. [How do I run the full stack locally with Docker?](#8-how-do-i-run-the-full-stack-locally-with-docker)
-9. [How do I run the contract property tests?](#9-how-do-i-run-the-contract-property-tests)
-10. [How do I contribute a new feature?](#10-how-do-i-contribute-a-new-feature)
+**For Creators**
+1. [How do I create a campaign?](#1-how-do-i-create-a-campaign)
+2. [What tokens can my campaign accept?](#2-what-tokens-can-my-campaign-accept)
+3. [Can I cancel or delete a campaign?](#3-can-i-cancel-or-delete-a-campaign)
+4. [Can I update my campaign after publishing it?](#4-can-i-update-my-campaign-after-publishing-it)
+5. [How do I claim a funded vault?](#5-how-do-i-claim-a-funded-vault)
+6. [What happens if my campaign misses its target?](#6-what-happens-if-my-campaign-misses-its-target)
+7. [Can I extend my campaign deadline?](#7-can-i-extend-my-campaign-deadline)
+
+**For Backers**
+8. [How does pledging work?](#8-how-does-pledging-work)
+9. [Can I cancel a pledge?](#9-can-i-cancel-a-pledge)
+10. [How do I get a refund?](#10-how-do-i-get-a-refund)
+11. [What wallets are supported?](#11-what-wallets-are-supported)
+12. [How do I set up Freighter?](#12-how-do-i-set-up-freighter)
+13. [Why did my pledge fail?](#13-why-did-my-pledge-fail)
+14. [Is there a minimum pledge amount?](#14-is-there-a-minimum-pledge-amount)
+
+**Technical**
+15. [Is mainnet supported?](#15-is-mainnet-supported)
+16. [What are the fees?](#16-what-are-the-fees)
+17. [How do I get testnet XLM?](#17-how-do-i-get-testnet-xlm)
+18. [How do I deploy the Soroban contract?](#18-how-do-i-deploy-the-soroban-contract)
+19. [How do I reset the local database?](#19-how-do-i-reset-the-local-database)
+20. [How do I configure environment variables?](#20-how-do-i-configure-environment-variables)
+21. [How do I run the full stack locally?](#21-how-do-i-run-the-full-stack-locally)
+22. [How do I contribute a new feature?](#22-how-do-i-contribute-a-new-feature)
 
 ---
 
-### 1. How do I get testnet XLM for development and testing?
+## For Creators
 
-Stellar testnet XLM is free and available through the Stellar Laboratory Friendbot.
+### 1. How do I create a campaign?
 
-**Steps:**
+Open the dashboard at `http://localhost:3000`, click **New Campaign**, and fill in:
 
-1. Create a Stellar testnet account using the [Stellar Laboratory](https://laboratory.stellar.org/#account-creator?network=testnet).
-2. Fund the account using the **Friendbot** button on the same page.
-3. Your account will receive 10,000 free testnet XLM.
+- **Title** — 3–120 characters
+- **Description** — optional, up to 2000 characters
+- **Accepted tokens** — one or more of `USDC`, `XLM`, `ARS`
+- **Target amount** — total you need to raise
+- **Deadline** — must be a future date
 
-Alternatively, use the Friendbot API directly:
+The campaign is created locally via `POST /api/campaigns`. Once the Soroban contract integration is live, creation will also record the campaign on-chain.
+
+---
+
+### 2. What tokens can my campaign accept?
+
+By default, campaigns can accept `USDC`, `XLM`, and `ARS`. The allowed set is controlled by the `ALLOWED_ASSETS` environment variable on the backend, so a self-hosted deployment can add or restrict tokens at the config level.
+
+When a campaign accepts multiple tokens, contributors choose which one to pledge and the dashboard shows a per-token progress bar.
+
+---
+
+### 3. Can I cancel or delete a campaign?
+
+Not directly through the UI yet. Campaigns transition automatically between states (`open` → `funded`/`failed`) based on pledges and the deadline. There is no manual cancel flow in the current MVP.
+
+If you need to remove a test campaign in a local development environment, you can delete it directly from the SQLite database — see [FAQ #19](#19-how-do-i-reset-the-local-database).
+
+---
+
+### 4. Can I update my campaign after publishing it?
+
+The Soroban contract exposes `update_metadata` for on-chain updates before the deadline:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- update_metadata \
+  --campaign_id 1 \
+  --creator $CREATOR_ADDRESS \
+  --new_metadata "Updated description"
+```
+
+The contract emits a `MetadataUpdated` event containing the old and new values. The backend event indexer picks this up automatically and updates local state.
+
+You cannot change `targetAmount`, `deadline`, or `acceptedTokens` after creation.
+
+---
+
+### 5. How do I claim a funded vault?
+
+Once a campaign reaches its target **and** the deadline has passed, the creator can claim it. Send a signed claim transaction through the frontend or call the endpoint directly:
+
+```bash
+curl -X POST http://localhost:3001/api/campaigns/:id/claim \
+  -H "Content-Type: application/json" \
+  -d '{"creator": "G...", "transactionHash": "abc123..."}'
+```
+
+The campaign status moves to `claimed` and the funds are released on-chain via the Soroban contract.
+
+---
+
+### 6. What happens if my campaign misses its target?
+
+If the deadline passes without reaching `targetAmount`, the campaign status changes to `failed`. No further pledges are accepted. Contributors can then request refunds for their pledges — the process is described in [FAQ #10](#10-how-do-i-get-a-refund).
+
+---
+
+### 7. Can I extend my campaign deadline?
+
+Yes, through on-chain governance. Any existing contributor can request an extension:
+
+```bash
+stellar contract invoke --id $CONTRACT_ID -- request_deadline_extension \
+  --campaign_id 1 \
+  --caller $CONTRIBUTOR_ADDRESS \
+  --new_deadline <unix_timestamp>
+```
+
+The extension is applied once more than 50% of unique contributors approve it. Constraints:
+
+- New deadline must be later than the current one
+- Cannot exceed 180 days from campaign creation
+
+---
+
+## For Backers
+
+### 8. How does pledging work?
+
+1. Connect your Freighter wallet (see [FAQ #12](#12-how-do-i-set-up-freighter))
+2. Open a campaign that is in `open` status
+3. Enter a pledge amount and select a token if the campaign accepts more than one
+4. Freighter prompts you to sign the Soroban transaction
+5. Once confirmed on-chain, the backend reconciles the pledge and the campaign progress updates
+
+Off-chain: the pledge is recorded locally first via `POST /api/campaigns/:id/pledges`. The Soroban transaction is submitted separately and the confirmed hash is reconciled via `POST /api/campaigns/:id/pledges/reconcile`.
+
+---
+
+### 9. Can I cancel a pledge?
+
+No. Once submitted, pledges are final. The on-chain Soroban contract does not expose a cancel instruction. If the campaign fails (misses its target by the deadline), you can request a full refund — see [FAQ #10](#10-how-do-i-get-a-refund).
+
+---
+
+### 10. How do I get a refund?
+
+Refunds are available when a campaign's status is `failed`. The backend calls the Soroban contract to verify the refund transaction and return the pledged amount:
+
+```bash
+curl -X POST http://localhost:3001/api/campaigns/:id/refund \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contributor": "G...",
+    "soroban": {
+      "txHash": "...",
+      "contractId": "C...",
+      "networkPassphrase": "Test SDF Network ; September 2015",
+      "rpcUrl": "https://soroban-testnet.stellar.org:443",
+      "walletAddress": "G..."
+    }
+  }'
+```
+
+The `refundedAmount` in the response confirms how much was returned.
+
+---
+
+### 11. What wallets are supported?
+
+**[Freighter](https://freighter.app)** is the only supported wallet right now. It is a browser extension available for Chrome and Firefox that signs Soroban transactions natively.
+
+Support for other Stellar wallets (e.g., Lobstr, xBull) is not in scope for the current MVP but can be added by implementing the [SEP-0007](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0007.md) URI scheme or [WalletConnect](https://walletconnect.com/) in a future release.
+
+---
+
+### 12. How do I set up Freighter?
+
+1. Install the **Freighter** extension from [freighter.app](https://freighter.app) (Chrome or Firefox)
+2. Click **Create a new wallet** and save your recovery phrase
+3. Go to **Settings → Network** and switch to **Testnet**
+4. Fund your wallet with testnet XLM — see [FAQ #17](#17-how-do-i-get-testnet-xlm)
+5. Open the app — the wallet widget in the header should display your public key
+
+If the header shows "Connect Freighter", click it and approve the connection request in the extension popup. Make sure both the app and Freighter are on the same network.
+
+---
+
+### 13. Why did my pledge fail?
+
+| Cause | What to check |
+|---|---|
+| Campaign is not `open` | Status past deadline or already `funded` |
+| Per-contributor limit hit | `maxPerContributor` set on the campaign |
+| Invalid contributor address | Must be a valid `G...` Stellar public key |
+| Amount is zero or negative | `amount` must be a positive number |
+| Wrong asset code | Asset must be in the campaign's `acceptedTokens` |
+| Contract ID mismatch | Backend `CONTRACT_ID` must match the deployed contract |
+
+Check the campaign status and your contribution history:
+
+```bash
+curl http://localhost:3001/api/campaigns/:id
+curl http://localhost:3001/api/campaigns/:id/contributors
+```
+
+---
+
+### 14. Is there a minimum pledge amount?
+
+Yes. The Soroban contract enforces a minimum contribution of **100 stroops** by default (configurable at deploy time via `initialize(admin, min_contribution)`). Pledges below this threshold are rejected with `"contribution below minimum"`.
+
+On the backend side there is no separate minimum — the contract validation is the authoritative check.
+
+---
+
+## Technical
+
+### 15. Is mainnet supported?
+
+The codebase is mainnet-compatible but the MVP defaults to Stellar **testnet**. To point at mainnet, update your environment variables:
+
+```env
+SOROBAN_RPC_URL=https://soroban-mainnet.stellar.org
+SOROBAN_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
+CONTRACT_ID=<your_mainnet_contract_id>
+```
+
+And regenerate TypeScript bindings against the mainnet contract:
+
+```bash
+NETWORK=mainnet \
+CONTRACT_ID=YOUR_MAINNET_CONTRACT_ID \
+RPC_URL=https://soroban-mainnet.stellar.org \
+NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015" \
+npm run gen:bindings
+```
+
+Before going to mainnet, review the [SECURITY.md](./SECURITY.md) checklist and the known limitations section in the README.
+
+---
+
+### 16. What are the fees?
+
+Stellar Goal Vault itself charges **no fees**. The only costs are standard Stellar network transaction fees:
+
+- **Base fee:** 100 stroops (0.00001 XLM) per operation — set by the Stellar network
+- **Soroban resource fees:** vary based on contract CPU/memory usage, typically a few hundred stroops per transaction
+
+The MVP does not take any protocol-level fee cut. A fee mechanism could be added to the Soroban contract in a future release.
+
+---
+
+### 17. How do I get testnet XLM?
+
+Use the Stellar Friendbot to fund any testnet account for free:
 
 ```bash
 curl -X POST "https://friendbot.stellar.org?addr=YOUR_TESTNET_PUBLIC_KEY"
 ```
 
-**Expected output:**
-
-```json
-{
-  "_links": {
-    "transaction": { "href": "https://horizon-testnet.stellar.org/transactions/..." }
-  }
-}
-```
-
-> **Related:** [Stellar testnet docs](https://developers.stellar.org/docs/learn/fundamentals/networks#testnet)
+Or visit [Stellar Laboratory](https://laboratory.stellar.org/#account-creator?network=testnet) and click the **Friendbot** button. Each request funds the account with 10,000 testnet XLM.
 
 ---
 
-### 2. How do I set up Freighter wallet for pledge transactions?
+### 18. How do I deploy the Soroban contract?
 
-[Freighter](https://freighter.app) is the Stellar browser extension wallet used to sign pledge transactions.
-
-**Steps:**
-
-1. Install the **Freighter** browser extension (Chrome or Firefox).
-2. Open Freighter and click **Create a new wallet**.
-3. Save your recovery phrase in a secure location.
-4. Click **Settings** → **Network** → switch to **Testnet**.
-5. Fund your wallet with testnet XLM (see [FAQ #1](#1-how-do-i-get-testnet-xlm-for-development-and-testing)).
-6. Verify connection by opening the app — the wallet widget in the header should show your public key.
-
-**Troubleshooting:**
-
-- If the widget shows "Connect Freighter", click it and approve the connection in the extension.
-- Ensure both Freighter and the app are on the same network (Testnet).
-- If transactions fail, check that your account has a non-zero XLM balance (minimum reserve is ~1 XLM).
-
-> **Related:** [`frontend/src/services/freighter.ts`](frontend/src/services/freighter.ts) — Freighter integration code
-
----
-
-### 3. How do I deploy the Soroban contract?
-
-The contract lives in the `contracts/` directory and is deployed via the provided shell script.
-
-**Prerequisites:**
-
-- `soroban-cli` installed (see [soroban.stellar.org](https://soroban.stellar.org/docs/getting-started/setup#install-the-soroban-cli))
-- Rust nightly with `wasm32v1-none` target: `rustup target add wasm32v1-none`
-- A funded Stellar testnet secret key
-
-**Steps:**
+**Prerequisites:** Rust + `wasm32-unknown-unknown` target, `soroban-cli`, and a funded testnet secret key.
 
 ```bash
-# From the repository root
-SECRET_KEY="S..." ./scripts/deploy.sh
+SECRET_KEY="S..." npm run deploy:contract
 ```
 
-**What happens:**
-
-1. The script builds the contract with `soroban contract build`
-2. Deploys it to the testnet with `soroban contract deploy`
-3. Saves the contract ID to `contracts/contract_id.txt`
-4. Prints the contract ID to the console
-
-**After deployment:**
+The script builds the contract, deploys it to testnet, and saves the contract ID to `contracts/contract_id.txt`. Update your backend config:
 
 ```bash
-# Update the backend environment
 CONTRACT_ID=$(cat contracts/contract_id.txt)
-sed -i "s/^CONTRACT_ID=.*/CONTRACT_ID=$CONTRACT_ID/" backend/.env
 ```
 
-> **See also:** [RUNBOOK.md — Redeploy the Soroban Contract](./RUNBOOK.md#3-redeploy-the-soroban-contract) for redeployment and rollback procedures.
+For full redeployment and rollback steps, see [RUNBOOK.md](./RUNBOOK.md).
 
 ---
 
-### 4. How do I reset the local development database?
-
-The SQLite database at `backend/data/campaigns.db` stores all campaigns, pledges, and event history.
-
-**Quick reset (deletes all data):**
+### 19. How do I reset the local database?
 
 ```bash
-# Stop the backend first
+# Stop the backend
 docker compose stop backend
 
-# Delete the database file
+# Delete the SQLite file
 rm -f backend/data/campaigns.db
 
-# Restart
+# Restart — the schema is recreated automatically on startup
 docker compose start backend
 ```
 
-**Reset with deterministic seed data:**
+To seed deterministic test data after resetting:
 
 ```bash
-# After deleting the DB (steps above)
 cd backend && npx ts-node src/services/seedDeterministic.ts
 ```
 
-This seeds 3 campaigns (open, funded, claimed) and 2 pledges for reproducible testing.
-
-> **See also:** [RUNBOOK.md — Reset the Dev Database](./RUNBOOK.md#1-reset-the-dev-database) and [`backend/src/services/seedDeterministic.ts`](backend/src/services/seedDeterministic.ts)
-
 ---
 
-### 5. How do I run the load test script?
+### 20. How do I configure environment variables?
 
-The backend includes an Autocannon-based load test for simulating concurrent traffic.
-
-**Prerequisites:**
-
-- Backend running locally:
-  ```bash
-  npm run dev:backend
-  ```
-
-**Run the default test:**
-
-```bash
-cd backend
-npm run load:test
-```
-
-**Custom test parameters:**
-
-```bash
-cd backend
-npm run load:test -- \
-  --base-url http://127.0.0.1:3001 \
-  --connections 20 \
-  --duration 20 \
-  --campaigns 8 \
-  --read-weight 3 \
-  --pledge-weight 1
-```
-
-**Available flags:**
-
-| Flag              | Default | Description                              |
-|-------------------|---------|------------------------------------------|
-| `--connections`   | 20      | Number of concurrent connections         |
-| `--duration`      | 20      | Test duration in seconds                 |
-| `--campaigns`     | 8       | Seed campaigns created before the run    |
-| `--read-weight`   | 3       | Relative weight of GET requests          |
-| `--pledge-weight` | 1       | Relative weight of POST pledge requests  |
-| `--pledge-amount` | 5       | Amount per pledge request                |
-| `--asset-code`    | USDC    | Asset code used for seed campaigns       |
-
-**Expected output:**
-
-```
-Running 20s test @ http://127.0.0.1:3001
-Stat      Avg     Stdev   Max
-Latency   12 ms   8 ms    45 ms
-Req/Sec   450     35      520
-Bytes/Sec 2.1 MB  180 kB  2.5 MB
-
-Non-2xx: 0
-Timeouts: 0
-```
-
-> **Related:** [`backend/scripts/load-test.js`](backend/scripts/load-test.js) — full script with source
-
----
-
-### 6. Why does my pledge fail?
-
-Pledge failures typically fall into one of these categories:
-
-**1. Campaign is not in "open" status**
-
-- Campaigns past their deadline or fully funded return an error.
-- Check the campaign status: `curl http://localhost:3001/api/campaigns/:id`
-
-**2. Contributor limit reached**
-
-- If the campaign has a `maxPerContributor` set, your total contributions across all pledges cannot exceed that limit.
-- Check your current contributions: `curl http://localhost:3001/api/campaigns/:id/contributors`
-
-**3. Invalid request body**
-
-- `contributor` must be a valid Stellar public key (`G...`).
-- `amount` must be a positive number.
-- Ensure the request body is valid JSON.
-
-**4. Database locked (SQLite contention)**
-
-- SQLite can block under high concurrency. This is expected during load tests but rare under normal use.
-- Retry the pledge after a brief wait.
-
-**5. Contract ID mismatch (Freighter flow)**
-
-- If using the Soroban-integrated pledge flow, the backend `CONTRACT_ID` must match the deployed contract.
-- Verify: `curl http://localhost:3001/api/config | grep contractId`
-
-> **Related:** [RUNBOOK.md — Clear the Soroban Event Cache](./RUNBOOK.md#5-clear-the-soroban-event-cache) if events appear out of sync
-
----
-
-### 7. How do I configure environment variables?
-
-**Backend environment** (`backend/.env`):
-
-```env
-# Required
-CONTRACT_ID=your_deployed_contract_id
-
-# Optional (defaults shown)
-PORT=3001
-DB_PATH=backend/data/campaigns.db
-SOROBAN_RPC_URL=https://soroban-testnet.stellar.org:443
-ALLOWED_ASSETS=USDC,XLM,ARS
-LOG_LEVEL=info
-```
-
-Start by copying the example file:
+Copy the example file and edit it:
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-**Frontend environment** (`frontend/.env`):
+Key variables:
 
-```env
-VITE_API_URL=http://localhost:3001/api
-```
+| Variable | Default | Notes |
+|---|---|---|
+| `CONTRACT_ID` | _(required)_ | Deployed Soroban contract ID |
+| `PORT` | `3001` | Backend HTTP port |
+| `ALLOWED_ASSETS` | `USDC,XLM,ARS` | Comma-separated accepted tokens |
+| `SOROBAN_RPC_URL` | testnet | RPC endpoint |
+| `DB_PATH` | `backend/data/campaigns.db` | SQLite file path |
+| `LOG_LEVEL` | `info` | `debug \| info \| warn \| error` |
+| `DEFAULT_MAX_PER_CONTRIBUTOR` | `0` | `0` = no limit |
 
-> **Important:** In production, `VITE_API_URL` should point to your deployed backend URL.
-
-**Contract deployment environment:**
-
-- `SECRET_KEY` — Stellar account secret key (required for deploy)
-- `NETWORK_PASSPHRASE` — defaults to testnet
-- `RPC_URL` — defaults to testnet
-
-> **See also:** [`backend/.env.example`](backend/.env.example) and [`frontend/.env.example`](frontend/.env.example)
+For production-specific options (API keys, Redis cache, rate limits) see [`backend/.env.example`](backend/.env.example).
 
 ---
 
-### 8. How do I run the full stack locally with Docker?
+### 21. How do I run the full stack locally?
 
-Docker Compose runs both the backend and frontend with hot-reload for local development.
+**Without Docker:**
 
-**Start everything:**
+```bash
+npm run install:all
+npm run dev:backend   # http://localhost:3001
+npm run dev:frontend  # http://localhost:3000
+```
+
+**With Docker (hot-reload):**
 
 ```bash
 docker compose up --build
 ```
 
-This starts:
-- **Backend** at `http://localhost:3001` (with `ts-node-dev` for hot reload)
-- **Frontend** at `http://localhost:3000` (with Vite HMR)
-
-**Run in background:**
-
-```bash
-docker compose up --build -d
-```
-
-**Stop:**
-
-```bash
-docker compose down
-```
-
-**View logs:**
-
-```bash
-docker compose logs -f backend
-docker compose logs -f frontend
-```
-
-> **Note:** The `docker-compose.override.yml` mounts source directories and enables hot-reload automatically. No extra flags needed.
+The `docker-compose.override.yml` mounts source directories automatically so changes are reflected without rebuilding images.
 
 ---
 
-### 9. How do I run the contract property tests?
+### 22. How do I contribute a new feature?
 
-The Soroban contract includes property-based tests using the `proptest` crate.
+1. Fork the repo and create a branch: `git checkout -b feat/my-thing`
+2. Install dependencies: `npm run install:all`
+3. Make your changes and run the relevant tests:
+   - Backend: `cd backend && npx vitest`
+   - Contract: `cd contracts && cargo test`
+4. Commit using conventional commits (`feat:`, `fix:`, `chore:`, etc.)
+5. Open a PR against `main`
 
-**Prerequisites:**
-
-- Rust toolchain installed
-- `wasm32v1-none` target: `rustup target add wasm32v1-none`
-
-**Run all contract tests:**
-
-```bash
-cd contracts
-cargo test
-```
-
-**Run property tests only:**
-
-```bash
-cd contracts
-cargo test property_tests
-```
-
-**Run with verbose output:**
-
-```bash
-cd contracts
-cargo test -- --nocapture
-```
-
-**Expected output:**
-
-```
-running X tests
-test test_multi_token_campaign ... ok
-test test_multi_token_refund ... ok
-test test_claim_before_deadline ... ok
-test test_claim_creator_mismatch ... ok
-test test_claim_double_claim ... ok
-test test_claim_success ... ok
-```
-
-> **Related:** [`contracts/src/test.rs`](contracts/src/test.rs) and [PROPERTY_TESTS_IMPLEMENTATION.md](./PROPERTY_TESTS_IMPLEMENTATION.md)
+Good starting points: issues labelled `good first issue`, or the ideas in [OPEN_SOURCE_ISSUES.md](./OPEN_SOURCE_ISSUES.md).
 
 ---
 
-### 10. How do I contribute a new feature?
-
-**Quick start:**
-
-1. **Fork** the repository on GitHub.
-2. **Clone** your fork: `git clone https://github.com/YOUR_USERNAME/stellar-goal-vault.git`
-3. **Install dependencies:** `npm run install:all`
-4. **Create a branch:** `git checkout -b feature/my-feature`
-5. Make your changes and **test** them:
-   - Backend tests: `cd backend && npx vitest`
-   - Contract tests: `cd contracts && cargo test`
-   - E2E tests: `npm run test:e2e`
-6. **Commit** using conventional commits (e.g., `feat: add new endpoint`).
-7. **Push** and open a **Pull Request** against the `main` branch.
-
-**Code style:**
-
-- TypeScript in `backend/` and `frontend/` with ESLint + Prettier
-- Rust in `contracts/` with `cargo fmt`
-- Pre-commit hooks are configured via Husky + lint-staged
-
-**Where to start:**
-
-- Check the [open issues](https://github.com/ritik4ever/stellar-goal-vault/issues) labelled `good first issue`.
-- Browse `OPEN_SOURCE_ISSUES.md` for curated contribution ideas.
-- Read the [Contributing Guide](./CONTRIBUTING.md) for detailed setup instructions.
-
----
-
-*Last updated: 2026-06-01*
+*Last updated: 2026-07-30 — update this date with each major release.*

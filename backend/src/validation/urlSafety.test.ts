@@ -165,9 +165,7 @@ describe('httpsOnlyUrlSchema', () => {
       const result = httpsOnlyUrlSchema.safeParse(url);
       expect(result.success).toBe(false);
       if (!result.success) {
-        const messages = result.error.issues.map((i) =>
-          i.message.toLowerCase(),
-        );
+        const messages = result.error.issues.map((i) => i.message.toLowerCase());
         // every non-https URL must mention the protocol error
         expect(messages.some((m) => m.includes('https'))).toBe(true);
       }
@@ -197,20 +195,14 @@ describe('httpsOnlyUrlSchema', () => {
       const result = httpsOnlyUrlSchema.safeParse(url);
       expect(result.success).toBe(false);
       if (!result.success) {
-        const messages = result.error.issues.map((i) =>
-          i.message.toLowerCase(),
-        );
-        expect(
-          messages.some((m) => m.includes('private') || m.includes('loopback')),
-        ).toBe(true);
+        const messages = result.error.issues.map((i) => i.message.toLowerCase());
+        expect(messages.some((m) => m.includes('private') || m.includes('loopback'))).toBe(true);
       }
     });
   });
 
   it('rejects URLs containing userinfo', () => {
-    const result = httpsOnlyUrlSchema.safeParse(
-      'https://user:pass@example.com/',
-    );
+    const result = httpsOnlyUrlSchema.safeParse('https://user:pass@example.com/');
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map((i) => i.message.toLowerCase());
@@ -243,9 +235,7 @@ describe('httpsOnlyUrlSchema', () => {
       // the host outright or strips non-ASCII; either way the literal
       // 127.0.0.1 never appears in the host field, so we make sure we
       // never accept such fuzzy bypasses.
-      const result = httpsOnlyUrlSchema.safeParse(
-        'https://127\u30020\u30020\u30021/',
-      );
+      const result = httpsOnlyUrlSchema.safeParse('https://127\u30020\u30020\u30021/');
       // It either gets rejected outright, or — in the unlikely case it
       // passes URL parsing — our hostname check still rebukes it as a
       // private literal. We assert at minimum that the resulting URL,
@@ -266,9 +256,7 @@ describe('httpsOnlyUrlSchema', () => {
     it('rejects percent-encoded host separator sneaking past path parsing', () => {
       // URL host parser refuses userinfo-style encoding; this URL fails
       // at URL parse time and is rejected.
-      const result = httpsOnlyUrlSchema.safeParse(
-        'https://user%40example.com@127.0.0.1/',
-      );
+      const result = httpsOnlyUrlSchema.safeParse('https://user%40example.com@127.0.0.1/');
       expect(result.success).toBe(false);
     });
   });

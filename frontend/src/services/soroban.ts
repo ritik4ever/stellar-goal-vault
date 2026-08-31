@@ -138,4 +138,3 @@ export const executeSorobanRefund = submitRefundTransaction;
  * Typed contract client instance for interacting with the Soroban GoalVaultContract
  */
 export const contractClient = new GoalVaultContract();
-

@@ -54,8 +54,7 @@ export async function apiRequest<T>(config: AxiosRequestConfig): Promise<T> {
         validateStatus: () => true,
       });
 
-      requestId =
-        (response.config.headers?.[REQUEST_ID_HEADER] as string | undefined) ?? requestId;
+      requestId = (response.config.headers?.[REQUEST_ID_HEADER] as string | undefined) ?? requestId;
 
       if (response.status >= 500 && attempt < MAX_RETRIES) {
         await sleep(RETRY_DELAY_MS);
@@ -75,8 +74,7 @@ export async function apiRequest<T>(config: AxiosRequestConfig): Promise<T> {
         (error as Error & { code?: string }).code = body.error?.code;
         (error as Error & { details?: Array<{ field: string; message: string }> }).details =
           body.error?.details;
-        (error as Error & { requestId?: string }).requestId =
-          body.error?.requestId ?? requestId;
+        (error as Error & { requestId?: string }).requestId = body.error?.requestId ?? requestId;
         throw error;
       }
 

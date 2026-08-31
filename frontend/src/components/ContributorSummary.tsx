@@ -6,6 +6,7 @@ import { EmptyState } from './EmptyState';
 import { ContributorSummary as ContributorSummaryData } from '../types/campaign';
 import { apiRequest } from '../services/httpClient';
 import { buildContributorCsv, downloadCsv } from '../utils/exportCsv';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -77,23 +78,51 @@ export function ContributorSummary({
     };
   }, [campaignId, fetchContributors]);
 
-  if (externalLoading || (isLoading && contributors.length === 0)) {
+  const showSkeleton = useMinDisplayTime(externalLoading || (isLoading && contributors.length === 0));
+  if (showSkeleton) {
     return (
       <section
-        className="contributor-summary contributor-summary-loading"
+        className="contributor-summary"
+        aria-busy="true"
         aria-label="Contributor summary"
       >
         <h3 className="contributor-summary-title">Contributors</h3>
         <div className="contributor-summary-stats" style={{ marginTop: 12 }}>
-          {Array.from({ length: 3 }).map((_, i) => (
+          {Array.from({ length: 4 }).map((_, i) => (
             <article key={i} className="contributor-stat">
               <div className="skeleton skeleton-line" style={{ width: 100 }} />
               <div
                 className="skeleton skeleton-line"
                 style={{ width: 60, height: 20, marginTop: 8 }}
               />
+              <div className="skeleton skeleton-line" style={{ width: 140, height: 10, marginTop: 6 }} />
             </article>
           ))}
+        </div>
+        <div className="contributor-table-wrap" aria-hidden="true">
+          <div className="contributor-table contributor-table-head">
+            <div className="contributor-table-row">
+              <span><div className="skeleton skeleton-line" style={{ width: 80 }} /></span>
+              <span><div className="skeleton skeleton-line" style={{ width: 80 }} /></span>
+              <span><div className="skeleton skeleton-line" style={{ width: 80 }} /></span>
+            </div>
+          </div>
+          <div className="contributor-table contributor-table-body">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="contributor-table-row">
+                <div className="contributor-address" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div className="skeleton" style={{ width: 24, height: 24, borderRadius: '50%' }} />
+                  <div className="skeleton skeleton-line" style={{ width: 120 }} />
+                </div>
+                <div className="contributor-amounts">
+                  <div className="skeleton skeleton-line" style={{ width: 60 }} />
+                </div>
+                <div className="contributor-amounts">
+                  <div className="skeleton skeleton-line" style={{ width: 60 }} />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
     );

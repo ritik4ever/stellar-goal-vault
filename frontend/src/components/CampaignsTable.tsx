@@ -1,10 +1,10 @@
-import { LayoutGrid } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useDebounce } from "../hooks/useDebounce";
-import { useSearchParams } from "react-router-dom";
-import { Campaign, CampaignStatus } from "../types/campaign";
-import { EmptyState } from "./EmptyState";
-import { AssetFilterDropdown } from "./AssetFilterDropdown";
+import { LayoutGrid } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDebounce } from '../hooks/useDebounce';
+import { useSearchParams } from 'react-router-dom';
+import { Campaign, CampaignStatus } from '../types/campaign';
+import { EmptyState } from './EmptyState';
+import { AssetFilterDropdown } from './AssetFilterDropdown';
 import {
   applyFilters,
   getDistinctAssetCodes,
@@ -17,15 +17,16 @@ import { AddressAvatar } from "./AddressAvatar";
 import { SkeletonCard } from "./SkeletonCard";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useMinDisplayTime } from "../hooks/useMinDisplayTime";
 
-type StatusFilterValue = "" | CampaignStatus;
+type StatusFilterValue = '' | CampaignStatus;
 
 const STATUS_FILTERS: Array<{ value: StatusFilterValue; label: string }> = [
-  { value: "", label: "All" },
-  { value: "open", label: "Open" },
-  { value: "funded", label: "Funded" },
-  { value: "claimed", label: "Claimed" },
-  { value: "failed", label: "Failed" },
+  { value: '', label: 'All' },
+  { value: 'open', label: 'Open' },
+  { value: 'funded', label: 'Funded' },
+  { value: 'claimed', label: 'Claimed' },
+  { value: 'failed', label: 'Failed' },
 ];
 
 interface CampaignsTableProps {
@@ -42,22 +43,21 @@ interface CampaignsTableProps {
 }
 
 function formatTimestamp(value: number | string): string {
-  const date =
-    typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  const date = typeof value === 'number' ? new Date(value * 1000) : new Date(value);
 
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
-function getStatusLabel(status: Campaign["progress"]["status"]): string {
+function getStatusLabel(status: Campaign['progress']['status']): string {
   switch (status) {
-    case "open":
-      return "open";
-    case "funded":
-      return "funded";
-    case "claimed":
-      return "claimed";
-    case "failed":
-      return "failed";
+    case 'open':
+      return 'open';
+    case 'funded':
+      return 'funded';
+    case 'claimed':
+      return 'claimed';
+    case 'failed':
+      return 'failed';
     default:
       return status;
   }
@@ -81,35 +81,41 @@ export function CampaignsTable({
   const urlStatus = (searchParams.get('status') as StatusFilterValue | null) ?? '';
   const VALID_SORTS: SortOption[] = ['createdAt', 'deadline', 'pledgedAmount', 'targetAmount'];
   const sortBy: SortOption = VALID_SORTS.includes(urlSort) ? urlSort : 'createdAt';
-  const [assetCode, setAssetCode] = useState("");
+  const [assetCode, setAssetCode] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>(urlStatus);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState('');
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
   function handleSortChange(newSort: SortOption) {
     // Toggle order if clicking same field, else default to desc
     const newOrder = newSort === sortBy && urlOrder === 'desc' ? 'asc' : 'desc';
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('sort', newSort);
-      next.set('order', newOrder);
-      return next;
-    }, { replace: true });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('sort', newSort);
+        next.set('order', newOrder);
+        return next;
+      },
+      { replace: true },
+    );
     onSortChange?.(newSort, newOrder);
   }
 
   function handleStatusFilterChange(value: StatusFilterValue) {
     setStatusFilter(value);
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (value === '') {
-        next.delete('status');
-      } else {
-        next.set('status', value);
-      }
-      return next;
-    }, { replace: true });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === '') {
+          next.delete('status');
+        } else {
+          next.set('status', value);
+        }
+        return next;
+      },
+      { replace: true },
+    );
   }
 
   function handleSearchChange(value: string) {
@@ -149,7 +155,7 @@ export function CampaignsTable({
           onLoadMore();
         }
       },
-      { rootMargin: "200px" },
+      { rootMargin: '200px' },
     );
 
     observer.observe(sentinel);
@@ -159,10 +165,7 @@ export function CampaignsTable({
   const isEmpty = campaigns.length === 0;
   const SKELETON_COUNT = 6;
 
-  const assetOptions = useMemo(
-    () => getDistinctAssetCodes(campaigns),
-    [campaigns],
-  );
+  const assetOptions = useMemo(() => getDistinctAssetCodes(campaigns), [campaigns]);
   const statusCounts = useMemo(() => {
     const counts: Record<CampaignStatus, number> = {
       open: 0,
@@ -196,7 +199,7 @@ export function CampaignsTable({
     return sortCampaigns(searched, sortBy);
   }, [campaigns, assetCode, statusFilter, debouncedSearchQuery, sortBy]);
 
-  const isMobile = useMediaQuery("(max-width: 767px)");
+  const isMobile = useMediaQuery('(max-width: 767px)');
 
   const virtualizer = useWindowVirtualizer({
     count: filteredCampaigns.length,
@@ -204,7 +207,8 @@ export function CampaignsTable({
     overscan: 5,
   });
 
-  if (isLoading && isEmpty) {
+  const showSkeleton = useMinDisplayTime(isLoading && isEmpty);
+  if (showSkeleton) {
     return (
       <section className="card">
         <div className="section-heading">
@@ -242,17 +246,13 @@ export function CampaignsTable({
 
       {invalidUrlCampaignId ? (
         <p className="banner-warn muted">
-          Campaign <code>#{invalidUrlCampaignId}</code> from the URL was not
-          found. Showing the first available campaign instead.
+          Campaign <code>#{invalidUrlCampaignId}</code> from the URL was not found. Showing the
+          first available campaign instead.
         </p>
       ) : null}
 
       <div className="board-controls">
-        <SearchInput
-          value={searchQuery}
-          onChange={handleSearchChange}
-          disabled={isLoading}
-        />
+        <SearchInput value={searchQuery} onChange={handleSearchChange} disabled={isLoading} />
         <label className="field-group" style={{ minWidth: 180 }}>
           <span>Asset:</span>
           <AssetFilterDropdown
@@ -264,23 +264,16 @@ export function CampaignsTable({
         </label>
         <label className="field-group" style={{ minWidth: 180 }}>
           <span>Status:</span>
-          <div
-            className="status-filter-tabs"
-            role="group"
-            aria-label="Filter campaigns by status"
-          >
+          <div className="status-filter-tabs" role="group" aria-label="Filter campaigns by status">
             {STATUS_FILTERS.map((filter) => {
               const isActive = statusFilter === filter.value;
-              const count =
-                filter.value === ""
-                  ? statusCounts.all
-                  : statusCounts[filter.value];
+              const count = filter.value === '' ? statusCounts.all : statusCounts[filter.value];
 
               return (
                 <button
                   key={filter.label}
                   type="button"
-                  className={`status-filter-tab ${isActive ? "status-filter-tab-active" : ""}`}
+                  className={`status-filter-tab ${isActive ? 'status-filter-tab-active' : ''}`}
                   onClick={() => handleStatusFilterChange(filter.value)}
                   aria-pressed={isActive}
                   disabled={isLoading}
@@ -294,27 +287,28 @@ export function CampaignsTable({
         </label>
         <label className="field-group" style={{ minWidth: 180 }}>
           <span>Sort:</span>
-          <SortDropdown
-            value={sortBy}
-            onChange={handleSortChange}
-            disabled={isLoading}
-          />
+          <SortDropdown value={sortBy} onChange={handleSortChange} disabled={isLoading} />
         </label>
       </div>
 
       {filteredCampaigns.length === 0 && isFiltered ? (
         <EmptyState
           variant="inline"
-          title={hasSearchQuery && !hasAssetFilter && !hasStatusFilter
-            ? 'No campaigns match your search.'
-            : 'No campaigns match the selected filters.'}
-          message={hasSearchQuery && !hasAssetFilter && !hasStatusFilter
-            ? 'Try a different search term or clear your search to see all campaigns.'
-            : 'Try adjusting or clearing your filters to see all campaigns.'}
+          title={
+            hasSearchQuery && !hasAssetFilter && !hasStatusFilter
+              ? 'No campaigns match your search.'
+              : 'No campaigns match the selected filters.'
+          }
+          message={
+            hasSearchQuery && !hasAssetFilter && !hasStatusFilter
+              ? 'Try a different search term or clear your search to see all campaigns.'
+              : 'Try adjusting or clearing your filters to see all campaigns.'
+          }
           action={{
-            label: hasSearchQuery && !hasAssetFilter && !hasStatusFilter
-              ? 'Clear Search'
-              : 'Clear Filters',
+            label:
+              hasSearchQuery && !hasAssetFilter && !hasStatusFilter
+                ? 'Clear Search'
+                : 'Clear Filters',
             onClick: handleClearFilters,
           }}
         />
@@ -342,7 +336,11 @@ export function CampaignsTable({
                   {virtualizer.getVirtualItems().map((virtualRow) => {
                     const campaign = filteredCampaigns[virtualRow.index];
                     return (
-                      <tr key={campaign.id} ref={virtualizer.measureElement} data-index={virtualRow.index}>
+                      <tr
+                        key={campaign.id}
+                        ref={virtualizer.measureElement}
+                        data-index={virtualRow.index}
+                      >
                         <td>
                           <div className="stacked">
                             <strong>{campaign.title}</strong>
@@ -352,8 +350,8 @@ export function CampaignsTable({
                         <td className="mono">
                           <div
                             style={{
-                              display: "flex",
-                              alignItems: "center",
+                              display: 'flex',
+                              alignItems: 'center',
                               gap: 10,
                             }}
                           >
@@ -363,8 +361,7 @@ export function CampaignsTable({
                         </td>
                         <td>
                           <div className="progress-copy">
-                            {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-                            {campaign.assetCode}
+                            {campaign.pledgedAmount} / {campaign.targetAmount} {campaign.assetCode}
                           </div>
                           <div className="progress-bar" aria-hidden>
                             <div
@@ -373,36 +370,26 @@ export function CampaignsTable({
                               }}
                             />
                           </div>
-                          <span className="muted">
-                            {campaign.progress.percentFunded}% funded
-                          </span>
+                          <span className="muted">{campaign.progress.percentFunded}% funded</span>
                         </td>
                         <td>
-                          <span
-                            className={`badge badge-${campaign.progress.status}`}
-                          >
+                          <span className={`badge badge-${campaign.progress.status}`}>
                             {getStatusLabel(campaign.progress.status)}
                           </span>
                         </td>
                         <td className="stacked">
                           <span>{formatTimestamp(campaign.deadline)}</span>
-                          <span className="muted">
-                            {campaign.progress.hoursLeft}h left
-                          </span>
+                          <span className="muted">{campaign.progress.hoursLeft}h left</span>
                         </td>
                         <td>
                           <button
                             className={
-                              selectedCampaignId === campaign.id
-                                ? "btn-secondary"
-                                : "btn-ghost"
+                              selectedCampaignId === campaign.id ? 'btn-secondary' : 'btn-ghost'
                             }
                             type="button"
                             onClick={() => onSelect(campaign.id)}
                           >
-                            {selectedCampaignId === campaign.id
-                              ? "Selected"
-                              : "View"}
+                            {selectedCampaignId === campaign.id ? 'Selected' : 'View'}
                           </button>
                         </td>
                       </tr>
@@ -413,7 +400,8 @@ export function CampaignsTable({
                       style={{
                         height:
                           virtualizer.getTotalSize() -
-                          virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1].end,
+                          virtualizer.getVirtualItems()[virtualizer.getVirtualItems().length - 1]
+                            .end,
                       }}
                     />
                   )}
@@ -435,9 +423,7 @@ export function CampaignsTable({
                     ref={virtualizer.measureElement}
                     data-index={virtualRow.index}
                     className={`campaign-card ${
-                      selectedCampaignId === campaign.id
-                        ? "campaign-card-selected"
-                        : ""
+                      selectedCampaignId === campaign.id ? 'campaign-card-selected' : ''
                     }`}
                   >
                     <div className="campaign-card-main">
@@ -450,8 +436,8 @@ export function CampaignsTable({
                       <div
                         className="campaign-creator mono"
                         style={{
-                          display: "flex",
-                          alignItems: "center",
+                          display: 'flex',
+                          alignItems: 'center',
                           gap: 10,
                           marginBottom: 12,
                         }}
@@ -461,8 +447,7 @@ export function CampaignsTable({
                       </div>
                       <div className="campaign-progress">
                         <div className="progress-copy">
-                          {campaign.pledgedAmount} / {campaign.targetAmount}{" "}
-                          {campaign.assetCode}
+                          {campaign.pledgedAmount} / {campaign.targetAmount} {campaign.assetCode}
                         </div>
                         <div className="progress-bar" aria-hidden>
                           <div
@@ -473,25 +458,19 @@ export function CampaignsTable({
                         </div>
                       </div>
                       <div className="campaign-meta">
-                        <span className="muted">
-                          {campaign.progress.hoursLeft}h left
-                        </span>
-                        <span className="muted">
-                          {formatTimestamp(campaign.deadline)}
-                        </span>
+                        <span className="muted">{campaign.progress.hoursLeft}h left</span>
+                        <span className="muted">{formatTimestamp(campaign.deadline)}</span>
                       </div>
                     </div>
                     <div className="campaign-card-actions">
                       <button
                         className={
-                          selectedCampaignId === campaign.id
-                            ? "btn-secondary"
-                            : "btn-ghost"
+                          selectedCampaignId === campaign.id ? 'btn-secondary' : 'btn-ghost'
                         }
                         type="button"
                         onClick={() => onSelect(campaign.id)}
                       >
-                        {selectedCampaignId === campaign.id ? "Selected" : "View"}
+                        {selectedCampaignId === campaign.id ? 'Selected' : 'View'}
                       </button>
                     </div>
                   </article>
@@ -514,7 +493,9 @@ export function CampaignsTable({
             <p className="muted campaigns-load-more">Loading more campaigns...</p>
           ) : null}
           {!hasMore && filteredCampaigns.length > 0 ? (
-            <p className="muted campaigns-end-of-list">You have reached the end of the campaign list.</p>
+            <p className="muted campaigns-end-of-list">
+              You have reached the end of the campaign list.
+            </p>
           ) : null}
         </>
       )}

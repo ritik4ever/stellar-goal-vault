@@ -17,6 +17,44 @@ export const TX_HASH_REGEX = /^[A-Fa-f0-9]{64}$/;
 // link previews, or thumbnail rendering. See `./urlSafety.ts` for the
 // full SSRF rationale and blocked-range list.
 
+/**
+ * Schema for campaign images supporting both HTTPS URLs and base64 data URLs.
+ * Base64 data URLs must be JPG or PNG format and under 2MB when decoded.
+ */
+export const imageUrlSchema = z
+  .string()
+  .trim()
+  .refine(
+    (value) => {
+      if (value.startsWith('data:')) {
+        // Validate base64 data URL
+        const dataUrlMatch = value.match(/^data:image\/(jpeg|png);base64,(.+)$/);
+        if (!dataUrlMatch) {
+          return false;
+        }
+        
+        // Estimate decoded size (base64 adds ~33% overhead)
+        // A base64 string of length N encodes roughly N * 0.75 bytes
+        const base64Data = dataUrlMatch[2];
+        const estimatedBytes = (base64Data.length * 3) / 4;
+        const maxBytes = 2 * 1024 * 1024; // 2MB
+        
+        return estimatedBytes <= maxBytes;
+      }
+      
+      // For HTTPS URLs, delegate to httpsOnlyUrlSchema
+      try {
+        httpsOnlyUrlSchema.parse(value);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    {
+      message: 'Image must be a valid HTTPS URL or a base64 data URL (JPG/PNG, max 2MB)',
+    },
+  );
+
 export const campaignIdSchema = z
   .string()
   .trim()
@@ -60,10 +98,7 @@ export const unixTimestampSchema = z.coerce
   .positive('deadline must be a valid UNIX timestamp in seconds.');
 
 function sanitizeInput(val: string): string {
-  return val
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\//g, "&sol;");
+  return val.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\//g, '&sol;');
 }
 
 const containsSqlComment = (val: string) => /--|\/\*|\*\//.test(val);
@@ -96,9 +131,10 @@ export const createCampaignPayloadSchema = z.object({
   // shared `httpsOnlyUrlSchema` enforces HTTPS-only and rejects host
   // literals that target private/loopback CIDRs. Pair with
   // `assertSafeRemoteUrl` whenever the backend actually fetches these.
+  // imageUrl now also accepts base64 data URLs for direct uploads.
   metadata: z
     .object({
-      imageUrl: httpsOnlyUrlSchema.optional(),
+      imageUrl: imageUrlSchema.optional(),
       externalLink: httpsOnlyUrlSchema.optional(),
     })
     .optional(),
@@ -239,12 +275,7 @@ export function parseCampaignListPaginationQuery(query: {
       path: ['page'],
     } as any);
   }
-  if (
-    !Number.isFinite(limitNum) ||
-    !Number.isInteger(limitNum) ||
-    limitNum < 1 ||
-    limitNum > 100
-  ) {
+  if (!Number.isFinite(limitNum) || !Number.isInteger(limitNum) || limitNum < 1 || limitNum > 100) {
     issues.push({
       code: 'custom',
       message: 'limit must be an integer from 1 to 100.',
@@ -540,9 +571,7 @@ export type ValidationIssue = {
   message: string;
 };
 
-export function zodIssuesToValidationIssues(
-  issues: z.ZodIssue[],
-): ValidationIssue[] {
+export function zodIssuesToValidationIssues(issues: z.ZodIssue[]): ValidationIssue[] {
   return issues.map((issue) => ({
     field: issue.path.length > 0 ? issue.path.join('.') : 'body',
     message: issue.message,
@@ -562,4 +591,44 @@ export function normalizeQueryValue(value: unknown): string | undefined {
 
   const trimmed = value.trim();
   return trimmed === '' ? undefined : trimmed;
+}
+
+export const COMMENT_ID_REGEX = /^[1-9]\d*$/;
+
+export const commentIdSchema = z
+  .string()
+  .trim()
+  .regex(COMMENT_ID_REGEX, 'Comment ID must be a positive integer.');
+
+export const createCommentPayloadSchema = z.object({
+  author: stellarAccountIdSchema,
+  content: z
+    .string()
+    .trim()
+    .min(1, 'Comment content cannot be empty.')
+    .max(500, 'Comment content cannot exceed 500 characters.'),
+});
+
+export const deleteCommentPayloadSchema = z.object({
+  requestor: stellarAccountIdSchema,
+});
+
+export function parseCommentListPaginationQuery(query: {
+  page?: unknown;
+  limit?: unknown;
+}): { ok: true; page: number; limit: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const parsedPage = parsePositiveIntegerQueryParam(query.page, 'page');
+  const parsedLimit = parsePositiveIntegerQueryParam(query.limit, 'limit', 100);
+  const issues: z.core.$ZodIssue[] = [];
+
+  if (!parsedPage.ok) issues.push(...parsedPage.issues);
+  if (!parsedLimit.ok) issues.push(...parsedLimit.issues);
+
+  if (issues.length > 0) return { ok: false, issues };
+
+  return {
+    ok: true,
+    page: parsedPage.ok ? (parsedPage.value ?? 1) : 1,
+    limit: parsedLimit.ok ? (parsedLimit.value ?? 20) : 20,
+  };
 }

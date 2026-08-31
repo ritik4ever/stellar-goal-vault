@@ -4,54 +4,51 @@ import {
   getCampaignCacheEntry,
   setCampaignCacheEntry,
   invalidateCampaignCache,
-  getCampaignCacheSize,
 } from './campaignCache';
 
 describe('campaignCache', () => {
-  beforeEach(() => {
-    invalidateCampaignCache();
+  beforeEach(async () => {
+    await invalidateCampaignCache();
   });
 
-  it('returns undefined for a key that has not been set', () => {
-    expect(getCampaignCacheEntry('campaigns:missing')).toBeUndefined();
+  it('returns undefined for a key that has not been set', async () => {
+    expect(await getCampaignCacheEntry('campaigns:missing')).toBeUndefined();
   });
 
-  it('returns the stored body after a set', () => {
+  it('returns the stored body after a set', async () => {
     const key = buildCampaignCacheKey('status=open');
     const body = JSON.stringify({ data: [], pagination: {} });
-    setCampaignCacheEntry(key, body);
-    expect(getCampaignCacheEntry(key)).toBe(body);
+    await setCampaignCacheEntry(key, body);
+    expect(await getCampaignCacheEntry(key)).toBe(body);
   });
 
   it('buildCampaignCacheKey namespaces the key correctly', () => {
-    expect(buildCampaignCacheKey('foo=bar')).toBe('campaigns:foo=bar');
-    expect(buildCampaignCacheKey('')).toBe('campaigns:');
+    expect(buildCampaignCacheKey('foo=bar')).toBe('campaigns:list:foo=bar');
+    expect(buildCampaignCacheKey('')).toBe('campaigns:list:');
   });
 
-  it('stores separate entries for different query strings', () => {
+  it('stores separate entries for different query strings', async () => {
     const k1 = buildCampaignCacheKey('status=open');
     const k2 = buildCampaignCacheKey('status=funded');
-    setCampaignCacheEntry(k1, 'open-response');
-    setCampaignCacheEntry(k2, 'funded-response');
-    expect(getCampaignCacheEntry(k1)).toBe('open-response');
-    expect(getCampaignCacheEntry(k2)).toBe('funded-response');
+    await setCampaignCacheEntry(k1, 'open-response');
+    await setCampaignCacheEntry(k2, 'funded-response');
+    expect(await getCampaignCacheEntry(k1)).toBe('open-response');
+    expect(await getCampaignCacheEntry(k2)).toBe('funded-response');
   });
 
-  it('invalidateCampaignCache clears all entries', () => {
-    setCampaignCacheEntry(buildCampaignCacheKey('a=1'), 'body-a');
-    setCampaignCacheEntry(buildCampaignCacheKey('b=2'), 'body-b');
-    expect(getCampaignCacheSize()).toBe(2);
+  it('invalidateCampaignCache clears all entries', async () => {
+    await setCampaignCacheEntry(buildCampaignCacheKey('a=1'), 'body-a');
+    await setCampaignCacheEntry(buildCampaignCacheKey('b=2'), 'body-b');
 
-    invalidateCampaignCache();
+    await invalidateCampaignCache();
 
-    expect(getCampaignCacheSize()).toBe(0);
-    expect(getCampaignCacheEntry(buildCampaignCacheKey('a=1'))).toBeUndefined();
+    expect(await getCampaignCacheEntry(buildCampaignCacheKey('a=1'))).toBeUndefined();
   });
 
-  it('overwrites an existing entry for the same key', () => {
+  it('overwrites an existing entry for the same key', async () => {
     const key = buildCampaignCacheKey('page=1');
-    setCampaignCacheEntry(key, 'first');
-    setCampaignCacheEntry(key, 'second');
-    expect(getCampaignCacheEntry(key)).toBe('second');
+    await setCampaignCacheEntry(key, 'first');
+    await setCampaignCacheEntry(key, 'second');
+    expect(await getCampaignCacheEntry(key)).toBe('second');
   });
 });

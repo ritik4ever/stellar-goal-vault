@@ -22,7 +22,11 @@ describe('Event Metadata Support', () => {
     const db = getDb();
     db.prepare(`DELETE FROM campaign_events`).run();
     db.prepare(`DELETE FROM pledges`).run();
-    db.prepare(`DELETE FROM campaigns`).run();
+    db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM notifications`).run();
+  db.prepare(`DELETE FROM campaigns`).run();
   });
 
   function ensureCampaign(campaignId: string): void {

@@ -53,12 +53,7 @@ describe('createCampaignPayloadSchema metadata (issue #308)', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects a data: URI image', () => {
-    const result = createCampaignPayloadSchema.safeParse(
-      buildPayload({ imageUrl: 'data:image/png;base64,iVBORw0K' }),
-    );
-    expect(result.success).toBe(false);
-  });
+
 
   it('rejects a private IPv4 host in imageUrl', () => {
     const result = createCampaignPayloadSchema.safeParse(
