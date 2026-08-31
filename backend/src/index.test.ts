@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-campaign-filters-${process.pid}.db`);
 
@@ -32,7 +32,12 @@ beforeAll(async () => {
   ({ initCampaignStore, listCampaigns, createCampaign, addPledge, calculateProgress } =
     await import('./services/campaignStore'));
   initCampaignStore();
-}, 20000);
+}, 60000);
+
+afterAll(async () => {
+  const { resetDbForTests } = await import('./services/db');
+  resetDbForTests();
+});
 
 beforeEach(() => {
   const db = getDb();
