@@ -1,9 +1,227 @@
-# Frontend Campaign Form Validation Implementation
+# Validation Implementation Guide
 
 ## Overview
-This document outlines the enhanced frontend validation system for the Create Campaign Form, which provides immediate user feedback and prevents submission of invalid data.
+This document outlines the validation system for Stellar Goal Vault, covering both frontend form validation and backend API validation using Zod schemas. The system provides immediate user feedback on the frontend and robust request validation on the backend.
 
-## Acceptance Criteria - Addressed
+## Architecture Overview
+
+The validation system operates at two layers:
+
+### Frontend Validation (`frontend/src/utils/validation.ts`)
+- Provides immediate user feedback during form input
+- Mirrors backend validation rules for consistency
+- Prevents invalid API calls by catching errors client-side
+- Uses custom validation functions with regex patterns
+
+### Backend Validation (`backend/src/validation/`)
+- Uses Zod schemas for robust request validation
+- Applied via `validateBody` middleware on API endpoints
+- Includes SSRF protection for URL fields
+- Stellar address validation with CRC checksum verification
+- Query parameter parsing and validation
+
+## Backend Zod Schemas
+
+Located in `backend/src/validation/schemas.ts`, these schemas define the validation rules for all API endpoints.
+
+### Core Regex Patterns
+```typescript
+export const STELLAR_ACCOUNT_REGEX = /^G[A-Z2-7]{55}$/;
+export const ASSET_CODE_REGEX = /^[A-Za-z0-9]{1,12}$/;
+export const CAMPAIGN_ID_REGEX = /^[1-9]\d*$/;
+export const TX_HASH_REGEX = /^[A-Fa-f0-9]{64}$/;
+```
+
+### Reusable Schemas
+
+#### `stellarAccountIdSchema`
+- Validates Stellar public key format (56 chars, starts with G)
+- Uses regex pattern matching
+- Error: "Must be a valid Stellar account ID (starts with G and is exactly 56 characters)"
+
+#### `assetCodeSchema`
+- Validates asset codes (1-12 alphanumeric characters)
+- Transforms to uppercase
+- Refines against `config.allowedAssets` list
+- Error: "Asset code is not supported. Supported assets: X, Y, Z"
+
+#### `positiveAmountSchema`
+- Coerces to number
+- Must be finite and positive
+- Error: "Amount must be greater than zero"
+
+#### `unixTimestampSchema`
+- Coerces to number
+- Must be positive integer
+- Error: "deadline must be a valid UNIX timestamp in seconds"
+
+#### `httpsOnlyUrlSchema`
+- Enforces HTTPS-only protocol
+- Blocks private/loopback IP addresses
+- Rejects URLs with userinfo (username/password)
+- Max length: 2048 characters
+- Part of SSRF protection (see `urlSafety.ts`)
+
+### Request Payload Schemas
+
+#### `createCampaignPayloadSchema`
+```typescript
+{
+  creator: stellarAccountIdSchema,
+  title: z.string().trim().min(4).max(80),
+  description: z.string().trim(). min(20).max(500),
+  acceptedTokens: z.array(assetCodeSchema).min(1),
+  targetAmount: positiveAmountSchema,
+  deadline: unixTimestampSchema,
+  metadata: {
+    imageUrl: httpsOnlyUrlSchema.optional(),
+    externalLink: httpsOnlyUrlSchema.optional()
+  }.optional(),
+  maxPerContributor: optionalPositiveIntSchema
+}
+```
+
+#### `createPledgePayloadSchema`
+```typescript
+{
+  contributor: stellarAccountIdSchema,
+  amount: positiveAmountSchema,
+  assetCode: assetCodeSchema
+}
+```
+
+#### `reconcilePledgePayloadSchema`
+```typescript
+{
+  contributor: stellarAccountIdSchema,
+  amount: positiveAmountSchema,
+  assetCode: assetCodeSchema,
+  transactionHash: z.string().regex(TX_HASH_REGEX),
+  confirmedAt: unixTimestampSchema.optional()
+}
+```
+
+#### `claimCampaignPayloadSchema`
+```typescript
+{
+  creator: stellarAccountIdSchema,
+  transactionHash: z.string().regex(TX_HASH_REGEX),
+  confirmedAt: unixTimestampSchema.optional()
+}
+```
+
+#### `refundPayloadSchema`
+```typescript
+{
+  contributor: stellarAccountIdSchema,
+  soroban: {
+    txHash: stellarTransactionHashSchema,
+    contractId: z.string().min(1),
+    networkPassphrase: z.string().min(1),
+    rpcUrl: z.string().url(),
+    walletAddress: stellarAccountIdSchema,
+    ledger: z.coerce.number().int().positive().optional(),
+    createdAt: unixTimestampSchema.optional(),
+    latestLedger: z.coerce.number().int().positive().optional()
+  }
+}
+```
+
+### Query Parameter Parsing Functions
+
+#### `parseCampaignListPaginationQuery`
+- Validates `page` and `limit` query parameters
+- Both must be provided together or omitted together
+- `page`: positive integer
+- `limit`: integer from 1 to 100
+- Returns `{ ok: true, page?, limit? }` or `{ ok: false, issues }`
+
+#### `parseHistoryPaginationQuery`
+- Validates `page` and `pageSize` for campaign history
+- Defaults: page=1, pageSize=20
+- `pageSize` max: 100
+
+#### `parsePledgeListPaginationQuery`
+- Validates `page` and `limit` for pledge lists
+- Defaults: page=1, limit=10
+- `limit` max: 100
+
+## Frontend Validation
+
+Located in `frontend/src/utils/validation.ts`, these functions mirror backend rules for client-side validation.
+
+### Validation Functions
+
+#### `validateStellarAccount(address: string)`
+- Checks format: 56 characters, starts with 'G', A-Z2-7 only
+- Error: "Invalid Stellar account format (must contain only A-Z and 2-7)"
+
+#### `validateTitle(title: string)`
+- Length: 4-80 characters
+- Error: "Title must be between 4 and 80 characters"
+
+#### `validateDescription(description: string)`
+- Length: 20-500 characters
+- Error: "Description must be between 20 and 500 characters"
+
+#### `validateTargetAmount(amount: number)`
+- Must be valid number
+- Must be greater than zero
+- Must be at least 0.01
+- Errors: "Amount must be a valid number", "Amount must be greater than zero", "Amount must be at least 0.01"
+
+#### `validateDeadlineHours(hours: number)`
+- Must be whole number
+- Must be at least 1 hour
+- Must not exceed 8760 hours (365 days)
+- Errors: "Deadline must be a whole number", "Deadline must be at least 1 hour", "Deadline cannot exceed 365 days"
+
+#### `validateForm(values: FormValues)`
+- Batch validates all form fields
+- Returns object with field names as keys and error messages as values
+
+#### `isFormValid(errors: FormErrors)`
+- Checks if any errors exist in the errors object
+
+## Specialized Validation Modules
+
+### Stellar Address Validation (`backend/src/validation/stellarAddress.ts`)
+- Replicates `StrKey.isValidEd25519PublicKey` from Stellar SDK
+- Validates Base32 encoding with CRC-16/XModem checksum
+- Checks version byte (0x30 for Ed25519 public key)
+- Function: `isValidStellarPublicKey(address: string)`
+
+### SSRF Protection (`backend/src/validation/urlSafety.ts`)
+- Two-layer defense against Server-Side Request Forgery
+- **Layer 1**: `httpsOnlyUrlSchema` - synchronous schema validation
+  - Rejects non-HTTPS protocols
+  - Blocks private/loopback IP literals
+  - Rejects URLs with userinfo
+- **Layer 2**: `assertSafeRemoteUrl` - runtime DNS resolution
+  - Resolves hostnames and checks against private CIDRs
+  - Defends against DNS rebinding attacks
+- Blocked ranges include: 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, and IPv6 equivalents
+
+## Validation Middleware
+
+### `validateBody` (`backend/src/middleware/validateBody.ts`)
+Express middleware that validates request bodies against Zod schemas:
+
+```typescript
+import { validateBody } from './middleware/validateBody';
+import { createCampaignPayloadSchema } from './validation/schemas';
+
+app.post('/api/campaigns', validateBody(createCampaignPayloadSchema), handler);
+```
+
+- Uses `safeParseAsync` for async schema support
+- Replaces `req.body` with parsed/transformed data on success
+- Returns 400 with `{ error: 'Validation failed', details: ZodIssue[] }` on failure
+- Designed for POST/PATCH routes with JSON payloads
+
+## Frontend Form Validation Implementation
+
+### Acceptance Criteria - Addressed
 
 ### ✅ Invalid creator accounts show inline field errors
 - **Implementation**: The creator account field now validates against Stellar address format (56 characters starting with 'G', containing only A-Z and 2-7)
@@ -40,6 +258,114 @@ This document outlines the enhanced frontend validation system for the Create Ca
   - Color: #f87171
   - Font weight: 500 (medium weight for emphasis)
   - Positioned below field with 6px margin
+
+## How to Add Validation for New Endpoints
+
+### Step 1: Define the Zod Schema
+
+Add your schema to `backend/src/validation/schemas.ts`:
+
+```typescript
+export const newEndpointPayloadSchema = z.object({
+  // Use existing reusable schemas where possible
+  accountId: stellarAccountIdSchema,
+  amount: positiveAmountSchema,
+  
+  // Or define custom validation
+  customField: z
+    .string()
+    .trim()
+    .min(1, 'Custom field is required')
+    .max(100, 'Custom field must not exceed 100 characters'),
+  
+  // For optional fields
+  optionalField: z.string().optional(),
+  
+  // For URLs with SSRF protection
+  userUrl: httpsOnlyUrlSchema.optional(),
+});
+```
+
+### Step 2: Apply the Middleware
+
+In `backend/src/index.ts`, add the `validateBody` middleware to your route:
+
+```typescript
+import { validateBody } from './middleware/validateBody';
+import { newEndpointPayloadSchema } from './validation/schemas';
+
+app.post(
+  '/api/new-endpoint',
+  validateBody(newEndpointPayloadSchema),
+  (req: Request, res: Response) => {
+    // req.body is now typed and validated
+    const body = req.body as z.infer<typeof newEndpointPayloadSchema>;
+    // Your handler logic here
+  }
+);
+```
+
+### Step 3: Add Frontend Validation (if applicable)
+
+If the endpoint has a corresponding form, add validation to `frontend/src/utils/validation.ts`:
+
+```typescript
+export function validateCustomField(value: string): string | undefined {
+  if (!value || value.trim().length === 0) {
+    return 'Custom field is required';
+  }
+  if (value.length > 100) {
+    return 'Custom field must not exceed 100 characters';
+  }
+  return undefined;
+}
+```
+
+### Step 4: Add Tests
+
+Create tests in `backend/src/validation/schemas.test.ts`:
+
+```typescript
+describe('newEndpointPayloadSchema', () => {
+  it('accepts valid payload', () => {
+    const result = newEndpointPayloadSchema.safeParse({
+      accountId: 'GABCD...',
+      amount: 100,
+      customField: 'valid value',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid Stellar account', () => {
+    const result = newEndpointPayloadSchema.safeParse({
+      accountId: 'invalid',
+      amount: 100,
+      customField: 'valid value',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+```
+
+### Step 5: Update OpenAPI Documentation
+
+If using OpenAPI, the schema will automatically be documented via `extendZodWithOpenApi(z)` at the top of `schemas.ts`.
+
+## Best Practices
+
+1. **Reuse Existing Schemas**: Always use `stellarAccountIdSchema`, `positiveAmountSchema`, etc. instead of redefining common patterns.
+
+2. **Coerce Types**: Use `z.coerce.number()` for numeric fields to handle string inputs from forms.
+
+3. **Trim Strings**: Always use `.trim()` on string fields to prevent whitespace-related issues.
+
+4. **SSRF Protection**: For any user-supplied URLs, use `httpsOnlyUrlSchema` and pair with `assertSafeRemoteUrl` at fetch time.
+
+5. **Error Messages**: Provide clear, actionable error messages that help users fix validation issues.
+
+6. **Query Parameters**: Use the existing parsing functions (`parseCampaignListPaginationQuery`, etc.) as templates for new query parameter validators.
+
+7. **Test Coverage**: Always add tests for both valid and invalid inputs, including boundary conditions.
 
 ## File Structure
 

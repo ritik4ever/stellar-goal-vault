@@ -38,19 +38,20 @@ describe('useToast', () => {
     expect(result.current.toasts[0].variant).toBe('info');
   });
 
-  it('stacks multiple toasts', () => {
+  it('stacks multiple toasts up to max 3', () => {
     const { result } = renderHook(() => useToast());
 
     act(() => {
       result.current.addToast('First', 'success');
       result.current.addToast('Second', 'error');
       result.current.addToast('Third', 'info');
+      result.current.addToast('Fourth', 'warning');
     });
 
     expect(result.current.toasts).toHaveLength(3);
   });
 
-  it('auto-dismisses after 6000 ms', () => {
+  it('auto-dismisses after 5000 ms', () => {
     const { result } = renderHook(() => useToast());
 
     act(() => {
@@ -60,10 +61,24 @@ describe('useToast', () => {
     expect(result.current.toasts).toHaveLength(1);
 
     act(() => {
-      vi.advanceTimersByTime(6000);
+      vi.advanceTimersByTime(5000);
     });
 
     expect(result.current.toasts).toHaveLength(0);
+  });
+
+  it('does not auto-dismiss error toasts', () => {
+    const { result } = renderHook(() => useToast());
+
+    act(() => {
+      result.current.addToast('Error persists', 'error');
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+
+    expect(result.current.toasts).toHaveLength(1);
   });
 
   it('manually dismissing removes only the targeted toast', () => {
@@ -82,5 +97,15 @@ describe('useToast', () => {
 
     expect(result.current.toasts).toHaveLength(1);
     expect(result.current.toasts[0].message).toBe('Keep me');
+  });
+
+  it('supports warning variant', () => {
+    const { result } = renderHook(() => useToast());
+
+    act(() => {
+      result.current.addToast('Heads up', 'warning');
+    });
+
+    expect(result.current.toasts[0].variant).toBe('warning');
   });
 });

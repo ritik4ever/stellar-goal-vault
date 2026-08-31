@@ -20,6 +20,10 @@ const MIN_CONTRIBUTION: i128 = 100;
 /// multi-token donation campaigns while keeping storage costs predictable.
 const MAX_ACCEPTED_TOKENS: u32 = 10;
 
+/// Default platform fee in basis points (50 = 0.5%). Admin can override
+/// via [`set_fee`]. Set to 0 to disable the fee mechanism entirely.
+const DEFAULT_PLATFORM_FEE_BPS: i128 = 50;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Campaign {
@@ -54,6 +58,14 @@ pub enum DataKey {
     HasContributed(u64, Address), // (campaign_id, contributor)
     /// Tracks which (old_contract_id, campaign_id) pairs have already been migrated.
     MigratedId(Address, u64),
+    /// Track contributor addresses for a campaign (used in refund_all).
+    Contributors(u64),
+    /// Platform fee in basis points (e.g. 50 = 0.5%). Defaults to
+    /// [`DEFAULT_PLATFORM_FEE_BPS`] when absent. 0 disables the fee.
+    PlatformFeeBps,
+    /// Address that receives platform fees on campaign claims. When absent no
+    /// fee is deducted regardless of [`PlatformFeeBps`].
+    FeeRecipient,
 }
 
 #[contracttype]
@@ -148,6 +160,16 @@ pub struct ExtensionRequested {
     pub new_deadline: u64,
 }
 
+/// Emitted when a platform fee is deducted from a campaign claim.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeCollected {
+    pub campaign_id: u64,
+    pub token: Address,
+    pub fee_amount: i128,
+    pub fee_recipient: Address,
+}
+
 #[contract]
 pub struct StellarGoalVaultContract;
 
@@ -214,6 +236,55 @@ impl StellarGoalVaultContract {
             .instance()
             .get(&DataKey::Admin)
             .unwrap_or_else(|| panic!("not initialized"))
+    }
+
+    /// Sets the platform fee in basis points (e.g. 50 = 0.5%).
+    /// Only the admin can call this. Pass 0 to disable the fee.
+    pub fn set_fee(env: Env, admin: Address, bps: i128) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"));
+        if admin != stored_admin {
+            panic!("caller is not admin");
+        }
+        if bps < 0 {
+            panic!("fee must be non-negative");
+        }
+        env.storage().instance().set(&DataKey::PlatformFeeBps, &bps);
+    }
+
+    /// Sets the address that receives platform fees on campaign claims.
+    /// Only the admin can call this.
+    pub fn set_fee_recipient(env: Env, admin: Address, recipient: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"));
+        if admin != stored_admin {
+            panic!("caller is not admin");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeRecipient, &recipient);
+    }
+
+    /// Returns the current platform fee in basis points. Defaults to
+    /// [`DEFAULT_PLATFORM_FEE_BPS`] (50) when not explicitly configured.
+    pub fn get_platform_fee_bps(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(DEFAULT_PLATFORM_FEE_BPS)
+    }
+
+    /// Returns the fee recipient address, or `None` if not set.
+    pub fn get_fee_recipient(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::FeeRecipient)
     }
 
     /// Creator can cancel an active campaign, allowing contributors to refund.
@@ -378,6 +449,11 @@ impl StellarGoalVaultContract {
         if !has_contributed {
             campaign.contributor_count += 1;
             env.storage().persistent().set(&has_contributed_key, &true);
+            // Track contributor for refund_all
+            let contributors_key = DataKey::Contributors(campaign_id);
+            let mut contributors: Vec<Address> = env.storage().persistent().get(&contributors_key).unwrap_or_else(|| Vec::new(&env));
+            contributors.push_back(contributor.clone());
+            env.storage().persistent().set(&contributors_key, &contributors);
         }
 
 
@@ -393,6 +469,8 @@ impl StellarGoalVaultContract {
             .persistent()
             .set(&balance_key, &(current_balance + amount));
 
+        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+        let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
         env.storage()
             .persistent()
             .set(&contribution_key, &(current_contribution + amount));
@@ -590,14 +668,45 @@ impl StellarGoalVaultContract {
 
         let contract_address = env.current_contract_address();
 
-        // Transfer all accepted tokens to creator
+        let fee_bps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(DEFAULT_PLATFORM_FEE_BPS);
+        let fee_recipient: Option<Address> = env.storage().instance().get(&DataKey::FeeRecipient);
+        let take_fee = fee_bps > 0;
+
         for token in campaign.accepted_tokens.iter() {
             let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
             let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
 
             if balance > 0 {
                 let token_client = TokenClient::new(&env, &token);
-                token_client.transfer(&contract_address, &creator, &balance);
+
+                if take_fee {
+                    if let Some(ref recipient) = fee_recipient {
+                        let fee_amount = balance * fee_bps / 10000;
+                        let creator_amount = balance - fee_amount;
+
+                        if fee_amount > 0 {
+                            token_client.transfer(&contract_address, recipient, &fee_amount);
+                            env.events().publish(
+                                (symbol_short!("Goal"), symbol_short!("Fee")),
+                                FeeCollected {
+                                    campaign_id,
+                                    token: token.clone(),
+                                    fee_amount,
+                                    fee_recipient: recipient.clone(),
+                                },
+                            );
+                        }
+                        token_client.transfer(&contract_address, &creator, &creator_amount);
+                    } else {
+                        token_client.transfer(&contract_address, &creator, &balance);
+                    }
+                } else {
+                    token_client.transfer(&contract_address, &creator, &balance);
+                }
 
                 // Clear the balance
                 env.storage().persistent().set(&balance_key, &0_i128);
@@ -824,5 +933,42 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .persistent()
         .get(&DataKey::Campaign(campaign_id))
         .unwrap_or_else(|| panic!("campaign not found"))
+}
+
+fn refund_contributor(
+    env: &Env,
+    campaign: &mut Campaign,
+    campaign_id: u64,
+    contributor: &Address,
+) -> i128 {
+    let mut total_refunded = 0_i128;
+    let contract_address = env.current_contract_address();
+    for token in campaign.accepted_tokens.iter() {
+        let contribution_key =
+            DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+        let amount: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+        if amount > 0 {
+            let token_client = TokenClient::new(env, &token);
+            token_client.transfer(&contract_address, contributor, &amount);
+            env.storage().persistent().set(&contribution_key, &0_i128);
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&balance_key, &(balance - amount));
+            campaign.pledged_amount -= amount;
+            total_refunded += amount;
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Refund")),
+                CampaignRefunded {
+                    campaign_id,
+                    contributor: contributor.clone(),
+                    token: token.clone(),
+                    amount,
+                },
+            );
+        }
+    }
+    total_refunded
 }
 

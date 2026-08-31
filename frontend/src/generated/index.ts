@@ -3,16 +3,25 @@
  * AUTO-GENERATED — do not edit manually
  * Regenerate with: npm run gen:bindings
  * Generated from contract ABI
- * 
+ *
  * This file provides type-safe bindings to the Soroban StellarGoalVaultContract.
  * Each function is a typed wrapper around the contract's public API.
  */
 
-import { Contract, rpc, TransactionBuilder, Networks, BASE_FEE, Address, nativeToScVal } from '@stellar/stellar-sdk';
+import {
+  Contract,
+  rpc,
+  TransactionBuilder,
+  Networks,
+  BASE_FEE,
+  Address,
+  nativeToScVal,
+} from '@stellar/stellar-sdk';
 
 export const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID || '';
 export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || 'https://soroban-testnet.stellar.org';
-export const NETWORK_PASSPHRASE = process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015';
+export const NETWORK_PASSPHRASE =
+  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015';
 
 /**
  * Campaign struct from the contract ABI
@@ -49,7 +58,11 @@ export class GoalVaultContract {
   private contractId: string;
   private networkPassphrase: string;
 
-  constructor(contractId: string = CONTRACT_ID, rpcUrl: string = RPC_URL, networkPassphrase: string = NETWORK_PASSPHRASE) {
+  constructor(
+    contractId: string = CONTRACT_ID,
+    rpcUrl: string = RPC_URL,
+    networkPassphrase: string = NETWORK_PASSPHRASE,
+  ) {
     this.contractId = contractId;
     this.networkPassphrase = networkPassphrase;
     this.contract = new Contract(contractId);
@@ -85,14 +98,12 @@ export class GoalVaultContract {
    */
   async getCampaignCount(caller: string): Promise<bigint> {
     const sourceAccount = await this.server.getAccount(caller);
-    
+
     const transaction = new TransactionBuilder(sourceAccount, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
     })
-      .addOperation(
-        this.contract.call('get_campaign_count')
-      )
+      .addOperation(this.contract.call('get_campaign_count'))
       .setTimeout(30)
       .build();
 
@@ -116,13 +127,13 @@ export class GoalVaultContract {
    */
   async getCampaign(caller: string, campaignId: bigint | number): Promise<Campaign> {
     const sourceAccount = await this.server.getAccount(caller);
-    
+
     const transaction = new TransactionBuilder(sourceAccount, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
     })
       .addOperation(
-        this.contract.call('get_campaign', nativeToScVal(BigInt(campaignId), { type: 'u64' }))
+        this.contract.call('get_campaign', nativeToScVal(BigInt(campaignId), { type: 'u64' })),
       )
       .setTimeout(30)
       .build();
@@ -153,7 +164,7 @@ export class GoalVaultContract {
     token: string,
   ): Promise<bigint> {
     const sourceAccount = await this.server.getAccount(caller);
-    
+
     const transaction = new TransactionBuilder(sourceAccount, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
@@ -164,7 +175,7 @@ export class GoalVaultContract {
           nativeToScVal(BigInt(campaignId), { type: 'u64' }),
           new Address(contributor).toScVal(),
           new Address(token).toScVal(),
-        )
+        ),
       )
       .setTimeout(30)
       .build();
@@ -193,7 +204,7 @@ export class GoalVaultContract {
     token: string,
   ): Promise<bigint> {
     const sourceAccount = await this.server.getAccount(caller);
-    
+
     const transaction = new TransactionBuilder(sourceAccount, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
@@ -203,7 +214,7 @@ export class GoalVaultContract {
           'get_campaign_token_balance',
           nativeToScVal(BigInt(campaignId), { type: 'u64' }),
           new Address(token).toScVal(),
-        )
+        ),
       )
       .setTimeout(30)
       .build();
@@ -228,13 +239,16 @@ export class GoalVaultContract {
    */
   async getContributorCount(caller: string, campaignId: bigint | number): Promise<number> {
     const sourceAccount = await this.server.getAccount(caller);
-    
+
     const transaction = new TransactionBuilder(sourceAccount, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
     })
       .addOperation(
-        this.contract.call('get_contributor_count', nativeToScVal(BigInt(campaignId), { type: 'u64' }))
+        this.contract.call(
+          'get_contributor_count',
+          nativeToScVal(BigInt(campaignId), { type: 'u64' }),
+        ),
       )
       .setTimeout(30)
       .build();
@@ -259,14 +273,12 @@ export class GoalVaultContract {
    */
   async getNextCampaignId(caller: string): Promise<bigint> {
     const sourceAccount = await this.server.getAccount(caller);
-    
+
     const transaction = new TransactionBuilder(sourceAccount, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
     })
-      .addOperation(
-        this.contract.call('get_next_campaign_id')
-      )
+      .addOperation(this.contract.call('get_next_campaign_id'))
       .setTimeout(30)
       .build();
 
@@ -290,14 +302,12 @@ export class GoalVaultContract {
    */
   async getVersion(caller: string): Promise<string> {
     const sourceAccount = await this.server.getAccount(caller);
-    
+
     const transaction = new TransactionBuilder(sourceAccount, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
     })
-      .addOperation(
-        this.contract.call('get_version')
-      )
+      .addOperation(this.contract.call('get_version'))
       .setTimeout(30)
       .build();
 
@@ -330,7 +340,7 @@ function parseCampaignFromScVal(val: any): Campaign {
   for (const field of fields) {
     const key = field.key().sym().toString();
     const fieldVal = field.val();
-    
+
     switch (key) {
       case 'creator':
         campaign.creator = fieldVal.address().accountId().toString();
@@ -357,9 +367,9 @@ function parseCampaignFromScVal(val: any): Campaign {
         campaign.contributor_count = fieldVal.u32().toNumber();
         break;
       case 'accepted_tokens':
-        campaign.accepted_tokens = fieldVal.vec().map((token: any) => 
-          token.address().accountId().toString()
-        );
+        campaign.accepted_tokens = fieldVal
+          .vec()
+          .map((token: any) => token.address().accountId().toString());
         break;
     }
   }

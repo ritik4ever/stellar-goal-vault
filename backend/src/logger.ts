@@ -1,108 +1,50 @@
+import pino from 'pino';
+import { getRequestId } from './requestContext';
+
 export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
-
 export type LogLevel = (typeof LOG_LEVELS)[number];
-
 type LogFields = Record<string, unknown>;
-
-const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
-  debug: 10,
-  info: 20,
-  warn: 30,
-  error: 40,
-};
 
 export function normalizeLogLevel(rawLevel: string | undefined): LogLevel {
   const normalized = rawLevel?.trim().toLowerCase();
   return LOG_LEVELS.includes(normalized as LogLevel) ? (normalized as LogLevel) : 'info';
 }
 
-export function shouldLog(level: LogLevel, configuredLevel: LogLevel): boolean {
-  return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[configuredLevel];
-}
+const isProduction = process.env.NODE_ENV === 'production';
 
-export function createLogLine(
-  level: LogLevel,
-  event: string,
-  fields: LogFields,
-  now: Date = new Date(),
-): string {
-  return JSON.stringify({
-    timestamp: now.toISOString(),
-    level,
-    event,
-    ...fields,
-  });
-}
-
-/* eslint-disable no-console */
-function getConsoleMethod(
-  level: LogLevel,
-): (message?: unknown, ...optionalParams: unknown[]) => void {
-  switch (level) {
-    case 'debug':
-      return console.debug;
-    case 'warn':
-      return console.warn;
-    case 'error':
-      return console.error;
-    case 'info':
-    default:
-      return console.info;
-  }
-}
-/* eslint-enable no-console */
-
-import { getRequestId } from './requestContext';
-
-function withRequestContext(fields: LogFields): LogFields {
-  const requestId = getRequestId();
-  if (requestId && fields.requestId === undefined) {
-    return { requestId, ...fields };
-  }
-  return fields;
-}
-
-export function logLine(
-  level: LogLevel,
-  event: string,
-  fields: LogFields,
-  configuredLevel: LogLevel,
-): void {
-  if (!shouldLog(level, configuredLevel)) {
-    return;
-  }
-
-  getConsoleMethod(level)(createLogLine(level, event, withRequestContext(fields)));
-}
-
-export function logInfo(event: string, fields: LogFields, configuredLevel: LogLevel): void {
-  logLine('info', event, fields, configuredLevel);
-}
-
-export function logRequest(
-  request: {
-    requestId?: string;
-    method: string;
-    path: string;
-    status: number;
-    durationMs: number;
-  },
-  configuredLevel: LogLevel,
-): void {
-  const durationMs = Number(request.durationMs.toFixed(2));
-
-  logInfo(
-    'http_request',
-    {
-      message: `${request.method} ${request.path} ${request.status} ${durationMs}ms`,
-      requestId: request.requestId,
-      method: request.method,
-      path: request.path,
-      status: request.status,
-      durationMs,
+export const logger = pino({
+  level: normalizeLogLevel(process.env.LOG_LEVEL),
+  transport: isProduction
+    ? undefined
+    : {
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          translateTime: 'SYS:standard',
+        },
+      },
+  formatters: {
+    level: (label) => {
+      return { level: label };
     },
-    configuredLevel,
-  );
+  },
+  redact: {
+    paths: ['req.headers.authorization', 'headers.authorization', 'address', 'creator'],
+    censor: (value: any, path: string[]) => {
+      if (typeof value === 'string' && (path.includes('address') || path.includes('creator')) && value.startsWith('G') && value.length > 50) {
+        return `${value.slice(0, 5)}...${value.slice(-5)}`;
+      }
+      return '[REDACTED]';
+    }
+  },
+  mixin() {
+    const requestId = getRequestId();
+    return requestId ? { requestId } : {};
+  }
+});
+
+export function logInfo(event: string, fields: LogFields, _configuredLevel?: LogLevel): void {
+  logger.info({ event, ...fields });
 }
 
 export function logError(
@@ -115,20 +57,57 @@ export function logError(
     status?: number;
     [key: string]: unknown;
   },
-  configuredLevel: LogLevel,
+  _configuredLevel?: LogLevel,
 ): void {
   const normalizedError =
     error instanceof Error ? error : new Error(typeof error === 'string' ? error : 'Unknown error');
 
-  logLine(
-    'error',
-    typeof context.event === 'string' ? context.event : 'error',
-    {
-      ...context,
+  logger.error({
+    ...context,
+    event: context.event ?? 'error',
+    err: {
       message: normalizedError.message,
       stack: normalizedError.stack,
-      errorName: normalizedError.name,
-    },
-    configuredLevel,
-  );
+      name: normalizedError.name,
+    }
+  });
+}
+
+export function logRequest(
+  request: {
+    requestId?: string;
+    method: string;
+    path: string;
+    status: number;
+    durationMs: number;
+  },
+  _configuredLevel?: LogLevel,
+): void {
+  const durationMs = Number(request.durationMs.toFixed(2));
+  logger.info({
+    event: 'http_request',
+    message: `${request.method} ${request.path} ${request.status} ${durationMs}ms`,
+    requestId: request.requestId,
+    method: request.method,
+    path: request.path,
+    status: request.status,
+    duration_ms: durationMs,
+  });
+}
+
+export function logLine(
+  level: LogLevel,
+  event: string,
+  fields: LogFields,
+  _configuredLevel?: LogLevel,
+): void {
+  if (level === 'debug') {
+    logger.debug({ event, ...fields });
+  } else if (level === 'warn') {
+    logger.warn({ event, ...fields });
+  } else if (level === 'error') {
+    logger.error({ event, ...fields });
+  } else {
+    logger.info({ event, ...fields });
+  }
 }

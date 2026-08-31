@@ -22,6 +22,7 @@ let getPledges: CampaignStoreModule['getPledges'];
 let getDb: DbModule['getDb'];
 let getCampaignHistory: EventHistoryModule['getCampaignHistory'];
 let addPledge: CampaignStoreModule['addPledge'];
+let getCampaignAnalytics: CampaignStoreModule['getCampaignAnalytics'];
 
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR = `G${'B'.repeat(55)}`;
@@ -41,6 +42,7 @@ beforeAll(async () => {
     getCampaign,
     getPledges,
     addPledge,
+    getCampaignAnalytics,
   } = await import('./campaignStore'));
   ({ getDb } = await import('./db'));
   ({ getCampaignHistory } = await import('./eventHistory'));
@@ -206,5 +208,64 @@ describe('campaign pledge pagination', () => {
     expect(page2.totalCount).toBe(3);
     expect(page2.pledges).toHaveLength(1);
     expect(page2.pledges[0].amount).toBe(50);
+  });
+});
+
+describe('campaign analytics', () => {
+  it('returns correct funding_gap for campaign with pledges', () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Analytics Test Campaign',
+      description: 'Campaign to test analytics metrics',
+      assetCode: 'USDC',
+      targetAmount: 1000,
+      deadline: futureDeadline,
+    });
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 250 });
+
+    const analytics = getCampaignAnalytics(campaign.id);
+    expect(analytics).toBeDefined();
+    expect(analytics?.fundingGap).toBe(750); // 1000 - 250 = 750
+  });
+
+  it('returns zero funding_gap when campaign is fully funded', () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Fully Funded Campaign',
+      description: 'Campaign to test funding_gap when fully funded',
+      assetCode: 'XLM',
+      targetAmount: 500,
+      deadline: futureDeadline,
+    });
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 500 });
+
+    const analytics = getCampaignAnalytics(campaign.id);
+    expect(analytics).toBeDefined();
+    expect(analytics?.fundingGap).toBe(0); // 500 - 500 = 0
+  });
+
+  it('returns funding_gap equal to target for campaign with no pledges', () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Empty Campaign',
+      description: 'Campaign with no pledges to test analytics',
+      assetCode: 'USDC',
+      targetAmount: 2000,
+      deadline: futureDeadline,
+    });
+
+    const analytics = getCampaignAnalytics(campaign.id);
+    expect(analytics).toBeDefined();
+    expect(analytics?.fundingGap).toBe(2000); // 2000 - 0 = 2000
+  });
+
+  it('returns undefined for non-existent campaign', () => {
+    const analytics = getCampaignAnalytics('99999');
+    expect(analytics).toBeUndefined();
   });
 });

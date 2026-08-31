@@ -29,11 +29,11 @@ console.log(`Output: ${OUTPUT_DIR}`);
 try {
   execSync(
     `stellar contract bindings typescript ` +
-    `--contract-id ${CONTRACT_ID} ` +
-    `--rpc-url ${RPC_URL} ` +
-    `--network-passphrase "${NETWORK_PASSPHRASE}" ` +
-    `--output-dir ${OUTPUT_DIR}`,
-    { stdio: 'inherit' }
+      `--contract-id ${CONTRACT_ID} ` +
+      `--rpc-url ${RPC_URL} ` +
+      `--network-passphrase "${NETWORK_PASSPHRASE}" ` +
+      `--output-dir ${OUTPUT_DIR}`,
+    { stdio: 'inherit' },
   );
   console.log('✅ Bindings generated successfully!');
 } catch (error) {

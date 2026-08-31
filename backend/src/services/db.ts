@@ -117,6 +117,7 @@ function migrate(database: SQLiteDatabase): void {
       contributor       TEXT NOT NULL,
       amount            REAL NOT NULL,
       asset_code        TEXT NOT NULL,
+      token_id          TEXT,
       created_at        INTEGER NOT NULL,
       refunded_at       INTEGER,
       transaction_hash TEXT,
@@ -135,9 +136,21 @@ function migrate(database: SQLiteDatabase): void {
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
     );
 
+    CREATE TABLE IF NOT EXISTS webhook_dead_letter_queue (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      event         TEXT NOT NULL,
+      campaign_id   TEXT NOT NULL,
+      payload       TEXT NOT NULL,
+      error_message TEXT,
+      failed_at     INTEGER NOT NULL,
+      attempts      INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_id ON campaign_events(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_comments_campaign_id ON campaign_comments(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_comments_created_at ON campaign_comments(created_at);
   `);
 
   const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
@@ -153,6 +166,14 @@ function migrate(database: SQLiteDatabase): void {
   if (!hasAssetCode) {
     database.exec(`ALTER TABLE pledges ADD COLUMN asset_code TEXT NOT NULL DEFAULT 'XLM'`);
   }
+
+  const hasTokenId = pledgeColumns.some((column) => column.name === 'token_id');
+  if (!hasTokenId) {
+    database.exec(`ALTER TABLE pledges ADD COLUMN token_id TEXT`);
+  }
+
+  // Backfill token_id for existing pledges where it's still NULL
+  database.exec(`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`);
 
   // Add deleted_at column if not exists
   const campaignColumns = database.prepare(`PRAGMA table_info(campaigns)`).all() as Array<{
@@ -173,7 +194,7 @@ function migrate(database: SQLiteDatabase): void {
     !campaignColumns.some((column) => column.name === 'accepted_tokens_json')
   ) {
     // 1. Create the FTS5 virtual table
-database.exec(`
+    database.exec(`
   CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
     id,
     title,
@@ -181,8 +202,8 @@ database.exec(`
   );
 `);
 
-// 2. Add the Triggers to keep data synchronized automatically
-database.exec(`
+    // 2. Add the Triggers to keep data synchronized automatically
+    database.exec(`
   -- Triggers for handling future changes
   CREATE TRIGGER IF NOT EXISTS after_campaigns_insert AFTER INSERT ON campaigns BEGIN
     INSERT INTO campaigns_fts(id, title, description) VALUES (new.id, new.title, new.description);
@@ -198,13 +219,12 @@ database.exec(`
   END;
 `);
 
-// 3. Fixes CodeRabbit: Backfill any pre-existing campaigns into the FTS table
-database.exec(`
+    // 3. Fixes CodeRabbit: Backfill any pre-existing campaigns into the FTS table
+    database.exec(`
   INSERT INTO campaigns_fts (id, title, description)
   SELECT id, title, description FROM campaigns
   WHERE id NOT IN (SELECT id FROM campaigns_fts);
 `);
-
   }
 
   database.exec(`
@@ -249,6 +269,27 @@ database.exec(`
   if (!hasMaxPerContributor) {
     database.exec(`ALTER TABLE campaigns ADD COLUMN max_per_contributor INTEGER`);
   }
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id   TEXT NOT NULL,
+      type          TEXT NOT NULL CHECK(type IN ('new_pledge', 'campaign_funded', 'refund_available', 'creator_update')),
+      title         TEXT NOT NULL,
+      body          TEXT NOT NULL,
+      target_wallet TEXT NOT NULL,
+      actor_wallet  TEXT,
+      is_read       INTEGER NOT NULL DEFAULT 0,
+      created_at    INTEGER NOT NULL,
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notifications_target_wallet
+    ON notifications(target_wallet, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_notifications_unread
+    ON notifications(target_wallet, is_read);
+  `);
 
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_campaign_events_tx_hash

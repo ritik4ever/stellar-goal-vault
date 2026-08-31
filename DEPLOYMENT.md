@@ -122,11 +122,20 @@ DEFAULT_MAX_PER_CONTRIBUTOR=0
 - `ALLOWED_ORIGINS` restricts CORS to your frontend domain.
 - Do not rely on SQLite for production data persistence on Render; the container filesystem is ephemeral.
 
-### 2.5 Notes on Render and SQLite
+### 2.5 SQLite Persistent Disk Setup on Render
 
-- The backend uses SQLite (`better-sqlite3`) by default.
-- Render's storage is not permanent across redeploys.
-- For production, use an external database and update `DB_PATH` accordingly.
+By default, Render's web service filesystem is ephemeral. To persist SQLite data across deployments, you must attach a Render Disk:
+1. In your Render Web Service settings, go to **Disks**.
+2. Click **Add Disk**.
+3. Name it `sqlite-data` (or similar).
+4. Set the **Mount Path** to `/var/data`.
+5. Set the Size (e.g., 1 GB).
+6. Save changes.
+
+Then, update your environment variables so the application uses the persistent disk:
+```env
+DB_PATH=/var/data/campaigns.db
+```
 
 ---
 
@@ -153,15 +162,13 @@ npm install && npm run build
 dist
 ```
 
-### 3.3 Configure Environment Variables
+### 3.3 Configure Environment Variables Checklist
 
-Set the frontend base API URL:
+Ensure the following environment variables are set in your Vercel project settings before deploying:
 
-```env
-VITE_API_URL=https://<your-backend-service>.onrender.com
-```
-
-This value must be the Render backend URL without a trailing `/`.
+- [ ] `VITE_API_URL`: The Render backend URL without a trailing `/` (e.g., `https://<your-backend-service>.onrender.com`)
+- [ ] `VITE_NETWORK`: The Stellar network to use (e.g., `testnet` or `public`)
+- [ ] `VITE_CONTRACT_ID`: The Soroban contract ID (optional, if frontend interacts directly)
 
 ### 3.4 Deploy
 
@@ -209,6 +216,15 @@ If the app fails to load data, verify the frontend env variable `VITE_API_URL`.
 If `CONTRACT_ID` is missing, the app may still run, but on-chain pledge integration will not function.
 
 Use the backend health endpoint and the frontend deployment status in Vercel to verify end-to-end availability.
+
+### 4.4 Post-Deploy Verification Checklist
+
+Run through this checklist to ensure a fully functional deployment:
+
+- [ ] **Backend Health:** Run `curl -s https://<your-backend-service>.onrender.com/api/health | grep '"status": "ok"'` to verify it is healthy.
+- [ ] **Frontend Load:** Visit the Vercel frontend URL in an incognito window; verify the app loads with no console errors.
+- [ ] **Data Persistence:** Create a test campaign via the UI. Manually restart the Render backend from the dashboard. Refresh the page and verify the campaign still exists (confirms SQLite disk is mounted correctly).
+- [ ] **Contract Integration:** Check `CONTRACT_ID` is present by attempting a pledge action on the frontend and verifying the transaction initiates via your wallet.
 
 ---
 
