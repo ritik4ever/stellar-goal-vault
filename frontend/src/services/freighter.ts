@@ -66,7 +66,7 @@ export interface EstimatedFee {
 }
 
 function formatStroopsAsXlm(stroops: number): string {
-  return (stroops / STROOPS_PER_XLM).toFixed(7).replace(/\.?0+$/, "");
+  return (stroops / STROOPS_PER_XLM).toFixed(7).replace(/\.?0+$/, '');
 }
 
 /**

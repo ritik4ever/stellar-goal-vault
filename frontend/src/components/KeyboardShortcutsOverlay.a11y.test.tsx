@@ -5,9 +5,7 @@ import { runAxeAudit, THEMES, type ThemeMode } from '../test/a11yTestUtils';
 
 describe.each(THEMES)('KeyboardShortcutsOverlay Accessibility (%s theme)', (theme: ThemeMode) => {
   it('has no accessibility violations when open', async () => {
-    const { container } = render(
-      <KeyboardShortcutsOverlay isOpen onClose={() => {}} />,
-    );
+    const { container } = render(<KeyboardShortcutsOverlay isOpen onClose={() => {}} />);
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();

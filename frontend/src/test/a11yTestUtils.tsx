@@ -25,8 +25,7 @@ export function setupDesktopViewport(width = 1280): void {
       const minWidth = query.match(/\(min-width:\s*(\d+)px\)/);
       const maxWidth = query.match(/\(max-width:\s*(\d+)px\)/);
       const matches =
-        (!minWidth || width >= Number(minWidth[1])) &&
-        (!maxWidth || width <= Number(maxWidth[1]));
+        (!minWidth || width >= Number(minWidth[1])) && (!maxWidth || width <= Number(maxWidth[1]));
 
       return {
         matches,

@@ -1,45 +1,24 @@
-# Contributor Summary Endpoint - Implementation TODO
+# TODO Triage and Backlog Prioritization
 
-## Approved Plan Summary
+## Priority Legend
 
-Add GET /api/campaigns/:id/contributors endpoint returning grouped contributor totals with refunded status. SQL GROUP BY contributor. 404 for invalid ID. Empty [] for no pledges. Document in README.md.
+- P0 — blocker
+- P1 — high priority
+- P2 — medium priority
+- P3 — nice to have
 
-## Implementation Steps
+## Active Backlog
 
-### 1. Backend Types (campaign.ts or new)
+- [ ] P1 — Implement Freighter-signed pledge transactions. This is the most important MVP gap because it connects the frontend wallet flow to real on-chain pledge submission and reconciliation. GitHub issue: [Create issue](https://github.com/stellar-goal-vault/stellar-goal-vault/issues/new?title=FEATURE%3A%20Implement%20Freighter-signed%20pledge%20transactions)
+- [ ] P2 — Finish frontend integration for the contributor summary endpoint. The backend contract is in place; the remaining work is to expose the data in the UI and confirm the contributor view behaves correctly. GitHub issue: [Create issue](https://github.com/stellar-goal-vault/stellar-goal-vault/issues/new?title=FEATURE%3A%20Wire%20campaign%20contributor%20summary%20into%20the%20frontend)
+- [ ] P3 — Add a creator dashboard with owned-campaign views and quick actions for wallet-connected users. This improves campaign management UX but is not required for the MVP launch path. GitHub issue: [Create issue](https://github.com/stellar-goal-vault/stellar-goal-vault/issues/new?title=FEATURE%3A%20Add%20creator%20dashboard%20with%20owned%20campaigns)
 
-- Add ContributorSummary interface
-- [x] Edit frontend/src/types/campaign.ts
+## Archived / Completed
 
-### 2. Backend Data Layer (campaignStore.ts)
+- [x] P2 — Contributor summary endpoint implementation. Completed work included backend grouping logic, contributor summary responses, and documentation updates. This item is now archived because the implementation is complete.
 
-- Add ContributorSummary interface, getContributorSummary function with GROUP BY SQL
-- [x] Edit backend/src/services/campaignStore.ts
+## Notes
 
-### 3. Backend Route (index.ts)
-
-- Added GET /api/campaigns/:id/contributors route + getContributorSummary import
-- [x] Edit backend/src/index.ts
-
-### 4. Document Response (README.md)
-
-- Added API reference with response shape
-- [x] Edit README.md
-
-### 5. Frontend API + Component (if needed)
-
-- Add listCampaignContributors(id): Promise<ContributorSummary[]>
-- Hook up ContributorSummary component if exists
-- [ ] Edit frontend/src/services/api.ts
-- [ ] Edit frontend/src/components/ContributorSummary.tsx (if relevant)
-
-### 6. Testing
-
-- Backend: curl /api/campaigns/1/contributors → array, /api/invalid → 404
-- Verify empty [], refunded status correct
-- Frontend: manual test in dev
-- Update TODO
-
-## Progress
-
-Ready for implementation.
+- All active backlog items now have an explicit priority.
+- High-priority items are linked to GitHub issue drafts so they can be moved into the tracker quickly.
+- Completed work has been archived to keep the active backlog focused on remaining work.

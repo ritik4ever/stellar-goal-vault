@@ -1,0 +1,55 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Group npm patch updates into weekly batch PRs and auto-merge",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "npm patch updates",
+      "schedule": ["before 9am on Monday"],
+      "automerge": true,
+      "platformAutomerge": true,
+      "labels": ["dependencies", "npm"]
+    },
+    {
+      "description": "Group Cargo patch updates into weekly batch PRs and auto-merge",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "Cargo patch updates",
+      "schedule": ["before 9am on Monday"],
+      "automerge": true,
+      "platformAutomerge": true,
+      "labels": ["dependencies", "rust"]
+    },
+    {
+      "description": "Major npm updates as individual PRs assigned to maintainers",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "groupName": null,
+      "schedule": ["at any time"],
+      "assignees": ["ritik4ever"],
+      "reviewers": ["ritik4ever"],
+      "labels": ["dependencies", "npm", "major"]
+    },
+    {
+      "description": "Major Cargo updates as individual PRs assigned to maintainers",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["major"],
+      "groupName": null,
+      "schedule": ["at any time"],
+      "assignees": ["ritik4ever"],
+      "reviewers": ["ritik4ever"],
+      "labels": ["dependencies", "rust", "major"]
+    }
+  ],
+  "timezone": "Africa/Lagos",
+  "prHourlyLimit": 2,
+  "prConcurrentLimit": 5,
+  "rangeStrategy": "bump",
+  "separateMajorMinor": true,
+  "separateMultipleMajor": true
+}

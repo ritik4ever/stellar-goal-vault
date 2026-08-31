@@ -3,6 +3,7 @@ import { Link } from 'lucide-react';
 import { Campaign } from '../types/campaign';
 import AddressAvatar from './AddressAvatar';
 import CopyButton from './CopyButton';
+import { Countdown } from './Countdown';
 
 interface CampaignCardProps {
   campaign: Campaign;
@@ -13,6 +14,7 @@ interface CampaignCardProps {
 function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignCardProps) {
   const prevPercentRef = useRef<number | null>(null);
   const [animate, setAnimate] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
     if (
@@ -24,32 +26,60 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
     prevPercentRef.current = campaign.progress.percentFunded;
   }, [campaign.progress.percentFunded]);
 
-  const formatTimestamp = (unixSeconds: number) => new Date(unixSeconds * 1000).toLocaleString();
+  // Reset image error when campaign changes
+  useEffect(() => {
+    setImageError(false);
+  }, [campaign.id]);
 
   const handleShareCampaign = () => {
     const deepLinkUrl = `${window.location.origin}${window.location.pathname}?campaign=${campaign.id}`;
-    navigator.clipboard.writeText(deepLinkUrl).then(() => {
-      // Share action complete
-    }).catch(() => {
-      // Copy failed
-    });
+    navigator.clipboard
+      .writeText(deepLinkUrl)
+      .then(() => {
+        // Share action complete
+      })
+      .catch(() => {
+        // Copy failed
+      });
   };
 
   return (
     <article
       className={`campaign-card ${selectedCampaignId === campaign.id ? 'campaign-card-selected' : ''}`}
     >
+      {/* Campaign Banner Image or Gradient Fallback */}
+      <div
+        style={{
+          width: '100%',
+          height: '160px',
+          overflow: 'hidden',
+          borderRadius: '8px 8px 0 0',
+          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+          position: 'relative',
+        }}
+      >
+        {campaign.metadata?.imageUrl && !imageError ? (
+          <img
+            src={campaign.metadata.imageUrl}
+            alt={campaign.title}
+            onError={() => setImageError(true)}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        ) : null}
+      </div>
+
       <div className="campaign-card-main">
         <div className="campaign-card-header">
           <div>
             <strong className="campaign-title">{campaign.title}</strong>
             <div className="muted" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span>#{campaign.id}</span>
-              <CopyButton
-                value={campaign.id}
-                ariaLabel="Copy campaign ID"
-                className="small"
-              />
+              <CopyButton value={campaign.id} ariaLabel="Copy campaign ID" className="small" />
               <button
                 type="button"
                 onClick={handleShareCampaign}
@@ -100,9 +130,10 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
             <div className="token-progress-list" aria-label="Per-token progress">
               {campaign.acceptedTokens.map((token) => {
                 const balance = campaign.tokenBalances![token] ?? 0;
-                const pct = campaign.targetAmount > 0
-                  ? Math.min(Math.round((balance / campaign.targetAmount) * 100), 100)
-                  : 0;
+                const pct =
+                  campaign.targetAmount > 0
+                    ? Math.min(Math.round((balance / campaign.targetAmount) * 100), 100)
+                    : 0;
                 return (
                   <div key={token} className="token-progress-row">
                     <span className="token-label muted">{token}</span>
@@ -131,7 +162,7 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
           <span className={`badge badge-${campaign.progress.status}`}>
             {campaign.progress.status}
           </span>
-          <div className="muted">{formatTimestamp(campaign.deadline)}</div>
+          <div className="muted"><Countdown deadline={campaign.deadline} /></div>
         </div>
       </div>
 
@@ -148,10 +179,7 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
   );
 }
 
-function areEqual(
-  prevProps: CampaignCardProps,
-  nextProps: CampaignCardProps,
-): boolean {
+function areEqual(prevProps: CampaignCardProps, nextProps: CampaignCardProps): boolean {
   return (
     prevProps.campaign.id === nextProps.campaign.id &&
     prevProps.campaign.pledgedAmount === nextProps.campaign.pledgedAmount &&

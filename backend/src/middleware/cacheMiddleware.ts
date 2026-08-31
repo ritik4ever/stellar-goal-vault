@@ -1,9 +1,5 @@
-import { Request, Response, NextFunction } from "express";
-import {
-  getCacheValue,
-  setCacheValue,
-  isCacheAvailable,
-} from "../services/cache";
+import { Request, Response, NextFunction } from 'express';
+import { getCacheValue, setCacheValue, isCacheAvailable } from '../services/cache';
 
 interface CacheableRequest extends Request {
   cacheKey?: string;
@@ -15,13 +11,9 @@ interface CacheableRequest extends Request {
  * Cache key format: "cache:{method}:{path}:{queryString}"
  */
 export function cacheMiddleware(ttlSeconds: number = 300) {
-  return async (
-    req: CacheableRequest,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  return async (req: CacheableRequest, res: Response, next: NextFunction): Promise<void> => {
     // Only cache GET requests
-    if (req.method !== "GET" || !isCacheAvailable()) {
+    if (req.method !== 'GET' || !isCacheAvailable()) {
       return next();
     }
 
@@ -29,15 +21,15 @@ export function cacheMiddleware(ttlSeconds: number = 300) {
     const queryString = Object.keys(req.query)
       .sort()
       .map((key) => `${key}=${req.query[key]}`)
-      .join("&");
-    const cacheKey = `cache:${req.method}:${req.path}${queryString ? "?" + queryString : ""}`;
+      .join('&');
+    const cacheKey = `cache:${req.method}:${req.path}${queryString ? '?' + queryString : ''}`;
     req.cacheKey = cacheKey;
 
     // Try to get from cache
     const cachedResponse = await getCacheValue(cacheKey);
     if (cachedResponse) {
-      res.setHeader("X-Cache", "HIT");
-      res.setHeader("Content-Type", "application/json");
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('Content-Type', 'application/json');
       res.send(cachedResponse);
       return;
     }
@@ -47,12 +39,11 @@ export function cacheMiddleware(ttlSeconds: number = 300) {
     res.send = function (data: unknown) {
       // Only cache successful responses (2xx status codes)
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        const responseData =
-          typeof data === "string" ? data : JSON.stringify(data);
+        const responseData = typeof data === 'string' ? data : JSON.stringify(data);
         setCacheValue(cacheKey, responseData, ttlSeconds).catch(() => {
           // Silently fail cache writes
         });
-        res.setHeader("X-Cache", "MISS");
+        res.setHeader('X-Cache', 'MISS');
       }
 
       return originalSend(data);
@@ -71,6 +62,6 @@ export async function invalidateCache(pattern: string): Promise<void> {
     return;
   }
 
-  const { clearCachePattern } = await import("../services/cache");
+  const { clearCachePattern } = await import('../services/cache');
   await clearCachePattern(pattern);
 }

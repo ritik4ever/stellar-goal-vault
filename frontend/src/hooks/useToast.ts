@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 
-export type ToastVariant = 'success' | 'error' | 'info';
+export type ToastVariant = 'success' | 'error' | 'warning' | 'info';
 
 export interface Toast {
   id: string;
@@ -10,7 +10,8 @@ export interface Toast {
   link?: { href: string; label: string };
 }
 
-const AUTO_DISMISS_MS = 6000;
+const MAX_VISIBLE = 3;
+const AUTO_DISMISS_MS = 5000;
 
 export function useToast() {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -26,17 +27,29 @@ export function useToast() {
   }, []);
 
   const addToast = useCallback(
-    (
-      message: string,
-      variant: ToastVariant = 'info',
-      link?: { href: string; label: string },
-    ) => {
+    (message: string, variant: ToastVariant = 'info', link?: { href: string; label: string }) => {
       const id = crypto.randomUUID();
-      setToasts((prev) => [...prev, { id, message, variant, link }]);
-      // Give the user more time to click the link when one is present.
-      const delay = link ? 10_000 : AUTO_DISMISS_MS;
-      const timer = setTimeout(() => dismiss(id), delay);
-      timersRef.current.set(id, timer);
+      setToasts((prev) => {
+        const next = [...prev, { id, message, variant, link }];
+        if (next.length <= MAX_VISIBLE) return next;
+        const oldestRemovable = next.findIndex(
+          (t) => t.id !== id && t.variant !== 'error',
+        );
+        if (oldestRemovable !== -1) {
+          const timer = timersRef.current.get(next[oldestRemovable].id);
+          if (timer !== undefined) {
+            clearTimeout(timer);
+            timersRef.current.delete(next[oldestRemovable].id);
+          }
+          return next.filter((_, i) => i !== oldestRemovable);
+        }
+        return next.slice(-MAX_VISIBLE);
+      });
+      if (variant !== 'error') {
+        const delay = link ? 10_000 : AUTO_DISMISS_MS;
+        const timer = setTimeout(() => dismiss(id), delay);
+        timersRef.current.set(id, timer);
+      }
     },
     [dismiss],
   );
