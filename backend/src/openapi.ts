@@ -218,6 +218,47 @@ const openIssueSchema = z
   })
   .openapi('OpenIssue');
 
+// API Key Management Schemas
+const apiKeyScopeSchema = z.enum(['read-only', 'read-write']);
+
+const createApiKeyRequestSchema = z
+  .object({
+    name: z.string().min(1).max(100).openapi({ example: 'Production API Key' }),
+    scope: apiKeyScopeSchema.openapi({ example: 'read-write' }),
+    expiresInDays: z.number().int().positive().optional().openapi({ example: 90 }),
+  })
+  .openapi('CreateApiKeyRequest');
+
+const apiKeyResponseSchema = z
+  .object({
+    id: z.string().openapi({ example: 'abc123def456' }),
+    name: z.string().openapi({ example: 'Production API Key' }),
+    keyPrefix: z.string().openapi({ example: 'sk_abc12' }),
+    scope: apiKeyScopeSchema,
+    createdAt: unixTimestampSchema,
+    expiresAt: unixTimestampSchema.nullable(),
+    lastUsedAt: unixTimestampSchema.nullable(),
+  })
+  .openapi('ApiKeyResponse');
+
+const createdApiKeyResponseSchema = z
+  .object({
+    id: z.string().openapi({ example: 'abc123def456' }),
+    name: z.string().openapi({ example: 'Production API Key' }),
+    keyPrefix: z.string().openapi({ example: 'sk_abc12' }),
+    plainKey: z.string().openapi({ example: 'sk_abc12xyz789...' }),
+    scope: apiKeyScopeSchema,
+    createdAt: unixTimestampSchema,
+    expiresAt: unixTimestampSchema.nullable(),
+  })
+  .openapi('CreatedApiKeyResponse');
+
+const rotateApiKeyRequestSchema = z
+  .object({
+    gracePeriodDays: z.number().int().positive().optional().openapi({ example: 7 }),
+  })
+  .openapi('RotateApiKeyRequest');
+
 // ---------------------------------------------------------------------------
 // Request / response envelope schemas
 // ---------------------------------------------------------------------------
@@ -420,6 +461,10 @@ const registeredSchemas = {
   StatsResponse: registry.register('StatsResponse', statsResponseSchema),
   LeaderboardResponse: registry.register('LeaderboardResponse', leaderboardResponseSchema),
   OpenIssuesResponse: registry.register('OpenIssuesResponse', openIssuesResponseSchema),
+  CreateApiKeyRequest: registry.register('CreateApiKeyRequest', createApiKeyRequestSchema),
+  ApiKeyResponse: registry.register('ApiKeyResponse', apiKeyResponseSchema),
+  CreatedApiKeyResponse: registry.register('CreatedApiKeyResponse', createdApiKeyResponseSchema),
+  RotateApiKeyRequest: registry.register('RotateApiKeyRequest', rotateApiKeyRequestSchema),
 };
 
 // ---------------------------------------------------------------------------
@@ -871,6 +916,103 @@ registry.registerPath({
       description: 'Internal server error',
       content: { 'application/json': { schema: registeredSchemas.ApiError } },
     },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// API Key Management Routes
+// ---------------------------------------------------------------------------
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/api-keys',
+  tags: ['API Keys'],
+  summary: 'Create an API key',
+  description:
+    'Creates a new API key with the specified scope. The plain key is only returned once.',
+  security: [],
+  request: {
+    body: {
+      content: { 'application/json': { schema: registeredSchemas.CreateApiKeyRequest } },
+      description: 'API key creation payload',
+    },
+  },
+  responses: {
+    201: {
+      description: 'API key created',
+      content: { 'application/json': { schema: registeredSchemas.CreatedApiKeyResponse } },
+    },
+    400: validationErrorResponse,
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/api-keys',
+  tags: ['API Keys'],
+  summary: 'List API keys',
+  description: 'Lists all active (non-revoked) API keys with masked secrets.',
+  security: [],
+  responses: {
+    200: {
+      description: 'List of API keys',
+      content: {
+        'application/json': {
+          schema: z.object({
+            data: z.array(apiKeyResponseSchema),
+          }),
+        },
+      },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'delete',
+  path: '/api/api-keys/{id}',
+  tags: ['API Keys'],
+  summary: 'Revoke an API key',
+  description: 'Revokes an API key immediately.',
+  security: [],
+  request: {
+    params: z.object({
+      id: z
+        .string()
+        .openapi({ param: { name: 'id', in: 'path', required: true }, example: 'abc123def456' }),
+    }),
+  },
+  responses: {
+    204: { description: 'API key revoked' },
+    404: notFoundResponse,
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/api-keys/{id}/rotate',
+  tags: ['API Keys'],
+  summary: 'Rotate an API key',
+  description:
+    'Creates a new API key to replace the specified key. The old key remains valid during a grace period (default 7 days) before being automatically revoked.',
+  security: [],
+  request: {
+    params: z.object({
+      id: z
+        .string()
+        .openapi({ param: { name: 'id', in: 'path', required: true }, example: 'abc123def456' }),
+    }),
+    body: {
+      content: { 'application/json': { schema: registeredSchemas.RotateApiKeyRequest } },
+      description: 'API key rotation payload',
+    },
+  },
+  responses: {
+    201: {
+      description: 'API key rotated',
+      content: { 'application/json': { schema: registeredSchemas.CreatedApiKeyResponse } },
+    },
+    400: validationErrorResponse,
+    404: notFoundResponse,
   },
 });
 

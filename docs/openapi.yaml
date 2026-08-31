@@ -1034,6 +1034,118 @@ components:
             $ref: "#/components/schemas/OpenIssue"
       required:
         - data
+    CreateApiKeyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Production API Key
+        scope:
+          type: string
+          enum:
+            - read-only
+            - read-write
+          example: read-write
+        expiresInDays:
+          type: integer
+          exclusiveMinimum: 0
+          example: 90
+      required:
+        - name
+        - scope
+    ApiKeyResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          example: abc123def456
+        name:
+          type: string
+          example: Production API Key
+        keyPrefix:
+          type: string
+          example: sk_abc12
+        scope:
+          type: string
+          enum:
+            - read-only
+            - read-write
+        createdAt:
+          type: integer
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        expiresAt:
+          type:
+            - integer
+            - "null"
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        lastUsedAt:
+          type:
+            - integer
+            - "null"
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+      required:
+        - id
+        - name
+        - keyPrefix
+        - scope
+        - createdAt
+        - expiresAt
+        - lastUsedAt
+    CreatedApiKeyResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          example: abc123def456
+        name:
+          type: string
+          example: Production API Key
+        keyPrefix:
+          type: string
+          example: sk_abc12
+        plainKey:
+          type: string
+          example: sk_abc12xyz789...
+        scope:
+          type: string
+          enum:
+            - read-only
+            - read-write
+        createdAt:
+          type: integer
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        expiresAt:
+          type:
+            - integer
+            - "null"
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+      required:
+        - id
+        - name
+        - keyPrefix
+        - plainKey
+        - scope
+        - createdAt
+        - expiresAt
+    RotateApiKeyRequest:
+      type: object
+      properties:
+        gracePeriodDays:
+          type: integer
+          exclusiveMinimum: 0
+          example: 7
   parameters: {}
 paths:
   /api/health:
@@ -1623,6 +1735,117 @@ paths:
                 $ref: "#/components/schemas/LeaderboardResponse"
         "500":
           description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/api-keys:
+    post:
+      tags:
+        - API Keys
+      summary: Create an API key
+      description: Creates a new API key with the specified scope. The plain key is
+        only returned once.
+      security: []
+      requestBody:
+        description: API key creation payload
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiKeyRequest"
+      responses:
+        "201":
+          description: API key created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedApiKeyResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      tags:
+        - API Keys
+      summary: List API keys
+      description: Lists all active (non-revoked) API keys with masked secrets.
+      security: []
+      responses:
+        "200":
+          description: List of API keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApiKeyResponse"
+                required:
+                  - data
+  /api/api-keys/{id}:
+    delete:
+      tags:
+        - API Keys
+      summary: Revoke an API key
+      description: Revokes an API key immediately.
+      security: []
+      parameters:
+        - schema:
+            type: string
+            example: abc123def456
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: API key revoked
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/api-keys/{id}/rotate:
+    post:
+      tags:
+        - API Keys
+      summary: Rotate an API key
+      description: Creates a new API key to replace the specified key. The old key
+        remains valid during a grace period (default 7 days) before being
+        automatically revoked.
+      security: []
+      parameters:
+        - schema:
+            type: string
+            example: abc123def456
+          required: true
+          name: id
+          in: path
+      requestBody:
+        description: API key rotation payload
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateApiKeyRequest"
+      responses:
+        "201":
+          description: API key rotated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedApiKeyResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
           content:
             application/json:
               schema:

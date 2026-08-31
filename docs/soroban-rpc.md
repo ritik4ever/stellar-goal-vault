@@ -5,6 +5,7 @@ particularly the simulate → sign → submit → reconcile flow used by the fro
 backend when creating on-chain pledges, claims, and refunds.
 
 **Why this doc exists**
+
 - The code in `backend/src/services/sorobanRpc.ts` interacts with a Soroban JSON-RPC
   node. That file contains logic to verify transaction results and map Soroban RPC
   responses to application-level errors. This doc explains the end-to-end flow,
@@ -47,6 +48,7 @@ sequenceDiagram
 ```
 
 Why simulation is required before signing
+
 - Simulation provides deterministic feedback about whether the transaction would
   succeed or fail if submitted. It helps:
   - Avoid unnecessary user signatures for transactions that would fail (bad inputs, insufficient balance, contract preconditions).
@@ -113,5 +115,6 @@ npm test
 If all of the above are present and the project builds, your assignment is complete.
 
 Additional notes
+
 - For production, consider adding an event indexer that listens for on-chain events instead of polling `getTransaction` repeatedly. This improves latency and reduces RPC load.
 - Surface granular RPC error messages (when safe) to help users understand `FAILED` causes — e.g., contract-level errors returned in the RPC metadata.
