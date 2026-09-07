@@ -14,6 +14,7 @@ type EventHistoryModule = typeof import('./eventHistory');
 let createCampaign: CampaignStoreModule['createCampaign'];
 
 let initCampaignStore: CampaignStoreModule['initCampaignStore'];
+let iterateCampaigns: CampaignStoreModule['iterateCampaigns'];
 let listCampaigns: CampaignStoreModule['listCampaigns'];
 let listCampaignPledges: CampaignStoreModule['listCampaignPledges'];
 let reconcileOnChainPledge: CampaignStoreModule['reconcileOnChainPledge'];
@@ -36,6 +37,7 @@ beforeAll(async () => {
     createCampaign,
 
     initCampaignStore,
+    iterateCampaigns,
     listCampaigns,
     listCampaignPledges,
     reconcileOnChainPledge,
@@ -96,6 +98,38 @@ describe('campaign store search', () => {
       listCampaigns({ searchQuery: 'gaaa' }).campaigns.some((row) => row.id === campaign.id),
     ).toBe(true);
     expect(listCampaigns({ searchQuery: campaign.id }).campaigns[0].id).toBe(campaign.id);
+  });
+});
+
+describe('campaign store iteration', () => {
+  it('uses list filters and yields pledge counts without materializing a result array', () => {
+    const deadline = Math.floor(Date.now() / 1000) + 86400;
+    const included = createCampaign({
+      creator: CREATOR,
+      title: 'Exported campaign',
+      description: 'USDC campaign included by the iterator filter.',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline,
+    });
+    createCampaign({
+      creator: CREATOR,
+      title: 'Excluded campaign',
+      description: 'XLM campaign excluded by the iterator filter.',
+      assetCode: 'XLM',
+      targetAmount: 100,
+      deadline,
+    });
+    addPledge(included.id, { contributor: CONTRIBUTOR, amount: 25 });
+
+    const iterator = iterateCampaigns({ assetCodes: ['USDC'] });
+    expect(Array.isArray(iterator)).toBe(false);
+    expect(Array.from(iterator)).toEqual([
+      expect.objectContaining({
+        campaign: expect.objectContaining({ id: included.id }),
+        pledgeCount: 1,
+      }),
+    ]);
   });
 });
 

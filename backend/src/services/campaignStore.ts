@@ -217,12 +217,130 @@ export function getContributorPledgedTotal(campaignId: string, contributor: stri
   return row.total;
 }
 
+export interface ListContributorPledgesOptions {
+  page: number;
+  limit: number;
+}
+
+export interface ContributorPledge {
+  id: number;
+  campaignId: string;
+  campaignName: string;
+  campaignStatus: CampaignStatus;
+  amount: number;
+  assetCode: string;
+  tokenId?: string;
+  createdAt: number;
+  refundedAt?: number;
+  transactionHash?: string;
+}
+
+export interface ListContributorPledgesResult {
+  pledges: ContributorPledge[];
+  totalCount: number;
+  page: number;
+  limit: number;
+}
+
+export function listContributorPledges(
+  contributor: string,
+  options: ListContributorPledgesOptions,
+): ListContributorPledgesResult {
+  const db = getDb();
+  const page = options.page > 0 ? options.page : 1;
+  const limit = options.limit > 0 ? options.limit : 10;
+  const offset = (page - 1) * limit;
+
+  const countRow = db
+    .prepare(`SELECT COUNT(*) AS count FROM pledges WHERE contributor = ?`)
+    .get(contributor) as { count: number };
+  const totalCount = countRow.count;
+
+  if (totalCount === 0) {
+    return { pledges: [], totalCount: 0, page, limit };
+  }
+
+  const pledgeRows = db
+    .prepare(
+      `SELECT
+         p.id,
+         p.campaign_id,
+         c.title AS campaign_name,
+         c.claimed_at,
+         c.pledged_amount,
+         c.target_amount,
+         c.deadline,
+         p.amount,
+         p.asset_code,
+         p.token_id,
+         p.created_at,
+         p.refunded_at,
+         p.transaction_hash
+       FROM pledges p
+       INNER JOIN campaigns c ON c.id = p.campaign_id
+       WHERE p.contributor = ?
+       ORDER BY p.created_at DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(contributor, limit, offset) as Array<{
+    id: number;
+    campaign_id: string;
+    campaign_name: string;
+    claimed_at: number | null;
+    pledged_amount: number;
+    target_amount: number;
+    deadline: number;
+    amount: number;
+    asset_code: string;
+    token_id: string | null;
+    created_at: number;
+    refunded_at: number | null;
+    transaction_hash: string | null;
+  }>;
+
+  const now = nowInMilliseconds();
+  const pledges: ContributorPledge[] = pledgeRows.map((row) => {
+    const campaign: CampaignRecord = {
+      id: row.campaign_id,
+      creator: '',
+      title: row.campaign_name,
+      description: '',
+      acceptedTokens: [],
+      assetCode: row.asset_code,
+      targetAmount: row.target_amount,
+      pledgedAmount: row.pledged_amount,
+      deadline: row.deadline,
+      createdAt: 0,
+      claimedAt: row.claimed_at ?? undefined,
+      failedAt: undefined,
+      deletedAt: undefined,
+    };
+    const progress = calculateProgress(campaign, now, 0);
+    return {
+      id: row.id,
+      campaignId: row.campaign_id,
+      campaignName: row.campaign_name,
+      campaignStatus: progress.status,
+      amount: row.amount,
+      assetCode: row.asset_code,
+      tokenId: row.token_id ?? row.asset_code,
+      createdAt: row.created_at,
+      refundedAt: row.refunded_at ?? undefined,
+      transactionHash: row.transaction_hash ?? undefined,
+    };
+  });
+
+  return { pledges, totalCount, page, limit };
+}
+
 /**
  * Initializes the campaign store by setting up the underlying SQLite database.
  * Must be called once at application startup before any store functions are used.
  */
 export function initCampaignStore(): void {
   initDb();
+  const db = getDb();
+  db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_contributor_created_at ON pledges(contributor, created_at);');
 }
 
 function checkContributorLimit(
@@ -311,6 +429,11 @@ export interface ListCampaignsResult {
   pledgeCounts: Record<string, number>;
 }
 
+export interface CampaignListEntry {
+  campaign: CampaignRecord;
+  pledgeCount: number;
+}
+
 export interface ListCampaignPledgesOptions {
   page: number;
   limit: number;
@@ -349,32 +472,18 @@ export interface LeaderboardEntry {
 
 const MAX_CAMPAIGN_DURATION_SECONDS = 60 * 60 * 24 * 180;
 
-/**
- * Retrieves a paginated, filtered list of campaigns from the database.
- *
- * @param options - Optional filters: `searchQuery`, `assetCode`, `status`, `includeDeleted`, `page`, `limit`.
- * @returns A {@link ListCampaignsResult} with the matching campaign records and the total count.
- */
-export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResult {
-  const db = getDb();
-  const paginate = options?.page !== undefined && options?.limit !== undefined;
-  const page = options?.page ?? 1;
-  const limit = options?.limit ?? 10;
-  const offset = paginate ? (page - 1) * limit : 0;
-
+function buildCampaignListQuery(options?: ListCampaignsOptions): {
+  whereClause: string;
+  orderByClause: string;
+  params: (string | number)[];
+} {
   const whereClauses: string[] = [];
   const params: (string | number)[] = [];
 
   if (options?.searchQuery && options.searchQuery.trim()) {
     const rawQuery = options.searchQuery.trim();
-
-    // Fixes CodeRabbit: Sanitize/escape special characters so FTS5 MATCH doesn't syntax crash
     const cleanQuery = rawQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
     const ftsMatchTerm = cleanQuery ? `${cleanQuery}*` : '';
-
-    // Fixes CodeRabbit: Use exact matching for creator public key instead of a slow LIKE scan
-    const creatorExactTerm = rawQuery;
-    const exactTerm = rawQuery;
 
     if (ftsMatchTerm) {
       whereClauses.push(`(
@@ -382,13 +491,13 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
       OR LOWER(campaigns.creator) = LOWER(?)
       OR campaigns.id = ?
     )`);
-      params.push(ftsMatchTerm, creatorExactTerm, exactTerm);
+      params.push(ftsMatchTerm, rawQuery, rawQuery);
     } else {
-      // Fallback if cleaning the query stripped all characters
       whereClauses.push(`(LOWER(campaigns.creator) = LOWER(?) OR campaigns.id = ?)`);
-      params.push(creatorExactTerm, exactTerm);
+      params.push(rawQuery, rawQuery);
     }
   }
+
   if (options?.assetCode) {
     whereClauses.push(`campaigns.accepted_tokens_json LIKE ?`);
     params.push(`%${options.assetCode.toUpperCase()}%`);
@@ -399,9 +508,7 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
       .map(() => `campaigns.accepted_tokens_json LIKE ?`)
       .join(' OR ');
     whereClauses.push(`(${conditions})`);
-    options.assetCodes.forEach((code) => {
-      params.push(`%${code.toUpperCase()}%`);
-    });
+    options.assetCodes.forEach((code) => params.push(`%${code.toUpperCase()}%`));
   }
 
   if (options?.status) {
@@ -430,30 +537,18 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
     whereClauses.push(`campaigns.created_at >= ?`);
     params.push(options.createdAfter);
   }
-
   if (options?.createdBefore !== undefined) {
     whereClauses.push(`campaigns.created_at <= ?`);
     params.push(options.createdBefore);
   }
-
   if (!options?.includeDeleted) {
     whereClauses.push(`campaigns.deleted_at IS NULL`);
   }
 
-  let whereClause = '';
-  if (whereClauses.length > 0) {
-    whereClause = ` WHERE ${whereClauses.join(' AND ')}`;
-  }
-
-  const countQuery = `SELECT COUNT(DISTINCT campaigns.id) as total FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause}`;
-  const totalCount = (db.prepare(countQuery).get(...params) as { total: number }).total;
-
-  // Build ORDER BY clause from sort options
-  const sortField = options?.sort ?? 'createdAt';
-  const sortOrder = options?.order ?? 'desc';
-  const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
+  const whereClause = whereClauses.length > 0 ? ` WHERE ${whereClauses.join(' AND ')}` : '';
+  const orderDir = options?.order === 'asc' ? 'ASC' : 'DESC';
   let orderByClause: string;
-  switch (sortField) {
+  switch (options?.sort ?? 'createdAt') {
     case 'deadline':
       orderByClause = `campaigns.deadline ${orderDir}`;
       break;
@@ -463,11 +558,67 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
     case 'targetAmount':
       orderByClause = `campaigns.target_amount ${orderDir}`;
       break;
-    case 'createdAt':
     default:
       orderByClause = `campaigns.created_at ${orderDir}`;
-      break;
   }
+
+  return { whereClause, orderByClause, params };
+}
+
+function campaignListEntryFromRow(
+  row: CampaignRow & { pledge_count: number },
+): CampaignListEntry {
+  const db = getDb();
+  const { pledge_count: pledgeCount, ...campaignRow } = row;
+  const now = nowInMilliseconds();
+  const failResult = db.prepare(
+    `UPDATE campaigns SET failed_at = ? WHERE id = ? AND failed_at IS NULL AND claimed_at IS NULL AND pledged_amount < target_amount AND deadline * 1000 < ?`,
+  ).run(campaignRow.deadline, campaignRow.id, now);
+  if (failResult.changes === 1) {
+    campaignRow.failed_at = campaignRow.deadline;
+    void dispatchWebhook('campaign_failed', campaignRow.id, {
+      pledgedAmount: campaignRow.pledged_amount,
+      targetAmount: campaignRow.target_amount,
+      deadline: campaignRow.deadline,
+    });
+  }
+
+  return { campaign: rowToCampaign(campaignRow as CampaignRow), pledgeCount };
+}
+
+export function* iterateCampaigns(
+  options?: ListCampaignsOptions,
+): Generator<CampaignListEntry> {
+  const db = getDb();
+  const { whereClause, orderByClause, params } = buildCampaignListQuery(options);
+  const query = `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY ${orderByClause}`;
+  const rows = db.prepare(query).iterate(...params) as IterableIterator<
+    CampaignRow & { pledge_count: number }
+  >;
+
+  for (const row of rows) {
+    const { pledge_count: pledgeCount, ...campaignRow } = row;
+    yield { campaign: rowToCampaign(campaignRow as CampaignRow), pledgeCount };
+  }
+}
+
+/**
+ * Retrieves a paginated, filtered list of campaigns from the database.
+ *
+ * @param options - Optional filters: `searchQuery`, `assetCode`, `status`, `includeDeleted`, `page`, `limit`.
+ * @returns A {@link ListCampaignsResult} with the matching campaign records and the total count.
+ */
+export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResult {
+  const db = getDb();
+  const paginate = options?.page !== undefined && options?.limit !== undefined;
+  const page = options?.page ?? 1;
+  const limit = options?.limit ?? 10;
+  const offset = paginate ? (page - 1) * limit : 0;
+
+  const { whereClause, orderByClause, params } = buildCampaignListQuery(options);
+
+  const countQuery = `SELECT COUNT(DISTINCT campaigns.id) as total FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause}`;
+  const totalCount = (db.prepare(countQuery).get(...params) as { total: number }).total;
 
   const dataQuery = paginate
     ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY ${orderByClause} LIMIT ? OFFSET ?`
@@ -481,24 +632,9 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
 
   const pledgeCounts: Record<string, number> = {};
   const campaigns = rows.map((row) => {
-    pledgeCounts[row.id] = row.pledge_count;
-    const { pledge_count: _pledgeCount, ...campaignRow } = row;
-    void _pledgeCount;
-
-    const now = nowInMilliseconds();
-    const failResult = db.prepare(
-      `UPDATE campaigns SET failed_at = ? WHERE id = ? AND failed_at IS NULL AND claimed_at IS NULL AND pledged_amount < target_amount AND deadline * 1000 < ?`,
-    ).run(campaignRow.deadline, campaignRow.id, now);
-    if (failResult.changes === 1) {
-      campaignRow.failed_at = campaignRow.deadline;
-      void dispatchWebhook('campaign_failed', campaignRow.id, {
-        pledgedAmount: campaignRow.pledged_amount,
-        targetAmount: campaignRow.target_amount,
-        deadline: campaignRow.deadline,
-      });
-    }
-
-    return rowToCampaign(campaignRow as CampaignRow);
+    const entry = campaignListEntryFromRow(row);
+    pledgeCounts[entry.campaign.id] = entry.pledgeCount;
+    return entry.campaign;
   });
 
   return {

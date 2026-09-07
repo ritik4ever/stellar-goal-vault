@@ -3,6 +3,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import helmet from 'helmet';
+import { once } from 'node:events';
 import { createServer, Server } from 'node:http';
 
 import { validateEnv } from './validateEnv';
@@ -36,8 +37,10 @@ import {
   getTrendingCampaigns,
   getTopContributors,
   initCampaignStore,
+  iterateCampaigns,
   listCampaignPledges,
   listCampaigns,
+  listContributorPledges,
   listComments,
   type ListCampaignsOptions,
   reconcileOnChainPledge,
@@ -348,6 +351,18 @@ app.get('/api/health', (_req: Request, res: Response) => {
     database,
   });
 });
+app.get('/api/contributors/:address/pledges', async (req: Request, res: Response) => {
+  const { address } = req.params;
+  const pagination = parsePledgeListPaginationQuery(req.query);
+  const result = await listContributorPledges(address, pagination);
+  res.setHeader('X-Total-Count', String(result.total));
+  res.json({
+    pledges: result.pledges,
+    page: pagination.page,
+    limit: pagination.limit,
+    total: result.total,
+  });
+});
 
 app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Response) => {
   try {
@@ -501,36 +516,35 @@ app.get('/api/campaigns/export.csv', async (req: Request, res: Response, next: e
       createdBefore: params.createdBefore,
     };
 
-    const { campaigns, pledgeCounts } = listCampaigns(listOptions);
-
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="campaigns.csv"');
     res.setHeader('Cache-Control', 'no-cache');
 
-    // CSV header row
-    res.write('id,title,creator,asset,target,pledged,status,deadline,contributor_count,created_at\n');
+    if (!res.write('id,title,creator,asset,target,pledged,status,deadline,contributor_count,created_at\r\n')) {
+      await once(res, 'drain');
+    }
 
-    // Stream each campaign row
-    for (const campaign of campaigns) {
-      const progress = calculateProgress(campaign, undefined, pledgeCounts[campaign.id]);
+    for (const { campaign, pledgeCount } of iterateCampaigns(listOptions)) {
+      const progress = calculateProgress(campaign, undefined, pledgeCount);
       const createdAt = new Date(campaign.createdAt * 1000).toISOString();
       const deadline = new Date(campaign.deadline * 1000).toISOString();
 
-      // Escape CSV fields that may contain commas or quotes
       const csvRow = [
-        campaign.id,
+        escapeCSV(campaign.id),
         escapeCSV(campaign.title),
-        campaign.creator,
-        campaign.assetCode,
+        escapeCSV(campaign.creator),
+        escapeCSV(campaign.assetCode),
         String(campaign.targetAmount),
         String(campaign.pledgedAmount),
-        progress.status,
-        deadline,
+        escapeCSV(progress.status),
+        escapeCSV(deadline),
         String(progress.pledgeCount),
-        createdAt,
+        escapeCSV(createdAt),
       ].join(',');
 
-      res.write(csvRow + '\n');
+      if (!res.write(`${csvRow}\r\n`)) {
+        await once(res, 'drain');
+      }
     }
 
     res.end();
@@ -541,10 +555,11 @@ app.get('/api/campaigns/export.csv', async (req: Request, res: Response, next: e
 
 /** Escape a field value for CSV (RFC 4180). */
 function escapeCSV(field: string): string {
-  if (field.includes(',') || field.includes('"') || field.includes('\n')) {
-    return '"' + field.replace(/"/g, '""') + '"';
+  const safeField = /^\s*[=+\-@]/.test(field) ? `'${field}` : field;
+  if (/[",\r\n]/.test(safeField)) {
+    return '"' + safeField.replace(/"/g, '""') + '"';
   }
-  return field;
+  return safeField;
 }
 
 app.get('/api/campaigns/trending', (req: Request, res: Response) => {
@@ -819,6 +834,33 @@ app.get('/api/campaigns/:id/contributors', (req: Request, res: Response) => {
 
   const summary = getContributorSummary(parsedId.value);
   res.json({ data: summary });
+});
+
+app.get('/api/contributors/:address/pledges', (req: Request, res: Response) => {
+  const { address } = req.params;
+  const paginationResult = parsePledgeListPaginationQuery({
+    page: req.query.page,
+    limit: req.query.limit,
+  });
+  if (!paginationResult.ok) {
+    sendValidationError(paginationResult.issues);
+  }
+
+  const { pledges, totalCount } = listContributorPledges(address, {
+    page: paginationResult.page,
+    limit: paginationResult.limit,
+  });
+
+  res.setHeader('X-Total-Count', String(totalCount));
+  res.json({
+    data: pledges,
+    pagination: {
+      total: totalCount,
+      page: paginationResult.page,
+      limit: paginationResult.limit,
+      totalPages: Math.max(1, Math.ceil(totalCount / paginationResult.limit)),
+    },
+  });
 });
 
 app.get('/api/campaigns/:id/history', (req: Request, res: Response) => {

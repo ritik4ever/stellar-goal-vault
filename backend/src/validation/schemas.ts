@@ -334,6 +334,65 @@ export function parsePledgeListPaginationQuery(query: {
     limit: parsedLimit.ok ? (parsedLimit.value ?? 10) : 10,
   };
 }
+export function parseContributorPledgesQuery(params: {
+  address: unknown;
+  page?: unknown;
+  limit?: unknown;
+}):
+  | { ok: true; address: string; page: number; limit: number }
+  | { ok: false; issues: z.core.$ZodIssue[] } {
+  const issues: z.core.$ZodIssue[] = [];
+  let address = '';
+
+  const addressResult = stellarAccountIdSchema.safeParse(params.address);
+  if (!addressResult.success) {
+    issues.push({
+      code: 'custom',
+      message: 'Must be a valid Stellar account ID (starts with G and is exactly 56 characters).',
+      path: ['address'],
+    });
+  } else {
+    address = addressResult.data;
+  }
+
+  const pagination = parsePledgeListPaginationQuery({
+    page: params.page,
+    limit: params.limit,
+  });
+  if (!pagination.ok) {
+    issues.push(...pagination.issues);
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  const page = pagination.ok ? pagination.page : 1;
+  const limit = pagination.ok ? pagination.limit : 10;
+
+  return {
+    ok: true,
+    address,
+    page,
+    limit,
+  };
+}
+
+export const contributorPledgeSchema = z.object({
+  campaignId: campaignIdSchema,
+  campaignName: z.string(),
+  status: z.enum(['open', 'funded', 'claimed', 'failed']),
+  amount: positiveAmountSchema,
+  assetCode: assetCodeSchema,
+  refundedAt: unixTimestampSchema.nullable().optional(),
+});
+
+export const contributorPledgesResponseSchema = z.object({
+  pledges: z.array(contributorPledgeSchema),
+  page: z.number(),
+  limit: z.number(),
+  total: z.number(),
+});
 
 function parseIso8601Timestamp(value: unknown): number | null {
   if (typeof value !== 'string') {
