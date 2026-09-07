@@ -162,6 +162,14 @@ const pledgeSchema = z
   })
   .openapi('Pledge');
 
+const contributorPledgeSchema = pledgeSchema
+  .extend({
+    campaignName: z.string().openapi({ example: 'Clean Water Initiative' }),
+    status: z.enum(['open', 'funded', 'claimed', 'failed']).openapi({ example: 'open' }),
+    refundStatus: z.enum(['refunded', 'not_refunded']).openapi({ example: 'not_refunded' }),
+  })
+  .openapi('ContributorPledge');
+
 const campaignEventSchema = z
   .object({
     id: z.number().int().openapi({ example: 1 }),
@@ -233,6 +241,11 @@ const campaignIdParamSchema = campaignIdSchema.openapi({
   example: '1',
 });
 
+const contributorAddressParamSchema = stellarAddressSchema.openapi({
+  param: { name: 'address', in: 'path', required: true },
+  example: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+});
+
 const campaignListResponseSchema = z
   .object({
     data: z.array(campaignSchema),
@@ -246,6 +259,13 @@ const pledgeListResponseSchema = z
     pagination: paginationSchema,
   })
   .openapi('PledgeListResponse');
+
+const contributorPledgeListResponseSchema = z
+  .object({
+    data: z.array(contributorPledgeSchema),
+    pagination: paginationSchema,
+  })
+  .openapi('ContributorPledgeListResponse');
 
 const campaignDetailResponseSchema = z
   .object({
@@ -391,6 +411,7 @@ const registeredSchemas = {
   Campaign: registry.register('Campaign', campaignSchema),
   CampaignProgress: registry.register('CampaignProgress', campaignProgressSchema),
   Pledge: registry.register('Pledge', pledgeSchema),
+  ContributorPledge: registry.register('ContributorPledge', contributorPledgeSchema),
   CampaignEvent: registry.register('CampaignEvent', campaignEventSchema),
   ContributorSummary: registry.register('ContributorSummary', contributorSummarySchema),
   OpenIssue: registry.register('OpenIssue', openIssueSchema),
@@ -403,6 +424,7 @@ const registeredSchemas = {
   CampaignListResponse: registry.register('CampaignListResponse', campaignListResponseSchema),
   CampaignDetailResponse: registry.register('CampaignDetailResponse', campaignDetailResponseSchema),
   PledgeListResponse: registry.register('PledgeListResponse', pledgeListResponseSchema),
+  ContributorPledgeListResponse: registry.register('ContributorPledgeListResponse', contributorPledgeListResponseSchema),
   PledgeResponse: registry.register('PledgeResponse', pledgeResponseSchema),
   ReconcileResponse: registry.register('ReconcileResponse', reconcileResponseSchema),
   RefundResponse: registry.register('RefundResponse', refundResponseSchema),
@@ -769,6 +791,30 @@ registry.registerPath({
     },
     400: validationErrorResponse,
     404: notFoundResponse,
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/contributors/{address}/pledges',
+  tags: ['Contributors'],
+  summary: 'List pledges by contributor',
+  description:
+    'Returns all pledges made by a contributor address across all campaigns. ' +
+    'Unknown addresses return an empty array. Refunded pledges include the refundedAt timestamp.',
+  request: {
+    params: z.object({ address: contributorAddressParamSchema }),
+    query: z.object({
+      page: z.coerce.number().int().min(1).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Paginated list of contributor pledges',
+      content: { 'application/json': { schema: registeredSchemas.ContributorPledgeListResponse } },
+    },
+    400: validationErrorResponse,
   },
 });
 

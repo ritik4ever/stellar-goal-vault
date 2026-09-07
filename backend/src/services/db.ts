@@ -73,6 +73,55 @@ export function checkDbHealth(): {
   }
 }
 
+export interface ContributorPledge {
+  id: number;
+  campaignId: string;
+  campaignName: string;
+  status: string;
+  amount: number;
+  assetCode: string;
+  tokenId: string | null;
+  createdAt: number;
+  refundedAt: number | null;
+  transactionHash: string | null;
+}
+
+export function getPledgesByContributor(
+  contributor: string,
+  page = 1,
+  limit = 20,
+): ContributorPledge[] {
+  const database = getDb();
+  const offset = Math.max((page - 1) * limit, 0);
+  const rows = database
+    .prepare(
+      `      SELECT
+        p.id,
+        p.campaign_id AS campaignId,
+        c.title AS campaignName,
+        CASE
+          WHEN c.deleted_at IS NOT NULL THEN 'deleted'
+          WHEN c.claimed_at IS NOT NULL THEN 'funded'
+          WHEN c.failed_at IS NOT NULL THEN 'failed'
+          ELSE 'active'
+        END AS status,
+        p.amount,
+        p.asset_code AS assetCode,
+        p.token_id AS tokenId,
+        p.created_at AS createdAt,
+        p.refunded_at AS refundedAt,
+        p.transaction_hash AS transactionHash
+      FROM pledges p
+      INNER JOIN campaigns c ON c.id = p.campaign_id
+      WHERE p.contributor = ?
+      ORDER BY p.created_at DESC, p.id DESC
+      LIMIT ? OFFSET ?
+      `,
+    )
+    .all(contributor, limit, offset) as ContributorPledge[];
+  return rows;
+}
+
 function migrate(database: SQLiteDatabase): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
@@ -147,6 +196,7 @@ function migrate(database: SQLiteDatabase): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_pledges_contributor ON pledges(contributor, created_at, id);
     CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_id ON campaign_events(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_comments_campaign_id ON campaign_comments(campaign_id);

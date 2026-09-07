@@ -217,12 +217,130 @@ export function getContributorPledgedTotal(campaignId: string, contributor: stri
   return row.total;
 }
 
+export interface ListContributorPledgesOptions {
+  page: number;
+  limit: number;
+}
+
+export interface ContributorPledge {
+  id: number;
+  campaignId: string;
+  campaignName: string;
+  campaignStatus: CampaignStatus;
+  amount: number;
+  assetCode: string;
+  tokenId?: string;
+  createdAt: number;
+  refundedAt?: number;
+  transactionHash?: string;
+}
+
+export interface ListContributorPledgesResult {
+  pledges: ContributorPledge[];
+  totalCount: number;
+  page: number;
+  limit: number;
+}
+
+export function listContributorPledges(
+  contributor: string,
+  options: ListContributorPledgesOptions,
+): ListContributorPledgesResult {
+  const db = getDb();
+  const page = options.page > 0 ? options.page : 1;
+  const limit = options.limit > 0 ? options.limit : 10;
+  const offset = (page - 1) * limit;
+
+  const countRow = db
+    .prepare(`SELECT COUNT(*) AS count FROM pledges WHERE contributor = ?`)
+    .get(contributor) as { count: number };
+  const totalCount = countRow.count;
+
+  if (totalCount === 0) {
+    return { pledges: [], totalCount: 0, page, limit };
+  }
+
+  const pledgeRows = db
+    .prepare(
+      `SELECT
+         p.id,
+         p.campaign_id,
+         c.title AS campaign_name,
+         c.claimed_at,
+         c.pledged_amount,
+         c.target_amount,
+         c.deadline,
+         p.amount,
+         p.asset_code,
+         p.token_id,
+         p.created_at,
+         p.refunded_at,
+         p.transaction_hash
+       FROM pledges p
+       INNER JOIN campaigns c ON c.id = p.campaign_id
+       WHERE p.contributor = ?
+       ORDER BY p.created_at DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(contributor, limit, offset) as Array<{
+    id: number;
+    campaign_id: string;
+    campaign_name: string;
+    claimed_at: number | null;
+    pledged_amount: number;
+    target_amount: number;
+    deadline: number;
+    amount: number;
+    asset_code: string;
+    token_id: string | null;
+    created_at: number;
+    refunded_at: number | null;
+    transaction_hash: string | null;
+  }>;
+
+  const now = nowInMilliseconds();
+  const pledges: ContributorPledge[] = pledgeRows.map((row) => {
+    const campaign: CampaignRecord = {
+      id: row.campaign_id,
+      creator: '',
+      title: row.campaign_name,
+      description: '',
+      acceptedTokens: [],
+      assetCode: row.asset_code,
+      targetAmount: row.target_amount,
+      pledgedAmount: row.pledged_amount,
+      deadline: row.deadline,
+      createdAt: 0,
+      claimedAt: row.claimed_at ?? undefined,
+      failedAt: undefined,
+      deletedAt: undefined,
+    };
+    const progress = calculateProgress(campaign, now, 0);
+    return {
+      id: row.id,
+      campaignId: row.campaign_id,
+      campaignName: row.campaign_name,
+      campaignStatus: progress.status,
+      amount: row.amount,
+      assetCode: row.asset_code,
+      tokenId: row.token_id ?? row.asset_code,
+      createdAt: row.created_at,
+      refundedAt: row.refunded_at ?? undefined,
+      transactionHash: row.transaction_hash ?? undefined,
+    };
+  });
+
+  return { pledges, totalCount, page, limit };
+}
+
 /**
  * Initializes the campaign store by setting up the underlying SQLite database.
  * Must be called once at application startup before any store functions are used.
  */
 export function initCampaignStore(): void {
   initDb();
+  const db = getDb();
+  db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_contributor_created_at ON pledges(contributor, created_at);');
 }
 
 function checkContributorLimit(
