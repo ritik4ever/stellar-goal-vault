@@ -29,6 +29,7 @@
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:contract": "vitest run tests/schemathesis.test.ts",
     "check:openapi": "npm run build:openapi && git diff --exit-code -- ../docs/openapi.yaml",
     "validate:openapi": "swagger-cli validate ../docs/openapi.yaml"
   },
