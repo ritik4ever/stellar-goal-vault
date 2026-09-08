@@ -19,6 +19,7 @@
 8. [Error Codes Reference](#error-codes-reference)
 9. [Gas Estimates](#gas-estimates)
 10. [Worked Examples](#worked-examples)
+11. [Storage Layout](#storage-layout)
 
 ---
 
@@ -1060,6 +1061,81 @@ Checking campaign state without mutation.
 //   → Returns Option<ExtensionRequest>
 //     None if no pending request, Some(request) if one exists
 ```
+
+## Storage Layout
+
+All ledger keys are encoded as `DataKey` variants. Instance keys are stored with `env.storage().instance()`, persistent keys with `env.storage().persistent()`. No temporary storage is used by this contract.
+
+### Ledger Keys
+
+| Ledger key | Format | Value type | Persistence | TTL | Migration impact |
+|---|---|---|---|---|---|
+| `Admin` | `DataKey::Admin` | `Address` | Instance | Contract instance lifetime | Survives upgrade; not modified by `migrate()`. |
+| `Paused` | `DataKey::Paused` | `bool` | Instance | Contract instance lifetime | Survives upgrade; migration does not unpause. |
+| `MinContribution` | `DataKey::MinContribution` | `i128` | Instance | Contract instance lifetime | Survives upgrade; not modified by `migrate()`. |
+| `NextCampaignId` | `DataKey::NextCampaignId` | `u64` | Instance | Contract instance lifetime | Survives upgrade; incremented by `create_campaign()` and `migrate()`. |
+| `DeployInfo` | `DataKey::DeployInfo` | `DeployInfo` | Instance | Contract instance lifetime | Written lazily by `get_version()`/`get_deploy_info()`; stays from old version unless cleared before upgrade. |
+| `Campaign` | `DataKey::Campaign { campaign_id }` | `Campaign` | Persistent | 31 days, extended on read/write | Created by `create_campaign()` and `migrate()`. |
+| `CampaignContributors` | `DataKey::CampaignContributors { campaign_id }` | `Vec<Address>` | Persistent | 31 days, extended on read/write | Not copied by `migrate()`; rebuilt from new contributions. |
+| `ContributorCap` | `DataKey::ContributorCap { campaign_id }` | `i128` | Persistent | 31 days, extended on read/write | Stored only when `max_per_contributor > 0`; not restored by `migrate()` because `Campaign` does not carry the cap. |
+| `Contribution` | `DataKey::Contribution { campaign_id, contributor, token }` | `i128` | Persistent | 31 days, extended on read/write | Created/updated by `contribute()`; not copied by `migrate()`. |
+| `CampaignTokenBalance` | `DataKey::CampaignTokenBalance { campaign_id, token }` | `i128` | Persistent | 31 days, extended on read/write | Created after first contribution for the pair; not copied by `migrate()`. |
+| `ExtensionRequest` | `DataKey::ExtensionRequest { campaign_id }` | `ExtensionRequest` | Persistent | 31 days, extended on read/write | Created by `request_deadline_extension()`; cleared by `approve_extension()`; not migrated. |
+| `MigrationMap` | `DataKey::MigrationMap { old_contract_id, source_id }` | `u64` (new campaign ID) | Persistent | 31 days, extended on read/write | Written only by `migrate()` to skip duplicate source IDs. |
+
+### Storage Access by Entry Point
+
+| Entry point | Storage keys touched |
+|---|---|
+| `initialize` | `Admin`, `Paused`, `MinContribution` |
+| `set_paused` | `Paused` |
+| `create_campaign` | `NextCampaignId`, `Campaign`, `CampaignContributors`, `ContributorCap` (only when `max_per_contributor > 0`) |
+| `cancel_campaign` | `Campaign` |
+| `update_metadata` | `Campaign` |
+| `contribute` | `Campaign`, `Contribution`, `CampaignTokenBalance`, `CampaignContributors` (first contribution only) |
+| `claim` | `Campaign`, `CampaignTokenBalance` (each token with a balance) |
+| `refund` | `Campaign`, `Contribution`, `CampaignTokenBalance`, `CampaignContributors` (when total contribution reaches zero) |
+| `refund_all` | `Campaign`, `CampaignContributors`, `Contribution`, `CampaignTokenBalance` |
+| `request_deadline_extension` | `ExtensionRequest` |
+| `approve_extension` | `ExtensionRequest`, `Campaign` (when deadline is applied) |
+| `migrate` | `NextCampaignId`, `Campaign`, `MigrationMap` |
+| `get_campaign` | `Campaign` |
+| `get_contribution` | `Contribution` |
+| `get_campaign_token_balance` | `CampaignTokenBalance` |
+| `get_contributor_count` | `Campaign` |
+| `get_min_contribution` | `MinContribution` |
+| `get_paused` | `Paused` |
+| `get_admin` | `Admin` |
+| `get_next_campaign_id`, `get_campaign_count` | `NextCampaignId` |
+| `get_version`, `get_deploy_info` | `DeployInfo` |
+| `get_extension_request` | `ExtensionRequest` |
+
+### Storage Budget Analysis
+
+Budget for 100 campaigns and 1,000 pledges. "Pledge" is one unique `(campaign_id, contributor, token)` tuple; repeated contributions update existing entries and do not add new entries.
+
+| Entry type | Per campaign base | 100 campaigns + 1,000 unique pledges |
+|---|---|---|
+| `Campaign` | 1 | 100 |
+| `CampaignContributors` | 1 | 100 |
+| `ContributorCap` | 0 if cap is 0, else 1 | 0–100 |
+| `Contribution` | per unique pledge | 1,000 |
+| `CampaignTokenBalance` | per distinct `(campaign_id, token)` pair with a non-zero balance | 1–1,000 |
+| `ExtensionRequest` | 0 unless a request is pending | 0 + pending requests |
+| `MigrationMap` | 0 unless `migrate()` is used | 0 |
+
+Total entries for 100 campaigns and 1,000 unique pledges:
+
+- Minimum (no cap entries, one token used per campaign): 100 + 100 + 0 + 1,000 + 100 = 1,300.
+- Maximum (all campaigns have caps and every pledge uses a distinct campaign/token pair): 100 + 100 + 100 + 1,000 + 1,000 = 2,300.
+- Typical pending extension requests add one `ExtensionRequest` entry per campaign with an open request.
+
+### Upgrade Migration Impact
+
+- Instance keys (`Admin`, `Paused`, `MinContribution`, `NextCampaignId`) survive code upgrades and are not reset by `migrate()`.
+- `DeployInfo` is lazy; if it already exists it continues to report the old deployment version/timestamp. Clear it before upgrade if the new version should be recorded on first read.
+- `migrate()` writes `MigrationMap` for each source ID, writes new `Campaign` entries, and advances `NextCampaignId`. Source campaign IDs are not reused.
+- `CampaignContributors`, `Contribution`, `CampaignTokenBalance`, `ContributorCap`, and pending `ExtensionRequest` entries are not recreated by `migrate()` because the current `migrate` signature accepts only `Campaign` structs. These keys must be preserved through a separate snapshot/restore or re-populated by post-migration operations.
 
 ---
 
