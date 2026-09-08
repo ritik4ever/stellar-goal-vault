@@ -2,6 +2,9 @@ export type CampaignStatus = 'open' | 'funded' | 'claimed' | 'failed';
 
 export type NotificationType = 'new_pledge' | 'campaign_funded' | 'refund_available' | 'creator_update';
 
+export const CATEGORY_ALLOWLIST = ['Tech', 'Art', 'Community', 'Education'] as const;
+export type CampaignCategory = typeof CATEGORY_ALLOWLIST[number];
+
 export interface NotificationItem {
   id: number;
   campaignId: string;
@@ -41,6 +44,7 @@ export interface Campaign {
   creator: string;
   title: string;
   description: string;
+  categories?: CampaignCategory[];
   acceptedTokens: string[];
   assetCode: string; // Backward compatibility
   targetAmount: number;
@@ -104,6 +108,7 @@ export interface CreateCampaignPayload {
   creator: string;
   title: string;
   description: string;
+  categories?: CampaignCategory[];
   acceptedTokens: string[];
   targetAmount: number;
   deadline: number;

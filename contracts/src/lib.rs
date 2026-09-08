@@ -4,7 +4,7 @@
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token::Client as TokenClient, Address, Env,
-    String, Vec,
+    String, Symbol, Vec,
 };
 
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -35,6 +35,7 @@ pub struct Campaign {
     pub claimed: bool,
     pub canceled: bool,
     pub metadata: String,
+    pub categories: Vec<Symbol>,
     pub contributor_count: u32,
     pub created_at: u64,
 }
@@ -60,6 +61,8 @@ pub enum DataKey {
     MigratedId(Address, u64),
     /// Track contributor addresses for a campaign (used in refund_all).
     Contributors(u64),
+    /// Map from category tag to campaign IDs for that category.
+    CategoryIndex(Symbol),
     /// Platform fee in basis points (e.g. 50 = 0.5%). Defaults to
     /// [`DEFAULT_PLATFORM_FEE_BPS`] when absent. 0 disables the fee.
     PlatformFeeBps,
@@ -174,6 +177,14 @@ pub struct FeeCollected {
 pub struct StellarGoalVaultContract;
 
 const MAX_CAMPAIGN_DURATION_SECONDS: u64 = 60 * 60 * 24 * 180;
+
+/// Admin-approved campaign categories. Campaign creators may select up to 3.
+const ALLOWED_CATEGORIES: [Symbol; 4] = [
+    symbol_short!("Tech"),
+    symbol_short!("Art"),
+    symbol_short!("Community"),
+    symbol_short!("Education"),
+];
 
 #[contractimpl]
 impl StellarGoalVaultContract {
@@ -311,6 +322,13 @@ impl StellarGoalVaultContract {
         );
     }
 
+    pub fn get_campaigns_by_category(env: Env, category: Symbol) -> Vec<u64> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CategoryIndex(category))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
     pub fn create_campaign(
         env: Env,
         creator: Address,
@@ -318,6 +336,7 @@ impl StellarGoalVaultContract {
         target_amount: i128,
         deadline: u64,
         metadata: String,
+        categories: Vec<Symbol>,
         max_per_contributor: i128,
     ) -> u64 {
         creator.require_auth();
@@ -353,6 +372,32 @@ impl StellarGoalVaultContract {
             panic!("max_per_contributor must not be negative");
         }
 
+        if categories.len() > 3 {
+            panic!("too many categories");
+        }
+        let mut i = 0;
+        while i < categories.len() {
+            let category = categories.get(i).unwrap();
+            let mut allowed = false;
+            for allowed_category in ALLOWED_CATEGORIES.iter() {
+                if allowed_category == category {
+                    allowed = true;
+                    break;
+                }
+            }
+            if !allowed {
+                panic!("invalid category");
+            }
+            let mut j = i + 1;
+            while j < categories.len() {
+                if categories.get(i).unwrap() == categories.get(j).unwrap() {
+                    panic!("duplicate category");
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+
         let mut next_id: u64 = env
             .storage()
             .persistent()
@@ -371,6 +416,7 @@ impl StellarGoalVaultContract {
             claimed: false,
             canceled: false,
             metadata: metadata.clone(),
+            categories: categories.clone(),
             contributor_count: 0,
             created_at,
         };
@@ -378,6 +424,21 @@ impl StellarGoalVaultContract {
         env.storage()
             .persistent()
             .set(&DataKey::NextCampaignId, &next_id);
+
+        let mut i = 0;
+        while i < categories.len() {
+            let category = categories.get(i).unwrap();
+            let mut campaign_ids: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::CategoryIndex(category.clone()))
+                .unwrap_or_else(|| Vec::new(&env));
+            campaign_ids.push_back(next_id);
+            env.storage()
+                .persistent()
+                .set(&DataKey::CategoryIndex(category.clone()), &campaign_ids);
+            i += 1;
+        }
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(next_id), &campaign);

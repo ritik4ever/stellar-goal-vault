@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { getDistinctAssetCodes } from '../services/api';
+import { getDistinctAssetCodes, getDistinctCampaignCategories } from '../services/api';
 
 export interface AssetFilterDropdownProps {
   options?: string[];
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  source?: 'asset' | 'category';
 }
 
 export function AssetFilterDropdown({
@@ -13,15 +14,22 @@ export function AssetFilterDropdown({
   value,
   onChange,
   disabled = false,
+  source = 'asset',
 }: AssetFilterDropdownProps) {
   const [options, setOptions] = useState<string[]>(initialOptions ?? []);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isloading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const isCategory = source === 'category';
+  const pluralLabel = isCategory ? 'categories' : 'assets';
+  const allLabel = isCategory ? 'All Categories' : 'All Assets';
+  const ariaLabel = isCategory ? 'Filter by category' : 'Filter by asset';
+  const apiCall = isCategory ? getDistinctCampaignCategories : getDistinctAssetCodes;
+
+  useEffect(() {
     let cancelled = false;
 
-    async function fetchAssets() {
+    async function fetchData() {
       if (initialOptions) {
         setOptions(initialOptions);
         return;
@@ -30,14 +38,14 @@ export function AssetFilterDropdown({
       setIsLoading(true);
       setError(null);
       try {
-        const assets = await getDistinctAssetCodes();
+        const result = await apiCall();
         if (!cancelled) {
-          setOptions(assets);
+          setOptions(result);
           setError(null);
         }
       } catch (err) {
         if (!cancelled) {
-          setError('Failed to load assets');
+          setError(`Failed to load ${pluralLabel}`);
           setOptions([]);
         }
       } finally {
@@ -47,11 +55,11 @@ export function AssetFilterDropdown({
       }
     }
 
-    void fetchAssets();
+    void fetchData();
     return () => {
       cancelled = true;
     };
-  }, [initialOptions]);
+  }, [initialOptions, apiCall, pluralLabel]);
 
   const handleRetry = () => {
     if (initialOptions) return;
@@ -59,11 +67,11 @@ export function AssetFilterDropdown({
       setIsLoading(true);
       setError(null);
       try {
-        const assets = await getDistinctAssetCodes();
-        setOptions(assets);
+        const result = await apiCall();
+        setOptions(result);
         setError(null);
       } catch (err) {
-        setError('Failed to load assets');
+        setError(`Failed to load ${pluralLabel}`);
         setOptions([]);
       } finally {
         setIsLoading(false);
@@ -78,16 +86,16 @@ export function AssetFilterDropdown({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={true}
-          aria-label="Filter by asset"
-          className="control-select"
-          style={{ cursor: 'not-allowed', opacity: 0.55, flex: 1 }}
+          aria-label={ariaLabel}
+          className='control-select'
+          style={{ cursor: 'not-allowed' | string, opacity: 0.55, flex: 1 }}
         >
-          <option value="">All Assets</option>
+          <option value="{ } {allLabel}</option>
         </select>
         <button
-          type="button"
+          type='button'
           onClick={handleRetry}
-          className="btn-ghost"
+          className='btn-ghost'
           style={{ padding: '4px 8px', fontSize: '0.875rem' }}
         >
           Retry
@@ -101,14 +109,14 @@ export function AssetFilterDropdown({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled || isLoading}
-      aria-label="Filter by asset"
-      className="control-select"
+      aria-label={ariaLabel}
+      className='control-select'
       style={{
         cursor: disabled || isLoading ? 'not-allowed' : 'pointer',
         opacity: disabled || isLoading ? 0.55 : 1,
       }}
     >
-      <option value="">{isLoading ? 'Loading...' : 'All Assets'}</option>
+      <option value="{ }">{isLoading ? 'Loading...' : allLabel}</option>
       {options.map((code) => (
         <option key={code} value={code}>
           {code}

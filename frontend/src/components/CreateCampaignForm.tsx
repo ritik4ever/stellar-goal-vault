@@ -2,7 +2,6 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, CreateCampaignPayload } from '../types/campaign';
 import {
   FormErrors,
-  validateCategory,
   validateDeadlineHours,
   validateDescription,
   validateMaxPerContributor,
@@ -28,7 +27,7 @@ interface WizardValues {
   creator: string;
   title: string;
   description: string;
-  category: string;
+  categories: string[];
   acceptedTokens: string[];
   targetAmount: string;
   deadlineHours: string;
@@ -48,7 +47,7 @@ const STEPS = [
 ] as const;
 
 const STEP_FIELDS: Record<number, Array<keyof FormErrors>> = {
-  0: ['creator', 'title', 'description', 'category'],
+  0: ['creator', 'title', 'description', 'categories'],
   1: ['acceptedTokens', 'targetAmount', 'deadlineHours', 'maxPerContributor'],
   2: [],
   3: [],
@@ -58,7 +57,7 @@ const INITIAL_VALUES: WizardValues = {
   creator: '',
   title: '',
   description: '',
-  category: '',
+  categories: [],
   acceptedTokens: [],
   targetAmount: '250',
   deadlineHours: '72',
@@ -88,9 +87,15 @@ function computeErrors(values: WizardValues): FormErrors {
     errors.description = descriptionError;
   }
 
-  const categoryError = validateCategory(values.category);
-  if (categoryError) {
-    errors.category = categoryError;
+  if (!values.categories || values.categories.length === 0) {
+    errors.category = 'Select at least one category';
+  } else if (values.categories.length > 3) {
+    errors.category = 'Select up to 3 categories';
+  } else {
+    const invalid = values.categories.filter((c) => !CATEGORY_OPTIONS.includes(c));
+    if (invalid.length > 0) {
+      errors.category = 'Invalid category selected';
+    }
   }
 
   if (!values.acceptedTokens || values.acceptedTokens.length === 0) {
@@ -284,6 +289,7 @@ export function CreateCampaignForm({
       const finalImageUrl = values.imagePreview || values.imageUrl.trim() || undefined;
 
       await onCreate({
+        categories: values.categories,
         creator: values.creator.trim(),
         title: values.title.trim(),
         description: values.description.trim(),
@@ -356,6 +362,31 @@ export function CreateCampaignForm({
       <form className="form-grid wizard-step-panel" onSubmit={handleSubmit} noValidate>
         {currentStep === 0 ? (
           <>
+            <fieldset className="field-group">
+              <legend>Categories (up to 3)</legend>
+              <div className="category-options">
+                {CATEGORY_OPTIONS.map((category) => (
+                  <label key={category} className="category-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={values.categories.includes(category)}
+                      onChange={(event) => {
+                        const next = event.target.checked
+                          ? [...values.categories, category]
+                          : values.categories.filter((c) => c !== category);
+                        if (next.length <= 3) update('categories', next);
+                      }}
+                      onBlur={() => handleFieldBlur('category')}
+                    />
+                    <span>{category}</span>
+                  </label>
+                ))}
+              </div>
+              {errors.category && touchedFields.has('category') ? (
+                <span className="field-error">{errors.category}</span>
+              ) : null}
+            </fieldset>
+
             <label className="field-group">
               <span>Creator account</span>
               <input
