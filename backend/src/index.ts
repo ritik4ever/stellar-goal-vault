@@ -3,6 +3,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import helmet from 'helmet';
+import { once } from 'node:events';
 import { createServer, Server } from 'node:http';
 
 import { validateEnv } from './validateEnv';
@@ -36,6 +37,7 @@ import {
   getTrendingCampaigns,
   getTopContributors,
   initCampaignStore,
+  iterateCampaigns,
   listCampaignPledges,
   listCampaigns,
   listContributorPledges,
@@ -494,6 +496,71 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
     next(error);
   }
 });
+
+app.get('/api/campaigns/export.csv', async (req: Request, res: Response, next: express.NextFunction) => {
+  try {
+    const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
+    if (!queryResult.ok) {
+      sendValidationError(queryResult.issues);
+    }
+
+    const params = queryResult.data;
+    const listOptions: ListCampaignsOptions = {
+      searchQuery: params.search || params.q,
+      assetCodes: params.asset,
+      status: params.status,
+      includeDeleted: params.includeDeleted,
+      sort: params.sort,
+      order: params.order,
+      createdAfter: params.createdAfter,
+      createdBefore: params.createdBefore,
+    };
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="campaigns.csv"');
+    res.setHeader('Cache-Control', 'no-cache');
+
+    if (!res.write('id,title,creator,asset,target,pledged,status,deadline,contributor_count,created_at\r\n')) {
+      await once(res, 'drain');
+    }
+
+    for (const { campaign, pledgeCount } of iterateCampaigns(listOptions)) {
+      const progress = calculateProgress(campaign, undefined, pledgeCount);
+      const createdAt = new Date(campaign.createdAt * 1000).toISOString();
+      const deadline = new Date(campaign.deadline * 1000).toISOString();
+
+      const csvRow = [
+        escapeCSV(campaign.id),
+        escapeCSV(campaign.title),
+        escapeCSV(campaign.creator),
+        escapeCSV(campaign.assetCode),
+        String(campaign.targetAmount),
+        String(campaign.pledgedAmount),
+        escapeCSV(progress.status),
+        escapeCSV(deadline),
+        String(progress.pledgeCount),
+        escapeCSV(createdAt),
+      ].join(',');
+
+      if (!res.write(`${csvRow}\r\n`)) {
+        await once(res, 'drain');
+      }
+    }
+
+    res.end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Escape a field value for CSV (RFC 4180). */
+function escapeCSV(field: string): string {
+  const safeField = /^\s*[=+\-@]/.test(field) ? `'${field}` : field;
+  if (/[",\r\n]/.test(safeField)) {
+    return '"' + safeField.replace(/"/g, '""') + '"';
+  }
+  return safeField;
+}
 
 app.get('/api/campaigns/trending', (req: Request, res: Response) => {
   const cached = getTrendingCacheEntry();

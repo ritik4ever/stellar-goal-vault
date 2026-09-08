@@ -232,6 +232,61 @@ describe('Campaign Lifecycle API', () => {
   });
 });
 
+describe('Campaign CSV export', () => {
+  it('streams filtered campaigns and neutralizes spreadsheet formulas', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const exported = createCampaign({
+      creator: CREATOR,
+      title: '=SUM(1,2)',
+      description: 'Campaign included in the CSV export regression test.',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: now + 3600,
+    });
+    const excluded = createCampaign({
+      creator: CREATOR,
+      title: 'Excluded XLM campaign',
+      description: 'Campaign excluded by the CSV asset filter.',
+      assetCode: 'XLM',
+      targetAmount: 50,
+      deadline: now + 3600,
+    });
+
+    const response = await fetch(`${baseUrl}/api/campaigns/export.csv?asset=USDC`);
+    const csv = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/csv');
+    expect(response.headers.get('content-disposition')).toBe(
+      'attachment; filename="campaigns.csv"',
+    );
+    expect(csv).toContain(
+      'id,title,creator,asset,target,pledged,status,deadline,contributor_count,created_at\r\n',
+    );
+    expect(csv).toContain(exported.id);
+    expect(csv).toContain('"\'=SUM(1,2)"');
+    expect(csv).not.toContain(excluded.id);
+  });
+
+  it('quotes carriage returns inside text fields', async () => {
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Temporary title',
+      description: 'Campaign used to verify RFC-style carriage return escaping.',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: Math.floor(Date.now() / 1000) + 3600,
+    });
+    getDb().prepare(`UPDATE campaigns SET title = ? WHERE id = ?`).run('Line\rBreak', campaign.id);
+
+    const response = await fetch(`${baseUrl}/api/campaigns/export.csv`);
+    const csv = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(csv).toContain('"Line\rBreak"');
+  });
+});
+
 describe('Campaign List Query Parameter Validation', () => {
   async function get(apiPath: string) {
     const response = await fetch(`${baseUrl}${apiPath}`);
