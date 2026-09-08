@@ -1,0 +1,38 @@
+name: API Contract Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'backend/src/routes/**'
+      - 'backend/src/openapi.ts'
+      - 'backend/src/validation/**'
+      - 'backend/src/index.ts'
+
+jobs:
+  schemathesis:
+    name: Schemathesis contract tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run API contract tests
+        working-directory: backend
+        run: npm run test:contract
+        env:
+          NODE_ENV: test
+          DB_PATH: /tmp/schemathesis-test.db

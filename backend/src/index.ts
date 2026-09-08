@@ -1,9 +1,9 @@
-import compression from 'compression';
-import cors from 'cors';
-import 'dotenv/config';
-import express, { Request, Response } from 'express';
-import helmet from 'helmet';
-import { createServer, Server } from 'node:http';
+import helmet from "helmet";
+import compression from "compression";
+import cors from "cors";
+import "dotenv/config";
+import express, { Request, Response } from "express";
+import { createServer, Server } from "node:http";
 
 import { validateEnv } from './validateEnv';
 import { z } from 'zod';

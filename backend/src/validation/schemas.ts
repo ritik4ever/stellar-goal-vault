@@ -102,24 +102,11 @@ const containsScriptTag = (val: string) => /<script/i.test(val);
 
 export const createCampaignPayloadSchema = z.object({
   creator: stellarAccountIdSchema,
-  title: z
-    .string()
-    .trim()
-    .min(4, 'Title must be at least 4 characters.')
-    .max(80)
-    .refine((val) => val.trim().length >= 4, 'Title cannot be only whitespace.')
-    .refine((val) => !containsScriptTag(val), 'Title cannot contain script tags.')
-    .refine((val) => !containsSqlComment(val), 'Title cannot contain SQL comment sequences.')
-    .transform((val) => sanitizeInput(val)),
-  description: z
-    .string()
-    .trim()
-    .min(20, 'Description must be at least 20 characters.')
-    .max(500)
-    .refine((val) => !containsScriptTag(val), 'Description cannot contain script tags.')
-    .refine((val) => !containsSqlComment(val), 'Description cannot contain SQL comment sequences.')
-    .transform((val) => sanitizeInput(val)),
-  acceptedTokens: z.array(assetCodeSchema).min(1, 'At least one accepted token is required.'),
+  title: z.string().trim().min(1, "Title is required."),
+  description: z.string().trim().min(1, "Description is required."),
+  acceptedTokens: z
+    .array(assetCodeSchema)
+    .min(1, 'At least one accepted token is required.'),
   targetAmount: positiveAmountSchema,
   deadline: unixTimestampSchema,
   // Campaign metadata URLs are user-controllable (issue #308). The

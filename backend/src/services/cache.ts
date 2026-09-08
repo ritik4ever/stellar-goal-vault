@@ -32,14 +32,8 @@ export async function initRedisCache(): Promise<void> {
     isConnected = true;
 
     logInfo('redis_connected', {}, config.logLevel);
-  } catch (error) {
-    logError(error instanceof Error ? error : new Error(String(error)), { event: 'redis_connection_failed' }, config.logLevel);
-    redisClient = null;
-    isConnected = false;
-  } catch {
-    redisClient = null;
-    isConnected = false;
-  } catch {
+  } catch (err) {
+    logError(err instanceof Error ? err : new Error(String(err)), { event: 'redis_connect_failed' }, config.logLevel);
     redisClient = null;
     isConnected = false;
   }
@@ -130,18 +124,11 @@ export async function closeRedisCache(): Promise<void> {
   if (redisClient && isConnected) {
     try {
       await redisClient.quit();
-      isConnected = false;
     } catch {
-      isConnected = false;
+      // ignore cleanup errors
     }
+    isConnected = false;
   }
-}
-
-/**
- * Check if cache is available.
- */
-export function isCacheAvailable(): boolean {
-  return isConnected && redisClient !== null;
 }
 
 /**
