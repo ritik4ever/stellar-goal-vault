@@ -137,6 +137,33 @@ See the [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for a comprehensive l
 - Contract: `cd contracts && cargo test`
 - E2E: `npm run test:e2e`
 
+## Secret scanning
+
+Gitleaks scans every pull request, pushes to `main` or `master`, weekly, and
+manual workflow runs. The workflow uses `.gitleaks.toml` as its configuration
+and blocks the check when it finds a possible secret.
+
+Run the same scan locally before pushing:
+
+```bash
+docker run --rm \
+  -v "$PWD:/repo" \
+  zricethezav/gitleaks:latest detect \
+  --source=/repo \
+  --config=/repo/.gitleaks.toml \
+  --redact
+```
+
+When Gitleaks reports a finding:
+
+1. Treat it as a real secret until verified otherwise. Rotate and revoke any
+   exposed credential before changing the code.
+2. For a confirmed false positive, add the narrowest possible path or regex
+   entry to `.gitleaks.toml`. Do not allowlist a broad directory or an entire
+   source file to hide a finding.
+3. Explain the false-positive rule in the pull request and rerun the local
+   scan. Never include the suspected secret in an issue or pull request.
+
 ## Code style
 
 - TypeScript: ESLint + Prettier (pre-commit via Husky + lint-staged)
