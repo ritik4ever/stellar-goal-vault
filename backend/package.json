@@ -19,7 +19,7 @@
     "pino-http": "^11.0.0",
     "redis": "^4.6.13",
     "swagger-ui-express": "^5.0.1",
-    "zod": "^4.5.4"
+    "zod": "^4.6.2"
   },
   "scripts": {
     "dev": "ts-node-dev --respawn src/index.ts",
