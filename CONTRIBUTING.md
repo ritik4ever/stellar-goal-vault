@@ -137,6 +137,32 @@ See the [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for a comprehensive l
 - Contract: `cd contracts && cargo test`
 - E2E: `npm run test:e2e`
 
+## CI artifacts
+
+CI uploads a small, fixed set of artifacts with bounded retention so failed runs can be diagnosed without re-running them. Artifact names end in `-<run_id>-<run_attempt>`, so re-runs and matrix jobs never collide. Only explicit paths are uploaded — never `.env` files, `node_modules`, keys or `contracts/target`.
+
+| Artifact (name prefix) | Workflow | Uploaded | Kept |
+| --- | --- | --- | --- |
+| `backend-build-npm-audit` | CI - Build Checks | always | 14 days |
+| `backend-build-diagnostics`, `frontend-build-diagnostics` (npm debug logs) | CI - Build Checks | on failure | 7 days |
+| `contract-build-wasm` (release `.wasm`) | CI - Build Checks | on success | 7 days |
+| `contract-build-diagnostics` (`cargo build` / `cargo test` logs) | CI - Build Checks | on failure | 7 days |
+| `backend-tests-coverage`, `integration-tests-coverage-node-<version>`, `frontend-ci-coverage` | PR Tests, Backend Integration Tests, Frontend CI | always | 14 days |
+| `contracts-ci-cargo-audit`, `load-test-results` | Contracts CI, Load Test | always | 14 days |
+| `playwright-e2e-report` | Playwright E2E Tests | always | 14 days |
+| `playwright-e2e-test-results` (traces, videos, screenshots), `playwright-e2e-docker-logs` | Playwright E2E Tests | on failure | 7 days |
+| `visual-regression-artifacts` | Playwright Visual Regression | on failure | 7 days |
+
+To download them, open the failed run under the repository's **Actions** tab and use the **Artifacts** section at the bottom of the run summary, or use the GitHub CLI:
+
+```bash
+gh run list --status failure --limit 5      # find the run id
+gh run download <run-id>                    # all artifacts
+gh run download <run-id> -n <artifact-name> # one artifact
+```
+
+Retention is set per upload with `retention-days` (7 for failure diagnostics, 14 for reports and coverage). When adding an upload step, keep those values, set `if-no-files-found: ignore`, and list explicit paths.
+
 ## Code style
 
 - TypeScript: ESLint + Prettier (pre-commit via Husky + lint-staged)

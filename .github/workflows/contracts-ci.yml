@@ -49,8 +49,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cargo-audit-report
+          name: contracts-ci-cargo-audit-${{ github.run_id }}-${{ github.run_attempt }}
           path: /tmp/cargo-audit.txt
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Run clippy (deny all warnings)
         working-directory: contracts
