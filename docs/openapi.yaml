@@ -899,11 +899,17 @@ components:
         database:
           type: object
           properties:
+            status:
+              type: string
+              enum:
+                - up
+                - down
             reachable:
               type: boolean
             error:
               type: string
           required:
+            - status
             - reachable
       required:
         - service
@@ -975,6 +981,25 @@ components:
         - timestamp
         - uptimeSeconds
         - components
+    DeepHealthErrorResponse:
+      type: object
+      properties:
+        overall:
+          type: string
+          enum:
+            - down
+        timestamp:
+          type: string
+          format: date-time
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - overall
+        - timestamp
+        - error
+        - message
     ConfigResponse:
       type: object
       properties:
@@ -1156,11 +1181,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeepHealthResponse"
         "503":
-          description: One or more components are unhealthy
+          description: One or more components are unhealthy (DeepHealthResponse), or the
+            check itself failed (DeepHealthErrorResponse)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DeepHealthResponse"
+                anyOf:
+                  - $ref: "#/components/schemas/DeepHealthResponse"
+                  - $ref: "#/components/schemas/DeepHealthErrorResponse"
   /api/campaigns:
     get:
       tags:

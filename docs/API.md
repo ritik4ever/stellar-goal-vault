@@ -59,7 +59,21 @@ Basic liveness check. Returns service status and a lightweight database reachabi
 
 - `status` is `"ok"` when both the API and the database probe succeed, `"degraded"` otherwise.
 - `database.status` is `"up"` or `"down"` based on a lightweight SQLite reachability check.
-- Returns `503` when the service is degraded.
+- Returns `503` when the service is degraded, with the probe error in `database.error`:
+
+```json
+{
+  "service": "stellar-goal-vault-backend",
+  "status": "degraded",
+  "timestamp": "2026-03-27T21:30:00.000Z",
+  "uptimeSeconds": 12.345,
+  "database": {
+    "status": "down",
+    "reachable": false,
+    "error": "SQLITE_CANTOPEN: unable to open database file"
+  }
+}
+```
 
 ---
 
@@ -82,7 +96,30 @@ Extended health check that probes the database, Soroban RPC, and the configured 
 }
 ```
 
-Returns `503` when `overall` is `"down"`.
+Returns `503` when `overall` is `"down"`. The same shape is used, and each unhealthy component has `status: "down"` with the reason in `details` (for `db`, the probe error; for `contract`, `"CONTRACT_ID not set"`).
+
+If the check itself throws, it returns `503` with a different shape:
+
+```json
+{
+  "overall": "down",
+  "timestamp": "2026-03-27T21:30:00.000Z",
+  "error": "Deep health check failed",
+  "message": "<underlying error message>"
+}
+```
+
+---
+
+### Health check contract
+
+These fields are relied on by uptime monitors and for debugging, and are pinned by `backend/src/healthContract.test.ts` for both success and failure paths. That file also validates every response against the OpenAPI schemas (`HealthResponse`, `DeepHealthResponse`, `DeepHealthErrorResponse`). Removing or renaming one of these fields fails the test:
+
+- `/api/health`: `service`, `status`, `timestamp`, `uptimeSeconds`, `database.status`, `database.reachable`, and `database.error` when down.
+- `/api/health/deep`: `overall`, `timestamp`, `uptimeSeconds`, and `components.{db,soroban,contract}.{status,details}`. The error shape has `overall`, `timestamp`, `error`, and `message`.
+- Every health response echoes `X-Request-ID`, and writes an `http_request` log entry with `requestId`, `method`, `path`, `status`, and `duration_ms`.
+
+Adding fields is fine. Update the OpenAPI schema in `backend/src/openapi.ts` and run `npm run build:openapi`.
 
 ---
 
