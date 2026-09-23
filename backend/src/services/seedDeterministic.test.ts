@@ -48,4 +48,27 @@ describe('deterministic seed state', () => {
     expect(secondCampaigns).toEqual(firstCampaigns);
     expect(secondPledges).toEqual(firstPledges);
   });
+
+  it('rejects campaign and pledge rows that violate database invariants', () => {
+    const db = getDb();
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO campaigns (
+            id, creator, title, description, accepted_tokens_json,
+            target_amount, pledged_amount, deadline, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run('invalid', 'G' + 'A'.repeat(55), 'Invalid', 'Invalid seed', '[]', 0, 0, 1, 1),
+    ).toThrow(/campaign integrity constraint failed/);
+
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run('1', 'G' + 'B'.repeat(55), 0, 'USDC', 1),
+    ).toThrow(/pledge integrity constraint failed/);
+  });
 });

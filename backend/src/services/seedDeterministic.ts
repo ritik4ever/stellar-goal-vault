@@ -165,7 +165,7 @@ export function seedDeterministicState(count: number = BASE_CAMPAIGNS.length): s
 
   // Use explicit transaction to ensure atomicity: either all data is seeded
   // or no partial state is persisted, allowing safe retries.
-  db.transaction(() => {
+  const seed = db.transaction(() => {
     db.prepare(`DELETE FROM campaign_events`).run();
     db.prepare(`DELETE FROM pledges`).run();
     db.prepare(`DELETE FROM campaigns`).run();
@@ -177,6 +177,13 @@ export function seedDeterministicState(count: number = BASE_CAMPAIGNS.length): s
     );
 
     for (const campaign of campaigns) {
+      if (
+        campaign.targetAmount <= 0 ||
+        campaign.pledgedAmount < 0 ||
+        campaign.pledgedAmount > campaign.targetAmount
+      ) {
+        throw new Error(`Invalid deterministic campaign seed: ${campaign.id}`);
+      }
       insertCampaign.run(
         campaign.id,
         campaign.creator,
@@ -197,9 +204,17 @@ export function seedDeterministicState(count: number = BASE_CAMPAIGNS.length): s
     );
 
     for (const pledge of pledges) {
-      insertPledge.run(pledge.campaignId, pledge.contributor, pledge.amount, pledge.assetCode, pledge.createdAt);
+      insertPledge.run(
+        pledge.campaignId,
+        pledge.contributor,
+        pledge.amount,
+        pledge.assetCode,
+        pledge.createdAt,
+      );
     }
-  })();
+  });
+
+  seed();
 
   return campaigns.map((c) => c.id);
 }
