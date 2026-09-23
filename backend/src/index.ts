@@ -11,6 +11,7 @@ import path from 'path';
 import { config, walletIntegrationReady } from './config';
 import { apiKeyAuthMiddleware } from './middleware/apiKeyAuth';
 import { cacheMiddleware } from './middleware/cacheMiddleware';
+import { idempotencyMiddleware } from './middleware/idempotencyMiddleware';
 import { requestIdMiddleware } from './middleware/requestId';
 import { validateBody } from './middleware/validateBody';
 import type { RequestWithId } from './middleware/types';
@@ -517,11 +518,12 @@ app.get('/api/campaigns/trending', (req: Request, res: Response) => {
   res.send(responseBody);
 });
 
-app.get('/api/campaigns/:id', (req: Request, res: Response) => {
-  const parsedId = parseCampaignId(req.params.id);
-  if (!parsedId.ok) {
-    sendValidationError(parsedId.issues);
-  }
+app.get('/api/campaigns/:id', async (req: Request, res: Response, next: express.NextFunction) => {
+  try {
+    const parsedId = parseCampaignId(req.params.id);
+    if (!parsedId.ok) {
+      sendValidationError(parsedId.issues);
+    }
 
     const cacheKey = `campaigns:detail:${parsedId.value}`;
     const cached = await getCampaignCacheEntry(cacheKey);
