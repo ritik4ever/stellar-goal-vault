@@ -28,6 +28,11 @@ const parseInteger = (value: string | undefined, fallback: number): number => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 };
 
+const parsePositiveInteger = (value: string | undefined, fallback: number): number => {
+  const parsed = parseInteger(value, fallback);
+  return parsed > 0 ? parsed : fallback;
+};
+
 export const config = {
   port: Number(process.env.PORT ?? 3001),
   logLevel: normalizeLogLevel(process.env.LOG_LEVEL),
@@ -57,6 +62,14 @@ export const config = {
   defaultMaxPerContributor: parseInteger(process.env.DEFAULT_MAX_PER_CONTRIBUTOR, 0),
   keepAliveTimeoutMs: parseInteger(process.env.KEEP_ALIVE_TIMEOUT_MS, 65_000),
   headersTimeoutMs: parseInteger(process.env.HEADERS_TIMEOUT_MS, 66_000),
+
+  // Background-job health (see docs/JOB_HEALTH.md).
+  // Unset means "derive from the poll interval" (see eventIndexer.ts).
+  indexerStaleAfterSeconds: process.env.INDEXER_STALE_AFTER_SECONDS
+    ? parsePositiveInteger(process.env.INDEXER_STALE_AFTER_SECONDS, 0) || undefined
+    : undefined,
+  jobFailingAfterFailures: parsePositiveInteger(process.env.JOB_FAILING_AFTER_FAILURES, 3),
+  jobMaxReportedLagSeconds: parsePositiveInteger(process.env.JOB_MAX_REPORTED_LAG_SECONDS, 86_400),
 };
 
 export const walletIntegrationReady = Boolean(

@@ -50,6 +50,7 @@ import {
 import { checkDbHealth } from './services/db';
 import { getCampaignTimeline, listCampaignHistory } from './services/eventHistory';
 import { startEventIndexer } from './services/eventIndexer';
+import { getJobHealthSnapshots } from './services/jobHealth';
 import {
   listNotifications,
   getUnreadCount,
@@ -347,6 +348,9 @@ app.get('/api/health', (_req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
     uptimeSeconds: Number(process.uptime().toFixed(3)),
     database,
+    // Background-job freshness. Informational: it does not change `status` or the HTTP
+    // code, so a flaky RPC cannot make orchestrators restart an otherwise healthy API.
+    jobs: getJobHealthSnapshots(),
   });
 });
 app.get('/api/contributors/:address/pledges', async (req: Request, res: Response) => {

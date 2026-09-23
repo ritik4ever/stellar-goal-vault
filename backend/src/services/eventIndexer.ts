@@ -5,6 +5,7 @@ import { reconcileOnChainPledge, getCampaign, updateCampaignMetadata } from './c
 import dotenv from 'dotenv';
 import { config } from '../config';
 import { logError, logInfo } from '../logger';
+import { MAX_LEDGER_LAG, clampLag, registerJob } from './jobHealth';
 
 dotenv.config();
 
@@ -19,6 +20,23 @@ const POLL_INTERVAL_MS = Number(process.env.SOROBAN_POLL_INTERVAL_MS ?? 15_000);
 
 /** Maximum backoff delay in milliseconds (5 minutes). */
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
+
+/** Events requested per getEvents call. A full page means more events may be waiting. */
+const EVENTS_PAGE_LIMIT = 200;
+
+/**
+ * Seconds without a successful poll before the indexer is reported `stale`.
+ * Defaults to four poll intervals (min 120s) so normal jitter never trips it.
+ */
+const STALE_AFTER_SECONDS =
+  config.indexerStaleAfterSeconds ?? Math.max(120, Math.ceil((POLL_INTERVAL_MS * 4) / 1000));
+
+/** Health tracker surfaced under `jobs.event_indexer` in GET /api/health. */
+export const eventIndexerJob = registerJob({
+  name: 'event_indexer',
+  staleAfterSeconds: STALE_AFTER_SECONDS,
+  enabled: Boolean(CONTRACT_ID),
+});
 
 /** Key used to store the last-processed ledger in the kv_store table. */
 const LAST_LEDGER_KEY = 'soroban_indexer_last_ledger';
@@ -76,8 +94,14 @@ interface SorobanEvent {
   [key: string]: unknown;
 }
 
-async function fetchSorobanEvents(startLedger: number): Promise<SorobanEvent[]> {
-  if (!CONTRACT_ID) return [];
+interface FetchedEvents {
+  events: SorobanEvent[];
+  /** Newest ledger the RPC reports having; undefined if the response omits it. */
+  latestLedger?: number;
+}
+
+async function fetchSorobanEvents(startLedger: number): Promise<FetchedEvents> {
+  if (!CONTRACT_ID) return { events: [] };
   const res = await axios.post(
     SOROBAN_RPC_URL,
     {
@@ -88,15 +112,17 @@ async function fetchSorobanEvents(startLedger: number): Promise<SorobanEvent[]> 
         contractIds: [CONTRACT_ID],
         startLedger,
         filters: [],
-        limit: 200,
+        limit: EVENTS_PAGE_LIMIT,
       },
     },
     { headers: { 'Content-Type': 'application/json' }, timeout: 10_000 },
   );
-  if (res.data?.result?.events && Array.isArray(res.data.result.events)) {
-    return res.data.result.events as SorobanEvent[];
-  }
-  return [];
+  const latestLedger = Number(res.data?.result?.latestLedger);
+  const events =
+    res.data?.result?.events && Array.isArray(res.data.result.events)
+      ? (res.data.result.events as SorobanEvent[])
+      : [];
+  return { events, latestLedger: Number.isFinite(latestLedger) ? latestLedger : undefined };
 }
 
 // ---------------------------------------------------------------------------
@@ -337,24 +363,40 @@ function handleParsedEvent(parsed: ParsedEvent): void {
 // Main poll cycle
 // ---------------------------------------------------------------------------
 
-async function indexSorobanEvents(): Promise<void> {
-  if (!CONTRACT_ID) return;
+interface PollResult {
+  /** Newly ingested events (duplicates and unrecognised events are not counted). */
+  processed: number;
+  /** Ledgers the RPC has that this poll has not yet covered; null if the RPC did not say. */
+  ledgerLag: number | null;
+  latestNetworkLedger: number | null;
+  syncedThroughLedger: number | null;
+}
+
+/** Returns null when the indexer is not configured to run (no CONTRACT_ID). */
+async function indexSorobanEvents(): Promise<PollResult | null> {
+  if (!CONTRACT_ID) return null;
 
   const db = getDb();
   const startLedger = getLastProcessedLedger();
 
-  const events = await fetchSorobanEvents(startLedger);
-  if (events.length === 0) return;
+  const { events, latestLedger } = await fetchSorobanEvents(startLedger);
 
   let maxLedger = startLedger;
+  let highestSeenLedger = 0;
+  let processed = 0;
 
   for (const event of events) {
+    if (event.ledger != null && Number(event.ledger) > highestSeenLedger) {
+      highestSeenLedger = Number(event.ledger);
+    }
+
     if (isDuplicateEvent(db, event)) continue;
 
     const parsed = parseSorobanEvent(event);
     if (!parsed) continue;
 
     handleParsedEvent(parsed);
+    processed += 1;
 
     if (parsed.ledger > maxLedger) {
       maxLedger = parsed.ledger;
@@ -364,6 +406,47 @@ async function indexSorobanEvents(): Promise<void> {
   // Persist the highest ledger we processed so we don't re-fetch it next poll
   if (maxLedger > startLedger) {
     setLastProcessedLedger(maxLedger + 1); // +1 so next poll starts after this ledger
+  }
+
+  // The persisted cursor only moves when events arrive, so it cannot measure lag on
+  // its own (an idle chain would look ever more behind). A short page means we have
+  // seen every event up to the RPC's latest ledger; a full page means a backlog remains.
+  let syncedThrough: number | null = null;
+  if (latestLedger !== undefined) {
+    syncedThrough = events.length >= EVENTS_PAGE_LIMIT ? highestSeenLedger : latestLedger;
+  }
+
+  return {
+    processed,
+    ledgerLag:
+      latestLedger !== undefined && syncedThrough !== null
+        ? clampLag(latestLedger - syncedThrough, MAX_LEDGER_LAG)
+        : null,
+    latestNetworkLedger: latestLedger ?? null,
+    syncedThroughLedger: syncedThrough,
+  };
+}
+
+/**
+ * Runs one poll and records the outcome for GET /api/health. Rethrows failures so the
+ * scheduler can apply its backoff. A successful poll with no new events still counts
+ * as a success (the indexer is idle, not stale).
+ */
+export async function pollEventIndexerOnce(): Promise<void> {
+  try {
+    const result = await indexSorobanEvents();
+    if (result === null) return; // Not configured: reported as `disabled`, never as a success.
+    eventIndexerJob.recordSuccess({
+      processed: result.processed,
+      details: {
+        ledger_lag: result.ledgerLag,
+        latest_network_ledger: result.latestNetworkLedger,
+        synced_through_ledger: result.syncedThroughLedger,
+      },
+    });
+  } catch (err) {
+    eventIndexerJob.recordFailure(err);
+    throw err;
   }
 }
 
@@ -377,7 +460,7 @@ let consecutiveFailures = 0;
 function scheduleNextPoll(delayMs: number): void {
   pollerTimer = setTimeout(async () => {
     try {
-      await indexSorobanEvents();
+      await pollEventIndexerOnce();
       consecutiveFailures = 0;
       scheduleNextPoll(POLL_INTERVAL_MS);
     } catch (err) {
@@ -410,6 +493,7 @@ function scheduleNextPoll(delayMs: number): void {
 
 export function startEventIndexer(): void {
   ensureKvStore();
+  eventIndexerJob.markStarted();
 
   const lastLedger = getLastProcessedLedger();
   logInfo(

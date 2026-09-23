@@ -283,6 +283,24 @@ const campaignHistoryResponseSchema = z
   })
   .openapi('CampaignHistoryResponse');
 
+const jobHealthSchema = z
+  .object({
+    name: z.string(),
+    state: z.enum(['healthy', 'idle', 'stale', 'failing', 'starting', 'disabled']),
+    last_success_timestamp_seconds: z.number().int().nullable(),
+    last_attempt_timestamp_seconds: z.number().int().nullable(),
+    last_failure_timestamp_seconds: z.number().int().nullable(),
+    freshness_lag_seconds: z.number().int().nullable(),
+    stale_after_seconds: z.number().int().nullable(),
+    consecutive_failures: z.number().int(),
+    total_failures: z.number().int(),
+    total_successes: z.number().int(),
+    last_error: z.string().nullable(),
+    last_run_processed: z.number().int().nullable(),
+    details: z.record(z.string(), z.number().nullable()),
+  })
+  .openapi('JobHealth');
+
 const healthResponseSchema = z
   .object({
     service: z.string(),
@@ -293,6 +311,7 @@ const healthResponseSchema = z
       reachable: z.boolean(),
       error: z.string().optional(),
     }),
+    jobs: z.record(z.string(), jobHealthSchema),
   })
   .openapi('HealthResponse');
 
