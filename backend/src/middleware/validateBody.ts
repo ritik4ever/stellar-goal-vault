@@ -36,6 +36,8 @@ export function validateBody<TSchema extends ZodType>(schema: TSchema): RequestH
         error: 'Validation failed',
         details: (parsed.error as ZodError).issues,
       };
+      // Surfaced as `errorCode` in the structured request log.
+      res.locals.errorCode = 'VALIDATION_ERROR';
       res.status(400).json(body);
       return;
     }
