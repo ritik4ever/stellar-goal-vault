@@ -133,12 +133,19 @@ export default defineConfig(async () => {
   return {
     plugins,
     build: {
+      chunkSizeWarningLimit: 600, // Recommend keeping chunks under 600KB unminified/uncompressed
       rollupOptions: {
         output: {
           manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
-            'vendor-stellar': ['@stellar/stellar-sdk'],
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            'vendor-stellar': [
+              '@stellar/stellar-sdk', 
+              '@stellar/freighter-api',
+              '@lobstrco/signer-extension-api',
+              '@creit.tech/xbull-wallet-connect'
+            ],
             'vendor-charts': ['recharts'],
+            'vendor-ui': ['lucide-react'],
           },
         },
       },
