@@ -3,6 +3,17 @@ import axios from 'axios';
 import { getDb } from './db';
 import { config } from '../config';
 import { logError, logInfo } from '../logger';
+import { registerJob } from './jobHealth';
+
+/**
+ * Health tracker surfaced under `jobs.webhook_delivery` in GET /api/health.
+ * Delivery is event-driven (no expected cadence), so it is never reported `stale`;
+ * one recorded run is one delivery, retries included.
+ */
+export const webhookDeliveryJob = registerJob({
+  name: 'webhook_delivery',
+  staleAfterSeconds: null,
+});
 
 export type WebhookEvent =
   | 'campaign_funded'
@@ -146,6 +157,7 @@ export async function dispatchWebhook(
       });
 
       if (response.status >= 200 && response.status < 300) {
+        webhookDeliveryJob.recordSuccess({ processed: 1 });
         logInfo(
           'webhook_delivered',
           { event, campaignId, attempt: attempt + 1, status: response.status },
@@ -172,6 +184,7 @@ export async function dispatchWebhook(
     }
   }
 
+  webhookDeliveryJob.recordFailure(lastErrorMessage);
   recordDeadLetter(event, campaignId, payloadString, lastErrorMessage, attempt);
   return false;
 }
