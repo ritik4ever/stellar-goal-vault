@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { sql } from 'better-sqlite3';
 
 const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-campaign-store-${process.pid}.db`);
 
