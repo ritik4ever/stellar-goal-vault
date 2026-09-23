@@ -84,7 +84,9 @@ export function logRequest(
   _configuredLevel?: LogLevel,
 ): void {
   const durationMs = Number(request.durationMs.toFixed(2));
-  logger.info({
+  const level = request.status >= 500 ? 'error' : request.status >= 400 ? 'warn' : 'info';
+  
+  const payload = {
     event: 'http_request',
     message: `${request.method} ${request.path} ${request.status} ${durationMs}ms`,
     requestId: request.requestId,
@@ -92,7 +94,15 @@ export function logRequest(
     path: request.path,
     status: request.status,
     duration_ms: durationMs,
-  });
+  };
+
+  if (level === 'error') {
+    logger.error(payload);
+  } else if (level === 'warn') {
+    logger.warn(payload);
+  } else {
+    logger.info(payload);
+  }
 }
 
 export function logLine(

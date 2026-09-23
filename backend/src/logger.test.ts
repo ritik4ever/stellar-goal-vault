@@ -12,7 +12,7 @@ describe('logger', () => {
     expect(normalizeLogLevel('debug')).toBe('debug');
   });
 
-  it('logs requests as JSON with method, path, status, and duration', () => {
+  it('logs success requests as info with structured fields', () => {
     const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
 
     logRequest(
@@ -38,6 +38,60 @@ describe('logger', () => {
       duration_ms: 18.57,
     });
     expect(payload.message).toContain('POST /api/campaigns 201');
+  });
+
+  it('logs client error requests as warn with structured fields', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    logRequest(
+      {
+        requestId: 'req-456',
+        method: 'GET',
+        path: '/api/not-found',
+        status: 404,
+        durationMs: 5.123,
+      },
+      'info',
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const payload = warnSpy.mock.calls[0][0] as any;
+
+    expect(payload).toMatchObject({
+      event: 'http_request',
+      requestId: 'req-456',
+      method: 'GET',
+      path: '/api/not-found',
+      status: 404,
+      duration_ms: 5.12,
+    });
+  });
+
+  it('logs server error requests as error with structured fields', () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+
+    logRequest(
+      {
+        requestId: 'req-789',
+        method: 'POST',
+        path: '/api/error',
+        status: 500,
+        durationMs: 12.345,
+      },
+      'info',
+    );
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const payload = errorSpy.mock.calls[0][0] as any;
+
+    expect(payload).toMatchObject({
+      event: 'http_request',
+      requestId: 'req-789',
+      method: 'POST',
+      path: '/api/error',
+      status: 500,
+      duration_ms: 12.35,
+    });
   });
 
   it('logs errors with the message and stack', () => {
