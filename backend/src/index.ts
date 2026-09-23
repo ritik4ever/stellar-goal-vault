@@ -6,6 +6,9 @@ import helmet from 'helmet';
 import { createServer, Server } from 'node:http';
 
 import { validateEnv } from './validateEnv';
+
+validateEnv();
+
 import { z } from 'zod';
 import path from 'path';
 import { config, walletIntegrationReady } from './config';
