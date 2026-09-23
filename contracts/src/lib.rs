@@ -311,7 +311,7 @@ impl StellarGoalVaultContract {
         );
     }
 
-    pub fn create_campaign(
+     pub fn create_campaign(
         env: Env,
         creator: Address,
         accepted_tokens: Vec<Address>,
@@ -320,6 +320,9 @@ impl StellarGoalVaultContract {
         metadata: String,
         max_per_contributor: i128,
     ) -> u64 {
+        // Privileged state transition: contract must not be paused, and the
+        // declared creator must authorize the call (issue #893).
+        require_not_paused(&env);
         creator.require_auth();
 
         if target_amount <= 0 {
@@ -359,6 +362,52 @@ impl StellarGoalVaultContract {
             .get(&DataKey::NextCampaignId)
             .unwrap_or(0);
         next_id += 1;
+
+        let created_at = env.ledger().timestamp();
+
+        let campaign = Campaign {
+            creator: creator.clone(),
+            accepted_tokens: accepted_tokens.clone(),
+            target_amount,
+            pledged_amount: 0,
+            deadline,
+            claimed: false,
+            canceled: false,
+            metadata: metadata.clone(),
+            contributor_count: 0,
+            created_at,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::NextCampaignId, &next_id);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(next_id), &campaign);
+
+        // Store the per-contributor cap only when a positive limit is set.
+        // Absent key is equivalent to cap == 0 (no limit).
+        if max_per_contributor > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::ContributorCap(next_id), &max_per_contributor);
+        }
+
+        // For backward compatibility, publish the first token in the event
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Create")),
+            CampaignCreated {
+                campaign_id: next_id,
+                creator,
+                token: accepted_tokens.get(0).unwrap(),
+                target_amount,
+                deadline,
+                metadata,
+            },
+        );
+
+        next_id
+         }
 
         let created_at = env.ledger().timestamp();
 
