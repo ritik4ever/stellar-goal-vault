@@ -20,3 +20,39 @@ The optimization replaces `server.prepareTransaction` with `rpc.assembleTransact
 | `rpc.assembleTransaction()` | 0 (Local only) | ~1ms - 3ms |
 
 By utilizing `rpc.assembleTransaction()`, we skip an unnecessary RPC call, saving 150-800ms of latency per pledge/claim action on the frontend bundle, directly improving the user's perceived performance when interacting with the wallet.
+
+---
+
+# Campaign List Rendering Benchmark
+
+`CampaignsTable` recomputes `search → filter → sort` over the entire campaign
+list on each render (virtualization only limits what is painted), so that
+pipeline is the dominant, measurable cost of the campaign list.
+
+- **Source:** `frontend/src/components/benchmarks/campaignsTable.bench.ts`
+- **Input size:** deterministic datasets of **1,000** and **5,000** campaigns.
+- **Output metrics:** Vitest reports ops/sec (`hz`) plus min/mean/p50/p99/max per benchmark.
+- **Datasets are generated in-process** from a fixed factory — no network or mutable external data, so results are reproducible locally and in CI.
+
+## Running
+
+```bash
+cd frontend
+npm run bench            # vitest bench --run
+# or a single file / filter
+npx vitest bench --run src/components/benchmarks/campaignsTable.bench.ts
+npx vitest bench --run -t "1,000"
+```
+
+## Benchmark cases
+
+| Dataset | Case |
+| --- | --- |
+| 1,000 / 5,000 | `search(all) + filter(USDC, open) + sort(pledgedAmount)` |
+| 1,000 / 5,000 | `search(match) + sort(createdAt)` |
+| 1,000 / 5,000 | `search(all) + sort(deadline)` |
+
+## Interpreting results
+
+Compare `hz` (higher is better) across runs on the same machine. Treat results as
+a relative regression signal for the list pipeline, not an absolute latency SLA.

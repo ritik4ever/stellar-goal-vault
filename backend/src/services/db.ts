@@ -136,9 +136,14 @@ function migrate(database: SQLiteDatabase): void {
       created_at            INTEGER NOT NULL,
       claimed_at            INTEGER,
       failed_at             INTEGER,
+      deleted_at            INTEGER,
       metadata_json         TEXT,
       max_per_contributor   INTEGER
     );
+
+    CREATE INDEX IF NOT EXISTS idx_campaigns_creator ON campaigns(creator);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_deadline ON campaigns(deadline);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(claimed_at, failed_at, deleted_at);
 
     -- 🌟 1. Create our new cheat-sheet search index table
     CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
@@ -173,6 +178,9 @@ function migrate(database: SQLiteDatabase): void {
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
     );
 
+    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_pledges_contributor ON pledges(contributor, created_at, id);
+
     CREATE TABLE IF NOT EXISTS campaign_events (
       id                  INTEGER PRIMARY KEY AUTOINCREMENT,
       campaign_id         TEXT NOT NULL,
@@ -185,6 +193,9 @@ function migrate(database: SQLiteDatabase): void {
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
     );
 
+    CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_id ON campaign_events(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
+
     CREATE TABLE IF NOT EXISTS webhook_dead_letter_queue (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       event         TEXT NOT NULL,
@@ -194,6 +205,8 @@ function migrate(database: SQLiteDatabase): void {
       failed_at     INTEGER NOT NULL,
       attempts      INTEGER NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_webhook_dlq_campaign_id ON webhook_dead_letter_queue(campaign_id);
 
     CREATE TABLE IF NOT EXISTS campaign_comments (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -205,10 +218,8 @@ function migrate(database: SQLiteDatabase): void {
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
     );
 
-    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);
-    CREATE INDEX IF NOT EXISTS idx_pledges_contributor ON pledges(contributor, created_at, id);
-    CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_id ON campaign_events(campaign_id);
-    CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_campaign_comments_campaign_id ON campaign_comments(campaign_id);
+
   `);
 
   const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
@@ -233,15 +244,10 @@ function migrate(database: SQLiteDatabase): void {
   // Backfill token_id for existing pledges where it's still NULL
   database.exec(`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`);
 
-  // Add deleted_at column if not exists
+  // Add failed_at column if not exists
   const campaignColumns = database.prepare(`PRAGMA table_info(campaigns)`).all() as Array<{
     name: string;
   }>;
-  if (!campaignColumns.some((column) => column.name === 'deleted_at')) {
-    database.exec(`ALTER TABLE campaigns ADD COLUMN deleted_at INTEGER`);
-  }
-
-  // Add failed_at column if not exists
   if (!campaignColumns.some((column) => column.name === 'failed_at')) {
     database.exec(`ALTER TABLE campaigns ADD COLUMN failed_at INTEGER`);
   }
@@ -254,7 +260,7 @@ function migrate(database: SQLiteDatabase): void {
     // 1. Create the FTS5 virtual table
     database.exec(`
   CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
-    id,
+    id UNINDEXED,
     title,
     description
   );

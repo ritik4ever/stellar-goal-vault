@@ -191,6 +191,35 @@ jobs:
 
 ## Test Utilities
 
+### Reusable fixtures (`tests/fixtures.ts`)
+
+Deterministic builders so tests never copy large setup blocks or depend on the
+wall clock:
+
+```typescript
+import {
+  buildAddress,
+  WALLETS,
+  buildCampaignInput,
+  buildPledgeInput,
+  freezeClock,
+  FIXTURE_EPOCH_SECONDS,
+  ONE_DAY_SECONDS,
+} from './fixtures';
+
+// Deterministic wallets + campaign/pledge inputs
+const campaign = createCampaign(buildCampaignInput({ targetAmount: 100 }));
+const pledge = buildPledgeInput({ contributor: WALLETS.alice, amount: 50 });
+
+// Freeze Date.now() so open/funded/failed states are reproducible
+const clock = freezeClock();
+clock.advance(ONE_DAY_SECONDS + 1);
+clock.restore();
+```
+
+`tests/integration.test.ts` is a fixture-driven API suite (create → pledge →
+claim / refund) that runs entirely against a frozen clock.
+
 ### Shared Helpers (`tests/utils.ts`)
 
 ```typescript

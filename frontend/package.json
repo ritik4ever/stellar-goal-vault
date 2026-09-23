@@ -8,6 +8,7 @@
     "build:analyze": "tsc && ANALYZE=true vite build",
     "preview": "vite preview",
     "test": "vitest",
+    "bench": "vitest bench --run",
     "lint": "eslint 'src/**/*.{ts,tsx}'"
   },
   "dependencies": {
@@ -36,7 +37,7 @@
     "@types/react-dom": "^18.2.17",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
-    "@vitejs/plugin-react": "^6.1.1",
+    "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.5.4",
     "eslint": "^8.57.0",
     "jsdom": "^30.1.0",

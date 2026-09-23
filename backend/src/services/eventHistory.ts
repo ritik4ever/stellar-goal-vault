@@ -1,5 +1,27 @@
 import { getDb } from './db';
 
+// ── Database Indexes ─────────────────────────────────────────────────────────
+// Indexes are created lazily on first access to support campaigns persistence
+// query patterns without blocking startup or requiring explicit migration scripts.
+const ensureIndexes = (() => {
+  let created = false;
+  return () => {
+    if (created) return;
+    const db = getDb();
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_id_timestamp
+        ON campaign_events (campaign_id, timestamp ASC, id ASC);
+      CREATE INDEX IF NOT EXISTS idx_campaign_events_tx_hash
+        ON campaign_events (json_extract(blockchain_metadata, '$.txHash'));
+      CREATE INDEX IF NOT EXISTS idx_campaign_events_ledger
+        ON campaign_events (json_extract(blockchain_metadata, '$.ledgerNumber'));
+      CREATE INDEX IF NOT EXISTS idx_campaign_events_source
+        ON campaign_events (json_extract(blockchain_metadata, '$.source'));
+      created = true;
+    `);
+  };
+})();
+
 export type CampaignEventType =
   | 'created'
   | 'pledged'
@@ -77,6 +99,7 @@ export function recordEvent(
   blockchainMetadata?: BlockchainMetadata,
 ): void {
   const db = getDb();
+  ensureIndexes();
   db.prepare(
     `INSERT INTO campaign_events (campaign_id, event_type, timestamp, actor, amount, metadata, blockchain_metadata)
      VALUES (@campaignId, @eventType, @timestamp, @actor, @amount, @metadata, @blockchainMetadata)`,
@@ -107,6 +130,7 @@ export interface CampaignHistoryPage {
  */
 export function getCampaignHistory(campaignId: string): CampaignEvent[] {
   const db = getDb();
+  ensureIndexes();
   const rows = db
     .prepare(`SELECT * FROM campaign_events WHERE campaign_id = ? ORDER BY timestamp ASC, id ASC`)
     .all(campaignId) as EventRow[];
@@ -126,6 +150,7 @@ export function listCampaignHistory(
   const offset = (page - 1) * pageSize;
 
   const db = getDb();
+  ensureIndexes();
   const countRow = db
     .prepare(`SELECT COUNT(*) as total FROM campaign_events WHERE campaign_id = ?`)
     .get(campaignId) as { total: number };
@@ -154,6 +179,7 @@ export function listCampaignHistory(
  */
 export function getEventByTxHash(txHash: string): CampaignEvent | undefined {
   const db = getDb();
+  ensureIndexes();
   const row = db
     .prepare(
       `SELECT * FROM campaign_events WHERE json_extract(blockchain_metadata, '$.txHash') = ? LIMIT 1`,
@@ -171,6 +197,7 @@ export function getEventByTxHash(txHash: string): CampaignEvent | undefined {
  */
 export function getEventsByLedger(ledgerNumber: number): CampaignEvent[] {
   const db = getDb();
+  ensureIndexes();
   const rows = db
     .prepare(
       `SELECT * FROM campaign_events WHERE json_extract(blockchain_metadata, '$.ledgerNumber') = ? ORDER BY json_extract(blockchain_metadata, '$.eventIndex') ASC`,
@@ -235,6 +262,7 @@ export function getCampaignTimeline(
   let cursorId: number | undefined;
 
   if (options.cursor) {
+    ensureIndexes();
     try {
       const decoded = Buffer.from(options.cursor, 'base64').toString('utf-8');
       const parts = decoded.split(':');
@@ -368,6 +396,7 @@ function rowToTimelineItem(row: TimelineRow): TimelineItem {
  */
 export function getEventsBySource(source: 'local' | 'soroban'): CampaignEvent[] {
   const db = getDb();
+  ensureIndexes();
   const rows = db
     .prepare(
       `SELECT * FROM campaign_events WHERE json_extract(blockchain_metadata, '$.source') = ? ORDER BY timestamp ASC, id ASC`,

@@ -19,8 +19,20 @@ function createRequestId(): string {
   return `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+export function getApiBaseUrl(): string {
+  const rawUrl = import.meta.env.VITE_API_URL;
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    return '/api';
+  }
+  const trimmed = rawUrl.trim();
+  if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  return '/api';
+}
+
 export const apiClient: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? '/api',
+  baseURL: getApiBaseUrl(),
   headers: {
     Accept: 'application/json',
   },

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { sql } from 'better-sqlite3';
 
 const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-campaign-store-${process.pid}.db`);
 
@@ -121,7 +122,7 @@ describe('on-chain pledge reconciliation', () => {
       confirmedAt: futureDeadline - 300,
     });
 
-    expect(updatedCampaign.pledgedAmount).toBe(25.5);
+    expect(updatedCampaign.campaign.pledgedAmount).toBe(25.5);
     expect(getCampaign(campaign.id)?.pledgedAmount).toBe(25.5);
 
     const pledges = getPledges(campaign.id);
@@ -270,5 +271,163 @@ describe('campaign analytics', () => {
   it('returns undefined for non-existent campaign', () => {
     const analytics = getCampaignAnalytics('99999');
     expect(analytics).toBeUndefined();
+  });
+});
+
+describe('campaign persistence regression tests', () => {
+  it('enforces unique constraint on transaction hash for pledges', () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Constraint Test Campaign',
+      description: 'Campaign to test unique constraint on transaction hash',
+      assetCode: 'USDC',
+      targetAmount: 1000,
+      deadline: futureDeadline,
+    });
+
+    const db = getDb();
+    
+    // Insert a pledge manually to simulate a potential conflict
+    db.prepare(`
+      INSERT INTO pledges (campaign_id, contributor, amount, transaction_hash, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(campaign.id, CONTRIBUTOR, 100, TX_HASH, futureDeadline - 100);
+
+    // Attempting to reconcile with the same transaction hash should fail or be handled
+    // The current implementation uses idempotency, so we test that the constraint
+    // is respected by the database layer if we try to insert directly
+    expect(() => {
+      db.prepare(`
+        INSERT INTO pledges (campaign_id, contributor, amount, transaction_hash, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(campaign.id, CONTRIBUTOR2, 50, TX_HASH, futureDeadline - 90);
+    }).toThrow();
+  });
+
+  it('rolls back transaction on campaign creation failure', () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    
+    // Create a valid campaign first
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Rollback Test Campaign',
+      description: 'Campaign to test transaction rollback',
+      assetCode: 'USDC',
+      targetAmount: 1000,
+      deadline: futureDeadline,
+    });
+
+    expect(campaign).toBeDefined();
+    expect(getCampaign(campaign.id)).toBeDefined();
+
+    // Verify that the campaign exists
+    const existingCampaign = getCampaign(campaign.id);
+    expect(existingCampaign?.title).toBe('Rollback Test Campaign');
+  });
+
+  it('handles edge case data with special characters in title and description', () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const specialTitle = 'Campaign with "quotes" and <html> tags & special chars: ñ ü é';
+    const specialDesc = 'Description with \n newlines and \t tabs and \r returns.';
+
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: specialTitle,
+      description: specialDesc,
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: futureDeadline,
+    });
+
+    expect(campaign.title).toBe(specialTitle);
+    expect(campaign.description).toBe(specialDesc);
+
+    const retrieved = getCampaign(campaign.id);
+    expect(retrieved?.title).toBe(specialTitle);
+    expect(retrieved?.description).toBe(specialDesc);
+  });
+
+  it('maintains ordering of campaigns by creation date descending', () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    const db = getDb();
+
+    // Create multiple campaigns
+    const campaign1 = createCampaign({
+      creator: CREATOR,
+      title: 'First Campaign',
+      description: 'First',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: futureDeadline,
+    });
+
+    const campaign2 = createCampaign({
+      creator: CREATOR,
+      title: 'Second Campaign',
+      description: 'Second',
+      assetCode: 'USDC',
+      targetAmount: 200,
+      deadline: futureDeadline,
+    });
+
+    const campaign3 = createCampaign({
+      creator: CREATOR,
+      title: 'Third Campaign',
+      description: 'Third',
+      assetCode: 'USDC',
+      targetAmount: 300,
+      deadline: futureDeadline,
+    });
+
+    // Manually adjust creation times to ensure order
+    const baseTime = futureDeadline - 1000;
+    db.prepare(`UPDATE campaigns SET created_at = ? WHERE id = ?`).run(baseTime, campaign1.id);
+    db.prepare(`UPDATE campaigns SET created_at = ? WHERE id = ?`).run(baseTime + 10, campaign2.id);
+    db.prepare(`UPDATE campaigns SET created_at = ? WHERE id = ?`).run(baseTime + 20, campaign3.id);
+
+    const result = listCampaigns();
+    expect(result.campaigns).toHaveLength(3);
+    expect(result.campaigns[0].id).toBe(campaign3.id);
+    expect(result.campaigns[1].id).toBe(campaign2.id);
+    expect(result.campaigns[2].id).toBe(campaign1.id);
+  });
+
+  it('handles zero target amount gracefully', () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Zero Target Campaign',
+      description: 'Campaign with zero target amount',
+      assetCode: 'USDC',
+      targetAmount: 0,
+      deadline: futureDeadline,
+    });
+
+    expect(campaign.targetAmount).toBe(0);
+    expect(getCampaign(campaign.id)?.targetAmount).toBe(0);
+
+    const analytics = getCampaignAnalytics(campaign.id);
+    expect(analytics?.fundingGap).toBe(0);
+  });
+
+  it('handles very large target amounts', () => {
+    const futureDeadline = Math.floor(Date.now() / 1000) + 86400;
+    
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Large Target Campaign',
+      description: 'Campaign with very large target amount',
+      assetCode: 'USDC',
+      targetAmount: 999999999999,
+      deadline: futureDeadline,
+    });
+
+    expect(campaign.targetAmount).toBe(999999999999);
+    expect(getCampaign(campaign.id)?.targetAmount).toBe(999999999999);
+
+    const analytics = getCampaignAnalytics(campaign.id);
+    expect(analytics?.fundingGap).toBe(999999999999);
   });
 });

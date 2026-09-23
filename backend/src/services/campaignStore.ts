@@ -340,6 +340,7 @@ export function listContributorPledges(
 export function initCampaignStore(): void {
   initDb();
   const db = getDb();
+  db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);');
   db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_contributor_created_at ON pledges(contributor, created_at);');
 }
 
