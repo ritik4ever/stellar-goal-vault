@@ -7,6 +7,12 @@ on:
   pull_request:
 
 
+# Cancel superseded runs for the same PR or branch. Runs on main get a
+# unique group, so they are never cancelled or queued. See docs/CI.md.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && format('run-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend-build:
     name: Backend Build
@@ -120,3 +126,22 @@ jobs:
       - name: Run contract tests
         working-directory: contracts
         run: cargo test
+
+  workflow-concurrency:
+    name: Workflow Concurrency Policy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Check workflow concurrency policy
+        run: node scripts/check-workflow-concurrency.mjs
+
+      - name: Test the policy checker
+        run: node --test scripts/check-workflow-concurrency.test.mjs
