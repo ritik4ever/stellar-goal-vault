@@ -28,6 +28,8 @@ Middleware is registered in `backend/src/index.ts` after request ID assignment:
 app.use(requestLoggingMiddleware);
 ```
 
+For operator troubleshooting guidance and runbook actions, see `OPERATOR_REQUEST_LOGGING_RUNBOOK.md` in the same directory.
+
 ## Example development log
 
 ```txt
