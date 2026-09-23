@@ -450,6 +450,61 @@ use soroban_sdk::{
         client.set_paused(&admin, &true);
         client.contribute(&campaign_id, &contributor, &token, &500);
     }
+    
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_campaign_blocked_when_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        client.set_paused(&admin, &true);
+
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "paused create should fail"),
+            &0_i128,
+        );
+    }
+
+    #[test]
+    fn test_create_campaign_succeeds_when_unpaused() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        // Explicitly unpaused (default), then create — preserves existing lifecycle.
+        client.set_paused(&admin, &false);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "unpaused create ok"),
+            &0_i128,
+        );
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.creator, creator);
+        assert_eq!(campaign.target_amount, 500);
+        assert!(!campaign.claimed);
+        assert!(!campaign.canceled);
+        assert_eq!(campaign.contributor_count, 0);
+                          }
 
     #[test]
     #[should_panic(expected = "contract is paused")]
