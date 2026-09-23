@@ -103,6 +103,10 @@ const WRITE_RATE_LIMIT_MAX_REQUESTS = Number(
 );
 const CAMPAIGN_DETAIL_PLEDGE_PREVIEW_LIMIT = 5;
 
+// First, so every response (including CORS, auth, cache, and rate-limit
+// rejections) carries an X-Request-ID and produces a structured request log.
+app.use(requestIdMiddleware);
+
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -216,8 +220,6 @@ export function applyRateLimit(limitOverride?: number) {
 }
 
 app.use(applyRateLimit());
-
-app.use(requestIdMiddleware);
 
 function sendValidationError(issues: z.ZodIssue[]): never {
   throw new AppError(
@@ -1036,6 +1038,7 @@ function isErrorWithType(error: unknown, type: string): boolean {
 app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) => {
   void next;
   if (isErrorWithType(err, 'entity.too.large')) {
+    res.locals.errorCode = 'PAYLOAD_TOO_LARGE';
     return res.status(413).json({
       success: false,
       error: {
@@ -1047,6 +1050,7 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
   }
 
   if (isErrorWithMessage(err) && err.message === 'Not allowed by CORS') {
+    res.locals.errorCode = 'FORBIDDEN';
     return res.status(403).json({
       success: false,
       error: {
@@ -1060,6 +1064,7 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
   const errorWithCode = err as { statusCode?: number; code?: string };
   const statusCode = err instanceof AppError ? err.statusCode : (errorWithCode.statusCode ?? 500);
   const code = err instanceof AppError ? err.code : (errorWithCode.code ?? 'INTERNAL_SERVER_ERROR');
+  res.locals.errorCode = code;
   const response: ApiErrorResponse = {
     success: false,
     error: {
@@ -1084,7 +1089,7 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
       event: 'request_error',
       requestId: (req as RequestWithId).requestId,
       method: req.method,
-      path: req.originalUrl || req.path,
+      path: (req.originalUrl || req.path).split('?')[0],
       status: statusCode,
       code,
     },

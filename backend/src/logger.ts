@@ -73,6 +73,19 @@ export function logError(
   });
 }
 
+/**
+ * Coarse result of a request, for filtering without parsing status codes.
+ * `aborted` means the client disconnected before the response finished.
+ */
+export type RequestOutcome = 'success' | 'client_error' | 'server_error' | 'aborted';
+
+export function requestOutcome(status: number, aborted = false): RequestOutcome {
+  if (aborted) return 'aborted';
+  if (status >= 500) return 'server_error';
+  if (status >= 400) return 'client_error';
+  return 'success';
+}
+
 export function logRequest(
   request: {
     requestId?: string;
@@ -80,6 +93,14 @@ export function logRequest(
     path: string;
     status: number;
     durationMs: number;
+    /** Matched Express route pattern, e.g. `/api/campaigns/:id/pledges`. */
+    route?: string;
+    /** Stable operation name: `<METHOD> <route>`, or `unmatched`. */
+    operation?: string;
+    campaignId?: string;
+    /** Application error code (e.g. `VALIDATION_ERROR`) for failed requests. */
+    errorCode?: string;
+    aborted?: boolean;
   },
   _configuredLevel?: LogLevel,
 ): void {
@@ -88,9 +109,14 @@ export function logRequest(
     event: 'http_request',
     message: `${request.method} ${request.path} ${request.status} ${durationMs}ms`,
     requestId: request.requestId,
+    operation: request.operation ?? 'unmatched',
+    route: request.route,
+    campaignId: request.campaignId,
     method: request.method,
     path: request.path,
     status: request.status,
+    outcome: requestOutcome(request.status, request.aborted),
+    errorCode: request.errorCode,
     duration_ms: durationMs,
   });
 }
