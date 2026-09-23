@@ -93,6 +93,7 @@ A map of every documentation file in the repository, organized by topic. Use thi
 |----------|-------------|
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Contract (testnet), backend (Render), frontend (Vercel) deployment |
 | [RUNBOOK.md](RUNBOOK.md) | Operations: database reset, API key rotation, contract redeploy, rollback |
+| [docs/HEALTH_RUNBOOK.md](docs/HEALTH_RUNBOOK.md) | Health check signal reference: DB, indexer, Soroban RPC, memory — diagnostics and recovery |
 | [TODO.md](TODO.md) | Pending implementation: contributor summary endpoint |
 
 ---

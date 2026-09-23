@@ -360,6 +360,14 @@ app.get('/api/health', (_req: Request, res: Response) => {
   // Healthy if DB is reachable and indexer isn't stuck failing
   const healthy = database.reachable && indexer.isHealthy;
 
+  const memUsage = process.memoryUsage();
+  const memory = {
+    rss: memUsage.rss,
+    heapUsed: memUsage.heapUsed,
+    heapTotal: memUsage.heapTotal,
+    external: memUsage.external,
+  };
+
   res.status(healthy ? 200 : 503).json({
     service: 'stellar-goal-vault-backend',
     status: healthy ? 'ok' : 'degraded',
@@ -367,6 +375,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
     uptimeSeconds: Number(process.uptime().toFixed(3)),
     database,
     indexer,
+    memory,
   });
 });
 app.get('/api/contributors/:address/pledges', async (req: Request, res: Response) => {
@@ -409,10 +418,19 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
     const indexer = getIndexerStatus();
     const allHealthy = database.reachable && hasContractId && sorobanHealthy && indexer.isHealthy;
 
+    const memUsage = process.memoryUsage();
+    const memory = {
+      rss: memUsage.rss,
+      heapUsed: memUsage.heapUsed,
+      heapTotal: memUsage.heapTotal,
+      external: memUsage.external,
+    };
+
     res.status(allHealthy ? 200 : 503).json({
       overall: allHealthy ? 'up' : 'down',
       timestamp: new Date().toISOString(),
       uptimeSeconds: Number(process.uptime().toFixed(3)),
+      memory,
       components: {
         db: {
           status: database.reachable ? 'up' : 'down',
