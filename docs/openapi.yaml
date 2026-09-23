@@ -243,6 +243,32 @@ components:
         - amount
         - assetCode
         - createdAt
+    ContributorPledge:
+      allOf:
+        - $ref: "#/components/schemas/Pledge"
+        - type: object
+          properties:
+            campaignName:
+              type: string
+              example: Clean Water Initiative
+            status:
+              type: string
+              enum:
+                - open
+                - funded
+                - claimed
+                - failed
+              example: open
+            refundStatus:
+              type: string
+              enum:
+                - refunded
+                - not_refunded
+              example: not_refunded
+          required:
+            - campaignName
+            - status
+            - refundStatus
     CampaignEvent:
       type: object
       properties:
@@ -262,6 +288,8 @@ components:
             - updated
             - metadata_updated
             - pledge_limit_reached
+            - archived
+            - restored
           example: pledged
         timestamp:
           type: integer
@@ -431,7 +459,6 @@ components:
           properties:
             imageUrl:
               type: string
-              maxLength: 2048
             externalLink:
               type: string
               maxLength: 2048
@@ -591,6 +618,40 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Pledge"
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Total number of items matching the query.
+              example: 42
+            page:
+              type: integer
+              description: Current page (1-based).
+              example: 1
+            limit:
+              type: integer
+              description: Number of items per page.
+              example: 10
+            totalPages:
+              type: integer
+              description: Total number of pages.
+              example: 5
+          required:
+            - total
+            - page
+            - limit
+            - totalPages
+      required:
+        - data
+        - pagination
+    ContributorPledgeListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContributorPledge"
         pagination:
           type: object
           properties:
@@ -838,11 +899,17 @@ components:
         database:
           type: object
           properties:
+            status:
+              type: string
+              enum:
+                - up
+                - down
             reachable:
               type: boolean
             error:
               type: string
           required:
+            - status
             - reachable
       required:
         - service
@@ -914,6 +981,25 @@ components:
         - timestamp
         - uptimeSeconds
         - components
+    DeepHealthErrorResponse:
+      type: object
+      properties:
+        overall:
+          type: string
+          enum:
+            - down
+        timestamp:
+          type: string
+          format: date-time
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - overall
+        - timestamp
+        - error
+        - message
     ConfigResponse:
       type: object
       properties:
@@ -970,6 +1056,30 @@ components:
         data:
           type: object
           properties:
+            total_campaigns:
+              type: integer
+              example: 10
+            open_campaigns:
+              type: integer
+              example: 5
+            funded_campaigns:
+              type: integer
+              example: 3
+            failed_campaigns:
+              type: integer
+              example: 1
+            total_pledged_usdc:
+              type: number
+              example: 35000
+            total_pledged_xlm:
+              type: number
+              example: 15000
+            total_contributors:
+              type: integer
+              example: 42
+            avg_funding_rate_pct:
+              type: number
+              example: 78.5
             totalCampaigns:
               type: integer
             openCampaigns:
@@ -985,13 +1095,14 @@ components:
             uniqueContributors:
               type: integer
           required:
-            - totalCampaigns
-            - openCampaigns
-            - fundedCampaigns
-            - claimedCampaigns
-            - failedCampaigns
-            - totalPledgeVolume
-            - uniqueContributors
+            - total_campaigns
+            - open_campaigns
+            - funded_campaigns
+            - failed_campaigns
+            - total_pledged_usdc
+            - total_pledged_xlm
+            - total_contributors
+            - avg_funding_rate_pct
       required:
         - data
     LeaderboardResponse:
@@ -1070,11 +1181,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeepHealthResponse"
         "503":
-          description: One or more components are unhealthy
+          description: One or more components are unhealthy (DeepHealthResponse), or the
+            check itself failed (DeepHealthErrorResponse)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DeepHealthResponse"
+                anyOf:
+                  - $ref: "#/components/schemas/DeepHealthResponse"
+                  - $ref: "#/components/schemas/DeepHealthErrorResponse"
   /api/campaigns:
     get:
       tags:
@@ -1153,8 +1267,22 @@ paths:
             enum:
               - "true"
               - "false"
+            description: "Include archived (soft-deleted) campaigns. Alias:
+              'include_archived'."
           required: false
+          description: "Include archived (soft-deleted) campaigns. Alias:
+            'include_archived'."
           name: includeDeleted
+          in: query
+        - schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+            description: Alias for 'includeDeleted'.
+          required: false
+          description: Alias for 'includeDeleted'.
+          name: include_archived
           in: query
         - schema:
             type: string
@@ -1208,6 +1336,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /api/campaigns/{id}:
     get:
       tags:
@@ -1240,6 +1374,83 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+    delete:
+      tags:
+        - Campaigns
+      summary: Archive (soft-delete) a campaign
+      description: Sets the archivedAt/deletedAt timestamp on a campaign. Archived
+        campaigns are excluded from the default campaign list but their pledges
+        and history are preserved. Use POST /api/campaigns/{id}/restore to
+        un-archive.
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Campaign archived
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignDetailResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Campaign is already archived
+        "429":
+          description: Rate limit exceeded
+  /api/campaigns/{id}/restore:
+    post:
+      tags:
+        - Campaigns
+      summary: Restore an archived campaign
+      description: Clears the archivedAt/deletedAt timestamp, making the campaign
+        active again.
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Campaign restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignDetailResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Campaign is not archived
+        "429":
+          description: Rate limit exceeded
   /api/campaigns/{id}/pledges:
     get:
       tags:
@@ -1289,6 +1500,8 @@ paths:
       tags:
         - Pledges
       summary: Create a pledge
+      description: Creates a pledge for a campaign. Use the Idempotency-Key header to
+        make the request idempotent. Cached responses are returned for 24 hours.
       parameters:
         - schema:
             type: string
@@ -1318,6 +1531,12 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
           content:
             application/json:
               schema:
@@ -1364,6 +1583,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "429":
           description: Rate limit exceeded
   /api/campaigns/{id}/claim:
@@ -1401,6 +1626,12 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
           content:
             application/json:
               schema:
@@ -1443,6 +1674,12 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
           content:
             application/json:
               schema:
@@ -1522,6 +1759,50 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/contributors/{address}/pledges:
+    get:
+      tags:
+        - Contributors
+      summary: List pledges by contributor
+      description: Returns all pledges made by a contributor address across all
+        campaigns. Unknown addresses return an empty array. Refunded pledges
+        include the refundedAt timestamp.
+      parameters:
+        - schema:
+            type: string
+            pattern: ^G[A-Z2-7]{55}$
+            description: A 56-character Stellar public key (G...).
+            example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          required: true
+          description: A 56-character Stellar public key (G...).
+          name: address
+          in: path
+        - schema:
+            type: integer
+            minimum: 1
+          required: false
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Paginated list of contributor pledges
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContributorPledgeListResponse"
+        "400":
+          description: Validation error
           content:
             application/json:
               schema:
