@@ -65,7 +65,7 @@ export class DashboardPage {
   async pledge(amount: string) {
     await this.pledgeAmountInput.fill(amount);
     await this.addPledgeButton.click();
-    await expect(this.page.locator('text=Pledge recorded')).toBeVisible();
+    await expect(this.page.locator(`text=Pledged ${amount} USDC`)).toBeVisible();
   }
 
   async claim() {
