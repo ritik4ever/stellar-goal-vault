@@ -1,9 +1,38 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Link } from 'lucide-react';
 import { Campaign } from '../types/campaign';
 import AddressAvatar from './AddressAvatar';
 import CopyButton from './CopyButton';
 import { Countdown } from './Countdown';
+
+/**
+ * Returns true for one commit after `percentFunded` changes (excluding the
+ * initial mount). Uses the React-sanctioned "adjust state during render"
+ * pattern so the transition class lands in the same commit as the new bar
+ * width — attaching it in a post-render effect instead would let the first
+ * funding change paint instantly rather than animate.
+ */
+function useProgressBarAnimation(percentFunded: number): boolean {
+  const [animate, setAnimate] = useState(false);
+  const [lastRenderedPercent, setLastRenderedPercent] = useState(percentFunded);
+
+  if (percentFunded !== lastRenderedPercent) {
+    setLastRenderedPercent(percentFunded);
+    setAnimate(true);
+  }
+
+  // Drop the transition class once the animation window has passed so the
+  // next change can re-arm it cleanly (450ms > the 400ms transition).
+  useEffect(() => {
+    if (!animate) {
+      return;
+    }
+    const timer = window.setTimeout(() => setAnimate(false), 450);
+    return () => window.clearTimeout(timer);
+  }, [animate]);
+
+  return animate;
+}
 
 interface CampaignCardProps {
   campaign: Campaign;
@@ -12,19 +41,8 @@ interface CampaignCardProps {
 }
 
 function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignCardProps) {
-  const prevPercentRef = useRef<number | null>(null);
-  const [animate, setAnimate] = useState(false);
   const [imageError, setImageError] = useState(false);
-
-  useEffect(() => {
-    if (
-      prevPercentRef.current !== null &&
-      prevPercentRef.current !== campaign.progress.percentFunded
-    ) {
-      setAnimate(true);
-    }
-    prevPercentRef.current = campaign.progress.percentFunded;
-  }, [campaign.progress.percentFunded]);
+  const animate = useProgressBarAnimation(campaign.progress.percentFunded);
 
   // Reset image error when campaign changes
   useEffect(() => {
