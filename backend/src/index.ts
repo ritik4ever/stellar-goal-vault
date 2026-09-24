@@ -357,11 +357,23 @@ export function filterCampaignList(
 }
 
 app.get('/api/health', (_req: Request, res: Response) => {
+  const start = process.hrtime();
   const database = checkDbHealth();
   const indexer = getIndexerStatus();
   
   // Healthy if DB is reachable and indexer isn't stuck failing
-  const healthy = database.reachable && indexer.isHealthy;
+  const healthy = database.reachable && indexer.consecutiveFailures < 3;
+
+  const end = process.hrtime(start);
+  const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+
+  logInfo('health_check', {
+    operation: 'health_check_shallow',
+    outcome: healthy ? 'success' : 'failure',
+    latency_ms: latencyMs,
+    db_reachable: database.reachable,
+    indexer_healthy: indexer.isHealthy,
+  });
 
   const memUsage = process.memoryUsage();
   const memory = {
@@ -395,6 +407,7 @@ app.get('/api/contributors/:address/pledges', async (req: Request, res: Response
 });
 
 app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Response) => {
+  const start = process.hrtime();
   try {
     const database = checkDbHealth();
     const hasContractId = !!config.contractId;
@@ -419,7 +432,20 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
     }
 
     const indexer = getIndexerStatus();
-    const allHealthy = database.reachable && hasContractId && sorobanHealthy && indexer.isHealthy;
+    const allHealthy = database.reachable && hasContractId && sorobanHealthy && indexer.consecutiveFailures === 0;
+
+    const end = process.hrtime(start);
+    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+
+    logInfo('health_check', {
+      operation: 'health_check_deep',
+      outcome: allHealthy ? 'success' : 'failure',
+      latency_ms: latencyMs,
+      db_reachable: database.reachable,
+      soroban_healthy: sorobanHealthy,
+      indexer_healthy: indexer.isHealthy,
+      has_contract_id: hasContractId,
+    });
 
     const memUsage = process.memoryUsage();
     const memory = {
@@ -456,6 +482,14 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
       },
     });
   } catch (error) {
+    const end = process.hrtime(start);
+    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+    logError(error, {
+      event: 'health_check_error',
+      operation: 'health_check_deep',
+      outcome: 'failure',
+      latency_ms: latencyMs,
+    });
     res.status(503).json({
       overall: 'down',
       timestamp: new Date().toISOString(),

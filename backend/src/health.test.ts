@@ -99,7 +99,7 @@ describe('GET /api/health', () => {
         lastKnownLedger: 1,
         isHealthy: true,
         consecutiveFailures: 0,
-        lagMs: 5000,,
+        lagMs: 5000,
         freshness: 'fresh',
         staleLagMs: 300000,
         freshLagMs: 30000
@@ -125,7 +125,7 @@ describe('GET /api/health', () => {
         lastKnownLedger: 1,
         isHealthy: true,
         consecutiveFailures: 0,
-        lagMs: 0,,
+        lagMs: 0,
         freshness: 'fresh',
         staleLagMs: 300000,
         freshLagMs: 30000
@@ -193,7 +193,7 @@ describe('GET /api/health', () => {
         lastKnownLedger: 42,
         isHealthy: true,
         consecutiveFailures: 0,
-        lagMs: 8000,,
+        lagMs: 8000,
         freshness: 'fresh',
         staleLagMs: 300000,
         freshLagMs: 30000
@@ -310,7 +310,7 @@ describe('GET /api/health/deep', () => {
         lastKnownLedger: 10,
         isHealthy: true,
         consecutiveFailures: 0,
-        lagMs: 1000,,
+        lagMs: 1000,
         freshness: 'fresh',
         staleLagMs: 300000,
         freshLagMs: 30000

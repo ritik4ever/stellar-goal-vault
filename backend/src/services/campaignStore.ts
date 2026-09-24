@@ -369,7 +369,7 @@ export function listContributorPledges(
 export function initCampaignStore(): void {
   initDb();
   const db = getDb();
-  db.exec('CREATE TABLE IF NOT EXISTS campaigns (
+  db.exec(`CREATE TABLE IF NOT EXISTS campaigns (
     id TEXT PRIMARY KEY,
     creator TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -384,8 +384,8 @@ export function initCampaignStore(): void {
     deleted_at INTEGER,
     metadata_json TEXT,
     max_per_contributor REAL
-  );');
-  db.exec('CREATE TABLE IF NOT EXISTS pledges (
+  );`);
+  db.exec(`CREATE TABLE IF NOT EXISTS pledges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     campaign_id TEXT NOT NULL,
     contributor TEXT NOT NULL,
@@ -396,7 +396,7 @@ export function initCampaignStore(): void {
     refunded_at INTEGER,
     transaction_hash TEXT,
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
-  );');
+  );`);
   db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);');
   db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_contributor_created_at ON pledges(contributor, created_at);');
   db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_transaction_hash ON pledges(transaction_hash);');
@@ -490,11 +490,8 @@ export interface CampaignDetailResult {
   progress: CampaignProgress;
   pledges?: PledgeRecord[];
   history?: BlockchainMetadata[];
-}ld;
-  order?: SortOrder;
-  createdAfter?: number;
-  createdBefore?: number;
 }
+
 
 export interface ListCampaignsResult {
   campaigns: CampaignRecord[];
