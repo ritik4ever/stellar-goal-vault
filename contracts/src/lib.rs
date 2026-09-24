@@ -20,6 +20,41 @@ const MIN_CONTRIBUTION: i128 = 100;
 /// multi-token donation campaigns while keeping storage costs predictable.
 const MAX_ACCEPTED_TOKENS: u32 = 10;
 
+/// Maximum length of the campaign metadata string (in bytes). Stored verbatim
+/// in the [`Campaign`] record, so an unbounded value would inflate the ledger
+/// entry in the same way oversized `accepted_tokens` would (see
+/// [`MAX_ACCEPTED_TOKENS`]). This also keeps the contract boundary aligned
+/// with the backend API, which enforces the same cap on campaign descriptions
+/// (see `backend/src/validation/schemas.ts`).
+const MAX_METADATA_LEN: u32 = 500;
+
+/// Validates that `token` is an actual, callable token contract before the
+/// campaign boundary persists it. Uses the `try_*` variant of the generated
+/// client so a non-token address (or an arbitrary contract that does not
+/// implement the token interface) produces a stable, deterministic panic at
+/// creation time instead of a cryptic error at first pledge time (issue #895).
+fn require_valid_token(env: &Env, token: &Address) {
+    if TokenClient::new(env, token)
+        .try_decimals()
+        .is_err()
+    {
+        panic!("accepted_tokens must contain valid token contract addresses");
+    }
+}
+
+/// Boundary check for the user-supplied metadata string (issue #895).
+///
+/// Rejects unbounded payloads that would inflate the [`Campaign`] ledger
+/// entry — the same storage-growth class [`MAX_ACCEPTED_TOKENS`] guards
+/// against. The cap matches the backend API's campaign description limit
+/// (`backend/src/validation/schemas.ts`) so clients see consistent rules on
+/// and off chain.
+fn require_valid_metadata(metadata: &String) {
+    if metadata.len() > MAX_METADATA_LEN {
+        panic!("metadata must not exceed 500 bytes");
+    }
+}
+
 /// Default platform fee in basis points (50 = 0.5%). Admin can override
 /// via [`set_fee`]. Set to 0 to disable the fee mechanism entirely.
 const DEFAULT_PLATFORM_FEE_BPS: i128 = 50;
@@ -173,6 +208,16 @@ pub struct FeeCollected {
 #[contract]
 pub struct StellarGoalVaultContract;
 
+// Contract test suite. Compiled only for `cargo test`; excluded from release
+// WASM builds because the `test` module is cfg(test)-gated.
+#[cfg(test)]
+mod test;
+
+// The crate is `#![no_std]` for WASM, but the test suite (e.g.
+// `std::panic::catch_unwind` in `test.rs`) runs on the host and needs `std`.
+#[cfg(test)]
+extern crate std;
+
 const MAX_CAMPAIGN_DURATION_SECONDS: u64 = 60 * 60 * 24 * 180;
 
 #[contractimpl]
@@ -322,39 +367,59 @@ impl StellarGoalVaultContract {
     ) -> u64 {
         // Privileged state transition: contract must not be paused, and the
         // declared creator must authorize the call (issue #893).
+        //
+        // All boundary validation below (issue #895) runs BEFORE any storage
+        // mutation, so an invalid request never mutates contract state and
+        // always surfaces as a stable, deterministic panic.
         require_not_paused(&env);
         creator.require_auth();
 
+        // ── amounts ─────────────────────────────────────────────────────
         if target_amount <= 0 {
             panic!("target amount must be positive");
         }
+        if max_per_contributor < 0 {
+            panic!("max_per_contributor must not be negative");
+        }
+        if max_per_contributor > 0 && max_per_contributor > target_amount {
+            panic!("max_per_contributor must not exceed target_amount");
+        }
+
+        // ── deadlines ───────────────────────────────────────────────────
         if deadline <= env.ledger().timestamp() {
             panic!("deadline must be in the future");
         }
         if deadline - env.ledger().timestamp() > MAX_CAMPAIGN_DURATION_SECONDS {
             panic!("deadline exceeds maximum campaign duration");
         }
+
+        // ── accepted tokens: shape first (cheap), then contents ─────────
+        // The count check runs before the pairwise duplicate scan so the
+        // O(n²) work is bounded by MAX_ACCEPTED_TOKENS² — an oversized list
+        // is rejected before the quadratic scan is ever entered.
         if accepted_tokens.len() == 0 {
             panic!("accepted_tokens must not be empty");
+        }
+        if accepted_tokens.len() > MAX_ACCEPTED_TOKENS {
+            panic!("too many accepted tokens");
         }
 
         let mut i = 0;
         while i < accepted_tokens.len() {
+            let token = accepted_tokens.get(i).unwrap();
+            require_valid_token(&env, &token);
             let mut j = i + 1;
             while j < accepted_tokens.len() {
-                if accepted_tokens.get(i).unwrap() == accepted_tokens.get(j).unwrap() {
+                if token == accepted_tokens.get(j).unwrap() {
                     panic!("duplicate token addresses");
                 }
                 j += 1;
             }
             i += 1;
         }
-        if accepted_tokens.len() > MAX_ACCEPTED_TOKENS {
-            panic!("too many accepted tokens");
-        }
-        if max_per_contributor < 0 {
-            panic!("max_per_contributor must not be negative");
-        }
+
+        // ── metadata: bounded before it can enter storage ─────────────────
+        require_valid_metadata(&metadata);
 
         let mut next_id: u64 = env
             .storage()
@@ -437,6 +502,29 @@ impl StellarGoalVaultContract {
         }
         if !campaign.accepted_tokens.iter().any(|t| t == token) {
             panic!("token not accepted by this campaign");
+        }
+
+        // Enforce the per-contributor cap recorded at creation time. Before
+        // this check the cap was written but never read (issue #895).
+        let cap: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ContributorCap(campaign_id))
+            .unwrap_or(0);
+        if cap > 0 {
+            let already: i128 = campaign
+                .accepted_tokens
+                .iter()
+                .map(|t| {
+                    env.storage()
+                        .persistent()
+                        .get(&DataKey::Contribution(campaign_id, contributor.clone(), t))
+                        .unwrap_or(0)
+                })
+                .sum();
+            if already + amount > cap {
+                panic!("per-contributor cap exceeded");
+            }
         }
 
         let token_client = TokenClient::new(&env, &token);
