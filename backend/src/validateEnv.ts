@@ -164,6 +164,7 @@ export const envSchema = z
         .split(',')
         .map((o) => o.trim())
         .filter(Boolean);
+      
       if (originList.length === 0 || originList.includes('*')) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -171,6 +172,55 @@ export const envSchema = z
           message:
             'ALLOWED_ORIGINS is required in production. Set to explicit allowed origins (e.g., https://example.com). Wildcard "*" and empty origins are not allowed in production.',
         });
+        // Skip URL validation if wildcard or empty - the error above is sufficient
+        return;
+      }
+
+      // Validate each origin is a properly formatted URL
+      for (const origin of originList) {
+        try {
+          const url = new URL(origin);
+          
+          // In production, require HTTPS
+          if (url.protocol !== 'https:') {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['ALLOWED_ORIGINS'],
+              message: `ALLOWED_ORIGINS must use HTTPS in production. Origin "${origin}" uses protocol "${url.protocol}". HTTP origins are not allowed in production.`,
+            });
+          }
+
+          // In production, reject localhost and 127.0.0.1
+          if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['ALLOWED_ORIGINS'],
+              message: `ALLOWED_ORIGINS cannot contain localhost or 127.0.0.1 in production. Origin "${origin}" is a local development address.`,
+            });
+          }
+
+          // In production, reject raw IP addresses (except localhost which is already caught)
+          // IPv4 regex pattern
+          const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+          // IPv6 pattern (simplified)
+          const ipv6Pattern = /^\[?[0-9a-fA-F:]+\]?$/;
+          
+          if ((ipv4Pattern.test(url.hostname) || ipv6Pattern.test(url.hostname)) && 
+              url.hostname !== '127.0.0.1' && 
+              !url.hostname.includes('localhost')) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['ALLOWED_ORIGINS'],
+              message: `ALLOWED_ORIGINS should use domain names, not IP addresses, in production. Origin "${origin}" uses an IP address. Use a domain name with HTTPS for better security.`,
+            });
+          }
+        } catch {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['ALLOWED_ORIGINS'],
+            message: `ALLOWED_ORIGINS contains invalid URL: "${origin}". Each origin must be a valid URL (e.g., https://example.com).`,
+          });
+        }
       }
 
       if (data.LOG_LEVEL === 'debug') {

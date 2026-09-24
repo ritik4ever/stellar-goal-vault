@@ -38,27 +38,123 @@ local-development override.
 | Setting | Rule | Applies in |
 | --- | --- | --- |
 | `NODE_ENV` | Accepted values are exactly `development`, `test`, `production`; anything else (e.g. `prod`) fails fast. Unset stays valid and resolves to `development`. | all environments |
-| `ALLOWED_ORIGINS` | Must be a non-empty, non-wildcard explicit list. | production |
+| `ALLOWED_ORIGINS` | Must be a non-empty, non-wildcard explicit list. Each origin must be a valid URL with HTTPS protocol. Localhost, 127.0.0.1, and raw IP addresses are rejected. | production |
 | `API_KEYS` | Must be non-empty. | production |
 | `CONTRACT_ID` | Must be set. | production |
 | `LOG_LEVEL` | `debug` is rejected. | production |
 | `SOROBAN_RPC_URL` | Must be `https://`. | production |
 | `WEBHOOK_SECRET` | Required when `WEBHOOK_URL` is set. | production |
 
+## Abuse Controls
+
+The backend implements several abuse control mechanisms to protect against malicious activity while allowing legitimate development workflows:
+
+### API Key Authentication Abuse Controls
+
+- **Failed attempt rate limiting:** 10 failed authentication attempts per minute per IP address. After exceeding this limit, further attempts return HTTP 429 with code `TOO_MANY_FAILED_ATTEMPTS`.
+- **Per-API-key rate limiting:** 1000 requests per minute per API key. After exceeding this limit, requests return HTTP 429 with code `API_KEY_RATE_LIMITED`.
+- **Development mode exemption:** All abuse controls are disabled in development and test modes to avoid blocking normal local development workflows.
+- **Conditional activation:** Abuse controls only activate when API keys are actually configured in production. If no API keys are set, the system allows all requests (as in development mode).
+
+### Rate Limiting
+
+- **IP-based rate limiting:** General rate limiting applies to all requests (120 read requests per minute, 20 write requests per minute).
+- **Separate limits:** Read and write operations have separate rate limits to allow high-volume read access while protecting write operations.
+- **Headers:** Rate limit information is exposed in response headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`).
+
+### Monitoring
+
+- **Statistics:** The `getAbuseControlStats()` function provides current cache sizes for monitoring abuse control activity.
+- **Testing:** The `clearAbuseControlCaches()` function allows clearing abuse control caches for testing purposes.
+
 ## Details
 
 ### `ALLOWED_ORIGINS` (CORS)
 
-- **Safe production default:** an explicit allow-list, e.g.
+- **Safe production default:** an explicit allow-list of HTTPS origins, e.g.
   `ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com`.
 - **Local development:** leave it empty or set `ALLOWED_ORIGINS=*`. In
   `development`, an empty value allows all origins so Vite on a random port
   still works.
 - **Risk of weakening:** a wildcard (`*`) or empty value in production lets any
   website make browser-originated requests to the API; combined with
-  ambient/at-rest auth this enables cross-site abuse.
+  ambient/at-rest auth this enables cross-site abuse. HTTP origins, localhost,
+  and raw IP addresses are also rejected in production.
 - **Compatibility:** `CORS_ALLOWED_ORIGINS` is accepted as a backwards-compatible
   alias, but new deployments should use `ALLOWED_ORIGINS`.
+- **Validation:** In production, each origin must be a valid URL with HTTPS
+  protocol. Localhost, 127.0.0.1, and raw IP addresses are rejected to prevent
+  misconfiguration and ensure proper security boundaries.
+
+#### Production Configuration Examples
+
+**Single frontend application:**
+```bash
+ALLOWED_ORIGINS=https://myapp.example.com
+```
+
+**Multiple frontend applications:**
+```bash
+ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com,https://www.example.com
+```
+
+**Frontend with multiple subdomains:**
+```bash
+ALLOWED_ORIGINS=https://*.example.com
+```
+
+**Platform deployment (e.g., Vercel, Netlify):**
+```bash
+ALLOWED_ORIGINS=https://stellar-goal-vault.vercel.app
+```
+
+#### Common Misconfigurations (Rejected in Production)
+
+❌ **Wildcard** - Allows any website to make requests:
+```bash
+ALLOWED_ORIGINS=*
+```
+
+❌ **HTTP origins** - Unencrypted connections are rejected:
+```bash
+ALLOWED_ORIGINS=http://example.com
+```
+
+❌ **Localhost** - Development addresses are rejected:
+```bash
+ALLOWED_ORIGINS=https://localhost:3000
+ALLOWED_ORIGINS=https://127.0.0.1:3000
+```
+
+❌ **IP addresses** - Raw IPs are rejected:
+```bash
+ALLOWED_ORIGINS=https://192.168.1.1
+ALLOWED_ORIGINS=https://10.0.0.1
+```
+
+❌ **Missing protocol** - Invalid URL format:
+```bash
+ALLOWED_ORIGINS=example.com
+```
+
+#### Development Mode Behavior
+
+In development (`NODE_ENV=development` or `NODE_ENV=test`), the following are allowed:
+- Empty value: allows all origins
+- Wildcard (`*`): allows all origins  
+- HTTP origins: allowed for local development
+- Localhost: allowed for local development
+- Invalid formats: allowed for development flexibility
+
+#### Startup Validation
+
+The backend enforces these rules at startup in production:
+- Non-empty, non-wildcard explicit list required
+- Each origin must be a valid URL with HTTPS protocol
+- Localhost, 127.0.0.1, and raw IP addresses are rejected
+- Invalid URL formats are rejected
+
+If validation fails, the server will not start with an actionable error message.
 
 ### `API_KEYS`
 
@@ -69,6 +165,7 @@ local-development override.
 - **Risk of weakening:** the middleware is only mounted when
   `NODE_ENV=production`; if `API_KEYS` is empty there, **write endpoints are
   unauthenticated**. Always set `API_KEYS` in production.
+- **Abuse controls:** Failed authentication attempts are rate limited (10 failures per minute per IP) to prevent brute force attacks. Per-API-key usage is tracked (1000 requests per minute) to prevent individual key abuse.
 - Generate with: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 
 ### `WEBHOOK_SECRET`
