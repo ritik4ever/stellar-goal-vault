@@ -1,5 +1,6 @@
 #![no_std]
 
+pub mod upgrade;
 
 
 use soroban_sdk::{
@@ -66,6 +67,8 @@ pub enum DataKey {
     /// Address that receives platform fees on campaign claims. When absent no
     /// fee is deducted regardless of [`PlatformFeeBps`].
     FeeRecipient,
+    UpgradeProposal,
+    UpgradeHistory,
 }
 
 #[contracttype]
