@@ -62,6 +62,9 @@ export const config = {
   defaultMaxPerContributor: parseInteger(process.env.DEFAULT_MAX_PER_CONTRIBUTOR, 0),
   keepAliveTimeoutMs: parseInteger(process.env.KEEP_ALIVE_TIMEOUT_MS, 65_000),
   headersTimeoutMs: parseInteger(process.env.HEADERS_TIMEOUT_MS, 66_000),
+  // Deep health check Soroban RPC probe retries (issue #1035).
+  healthCheckRpcMaxAttempts: Math.max(1, parseInteger(process.env.HEALTH_CHECK_RPC_MAX_ATTEMPTS, 3)),
+  healthCheckRpcRetryDelayMs: parseInteger(process.env.HEALTH_CHECK_RPC_RETRY_DELAY_MS, 100),
 };
 
 export const walletIntegrationReady = Boolean(

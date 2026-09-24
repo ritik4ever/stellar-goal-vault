@@ -415,6 +415,141 @@ describe('GET /api/health/deep', () => {
     });
   });
 
+  describe('retry visibility (issue #1035)', () => {
+    type LogLine = Record<string, unknown> & { level: string };
+
+    /**
+     * Capture every log line together with the requestId pino's mixin would
+     * attach (read from the same AsyncLocalStorage at call time).
+     */
+    async function captureLogs(): Promise<LogLine[]> {
+      const { logger } = await import('./logger');
+      const { getRequestId } = await import('./requestContext');
+      const lines: LogLine[] = [];
+      for (const level of ['info', 'warn', 'error'] as const) {
+        vi.spyOn(logger, level).mockImplementation(((payload: Record<string, unknown>) => {
+          const requestId = getRequestId();
+          lines.push({ ...payload, ...(requestId ? { requestId } : {}), level });
+        }) as never);
+      }
+      return lines;
+    }
+
+    async function stubHealthyDbAndIndexer() {
+      vi.spyOn(await import('./services/db'), 'checkDbHealth').mockReturnValue({
+        status: 'up',
+        reachable: true,
+      });
+      vi.spyOn(await import('./services/eventIndexer'), 'getIndexerStatus').mockReturnValue({
+        lastSuccessfulPollTime: Date.now(),
+        lastKnownLedger: 1,
+        isHealthy: true,
+        consecutiveFailures: 0,
+        lagMs: 1000,
+        freshness: 'fresh',
+        staleLagMs: 300000,
+        freshLagMs: 30000,
+      });
+    }
+
+    function refused(): Error {
+      return Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:443'), {
+          code: 'ECONNREFUSED',
+        }),
+      });
+    }
+
+    it('reconstructs "succeeded after 2 retries" from one requestId with a single success line', async () => {
+      await stubHealthyDbAndIndexer();
+      vi.spyOn(globalThis, 'fetch')
+        .mockRejectedValueOnce(refused())
+        .mockResolvedValueOnce(new Response('{}', { status: 503 }))
+        .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+      const lines = await captureLogs();
+      const requestId = 'health-retry-recovered';
+
+      const res = await request(app).get('/api/health/deep').set('X-Request-ID', requestId);
+      expect(res.body.components.soroban.status).toBe('up');
+
+      const forRequest = lines.filter((line) => line.requestId === requestId);
+      const retries = forRequest.filter((line) => line.event === 'health_check_retry');
+      const outcomes = forRequest.filter((line) => line.event === 'health_check');
+
+      expect(retries.map((line) => [line.level, line.attempt, line.reason])).toEqual([
+        ['warn', 1, 'network_error:ECONNREFUSED'],
+        ['warn', 2, 'http_503'],
+      ]);
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0]).toMatchObject({
+        operation: 'health_check_deep',
+        soroban_healthy: true,
+        soroban_attempts: 3,
+        soroban_failure_reason: null,
+        retry_count: 2,
+        retry_reasons: ['network_error:ECONNREFUSED', 'http_503'],
+      });
+      // Exactly one line per request carries an outcome.
+      expect(forRequest.filter((line) => 'outcome' in line)).toHaveLength(1);
+    });
+
+    it('records retries and the final failure reason when every attempt fails', async () => {
+      await stubHealthyDbAndIndexer();
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 502 }));
+      const lines = await captureLogs();
+      const requestId = 'health-retry-exhausted';
+
+      const res = await request(app).get('/api/health/deep').set('X-Request-ID', requestId);
+      expect(res.status).toBe(503);
+      expect(res.body.components.soroban.status).toBe('down');
+
+      const forRequest = lines.filter((line) => line.requestId === requestId);
+      expect(forRequest.filter((line) => line.event === 'health_check_retry')).toHaveLength(2);
+      const outcomes = forRequest.filter((line) => line.event === 'health_check');
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0]).toMatchObject({
+        outcome: 'failure',
+        soroban_healthy: false,
+        soroban_attempts: 3,
+        soroban_failure_reason: 'http_502',
+        retry_count: 2,
+        retry_reasons: ['http_502', 'http_502'],
+      });
+    });
+
+    it('does not log the RPC URL or its credentials in retry or outcome lines', async () => {
+      const { config } = await import('./config');
+      const savedUrl = config.sorobanRpcUrl;
+      config.sorobanRpcUrl = 'https://svc:fake-pass-2@rpc.provider.test/?apikey=FAKE-RPC-KEY-456';
+      try {
+        await stubHealthyDbAndIndexer();
+        vi.spyOn(globalThis, 'fetch')
+          .mockRejectedValueOnce(new Error(`request to ${config.sorobanRpcUrl} failed`))
+          .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+        const lines = await captureLogs();
+
+        await request(app).get('/api/health/deep').set('X-Request-ID', 'health-retry-secrets');
+
+        const serialized = JSON.stringify(lines);
+        expect(lines.some((line) => line.event === 'health_check_retry')).toBe(true);
+        for (const secret of ['fake-pass-2', 'FAKE-RPC-KEY-456', 'rpc.provider.test']) {
+          expect(serialized, `logs leaked "${secret}"`).not.toContain(secret);
+        }
+      } finally {
+        config.sorobanRpcUrl = savedUrl;
+      }
+    });
+
+    it('shallow health_check carries retry_count 0 so all outcome lines share one shape', async () => {
+      const lines = await captureLogs();
+      await request(app).get('/api/health').set('X-Request-ID', 'health-shallow-shape');
+      const outcome = lines.find(
+        (line) => line.event === 'health_check' && line.requestId === 'health-shallow-shape',
+      );
+      expect(outcome).toMatchObject({ operation: 'health_check_shallow', retry_count: 0 });
+    });
+  });
+
   describe('error handling', () => {
     it('returns 503 with overall "down" on unexpected thrown error', async () => {
       // Force the db check to throw rather than return a struct

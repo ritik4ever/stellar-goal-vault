@@ -62,6 +62,7 @@ import {
 } from './services/notificationService';
 import { getDeadLetterQueue, clearDeadLetterQueue, retryDeadLetter } from './services/webhookService';
 import { fetchOpenIssues } from './services/openIssues';
+import { probeSorobanRpc } from './services/healthProbe';
 import { ensureSorobanRefundConfig, verifyRefundTransaction } from './services/sorobanRpc';
 import { AppError, ApiErrorResponse } from './types/errors';
 import {
@@ -414,25 +415,8 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
   try {
     const database = checkDbHealth();
     const hasContractId = !!config.contractId;
-    let sorobanHealthy = false;
-
-    try {
-      if (config.sorobanRpcUrl) {
-        const response = await fetch(config.sorobanRpcUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'getHealth',
-            id: 1,
-          }),
-          signal: AbortSignal.timeout(5000),
-        });
-        sorobanHealthy = response.ok || response.status < 500;
-      }
-    } catch {
-      sorobanHealthy = false;
-    }
+    const sorobanProbe = await probeSorobanRpc();
+    const sorobanHealthy = sorobanProbe.healthy;
 
     const indexer = getIndexerStatus();
     // Align overall with component.indexer.status (isHealthy includes freshness/lag).
@@ -442,12 +426,18 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
     const end = process.hrtime(start);
     const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
 
+    // Single outcome line per check; retries are summarized here rather than
+    // logged as separate outcomes (see services/healthProbe.ts).
     logInfo('health_check', {
       operation: 'health_check_deep',
       outcome: allHealthy ? 'success' : 'failure',
       latency_ms: latencyMs,
       db_reachable: database.reachable,
       soroban_healthy: sorobanHealthy,
+      soroban_attempts: sorobanProbe.attempts,
+      soroban_failure_reason: sorobanProbe.failureReason,
+      retry_count: sorobanProbe.retryCount,
+      retry_reasons: sorobanProbe.retryReasons,
       indexer_healthy: indexer.isHealthy,
       indexer_freshness: indexer.freshness,
       indexer_lag_ms: indexer.lagMs,
