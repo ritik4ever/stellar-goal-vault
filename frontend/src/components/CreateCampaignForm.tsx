@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, CreateCampaignPayload } from '../types/campaign';
 import {
   FormErrors,
@@ -52,6 +52,26 @@ const STEP_FIELDS: Record<number, Array<keyof FormErrors>> = {
   1: ['acceptedTokens', 'targetAmount', 'deadlineHours', 'maxPerContributor'],
   2: [],
   3: [],
+};
+
+/**
+ * Maps backend field names from ApiError.details onto the wizard step that
+ * owns that field, so the user can jump directly to the affected step.
+ * Keys are the field strings the server may return.
+ */
+const DETAIL_FIELD_TO_STEP: Record<string, number> = {
+  creator: 0,
+  title: 0,
+  description: 0,
+  category: 0,
+  acceptedTokens: 1,
+  accepted_tokens: 1,
+  targetAmount: 1,
+  target_amount: 1,
+  deadlineHours: 1,
+  deadline: 1,
+  maxPerContributor: 1,
+  max_per_contributor: 1,
 };
 
 const INITIAL_VALUES: WizardValues = {
@@ -159,6 +179,26 @@ export function CreateCampaignForm({
   const [maxStepReached, setMaxStepReached] = useState(0);
   const nextTierId = useRef(0);
 
+  // Tracks whether the user has manually dismissed the current apiError so
+  // it doesn't re-appear until a new (different) error arrives.
+  const [dismissedApiError, setDismissedApiError] = useState<ApiError | null>(null);
+
+  // When a new apiError arrives (different object reference than what was dismissed),
+  // un-dismiss it so the alert re-appears.
+  useEffect(() => {
+    if (apiError && apiError !== dismissedApiError) {
+      setDismissedApiError(null);
+    }
+  }, [apiError]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear a stale dismissed error whenever the user navigates away from the
+  // review step — they are actively editing so the old error is no longer relevant.
+  useEffect(() => {
+    if (currentStep !== 3) {
+      setDismissedApiError(null);
+    }
+  }, [currentStep]);
+
   const errors = useMemo(() => computeErrors(values), [values]);
 
   useEffect(() => {
@@ -254,6 +294,17 @@ export function CreateCampaignForm({
       setCurrentStep(index);
     }
   }
+
+  function handleDismissError() {
+    setDismissedApiError(apiError ?? null);
+  }
+
+  const handleRetry = useCallback(() => {
+    const submitBtn = document.querySelector<HTMLButtonElement>(
+      '.wizard-step-panel button[type="submit"]',
+    );
+    submitBtn?.click();
+  }, []);
 
   const reviewDeadlineLabel = useMemo(() => {
     const hours = Number(values.deadlineHours);
@@ -683,16 +734,38 @@ export function CreateCampaignForm({
               )}
             </div>
 
-            {apiError ? (
-              <div className="form-error">
-                <p>{apiError.message}</p>
+            {apiError && apiError !== dismissedApiError ? (
+              <div className="form-error wizard-api-error" role="alert" aria-live="assertive">
+                <div className="wizard-api-error-header">
+                  <p className="wizard-api-error-message">{apiError.message}</p>
+                  <button
+                    type="button"
+                    className="wizard-api-error-dismiss"
+                    aria-label="Dismiss error"
+                    onClick={handleDismissError}
+                  >
+                    ×
+                  </button>
+                </div>
                 {apiError.details && apiError.details.length > 0 ? (
                   <ul className="error-details">
-                    {apiError.details.map((detail, index) => (
-                      <li key={`${detail.field}-${index}`}>
-                        <strong>{detail.field}:</strong> {detail.message}
-                      </li>
-                    ))}
+                    {apiError.details.map((detail, index) => {
+                      const targetStep = DETAIL_FIELD_TO_STEP[detail.field];
+                      return (
+                        <li key={`${detail.field}-${index}`}>
+                          <strong>{detail.field}:</strong> {detail.message}
+                          {targetStep !== undefined ? (
+                            <button
+                              type="button"
+                              className="wizard-api-error-goto"
+                              onClick={() => goToStep(targetStep)}
+                            >
+                              Go to {STEPS[targetStep].label}
+                            </button>
+                          ) : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                 ) : null}
                 {apiError.code ? (
@@ -701,6 +774,16 @@ export function CreateCampaignForm({
                     {apiError.requestId ? ` | Request ID: ${apiError.requestId}` : ''}
                   </small>
                 ) : null}
+                <div className="wizard-api-error-actions">
+                  <button
+                    type="button"
+                    className="btn-ghost btn-small"
+                    disabled={isSubmitting}
+                    onClick={handleRetry}
+                  >
+                    {isSubmitting ? 'Retrying…' : 'Retry'}
+                  </button>
+                </div>
               </div>
             ) : null}
           </div>

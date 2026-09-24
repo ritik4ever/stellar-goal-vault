@@ -2347,3 +2347,63 @@ tbody tr:hover td {
     overflow: hidden;
   }
 }
+
+/* Recoverable API error block inside the wizard review step */
+.wizard-api-error {
+  display: grid;
+  gap: 10px;
+}
+
+.wizard-api-error-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wizard-api-error-message {
+  margin: 0;
+  flex: 1;
+}
+
+.wizard-api-error-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0 2px;
+  color: currentColor;
+  opacity: 0.7;
+  min-height: auto;
+  transition: opacity 0.15s;
+}
+
+.wizard-api-error-dismiss:hover {
+  opacity: 1;
+}
+
+.wizard-api-error-goto {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: currentColor;
+  text-decoration: underline;
+  padding: 0 0 0 8px;
+  min-height: auto;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+
+.wizard-api-error-goto:hover {
+  opacity: 1;
+}
+
+.wizard-api-error-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
