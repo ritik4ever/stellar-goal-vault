@@ -213,6 +213,11 @@ pub struct StellarGoalVaultContract;
 #[cfg(test)]
 mod test;
 
+// Authorization coverage for the pledge path (issue #898): asserts the exact
+// signer each privileged entry point requires, and that calls without it fail.
+#[cfg(test)]
+mod test_pledge_auth;
+
 // The crate is `#![no_std]` for WASM, but the test suite (e.g.
 // `std::panic::catch_unwind` in `test.rs`) runs on the host and needs `std`.
 #[cfg(test)]
@@ -474,8 +479,19 @@ impl StellarGoalVaultContract {
         next_id
     }
 
+    /// Pledge `amount` of `token` to a campaign.
+    ///
+    /// Authorization (issue #898): `contributor` must sign, and the signature
+    /// covers every argument, so it cannot be replayed for another campaign,
+    /// token or amount. The vault contract itself can never be the
+    /// contributor — a self-transfer would raise `pledged_amount` without
+    /// moving any funds — and that check runs before auth or any storage read
+    /// so it fails the same way every time.
     pub fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, amount: i128) {
         require_not_paused(&env);
+        if contributor == env.current_contract_address() {
+            panic!("contributor cannot be the vault contract");
+        }
         contributor.require_auth();
 
         let min_contribution: i128 = env
@@ -841,8 +857,22 @@ impl StellarGoalVaultContract {
             .set(&DataKey::Campaign(campaign_id), &campaign);
     }
 
+    /// Refund every contributor of a failed or canceled campaign in one call.
+    ///
+    /// Authorization (issue #898): admin only. This closes out every
+    /// contributor's position at once, so it is a privileged transition; it
+    /// used to be callable by anyone. The stored admin must sign, checked
+    /// before the campaign is read so an unauthorized call fails the same way
+    /// regardless of campaign state. Contributors who want their own funds
+    /// back without the admin keep using `refund`, which only they can sign.
     pub fn refund_all(env: Env, campaign_id: u64) {
         require_not_paused(&env);
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("not initialized"));
+        admin.require_auth();
 
         let mut campaign = read_campaign(&env, campaign_id);
         if campaign.claimed {
