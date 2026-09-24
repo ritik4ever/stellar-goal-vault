@@ -607,7 +607,6 @@ See also [CHANGELOG.md](./CHANGELOG.md) for a full history of notable changes ac
 ## Known limitations
 
 - Campaign creation is still local-first, so pledges will only simulate successfully for campaign IDs that also exist in the configured contract
-- No authentication or rate limiting on write endpoints
 - No background indexer for on-chain event sync yet
 
 ## Suggested roadmap

@@ -26,6 +26,7 @@ real `.env`, API key, private key, or database URL. Secret scanning
 | `LOG_LEVEL` | `info` (never log secrets) | `debug` | Debug logs can leak request bodies/keys into logs. |
 | `MAX_BODY_SIZE` | Valid size string (e.g. `16kb`, `1mb`) | `16kb` | Unvalidated or overly large payload limits enable body payload DoS attacks. |
 | `RATE_LIMIT_WINDOW_MS` / limits | Positive numeric integers | `60000` / `120` | Disabling or misconfiguring rate limits exposes write endpoints to spam/bruteforce. |
+| `WRITE_RATE_LIMIT_MAX_REQUESTS` | `20` (recommended max: `1000`) | `20` | Excessive write rate limits expose write endpoints to abuse and DoS. |
 | `SECRET_KEY` / `SERVER_PRIVATE_KEY` (contract deploy) | Long random value, injected at runtime | never set locally | A committed/weak key compromises contract control. |
 
 ## Startup validation (enforced automatically)
@@ -39,11 +40,12 @@ local-development override.
 | --- | --- | --- |
 | `NODE_ENV` | Accepted values are exactly `development`, `test`, `production`; anything else (e.g. `prod`) fails fast. Unset stays valid and resolves to `development`. | all environments |
 | `ALLOWED_ORIGINS` | Must be a non-empty, non-wildcard explicit list. | production |
-| `API_KEYS` | Must be non-empty. | production |
+| `API_KEYS` | Must be non-empty and contain no empty/whitespace-only values. | production |
 | `CONTRACT_ID` | Must be set. | production |
 | `LOG_LEVEL` | `debug` is rejected. | production |
 | `SOROBAN_RPC_URL` | Must be `https://`. | production |
 | `WEBHOOK_SECRET` | Required when `WEBHOOK_URL` is set. | production |
+| `WRITE_RATE_LIMIT_MAX_REQUESTS` | Must be a positive integer (1-1000). | production |
 
 ## Details
 
@@ -70,6 +72,45 @@ local-development override.
   `NODE_ENV=production`; if `API_KEYS` is empty there, **write endpoints are
   unauthenticated**. Always set `API_KEYS` in production.
 - Generate with: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+
+### API Write Route Security
+
+All write operations (POST, PUT, PATCH, DELETE) are protected by API key authentication in production. This is enforced at both the configuration validation level and the middleware level.
+
+**Protected Write Endpoints:**
+- `POST /api/campaigns` - Create campaigns
+- `POST /api/campaigns/:id/pledges` - Add pledges
+- `POST /api/campaigns/:id/claim` - Claim campaigns
+- `POST /api/campaigns/:id/refund` - Process refunds
+- `POST /api/campaigns/:id/pledges/reconcile` - Reconcile on-chain pledges
+- `DELETE /api/campaigns/:id` - Archive campaigns
+- `POST /api/campaigns/:id/restore` - Restore archived campaigns
+- `POST /api/notifications/mark-all-read` - Mark notifications as read
+- `DELETE /api/webhooks/dead-letter` - Clear webhook dead-letter queue
+- `POST /api/webhooks/dead-letter/:id/retry` - Retry failed webhooks
+
+**Public Endpoints (No Authentication Required):**
+- `GET /api/health` - Health checks
+- `GET /api/health/deep` - Deep health checks
+- `GET /api/config` - Public configuration
+- `GET /api/stats` - Global statistics
+- `GET /api/leaderboard` - Leaderboard
+- `GET /api/open-issues` - Open GitHub issues
+- `GET /api/campaigns` - Campaign listing
+- `GET /api/campaigns/:id` - Campaign details
+- `GET /api/campaigns/trending` - Trending campaigns
+- `GET /api/assets` - Supported assets
+
+**Authentication Requirements:**
+- Production: All write endpoints require valid `Authorization: Bearer <api-key>` header
+- Development: Write endpoints allowed without authentication for local development
+- Test: Write endpoints allowed without authentication for test environment
+
+**Rate Limiting:**
+- Write endpoints have separate rate limiting controlled by `WRITE_RATE_LIMIT_MAX_REQUESTS`
+- Default: 20 requests per minute per IP
+- Recommended maximum: 1000 requests per minute
+- Excessive limits can expose the API to abuse and DoS attacks
 
 ### `WEBHOOK_SECRET`
 

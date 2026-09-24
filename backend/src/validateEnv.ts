@@ -150,12 +150,23 @@ export const envSchema = z
         });
       }
 
-      const apiKeys = (data.API_KEYS || '').split(',').filter(Boolean);
+      const apiKeysRaw = (data.API_KEYS || '').split(',');
+      const apiKeys = apiKeysRaw.filter(Boolean);
       if (apiKeys.length === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['API_KEYS'],
-          message: 'API_KEYS is required in production to secure write endpoints',
+          message: 'API_KEYS is required in production to secure write endpoints. Without API keys, all POST/PUT/PATCH/DELETE routes would be publicly accessible, creating a critical security vulnerability.',
+        });
+      }
+
+      // Validate that API keys are not empty or whitespace-only
+      const invalidApiKeys = apiKeysRaw.filter((key) => !key || !key.trim());
+      if (invalidApiKeys.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['API_KEYS'],
+          message: 'API_KEYS contains empty or whitespace-only values. All API keys must be non-empty strings.',
         });
       }
 
@@ -206,6 +217,37 @@ export const envSchema = z
           message:
             'WEBHOOK_SECRET is required in production when WEBHOOK_URL is configured: without it webhook signatures cannot be verified. Set WEBHOOK_SECRET or remove WEBHOOK_URL.',
         });
+      }
+
+      // Validate write route rate limiting configuration
+      const writeRateLimitStr = data.WRITE_RATE_LIMIT_MAX_REQUESTS ?? data.RATE_LIMIT_WRITE_LIMIT;
+      if (writeRateLimitStr) {
+        const writeRateLimit = Number.parseInt(writeRateLimitStr, 10);
+        if (Number.isNaN(writeRateLimit) || writeRateLimit <= 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['WRITE_RATE_LIMIT_MAX_REQUESTS'],
+            message: 'WRITE_RATE_LIMIT_MAX_REQUESTS must be a positive integer in production to protect write endpoints from abuse.',
+          });
+        } else if (writeRateLimit > 1000) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['WRITE_RATE_LIMIT_MAX_REQUESTS'],
+            message: 'WRITE_RATE_LIMIT_MAX_REQUESTS exceeds recommended maximum of 1000. High write rate limits may expose the API to abuse.',
+          });
+        }
+      }
+    } else {
+      // In non-production environments, only validate format if provided
+      const writeRateLimitStr = data.WRITE_RATE_LIMIT_MAX_REQUESTS ?? data.RATE_LIMIT_WRITE_LIMIT;
+      if (writeRateLimitStr) {
+        if (!/^\d+$/.test(writeRateLimitStr)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['WRITE_RATE_LIMIT_MAX_REQUESTS'],
+            message: 'WRITE_RATE_LIMIT_MAX_REQUESTS must be a non-negative integer if provided.',
+          });
+        }
       }
     }
   });

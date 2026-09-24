@@ -120,4 +120,61 @@ describe('Environment & Request Input Configuration Validation', () => {
     };
     expect(() => validateEnv(devEnv)).not.toThrow();
   });
+
+  describe('Write Route Security Configuration', () => {
+    it('fails in production when API_KEYS contains empty values', () => {
+      const env = { ...validProdEnv, API_KEYS: 'key1,,key2' };
+      expect(() => validateEnv(env)).toThrow(/API_KEYS contains empty or whitespace-only values/);
+    });
+
+    it('fails in production when API_KEYS contains only whitespace', () => {
+      const env = { ...validProdEnv, API_KEYS: 'key1,   ,key2' };
+      expect(() => validateEnv(env)).toThrow(/API_KEYS contains empty or whitespace-only values/);
+    });
+
+    it('rejects non-numeric WRITE_RATE_LIMIT_MAX_REQUESTS in production', () => {
+      const env = { ...validProdEnv, WRITE_RATE_LIMIT_MAX_REQUESTS: 'invalid' };
+      expect(() => validateEnv(env)).toThrow(/WRITE_RATE_LIMIT_MAX_REQUESTS must be a positive integer/);
+    });
+
+    it('rejects zero or negative WRITE_RATE_LIMIT_MAX_REQUESTS in production', () => {
+      const env = { ...validProdEnv, WRITE_RATE_LIMIT_MAX_REQUESTS: '0' };
+      expect(() => validateEnv(env)).toThrow(/WRITE_RATE_LIMIT_MAX_REQUESTS must be a positive integer/);
+    });
+
+    it('rejects WRITE_RATE_LIMIT_MAX_REQUESTS exceeding recommended maximum in production', () => {
+      const env = { ...validProdEnv, WRITE_RATE_LIMIT_MAX_REQUESTS: '1001' };
+      expect(() => validateEnv(env)).toThrow(/exceeds recommended maximum of 1000/);
+    });
+
+    it('allows valid WRITE_RATE_LIMIT_MAX_REQUESTS within recommended range in production', () => {
+      const env = { ...validProdEnv, WRITE_RATE_LIMIT_MAX_REQUESTS: '100' };
+      expect(() => validateEnv(env)).not.toThrow();
+    });
+
+    it('validates write rate limit format even in development when provided', () => {
+      const devEnv: Record<string, string> = {
+        NODE_ENV: 'development',
+        WRITE_RATE_LIMIT_MAX_REQUESTS: 'invalid',
+      };
+      expect(() => validateEnv(devEnv)).toThrow(/WRITE_RATE_LIMIT_MAX_REQUESTS must be a non-negative integer/);
+    });
+
+    it('allows development mode without write rate limit when not provided', () => {
+      const devEnv: Record<string, string> = {
+        NODE_ENV: 'development',
+      };
+      expect(() => validateEnv(devEnv)).not.toThrow();
+    });
+
+    it('validates RATE_LIMIT_WRITE_LIMIT as alternative to WRITE_RATE_LIMIT_MAX_REQUESTS', () => {
+      const env = { ...validProdEnv, RATE_LIMIT_WRITE_LIMIT: '50' };
+      expect(() => validateEnv(env)).not.toThrow();
+    });
+
+    it('fails when RATE_LIMIT_WRITE_LIMIT is invalid in production', () => {
+      const env = { ...validProdEnv, RATE_LIMIT_WRITE_LIMIT: '-5' };
+      expect(() => validateEnv(env)).toThrow(/WRITE_RATE_LIMIT_MAX_REQUESTS must be a positive integer/);
+    });
+  });
 });
