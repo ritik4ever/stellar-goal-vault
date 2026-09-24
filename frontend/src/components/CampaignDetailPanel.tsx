@@ -14,6 +14,7 @@ import { useCampaignShareCard } from './CampaignShareCard';
 import { useToast } from '../hooks/useToast';
 import { ShareButtons } from './ShareButtons';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
+import type { ToastVariant } from '../hooks/useToast';
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -30,6 +31,11 @@ interface CampaignDetailPanelProps {
   onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
   onClose?: () => void;
+  onToast?: (
+    message: string,
+    variant?: ToastVariant,
+    link?: { href: string; label: string },
+  ) => void;
 }
 
 const FEE_ESTIMATION_ERROR_CODES = new Set([
@@ -79,6 +85,7 @@ export function CampaignDetailPanel({
   onPledge = async () => {},
   onClaim = async () => {},
   onRefund = async () => {},
+  onToast,
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState('25');
   const [pledgeToken, setPledgeToken] = useState('');
