@@ -397,3 +397,37 @@ describe('campaign persistence regression tests', () => {
     expect(campaign.description).toBe('Description with special chars: <>&"\'');
   });
 });
+
+describe('campaign list stable pagination ordering', () => {
+  it('keeps chunks ordered, disjoint, and complete when the sort key ties', () => {
+    // Every campaign is created at the same mocked instant with identical
+    // target amounts, so the requested sort key cannot order them on its own —
+    // only the deterministic id tie-breaker can.
+    const created = Array.from({ length: 5 }, (_, index) =>
+      createCampaign({
+        creator: CREATOR,
+        title: `Stable pagination ${index + 1}`,
+        description: 'Campaign created to verify deterministic pagination across chunks.',
+        assetCode: 'USDC',
+        targetAmount: 100,
+        deadline: FIXED_DEADLINE,
+      }),
+    );
+
+    const pages = [1, 2, 3].map(
+      (page) => listCampaigns({ page, limit: 2, sort: 'targetAmount', order: 'desc' }).campaigns,
+    );
+    const ids = pages.flat().map((campaign) => campaign.id);
+
+    // No chunk repeats a campaign and the union of the chunks is the full list.
+    expect(ids).toHaveLength(created.length);
+    expect(new Set(ids).size).toBe(created.length);
+
+    // Tied rows fall back to the id tie-breaker in the requested direction.
+    const expected = created
+      .map((campaign) => Number(campaign.id))
+      .sort((a, b) => b - a)
+      .map((id) => String(id));
+    expect(ids).toEqual(expected);
+  });
+});

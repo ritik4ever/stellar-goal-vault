@@ -42,6 +42,7 @@ import { useToast } from "./hooks/useToast";
 import { useOpenGraph } from "./hooks/useOpenGraph";
 import { useCampaignShareCard } from "./components/CampaignShareCard";
 import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
+import { appendUniqueCampaigns } from "./lib/campaignListPagination";
 import {
   ApiError,
   AppConfig,
@@ -207,7 +208,9 @@ function App() {
       order,
     });
 
-    setCampaigns((current) => (append ? [...current, ...response.data] : response.data));
+    setCampaigns((current) =>
+      append ? appendUniqueCampaigns(current, response.data) : response.data,
+    );
     setCampaignPage(page);
     setHasMoreCampaigns(page < response.pagination.totalPages);
 
@@ -227,7 +230,7 @@ function App() {
         page,
         limit: CAMPAIGN_PAGE_SIZE,
       });
-      combined = [...combined, ...lastResponse.data];
+      combined = appendUniqueCampaigns(combined, lastResponse.data);
     }
 
     setCampaigns(combined);

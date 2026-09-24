@@ -541,11 +541,14 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
     listOptions.limit = params.limit;
   }
 
-  const { campaigns, totalCount } = listCampaigns(listOptions);
+  const { campaigns, pledgeCounts, totalCount } = listCampaigns(listOptions);
 
+  // `listCampaigns` already aggregated active pledge counts in SQL for exactly
+  // the rows on this page, so reuse them instead of letting `calculateProgress`
+  // issue one COUNT query per campaign (an N+1 read on the hot list endpoint).
   const data = campaigns.map((campaign) => ({
     ...campaign,
-    progress: calculateProgress(campaign),
+    progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
   }));
 
   const page = params.page ?? 1;

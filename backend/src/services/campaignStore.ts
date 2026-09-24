@@ -540,8 +540,12 @@ const MAX_CAMPAIGN_DURATION_SECONDS = 60 * 60 * 24 * 180;
 /**
  * Retrieves a paginated, filtered list of campaigns from the database.
  *
- * @param options - Optional filters: `searchQuery`, `assetCode`, `status`, `includeDeleted`, `page`, `limit`.
- * @returns A {@link ListCampaignsResult} with the matching campaign records and the total count.
+ * Results are always ordered by the requested sort field plus a deterministic
+ * `id` tie-breaker, so consecutive `page`/`limit` requests form stable,
+ * non-overlapping chunks even when many campaigns share the same sort value.
+ *
+ * @param options - Optional filters: `searchQuery`, `assetCode`, `status`, `includeDeleted`, `page`, `limit`, `sort`, `order`.
+ * @returns A {@link ListCampaignsResult} with the matching campaign records, per-campaign active pledge counts, and the total count.
  */
 export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResult {
   const db = getDb();
@@ -640,22 +644,29 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const sortField = options?.sort ?? 'createdAt';
   const sortOrder = options?.order ?? 'desc';
   const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
-  let orderByClause: string;
+  let primaryOrder: string;
   switch (sortField) {
     case 'deadline':
-      orderByClause = `campaigns.deadline ${orderDir}`;
+      primaryOrder = `campaigns.deadline ${orderDir}`;
       break;
     case 'pledgedAmount':
-      orderByClause = `campaigns.pledged_amount ${orderDir}`;
+      primaryOrder = `campaigns.pledged_amount ${orderDir}`;
       break;
     case 'targetAmount':
-      orderByClause = `campaigns.target_amount ${orderDir}`;
+      primaryOrder = `campaigns.target_amount ${orderDir}`;
       break;
     case 'createdAt':
     default:
-      orderByClause = `campaigns.created_at ${orderDir}`;
+      primaryOrder = `campaigns.created_at ${orderDir}`;
       break;
   }
+
+  // Append a deterministic tie-breaker so OFFSET/LIMIT pagination is stable:
+  // rows sharing the same sort key always resolve to the same relative order
+  // across requests. Without it, SQLite is free to return tied rows in a
+  // different order per query, which makes later chunks duplicate or skip
+  // campaigns as the list grows.
+  const orderByClause = `${primaryOrder}, CAST(campaigns.id AS INTEGER) ${orderDir}`;
 
   const dataQuery = paginate
     ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY ${orderByClause} LIMIT ? OFFSET ?`

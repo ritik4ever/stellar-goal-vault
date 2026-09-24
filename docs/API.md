@@ -124,6 +124,11 @@ Returns all campaigns with computed progress. Supports filtering, sorting, and p
 | `createdAfter` | ISO 8601 | Return campaigns created after this timestamp.                          |
 | `createdBefore`| ISO 8601 | Return campaigns created before this timestamp.                         |
 
+> **Pagination stability:** results are ordered by the requested `sort` field and then by
+> `id` in the same `order` direction. That tie-breaker makes consecutive `page` requests
+> form stable, non-overlapping chunks even when many campaigns share the same sort value,
+> so loading later chunks never repeats or skips a campaign.
+
 **Response `200 OK`:**
 
 ```json
