@@ -393,6 +393,7 @@ let pollerTimer: ReturnType<typeof setTimeout> | null = null;
 let consecutiveFailures = 0;
 let lastSuccessfulPollTime: number | null = null;
 let lastKnownLedger: number | null = null;
+let lastErrorReason: string | null = null;
 
 export type IndexerFreshness = 'fresh' | 'idle' | 'stale' | 'failing' | 'never';
 
@@ -440,7 +441,22 @@ function scheduleNextPoll(delayMs: number): void {
   pollerTimer = setTimeout(async () => {
     try {
       await indexSorobanEvents();
+      
+      if (consecutiveFailures > 0) {
+        logInfo(
+          'soroban_indexer_recovery',
+          {
+            message: `Indexer recovered after ${consecutiveFailures} consecutive failures.`,
+            retryCount: consecutiveFailures,
+            outcome: 'success',
+            lastErrorReason,
+          },
+          config.logLevel,
+        );
+      }
+      
       consecutiveFailures = 0;
+      lastErrorReason = null;
       lastSuccessfulPollTime = Date.now();
       scheduleNextPoll(POLL_INTERVAL_MS);
     } catch (err) {
@@ -449,12 +465,17 @@ function scheduleNextPoll(delayMs: number): void {
         POLL_INTERVAL_MS * Math.pow(2, consecutiveFailures),
         MAX_BACKOFF_MS,
       );
+      
+      const reason = err instanceof Error ? err.message : String(err);
+      lastErrorReason = reason;
+      
       logError(
         err,
         {
           event: 'soroban_event_index_error',
           consecutiveFailures,
           nextRetryMs: backoffMs,
+          reason,
         },
         config.logLevel,
       );
