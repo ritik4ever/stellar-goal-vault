@@ -35,7 +35,7 @@ describe.each(THEMES)('CampaignsTable Accessibility (%s theme)', (theme: ThemeMo
   it('has no accessibility violations in an empty state', async () => {
     const { container } = render(
       <MemoryRouter>
-        <CampaignsTable campaigns={[]} selectedCampaignId={null} onSelect={() => {}} />
+        <CampaignsTable campaigns={[]} selectedCampaignId={null} onSelect={() => {}} error={null} />
       </MemoryRouter>,
     );
 
@@ -44,7 +44,11 @@ describe.each(THEMES)('CampaignsTable Accessibility (%s theme)', (theme: ThemeMo
   });
 
   it('has no accessibility violations with campaign data', async () => {
-    const { container } = render();
+    const { container } = render(
+      <MemoryRouter>
+        <CampaignsTable campaigns={[mockCampaign]} selectedCampaignId={null} onSelect={() => {}} error={null} />
+      </MemoryRouter>,
+    );
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();

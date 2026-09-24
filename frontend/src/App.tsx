@@ -182,6 +182,7 @@ function App() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
+  const [campaignsError, setCampaignsError] = useState<{ message: string; isRecoverable: boolean } | null>(null);
   const [transactionPreview, setTransactionPreview] = useState<TransactionPreviewState | null>(
     null,
   );
@@ -265,6 +266,11 @@ function App() {
     }
   }
 
+  function handleRetryCampaignsLoad() {
+    setCampaignsError(null);
+    void refreshCampaigns(activeSearchRef.current);
+  }
+
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === '?' && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -292,6 +298,7 @@ function App() {
     nextSelectedId?: string | null,
   ): Promise<Campaign[]> {
     setIsCampaignsLoading(true);
+    setCampaignsError(null);
     activeSearchRef.current = searchQuery;
     try {
       const response = await fetchCampaignPage(1, searchQuery, false);
@@ -311,6 +318,13 @@ function App() {
       }
 
       return data;
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      setCampaignsError({
+        message: errorMessage,
+        isRecoverable: true,
+      });
+      throw error;
     } finally {
       setIsCampaignsLoading(false);
     }
@@ -421,7 +435,12 @@ function App() {
           data = response.data;
         }
       } catch (error) {
-        addToast(getErrorMessage(error), 'error');
+        const errorMessage = getErrorMessage(error);
+        setCampaignsError({
+          message: errorMessage,
+          isRecoverable: true,
+        });
+        addToast(errorMessage, 'error');
       }
 
       if (cancelled) {
@@ -844,6 +863,11 @@ function App() {
             isLoadingMore={isLoadingMoreCampaigns}
             isLoading={isCampaignsLoading || initialLoad}
             invalidUrlCampaignId={invalidUrlCampaignId}
+            error={campaignsError ? {
+              message: campaignsError.message,
+              onRetry: handleRetryCampaignsLoad,
+              isRecoverable: campaignsError.isRecoverable,
+            } : null}
           />
         </ErrorBoundary>
 
