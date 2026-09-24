@@ -41,7 +41,14 @@ export function FundingProgress({
 
   return (
     <div className="w-full" data-testid="funding-progress">
-      <div className="relative w-full h-4 bg-gray-200 rounded-full overflow-hidden">
+      <div
+        className="relative w-full h-4 bg-gray-200 rounded-full overflow-hidden"
+        role="progressbar"
+        aria-valuenow={Math.round(percentage)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`Campaign funding progress: ${Math.round(percentage)}% funded`}
+      >
         <div
           className="absolute top-0 left-0 h-full rounded-full"
           style={barStyle}
@@ -53,6 +60,7 @@ export function FundingProgress({
             className="absolute top-0 bottom-0 border-l-2 border-white/50 z-10"
             style={{ left: `${marker}%` }}
             data-testid={`marker-${marker}`}
+            aria-hidden="true"
           />
         ))}
       </div>

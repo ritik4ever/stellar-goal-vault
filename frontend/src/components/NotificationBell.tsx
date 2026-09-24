@@ -57,6 +57,7 @@ export function NotificationBell({ wallet, campaignId }: NotificationBellProps) 
     fetchNotifications().finally(() => setLoading(false));
   }, [open, fetchNotifications]);
 
+  // Close on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
@@ -65,6 +66,18 @@ export function NotificationBell({ wallet, campaignId }: NotificationBellProps) 
     }
     if (open) document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open]);
 
   const handleMarkAllRead = async () => {
@@ -87,24 +100,32 @@ export function NotificationBell({ wallet, campaignId }: NotificationBellProps) 
         className="btn-ghost"
         type="button"
         onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        aria-haspopup="true"
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
         style={{ position: 'relative', minHeight: 42, minWidth: 42, padding: 0 }}
       >
         {unreadCount > 0 ? <BellDot size={18} /> : <Bell size={18} />}
         {unreadCount > 0 && (
-          <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+          <span className="notification-badge" aria-hidden="true">{unreadCount > 99 ? '99+' : unreadCount}</span>
         )}
       </button>
 
       {open && (
-        <div className="notification-drawer">
+        <div
+          className="notification-drawer"
+          role="dialog"
+          aria-modal="false"
+          aria-label="Notifications panel"
+        >
           <div className="notification-drawer-header">
-            <span className="notification-drawer-title">Notifications</span>
+            <span className="notification-drawer-title" id="notification-panel-title">Notifications</span>
             {unreadCount > 0 && (
               <button
                 className="notification-mark-read-btn"
                 type="button"
                 onClick={handleMarkAllRead}
+                aria-label="Mark all notifications as read"
               >
                 <CheckCheck size={14} />
                 Mark all read
@@ -114,15 +135,15 @@ export function NotificationBell({ wallet, campaignId }: NotificationBellProps) 
               className="notification-close-btn"
               type="button"
               onClick={() => setOpen(false)}
-              aria-label="Close"
+              aria-label="Close notifications"
             >
               <X size={16} />
             </button>
           </div>
 
-          <div className="notification-drawer-body">
+          <div className="notification-drawer-body" role="log" aria-live="polite" aria-label="Notification list">
             {loading && notifications.length === 0 ? (
-              <div className="notification-empty">Loading…</div>
+              <div className="notification-empty" aria-busy="true">Loading…</div>
             ) : filtered.length === 0 ? (
               <div className="notification-empty">No notifications yet</div>
             ) : (
@@ -130,6 +151,8 @@ export function NotificationBell({ wallet, campaignId }: NotificationBellProps) 
                 <div
                   key={n.id}
                   className={`notification-item${n.isRead ? '' : ' notification-item-unread'}`}
+                  role="article"
+                  aria-label={`${n.type.replace(/_/g, ' ')} notification: ${n.title}`}
                 >
                   <div className="notification-item-title">
                     {n.type === 'new_pledge' && '💰 '}
