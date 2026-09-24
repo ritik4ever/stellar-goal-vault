@@ -903,42 +903,47 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     maxPerContributor: input.maxPerContributor,
   };
 
-  db.prepare(
-    `INSERT INTO campaigns (
-      id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, failed_at, metadata_json, max_per_contributor
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-    )`,
-  ).run(
-    campaign.id,
-    campaign.creator,
-    campaign.title,
-    campaign.description,
-    JSON.stringify(campaign.acceptedTokens),
-    campaign.targetAmount,
-    campaign.pledgedAmount,
-    campaign.deadline,
-    campaign.createdAt,
-    null,
-    null,
-    campaign.metadata ? JSON.stringify(campaign.metadata) : null,
-    campaign.maxPerContributor ?? null,
-  );
+  // Explicit transaction: campaign INSERT + initial "created" event commit
+  // together so a mid-operation failure leaves no orphaned campaign row and
+  // retries remain safe (campaigns persistence / #870).
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO campaigns (
+        id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, failed_at, metadata_json, max_per_contributor
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      )`,
+    ).run(
+      campaign.id,
+      campaign.creator,
+      campaign.title,
+      campaign.description,
+      JSON.stringify(campaign.acceptedTokens),
+      campaign.targetAmount,
+      campaign.pledgedAmount,
+      campaign.deadline,
+      campaign.createdAt,
+      null,
+      null,
+      campaign.metadata ? JSON.stringify(campaign.metadata) : null,
+      campaign.maxPerContributor ?? null,
+    );
 
-  recordEvent(
-    campaign.id,
-    'created',
-    campaign.createdAt,
-    campaign.creator,
-    undefined,
-    {
-      title: campaign.title,
-      acceptedTokens: campaign.acceptedTokens,
-      targetAmount: campaign.targetAmount,
-      deadline: campaign.deadline,
-    },
-    { source: 'local' } as BlockchainMetadata,
-  );
+    recordEvent(
+      campaign.id,
+      'created',
+      campaign.createdAt,
+      campaign.creator,
+      undefined,
+      {
+        title: campaign.title,
+        acceptedTokens: campaign.acceptedTokens,
+        targetAmount: campaign.targetAmount,
+        deadline: campaign.deadline,
+      },
+      { source: 'local' } as BlockchainMetadata,
+    );
+  })();
 
   return campaign;
 }
@@ -1410,15 +1415,19 @@ export function softDeleteCampaign(campaignId: string): CampaignRecord {
   }
 
   const deletedAt = nowInSeconds();
-  const changes = db
-    .prepare(`UPDATE campaigns SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`)
-    .run(deletedAt, campaignId);
+  // Explicit transaction: soft-delete UPDATE + archived event commit together
+  // so partial failure leaves no inconsistent lifecycle state (#870).
+  db.transaction(() => {
+    const changes = db
+      .prepare(`UPDATE campaigns SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`)
+      .run(deletedAt, campaignId);
 
-  if (changes.changes === 0) {
-    throw toServiceError('Campaign not found or already deleted.', 404, 'NOT_FOUND');
-  }
+    if (changes.changes === 0) {
+      throw toServiceError('Campaign not found or already deleted.', 404, 'NOT_FOUND');
+    }
 
-  recordEvent(campaignId, 'archived', deletedAt, campaign.creator);
+    recordEvent(campaignId, 'archived', deletedAt, campaign.creator);
+  })();
 
   return getCampaign(campaignId)!;
 }
@@ -1443,15 +1452,19 @@ export function restoreCampaign(campaignId: string): CampaignRecord {
   }
 
   const restoredAt = nowInSeconds();
-  const changes = db
-    .prepare(`UPDATE campaigns SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`)
-    .run(campaignId);
+  // Explicit transaction: restore UPDATE + restored event commit together
+  // so mid-operation failures leave no partial archived/restored state (#870).
+  db.transaction(() => {
+    const changes = db
+      .prepare(`UPDATE campaigns SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`)
+      .run(campaignId);
 
-  if (changes.changes === 0) {
-    throw toServiceError('Campaign not found or not archived.', 404, 'NOT_FOUND');
-  }
+    if (changes.changes === 0) {
+      throw toServiceError('Campaign not found or not archived.', 404, 'NOT_FOUND');
+    }
 
-  recordEvent(campaignId, 'restored', restoredAt, campaign.creator);
+    recordEvent(campaignId, 'restored', restoredAt, campaign.creator);
+  })();
 
   return getCampaign(campaignId)!;
 }
