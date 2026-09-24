@@ -101,16 +101,48 @@ describe('CampaignDetailPanel', () => {
   });
 
   it('renders campaign details when campaign is provided', () => {
-    render(
+    const { container } = render(
       <BrowserRouter>
         <CampaignDetailPanel
           campaign={mockCampaign}
           appConfig={mockConfig}
+          connectedWallet={mockCampaign.creator}
           isLoading={false}
         />
       </BrowserRouter>
     );
     expect(screen.getByText('Test Campaign')).toBeInTheDocument();
+    expect(container.querySelector('.campaign-detail-banner')).toBeInTheDocument();
+    expect(container.querySelectorAll('.campaign-detail-actions')).toHaveLength(2);
+    expect(container.querySelector('.wallet-address-row')).toBeInTheDocument();
+  });
+
+  it('exposes named groups and supports keyboard activation', async () => {
+    const user = userEvent.setup();
+    const onConnectWallet = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <BrowserRouter>
+        <CampaignDetailPanel
+          campaign={mockCampaign}
+          appConfig={mockConfig}
+          onConnectWallet={onConnectWallet}
+        />
+      </BrowserRouter>,
+    );
+
+    expect(screen.getByRole('region', { name: 'Test Campaign' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Wallet status' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Campaign summary' })).toBeInTheDocument();
+    expect(screen.getByRole('form', { name: 'Pledge campaign' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Refund contributor' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Campaign actions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect Wallet' })).toHaveAccessibleName('Connect Wallet');
+
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Connect Wallet' }));
+    await user.keyboard('{Enter}');
+    expect(onConnectWallet).toHaveBeenCalledOnce();
   });
 
   describe('Failure Path Coverage', () => {

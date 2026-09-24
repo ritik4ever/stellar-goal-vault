@@ -234,44 +234,29 @@ export function CampaignDetailPanel({
   }
 
   return (
-    <section className="card detail-panel">
+    <section className="card detail-panel" aria-labelledby="campaign-detail-title">
       {/* Full-width Campaign Banner */}
       <div
-        style={{
-          width: 'calc(100% + 2rem)',
-          marginLeft: '-1rem',
-          marginRight: '-1rem',
-          marginTop: '-1rem',
-          height: '240px',
-          overflow: 'hidden',
-          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
-          position: 'relative',
-          marginBottom: '1.5rem',
-        }}
+        className="campaign-detail-banner"
       >
         {activeCampaign.metadata?.imageUrl && !bannerImageError ? (
           <img
             src={activeCampaign.metadata.imageUrl}
             alt={activeCampaign.title}
             onError={() => setBannerImageError(true)}
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              display: 'block',
-            }}
+            className="campaign-detail-banner-image"
           />
         ) : null}
       </div>
 
       <div className="section-heading">
-        <h2>{activeCampaign.title}</h2>
+        <h2 id="campaign-detail-title">{activeCampaign.title}</h2>
         <p className="muted">{activeCampaign.description}</p>
       </div>
 
-      <div className="wallet-status">
+      <div className="wallet-status" role="group" aria-labelledby="wallet-status-title">
         <div>
-          <h3 className="wallet-status-title">Wallet status</h3>
+          <h3 id="wallet-status-title" className="wallet-status-title">Wallet status</h3>
           <p className="muted">
             {connectedWallet
               ? `Connected to ${networkName(appConfig)}`
@@ -281,9 +266,9 @@ export function CampaignDetailPanel({
         <div className="wallet-connected">
           {connectedWallet ? (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="wallet-address-row">
                 <AddressAvatar address={connectedWallet} size={28} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="wallet-address-value">
                   <strong className="mono">{connectedWallet.slice(0, 16)}...</strong>
                   <CopyButton value={connectedWallet} ariaLabel="Copy connected wallet address" />
                 </div>
@@ -312,19 +297,19 @@ export function CampaignDetailPanel({
         </div>
       </div>
 
-      <div className="detail-grid">
+      <div className="detail-grid" role="group" aria-label="Campaign summary">
         <article className="detail-stat">
           <span>Campaign ID</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="detail-stat-value">
             <strong className="mono">{activeCampaign.id}</strong>
             <CopyButton value={activeCampaign.id} ariaLabel="Copy campaign ID" />
           </div>
         </article>
         <article className="detail-stat">
           <span>Creator</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="detail-stat-value">
             <AddressAvatar address={activeCampaign.creator} size={28} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="wallet-address-value">
               <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
               <CopyButton value={activeCampaign.creator} ariaLabel="Copy creator address" />
             </div>
@@ -363,7 +348,13 @@ export function CampaignDetailPanel({
         </p>
       ) : null}
 
-      <form className="form-grid" onSubmit={handlePledge} aria-busy={isSubmitting || isPledgePending}>
+      <form
+        className="form-grid"
+        aria-label="Pledge campaign"
+        aria-busy={isSubmitting || isPledgePending}
+        aria-describedby={pledgeError ? 'pledge-error' : undefined}
+        onSubmit={handlePledge}
+      >
         <label className="field-group">
           <span>Connected contributor</span>
           <input
@@ -400,7 +391,7 @@ export function CampaignDetailPanel({
           />
         </label>
 
-        <div className="action-row">
+        <div className="action-row campaign-detail-actions">
           <button
             className="btn-primary"
             type="submit"
@@ -433,7 +424,7 @@ export function CampaignDetailPanel({
         </div>
 
         {pledgeError ? (
-          <div className="pledge-error" role="alert">
+          <div className="pledge-error" id="pledge-error" role="alert" aria-live="assertive">
             <p className="error-text">{pledgeError}</p>
             <button
               className="btn-ghost"
@@ -449,7 +440,7 @@ export function CampaignDetailPanel({
         ) : null}
 
         {pledgeSuccess ? (
-          <p className="form-success" role="status">
+          <p className="form-success" role="status" aria-live="polite">
             Pledge submitted successfully.
           </p>
         ) : null}
@@ -467,7 +458,12 @@ export function CampaignDetailPanel({
         ) : null}
       </form>
 
-      <div className="form-grid" style={{ marginTop: 16 }}>
+      <div
+        className="form-grid"
+        style={{ marginTop: 16 }}
+        role="group"
+        aria-label="Refund contributor"
+      >
         <label className="field-group">
           <span>Refund contributor</span>
           <input
@@ -478,7 +474,7 @@ export function CampaignDetailPanel({
           />
         </label>
 
-        <div className="action-row">
+        <div className="action-row campaign-detail-actions">
           <button
             className="btn-ghost"
             type="button"
@@ -497,7 +493,7 @@ export function CampaignDetailPanel({
       </div>
 
       {isPledgePending ? (
-        <p className="pending-note">
+        <p className="pending-note" role="status" aria-live="polite">
           The pledge transaction is in flight. Campaign state will refresh after the backend
           reconciles the result.
         </p>
@@ -516,7 +512,7 @@ export function CampaignDetailPanel({
         </div>
       ) : null}
 
-      <div className="share-actions">
+      <div className="share-actions" role="group" aria-label="Campaign actions">
         <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
           <Download size={16} />
           Download PNG

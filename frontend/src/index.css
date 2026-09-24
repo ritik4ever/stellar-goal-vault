@@ -280,6 +280,22 @@ select {
   font-weight: 700;
 }
 
+.campaign-detail-banner {
+  width: calc(100% + 5rem);
+  height: 240px;
+  margin: -40px -40px 1.5rem;
+  overflow: hidden;
+  position: relative;
+  background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+}
+
+.campaign-detail-banner-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 /* Forms & Inputs */
 .form-grid,
 .field-group {
@@ -1294,11 +1310,36 @@ tbody tr:hover td {
   background: var(--bg-input);
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .detail-stat span {
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+
+.detail-stat-value,
+.wallet-address-row,
+.wallet-address-value {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.detail-stat-value,
+.wallet-address-row {
+  gap: 10px;
+}
+
+.wallet-address-value {
+  gap: 8px;
+}
+
+.detail-stat-value strong,
+.wallet-address-value strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .row {
@@ -1852,6 +1893,42 @@ tbody tr:hover td {
   .table-wrap {
     margin: 0 -12px;
     padding: 0 12px;
+  }
+
+  .campaign-detail-banner {
+    width: calc(100% + 3rem);
+    height: 180px;
+    margin: -24px -24px 1.25rem;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .wallet-status,
+  .wallet-connected {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .wallet-address-row {
+    width: 100%;
+  }
+
+  .wallet-address-value {
+    flex: 1;
+  }
+
+  .campaign-detail-actions {
+    flex-direction: column;
+  }
+
+  .campaign-detail-actions .btn-primary,
+  .campaign-detail-actions .btn-ghost,
+  .external-link-container .btn-ghost,
+  .share-actions .btn-ghost {
+    width: 100%;
   }
 }
 
