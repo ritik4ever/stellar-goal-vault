@@ -38,6 +38,7 @@ import {
   getCampaignWithProgress,
   getContributorSummary,
   getGlobalStats,
+  getMilestonesReached,
   getTrendingCampaigns,
   getTopContributors,
   initCampaignStore,
@@ -512,6 +513,7 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
   const data = campaigns.map((campaign) => ({
     ...campaign,
     progress: calculateProgress(campaign),
+    milestones: getMilestonesReached(campaign.id),
   }));
 
   const page = params.page ?? 1;

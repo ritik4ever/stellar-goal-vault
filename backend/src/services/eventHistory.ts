@@ -30,6 +30,7 @@ export type CampaignEventType =
   | 'updated'
   | 'metadata_updated'
   | 'pledge_limit_reached'
+  | 'milestone_reached'
   | 'archived'
   | 'restored';
 export interface BlockchainMetadata {
@@ -366,6 +367,9 @@ function rowToTimelineItem(row: TimelineRow): TimelineItem {
         type = 'pledge';
         break;
       case 'pledge_limit_reached':
+        type = 'status_change';
+        break;
+      case 'milestone_reached':
         type = 'status_change';
         break;
       default:
