@@ -49,8 +49,25 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-npm-audit
+          name: backend-build-npm-audit-${{ github.run_id }}-${{ github.run_attempt }}
           path: /tmp/backend-audit.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Collect backend npm debug logs
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/diagnostics"
+          cp ~/.npm/_logs/*.log "$RUNNER_TEMP/diagnostics/" 2>/dev/null || true
+
+      - name: Upload backend diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/diagnostics/*.log
+          retention-days: 7
+          if-no-files-found: ignore
 
   frontend-build:
     name: Frontend Build
@@ -78,6 +95,21 @@ jobs:
       - name: Lint frontend
         working-directory: frontend
         run: npm run lint
+
+      - name: Collect frontend npm debug logs
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/diagnostics"
+          cp ~/.npm/_logs/*.log "$RUNNER_TEMP/diagnostics/" 2>/dev/null || true
+
+      - name: Upload frontend diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/diagnostics/*.log
+          retention-days: 7
+          if-no-files-found: ignore
 
   format-check:
     name: Prettier Format Check
@@ -115,8 +147,31 @@ jobs:
 
       - name: Build contract
         working-directory: contracts
-        run: cargo build --target wasm32-unknown-unknown --release
-        
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/diagnostics"
+          cargo build --target wasm32-unknown-unknown --release 2>&1 | tee "$RUNNER_TEMP/diagnostics/cargo-build.log"
+
+      - name: Upload contract WASM binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-build-wasm-${{ github.run_id }}-${{ github.run_attempt }}
+          path: contracts/target/wasm32-unknown-unknown/release/*.wasm
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Run contract tests
         working-directory: contracts
-        run: cargo test
+        run: |
+          set -o pipefail
+          cargo test 2>&1 | tee "$RUNNER_TEMP/diagnostics/cargo-test.log"
+
+      - name: Upload contract build and test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-build-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/diagnostics/*.log
+          retention-days: 7
+          if-no-files-found: ignore
+

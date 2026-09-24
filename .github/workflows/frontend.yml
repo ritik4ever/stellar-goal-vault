@@ -42,11 +42,13 @@ jobs:
         run: npm test -- --run --coverage --coverage.provider=v8 --coverage.reporter=lcov --coverage.reporter=text
 
       - name: Upload coverage report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-coverage
+          name: frontend-ci-coverage-${{ github.run_id }}-${{ github.run_attempt }}
           path: frontend/coverage/
-          retention-days: 7
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Build
         run: npm run build
