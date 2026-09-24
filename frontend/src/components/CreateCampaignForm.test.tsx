@@ -547,3 +547,457 @@ describe('CreateCampaignForm – Mobile Responsiveness', () => {
     expect(nextButton).toBeInTheDocument();
   });
 });
+
+describe('CreateCampaignForm – Additional Coverage', () => {
+  const validCreator = `G${'A'.repeat(55)}`;
+  const validTitle = 'My Valid Campaign Title';
+  const validDescription = 'This campaign funds a real Soroban pledge flow for the MVP dashboard.';
+
+  const fillBasics = async (
+    user: ReturnType<typeof userEvent.setup>,
+    overrides: { title?: string; description?: string } = {},
+  ) => {
+    await user.type(screen.getByPlaceholderText(/G\.\.\. creator public key/i), validCreator);
+    await user.type(
+      screen.getByPlaceholderText(/Stellar community design sprint/i),
+      overrides.title ?? validTitle,
+    );
+    await user.type(
+      screen.getByPlaceholderText(/Describe what the campaign funds/i),
+      overrides.description ?? validDescription,
+    );
+    await user.selectOptions(screen.getByRole('combobox'), 'Community');
+  };
+
+  const clickNext = (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(screen.getByRole('button', { name: /^next$/i }));
+
+  const advanceToFunding = async (user: ReturnType<typeof userEvent.setup>) => {
+    await fillBasics(user);
+    await clickNext(user);
+  };
+
+  const advanceToRewards = async (user: ReturnType<typeof userEvent.setup>) => {
+    await advanceToFunding(user);
+    await clickNext(user);
+  };
+
+  const advanceToReview = async (user: ReturnType<typeof userEvent.setup>) => {
+    await advanceToRewards(user);
+    await clickNext(user);
+  };
+
+  // -----------------------------------------------------------------------
+  // 1. Default / empty-state rendering
+  // -----------------------------------------------------------------------
+
+  describe('Default state', () => {
+    it('defaults acceptedTokens to USDC when allowedAssets is omitted', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} />);
+      await advanceToFunding(user);
+
+      expect(screen.getByRole('checkbox', { name: /usdc/i })).toBeChecked();
+    });
+
+    it('defaults acceptedTokens to USDC when allowedAssets is an empty array', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={[]} />);
+      await advanceToFunding(user);
+
+      expect(screen.getByRole('checkbox', { name: /usdc/i })).toBeChecked();
+    });
+
+    it('renders one checkbox per asset when multiple allowedAssets are provided', async () => {
+      const user = userEvent.setup();
+      render(
+        <CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC', 'XLM', 'EURC']} />,
+      );
+      await advanceToFunding(user);
+
+      expect(screen.getByRole('checkbox', { name: /usdc/i })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /xlm/i })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /eurc/i })).toBeInTheDocument();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 2. Token checkbox behaviour
+  // -----------------------------------------------------------------------
+
+  describe('Token checkboxes (Step 2 – Funding)', () => {
+    it('checking a second token adds it to the selection', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC', 'XLM']} />);
+      await advanceToFunding(user);
+
+      await user.click(screen.getByRole('checkbox', { name: /xlm/i }));
+
+      expect(screen.getByRole('checkbox', { name: /usdc/i })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /xlm/i })).toBeChecked();
+    });
+
+    it('unchecking the only selected token shows the accepted-tokens error on Next', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC', 'XLM']} />);
+      await advanceToFunding(user);
+
+      await user.click(screen.getByRole('checkbox', { name: /usdc/i }));
+      await user.click(screen.getByRole('button', { name: /^next$/i }));
+
+      expect(screen.getByText(/at least one accepted token is required/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/target amount/i)).toBeInTheDocument();
+    });
+
+    it('multiple selected tokens appear in the submission payload', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      render(<CreateCampaignForm onCreate={onCreate} allowedAssets={['USDC', 'XLM']} />);
+
+      await advanceToFunding(user);
+      await user.click(screen.getByRole('checkbox', { name: /xlm/i }));
+      await clickNext(user);
+      await clickNext(user);
+      await user.click(screen.getByRole('button', { name: /create campaign/i }));
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      expect(onCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ acceptedTokens: ['USDC', 'XLM'] }),
+      );
+    });
+
+    it('Review step shows all selected tokens', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC', 'XLM']} />);
+      await advanceToFunding(user);
+      await user.click(screen.getByRole('checkbox', { name: /xlm/i }));
+      await clickNext(user);
+      await clickNext(user);
+
+      expect(screen.getByText(/usdc.*xlm|xlm.*usdc/i)).toBeInTheDocument();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 3. Full success path — optional fields populated
+  // -----------------------------------------------------------------------
+
+  describe('Submission – optional fields', () => {
+    it('includes imageUrl in metadata when provided', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      render(<CreateCampaignForm onCreate={onCreate} allowedAssets={['USDC']} />);
+
+      await fillBasics(user);
+      await user.type(
+        screen.getByPlaceholderText(/https:\/\/example\.com\/image\.png/i),
+        'https://img.example.com/banner.png',
+      );
+      await clickNext(user);
+      await clickNext(user);
+      await clickNext(user);
+      await user.click(screen.getByRole('button', { name: /create campaign/i }));
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      expect(onCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({ imageUrl: 'https://img.example.com/banner.png' }),
+        }),
+      );
+    });
+
+    it('includes externalLink in metadata when provided', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      render(<CreateCampaignForm onCreate={onCreate} allowedAssets={['USDC']} />);
+
+      await fillBasics(user);
+      await user.type(
+        screen.getByPlaceholderText(/https:\/\/example\.com\/project/i),
+        'https://myproject.example.com',
+      );
+      await clickNext(user);
+      await clickNext(user);
+      await clickNext(user);
+      await user.click(screen.getByRole('button', { name: /create campaign/i }));
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      expect(onCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({ externalLink: 'https://myproject.example.com' }),
+        }),
+      );
+    });
+
+    it('omits imageUrl and externalLink from metadata when both are blank', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      render(<CreateCampaignForm onCreate={onCreate} allowedAssets={['USDC']} />);
+
+      await advanceToReview(user);
+      await user.click(screen.getByRole('button', { name: /create campaign/i }));
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      const payload = onCreate.mock.calls[0][0] as Parameters<typeof onCreate>[0];
+      expect(payload.metadata.imageUrl).toBeUndefined();
+      expect(payload.metadata.externalLink).toBeUndefined();
+    });
+
+    it('omits maxPerContributor from payload when left blank', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      render(<CreateCampaignForm onCreate={onCreate} allowedAssets={['USDC']} />);
+
+      await advanceToReview(user);
+      await user.click(screen.getByRole('button', { name: /create campaign/i }));
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      const payload = onCreate.mock.calls[0][0] as Parameters<typeof onCreate>[0];
+      expect(payload.maxPerContributor).toBeUndefined();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 4. Funding step — additional validation coverage
+  // -----------------------------------------------------------------------
+
+  describe('Step 2 – Funding validation gaps', () => {
+    it('shows an error when target amount is cleared (empty)', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+      await advanceToFunding(user);
+
+      await user.clear(screen.getByLabelText(/target amount/i));
+      await user.click(screen.getByRole('button', { name: /^next$/i }));
+
+      expect(screen.getByText(/target amount is required/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/target amount/i)).toBeInTheDocument();
+    });
+
+    it('shows an error when deadline is cleared (empty)', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+      await advanceToFunding(user);
+
+      await user.clear(screen.getByLabelText(/deadline in hours/i));
+      await user.click(screen.getByRole('button', { name: /^next$/i }));
+
+      expect(screen.getByText(/deadline is required/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/deadline in hours/i)).toBeInTheDocument();
+    });
+
+    it('shows an error when deadline exceeds 365 days (8760 hours)', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+      await advanceToFunding(user);
+
+      const deadlineInput = screen.getByLabelText(/deadline in hours/i);
+      await user.clear(deadlineInput);
+      await user.type(deadlineInput, '8761');
+      await user.click(screen.getByRole('button', { name: /^next$/i }));
+
+      expect(screen.getByText(/cannot exceed 365 days/i)).toBeInTheDocument();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 5. Reward tier edge cases
+  // -----------------------------------------------------------------------
+
+  describe('Step 3 – Reward tier edge cases', () => {
+    it('shows an error for a tier minimum amount of zero', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+      await advanceToRewards(user);
+
+      await user.click(screen.getByRole('button', { name: /add reward tier/i }));
+      await user.type(screen.getByPlaceholderText(/early supporter badge/i), 'Bronze');
+      await user.type(screen.getByLabelText(/minimum pledge amount/i), '0');
+      await clickNext(user);
+
+      expect(
+        screen.getByText(/minimum pledge amount must be greater than zero/i),
+      ).toBeInTheDocument();
+    });
+
+    it('applies input-error class to an invalid tier minimum amount field', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+      await advanceToRewards(user);
+
+      await user.click(screen.getByRole('button', { name: /add reward tier/i }));
+      await user.type(screen.getByLabelText(/minimum pledge amount/i), '0');
+      await clickNext(user);
+
+      expect(screen.getByLabelText(/minimum pledge amount/i)).toHaveClass('input-error');
+    });
+
+    it('allows adding multiple reward tiers and shows each one', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+      await advanceToRewards(user);
+
+      await user.click(screen.getByRole('button', { name: /add reward tier/i }));
+      await user.click(screen.getByRole('button', { name: /add reward tier/i }));
+
+      expect(screen.getByText('Tier 1')).toBeInTheDocument();
+      expect(screen.getByText('Tier 2')).toBeInTheDocument();
+    });
+
+    it('shows both tiers on the Review step', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+      await advanceToRewards(user);
+
+      await user.click(screen.getByRole('button', { name: /add reward tier/i }));
+      const titleInputs = screen.getAllByPlaceholderText(/early supporter badge/i);
+      const amountInputs = screen.getAllByLabelText(/minimum pledge amount/i);
+      await user.type(titleInputs[0], 'Silver');
+      await user.type(amountInputs[0], '25');
+
+      await user.click(screen.getByRole('button', { name: /add reward tier/i }));
+      const titleInputs2 = screen.getAllByPlaceholderText(/early supporter badge/i);
+      const amountInputs2 = screen.getAllByLabelText(/minimum pledge amount/i);
+      await user.type(titleInputs2[1], 'Gold');
+      await user.type(amountInputs2[1], '100');
+
+      await clickNext(user);
+
+      expect(screen.getByText('Silver')).toBeInTheDocument();
+      expect(screen.getByText('Gold')).toBeInTheDocument();
+    });
+
+    it('tier description appears on the Review step', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+      await advanceToRewards(user);
+
+      await user.click(screen.getByRole('button', { name: /add reward tier/i }));
+      await user.type(screen.getByPlaceholderText(/early supporter badge/i), 'Platinum');
+      await user.type(screen.getByLabelText(/minimum pledge amount/i), '200');
+      await user.type(
+        screen.getByPlaceholderText(/What contributors receive at this tier/i),
+        'Exclusive merch pack',
+      );
+      await clickNext(user);
+
+      expect(screen.getByText('Exclusive merch pack')).toBeInTheDocument();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 6. Review step rendering
+  // -----------------------------------------------------------------------
+
+  describe('Step 4 – Review rendering', () => {
+    it('shows the imageUrl as an img element on the Review step', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+
+      await fillBasics(user);
+      await user.type(
+        screen.getByPlaceholderText(/https:\/\/example\.com\/image\.png/i),
+        'https://cdn.example.com/preview.jpg',
+      );
+      await clickNext(user);
+      await clickNext(user);
+      await clickNext(user);
+
+      const img = screen.getByRole('img', { name: /campaign preview/i });
+      expect(img).toBeInTheDocument();
+      expect(img).toHaveAttribute('src', 'https://cdn.example.com/preview.jpg');
+    });
+
+    it('shows the externalLink as an anchor on the Review step', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+
+      await fillBasics(user);
+      await user.type(
+        screen.getByPlaceholderText(/https:\/\/example\.com\/project/i),
+        'https://myproject.example.com',
+      );
+      await clickNext(user);
+      await clickNext(user);
+      await clickNext(user);
+
+      const link = screen.getByRole('link', { name: /myproject\.example\.com/i });
+      expect(link).toBeInTheDocument();
+      expect(link).toHaveAttribute('href', 'https://myproject.example.com');
+    });
+
+    it('does not show an img on the Review step when imageUrl is blank', async () => {
+      const user = userEvent.setup();
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+      await advanceToReview(user);
+
+      expect(screen.queryByRole('img', { name: /campaign preview/i })).not.toBeInTheDocument();
+    });
+
+    it('shows the reviewDeadlineLabel with hours and a human-readable date', async () => {
+      const user = userEvent.setup();
+      const mockDate = new Date('2025-06-01T00:00:00Z');
+      vi.setSystemTime(mockDate);
+
+      render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+      await advanceToReview(user);
+
+      expect(screen.getByText(/72 hours \(around/i)).toBeInTheDocument();
+
+      vi.useRealTimers();
+    });
+
+    it('resets maxStepReached after successful submission so step tabs are disabled again', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      render(<CreateCampaignForm onCreate={onCreate} allowedAssets={['USDC']} />);
+
+      await advanceToReview(user);
+      await user.click(screen.getByRole('button', { name: /create campaign/i }));
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+
+      expect(screen.getByRole('button', { name: /funding/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /rewards/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /review/i })).toBeDisabled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 7. apiError prop reactivity
+  // -----------------------------------------------------------------------
+
+  describe('apiError prop reactivity', () => {
+    it('hides the error block when apiError changes from an error to null', async () => {
+      const user = userEvent.setup();
+      const apiError: ApiError = { message: 'Initial error' };
+
+      const { rerender } = render(
+        <CreateCampaignForm onCreate={async () => {}} apiError={apiError} />,
+      );
+      await advanceToReview(user);
+      expect(screen.getByText('Initial error')).toBeInTheDocument();
+
+      rerender(<CreateCampaignForm onCreate={async () => {}} apiError={null} />);
+
+      expect(screen.queryByText('Initial error')).not.toBeInTheDocument();
+    });
+
+    it('updates the error block when apiError message changes', async () => {
+      const user = userEvent.setup();
+      const firstError: ApiError = { message: 'First error' };
+      const secondError: ApiError = { message: 'Second error' };
+
+      const { rerender } = render(
+        <CreateCampaignForm onCreate={async () => {}} apiError={firstError} />,
+      );
+      await advanceToReview(user);
+      expect(screen.getByText('First error')).toBeInTheDocument();
+
+      rerender(<CreateCampaignForm onCreate={async () => {}} apiError={secondError} />);
+
+      expect(screen.queryByText('First error')).not.toBeInTheDocument();
+      expect(screen.getByText('Second error')).toBeInTheDocument();
+    });
+  });
+});
