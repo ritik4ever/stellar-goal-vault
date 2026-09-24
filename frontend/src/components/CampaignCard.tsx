@@ -3,6 +3,7 @@ import { Link } from 'lucide-react';
 import { Campaign } from '../types/campaign';
 import AddressAvatar from './AddressAvatar';
 import CopyButton from './CopyButton';
+import { formatAmount } from '../utils/formatCurrency';
 import { Countdown } from './Countdown';
 
 interface CampaignCardProps {
@@ -123,7 +124,7 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
 
         <div className="campaign-progress">
           <div className="progress-copy">
-            {campaign.pledgedAmount} / {campaign.targetAmount}{' '}
+            {formatAmount(campaign.pledgedAmount)} / {formatAmount(campaign.targetAmount)}{' '}
             {campaign.acceptedTokens?.length > 1 ? 'Tokens' : campaign.assetCode}
           </div>
           {campaign.acceptedTokens?.length > 1 && campaign.tokenBalances ? (
@@ -140,7 +141,7 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
                     <div className="progress-bar" aria-hidden>
                       <div style={{ width: `${pct}%` }} />
                     </div>
-                    <span className="token-balance muted">{balance}</span>
+                    <span className="token-balance muted">{formatAmount(balance)}</span>
                   </div>
                 );
               })}
