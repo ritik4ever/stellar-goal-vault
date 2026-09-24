@@ -15,16 +15,40 @@ import { app } from './index';
 import { createCampaign, initCampaignStore } from './services/campaignStore';
 import { getDb } from './services/db';
 
+// Deterministic baseline timestamp for integration testing.
+// Using a fixed epoch timestamp eliminates wall-clock drift, timezone dependencies,
+// and test flakes across execution environments.
+// 1_700_000_000_000 ms corresponds to 2023-11-14T22:13:20.000Z (1_700_000_000 s).
+const BASE_MOCK_TIME_MS = 1_700_000_000_000;
+const BASE_MOCK_TIME_SEC = Math.floor(BASE_MOCK_TIME_MS / 1000);
+
+let currentMockTimeMs = BASE_MOCK_TIME_MS;
+let dateNowSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+function setMockTimeMs(timeMs: number): void {
+  currentMockTimeMs = timeMs;
+}
+
+function advanceMockTimeSeconds(seconds: number): void {
+  currentMockTimeMs += seconds * 1000;
+}
+
+function nowInMockSeconds(): number {
+  return Math.floor(currentMockTimeMs / 1000);
+}
+
 // Mock sorobanRpc to avoid real network calls during tests
 vi.mock('./services/sorobanRpc', () => ({
   ensureSorobanRefundConfig: vi.fn(),
-  verifyRefundTransaction: vi.fn().mockResolvedValue({
-    txHash: 'mock-tx-hash',
-    status: 'SUCCESS',
-    ledger: 100,
-    createdAt: Math.floor(Date.now() / 1000),
-    latestLedger: 100,
-  }),
+  verifyRefundTransaction: vi.fn().mockImplementation(() =>
+    Promise.resolve({
+      txHash: 'mock-tx-hash',
+      status: 'SUCCESS',
+      ledger: 100,
+      createdAt: Math.floor(Date.now() / 1000),
+      latestLedger: 100,
+    }),
+  ),
 }));
 
 const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-api-${process.pid}.db`);
@@ -48,11 +72,19 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  dateNowSpy?.mockRestore();
   server.close();
   fs.rmSync(TEST_DB_PATH, { force: true });
 });
 
 beforeEach(() => {
+  currentMockTimeMs = BASE_MOCK_TIME_MS;
+  if (!dateNowSpy) {
+    dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => currentMockTimeMs);
+  } else {
+    dateNowSpy.mockImplementation(() => currentMockTimeMs);
+  }
+
   const db = getDb();
   db.prepare(`DELETE FROM campaign_events`).run();
   db.prepare(`DELETE FROM pledges`).run();
@@ -102,13 +134,14 @@ async function get(apiPath: string) {
 describe('Campaign Lifecycle API', () => {
   it('covers create, pledge, claim end-to-end', async () => {
     // 1. Create Campaign
+    const deadline = nowInMockSeconds() + 3600;
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
       title: 'Test Campaign',
       description: 'This is a test campaign with sufficient description length',
       acceptedTokens: ['USDC'],
       targetAmount: 100,
-      deadline: Math.floor(Date.now() / 1000) + 3600,
+      deadline,
     });
     expect(createRes.status).toBe(201);
     const campaignId = createRes.data.data.id;
@@ -124,16 +157,23 @@ describe('Campaign Lifecycle API', () => {
     expect(pledgeRes.data.data.progress.status).toBe('funded');
     expect(pledgeRes.data.data.progress.canClaim).toBe(false); // Deadline not reached yet
 
-    // Move deadline to past in DB to allow claim
-    getDb()
-      .prepare(`UPDATE campaigns SET deadline = ? WHERE id = ?`)
-      .run(Math.floor(Date.now() / 1000) - 3600, campaignId);
+    // Early claim attempt before deadline must fail with 400 INVALID_CAMPAIGN_STATE
+    const earlyClaimRes = await post(`/api/campaigns/${campaignId}/claim`, {
+      creator: CREATOR,
+      transactionHash: 'a'.repeat(64),
+      confirmedAt: nowInMockSeconds(),
+    });
+    expect(earlyClaimRes.status).toBe(400);
+    expect(earlyClaimRes.data.error.code).toBe('INVALID_CAMPAIGN_STATE');
+
+    // Advance mocked time past the deadline to allow claim without DB mutation
+    advanceMockTimeSeconds(3601);
 
     // 3. Claim
     const claimRes = await post(`/api/campaigns/${campaignId}/claim`, {
       creator: CREATOR,
       transactionHash: 'a'.repeat(64),
-      confirmedAt: Math.floor(Date.now() / 1000),
+      confirmedAt: nowInMockSeconds(),
     });
     expect(claimRes.status).toBe(200);
     expect(claimRes.data.data.progress.status).toBe('claimed');
@@ -149,7 +189,7 @@ describe('Campaign Lifecycle API', () => {
     const duplicateClaimRes = await post(`/api/campaigns/${campaignId}/claim`, {
       creator: CREATOR,
       transactionHash: 'b'.repeat(64),
-      confirmedAt: Math.floor(Date.now() / 1000),
+      confirmedAt: nowInMockSeconds(),
     });
     expect(duplicateClaimRes.status).toBe(409);
     expect(duplicateClaimRes.data.error.code).toBe('CAMPAIGN_ALREADY_CLAIMED');
@@ -165,13 +205,14 @@ describe('Campaign Lifecycle API', () => {
 
   it('covers create, pledge, failed, refund end-to-end', async () => {
     // 1. Create Campaign
+    const deadline = nowInMockSeconds() + 3600;
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
       title: 'Test Campaign 2',
       description: 'This is another test campaign with enough characters',
       acceptedTokens: ['XLM'],
       targetAmount: 100,
-      deadline: Math.floor(Date.now() / 1000) + 3600,
+      deadline,
     });
     expect(createRes.status).toBe(201);
     const campaignId = createRes.data.data.id;
@@ -192,7 +233,7 @@ describe('Campaign Lifecycle API', () => {
       walletAddress: CONTRIBUTOR,
     };
 
-    // Attempt early refund (should fail)
+    // Attempt early refund (should fail before deadline)
     const earlyRefundRes = await post(`/api/campaigns/${campaignId}/refund`, {
       contributor: CONTRIBUTOR,
       soroban: mockSorobanData,
@@ -200,10 +241,8 @@ describe('Campaign Lifecycle API', () => {
     expect(earlyRefundRes.status).toBe(400);
     expect(earlyRefundRes.data.error.code).toBe('INVALID_CAMPAIGN_STATE');
 
-    // Move deadline to past in DB to fail the campaign
-    getDb()
-      .prepare(`UPDATE campaigns SET deadline = ? WHERE id = ?`)
-      .run(Math.floor(Date.now() / 1000) - 3600, campaignId);
+    // Advance mocked time past the deadline to fail the campaign without DB mutation
+    advanceMockTimeSeconds(3601);
 
     // 3. Refund
     const refundRes = await post(`/api/campaigns/${campaignId}/refund`, {
@@ -222,7 +261,7 @@ describe('Campaign Lifecycle API', () => {
       description: '<h1>Test</h1> with at least 20 characters',
       acceptedTokens: ['USDC'],
       targetAmount: 100,
-      deadline: Math.floor(Date.now() / 1000) + 3600,
+      deadline: nowInMockSeconds() + 3600,
     });
     expect(createRes.status).toBe(201);
     expect(createRes.data.data.title).toBe('&lt;h1&gt;Test&lt;&sol;h1&gt;');
@@ -328,7 +367,7 @@ describe('Campaign Filters - createdAfter/createdBefore', () => {
   }
 
   it('filters campaigns by createdAfter date', async () => {
-    const now = Math.floor(Date.now() / 1000);
+    const deadline = nowInMockSeconds() + 3600;
 
     // Create a campaign
     const createRes = await post('/api/campaigns', {
@@ -337,20 +376,20 @@ describe('Campaign Filters - createdAfter/createdBefore', () => {
       description: 'Created just now with sufficient description',
       acceptedTokens: ['USDC'],
       targetAmount: 100,
-      deadline: now + 3600,
+      deadline,
     });
     expect(createRes.status).toBe(201);
     const campaignId = createRes.data.data.id;
 
-    // Query with createdAfter (should include this campaign)
-    const futureTimestamp = new Date(Date.now() - 60000).toISOString(); // 1 minute ago
-    const res = await get(`/api/campaigns?createdAfter=${encodeURIComponent(futureTimestamp)}`);
+    // Query with createdAfter (1 minute before mock time)
+    const afterTimestamp = new Date(currentMockTimeMs - 60000).toISOString();
+    const res = await get(`/api/campaigns?createdAfter=${encodeURIComponent(afterTimestamp)}`);
     expect(res.status).toBe(200);
     expect(res.data.data.some((c: { id: string }) => c.id === campaignId)).toBe(true);
   });
 
   it('filters campaigns by createdBefore date', async () => {
-    const now = Math.floor(Date.now() / 1000);
+    const deadline = nowInMockSeconds() + 3600;
 
     // Create a campaign
     const createRes = await post('/api/campaigns', {
@@ -359,15 +398,45 @@ describe('Campaign Filters - createdAfter/createdBefore', () => {
       description: 'Created earlier with sufficient description text',
       acceptedTokens: ['XLM'],
       targetAmount: 100,
-      deadline: now + 3600,
+      deadline,
     });
     expect(createRes.status).toBe(201);
 
-    // Query with createdBefore in the future (should include this campaign)
-    const futureTimestamp = new Date(Date.now() + 60000).toISOString(); // 1 minute in future
-    const res = await get(`/api/campaigns?createdBefore=${encodeURIComponent(futureTimestamp)}`);
+    // Query with createdBefore in the future (1 minute after mock time)
+    const beforeTimestamp = new Date(currentMockTimeMs + 60000).toISOString();
+    const res = await get(`/api/campaigns?createdBefore=${encodeURIComponent(beforeTimestamp)}`);
     expect(res.status).toBe(200);
     expect(res.data.data.length).toBeGreaterThan(0);
+  });
+
+  it('filters campaigns by createdAfter with non-UTC timezone offsets consistently', async () => {
+    const deadline = nowInMockSeconds() + 3600;
+
+    const createRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Timezone Campaign',
+      description: 'Created at deterministic time to test timezone offset queries',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline,
+    });
+    expect(createRes.status).toBe(201);
+    const campaignId = createRes.data.data.id;
+
+    // BASE_MOCK_TIME_MS corresponds to 2023-11-14T22:13:20.000Z.
+    // 1 minute before in UTC: 2023-11-14T22:12:20Z.
+    // In +03:00 timezone: 2023-11-15T01:12:20+03:00
+    // In -05:00 timezone: 2023-11-14T17:12:20-05:00
+    const plusTz = '2023-11-15T01:12:20+03:00';
+    const minusTz = '2023-11-14T17:12:20-05:00';
+
+    const resPlus = await get(`/api/campaigns?createdAfter=${encodeURIComponent(plusTz)}`);
+    expect(resPlus.status).toBe(200);
+    expect(resPlus.data.data.some((c: { id: string }) => c.id === campaignId)).toBe(true);
+
+    const resMinus = await get(`/api/campaigns?createdAfter=${encodeURIComponent(minusTz)}`);
+    expect(resMinus.status).toBe(200);
+    expect(resMinus.data.data.some((c: { id: string }) => c.id === campaignId)).toBe(true);
   });
 });
 
@@ -379,7 +448,7 @@ describe('Campaign Multi-Asset Filter', () => {
   }
 
   it('filters campaigns by multiple asset codes', async () => {
-    const now = Math.floor(Date.now() / 1000);
+    const deadline = nowInMockSeconds() + 3600;
 
     // Create campaigns with different assets
     const xlmRes = await post('/api/campaigns', {
@@ -388,7 +457,7 @@ describe('Campaign Multi-Asset Filter', () => {
       description: 'Campaign accepting XLM tokens only here',
       acceptedTokens: ['XLM'],
       targetAmount: 100,
-      deadline: now + 3600,
+      deadline,
     });
     expect(xlmRes.status).toBe(201);
 
@@ -398,7 +467,7 @@ describe('Campaign Multi-Asset Filter', () => {
       description: 'Campaign accepting USDC tokens here now',
       acceptedTokens: ['USDC'],
       targetAmount: 100,
-      deadline: now + 3600,
+      deadline,
     });
     expect(usdcRes.status).toBe(201);
 
@@ -433,7 +502,7 @@ describe('Campaign maxPerContributor Field', () => {
   }
 
   it('includes maxPerContributor in GET /api/campaigns list response', async () => {
-    const now = Math.floor(Date.now() / 1000);
+    const deadline = nowInMockSeconds() + 3600;
 
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
@@ -441,7 +510,7 @@ describe('Campaign maxPerContributor Field', () => {
       description: 'Campaign with per-contributor limit',
       acceptedTokens: ['USDC'],
       targetAmount: 100,
-      deadline: now + 3600,
+      deadline,
       maxPerContributor: 50,
     });
     expect(createRes.status).toBe(201);
@@ -458,45 +527,41 @@ describe('Campaign maxPerContributor Field', () => {
   });
 
   it('keeps a campaign open at the exact deadline and fails it 1ms later', async () => {
-    const fixedNow = 1_700_000_000_000;
-    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(fixedNow);
+    const fixedNow = BASE_MOCK_TIME_MS;
+    setMockTimeMs(fixedNow);
 
-    try {
-      const campaign = createCampaign({
-        creator: CREATOR,
-        title: 'Exact deadline boundary campaign',
-        description: 'Boundary test for exact deadline status consistency',
-        acceptedTokens: ['USDC'],
-        targetAmount: 100,
-        deadline: Math.floor(fixedNow / 1000),
-      });
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Exact deadline boundary campaign',
+      description: 'Boundary test for exact deadline status consistency',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: Math.floor(fixedNow / 1000),
+    });
 
-      const firstCall = await get('/api/campaigns?page=1&limit=10');
-      expect(firstCall.status).toBe(200);
+    const firstCall = await get('/api/campaigns?page=1&limit=10');
+    expect(firstCall.status).toBe(200);
 
-      const firstListedCampaign = firstCall.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
-      expect(firstListedCampaign?.progress.status).toBe('open');
+    const firstListedCampaign = firstCall.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
+    expect(firstListedCampaign?.progress.status).toBe('open');
 
-      const secondCall = await get('/api/campaigns?page=1&limit=10');
-      expect(secondCall.status).toBe(200);
+    const secondCall = await get('/api/campaigns?page=1&limit=10');
+    expect(secondCall.status).toBe(200);
 
-      const secondListedCampaign = secondCall.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
-      expect(secondListedCampaign?.progress.status).toBe('open');
+    const secondListedCampaign = secondCall.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
+    expect(secondListedCampaign?.progress.status).toBe('open');
 
-      nowSpy.mockReturnValue(fixedNow + 1);
+    setMockTimeMs(fixedNow + 1);
 
-      const oneMillisecondLater = await get('/api/campaigns?page=1&limit=10');
-      expect(oneMillisecondLater.status).toBe(200);
+    const oneMillisecondLater = await get('/api/campaigns?page=1&limit=10');
+    expect(oneMillisecondLater.status).toBe(200);
 
-      const failedCampaign = oneMillisecondLater.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
-      expect(failedCampaign?.progress.status).toBe('failed');
-    } finally {
-      nowSpy.mockRestore();
-    }
+    const failedCampaign = oneMillisecondLater.data.data.find((item: { id: string; progress: { status: string } }) => item.id === campaign.id);
+    expect(failedCampaign?.progress.status).toBe('failed');
   });
 
   it('includes maxPerContributor in GET /api/campaigns/:id detail response', async () => {
-    const now = Math.floor(Date.now() / 1000);
+    const deadline = nowInMockSeconds() + 3600;
 
     const createRes = await post('/api/campaigns', {
       creator: CREATOR,
@@ -504,7 +569,7 @@ describe('Campaign maxPerContributor Field', () => {
       description: 'Campaign with per-contributor limit',
       acceptedTokens: ['USDC'],
       targetAmount: 100,
-      deadline: now + 3600,
+      deadline,
       maxPerContributor: 75,
     });
     expect(createRes.status).toBe(201);
@@ -540,14 +605,13 @@ describe('Campaign archive (soft delete) and restore', () => {
   }
 
   async function createTestCampaign(title: string) {
-    const now = Math.floor(Date.now() / 1000);
     const res = await post('/api/campaigns', {
       creator: CREATOR,
       title,
       description: 'A campaign used to exercise archive/restore behavior',
       acceptedTokens: ['USDC'],
       targetAmount: 100,
-      deadline: now + 3600,
+      deadline: nowInMockSeconds() + 3600,
     });
     expect(res.status).toBe(201);
     return res.data.data.id as string;
@@ -682,7 +746,7 @@ describe('POST /api/campaigns/:id/pledges with Idempotency-Key', () => {
       description: 'This campaign is used to test idempotency behavior.',
       acceptedTokens: ['USDC'],
       targetAmount: 500,
-      deadline: Math.floor(Date.now() / 1000) + 86400,
+      deadline: nowInMockSeconds() + 86400,
     });
     return createRes.data.data.id;
   }
@@ -833,5 +897,188 @@ describe('POST /api/campaigns/:id/pledges with Idempotency-Key', () => {
     );
     expect(secondRes.status).toBe(201);
     expect(secondRes.headers.get('X-Idempotency-Cache')).toBe('HIT');
+  });
+});
+
+describe('Campaign Deadline and Lifecycle Time Invariance', () => {
+  it('rejects campaign creation when deadline is in the past or exactly current time', async () => {
+    const pastRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Past Deadline Campaign',
+      description: 'This campaign should fail because deadline is in the past',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: nowInMockSeconds() - 10,
+    });
+    expect(pastRes.status).toBe(400);
+    expect(pastRes.data.error.code).toBe('INVALID_DEADLINE');
+
+    const equalRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Current Deadline Campaign',
+      description: 'This campaign should fail because deadline equals current time',
+      acceptedTokens: ['USDC'],
+      targetAmount: 100,
+      deadline: nowInMockSeconds(),
+    });
+    expect(equalRes.status).toBe(400);
+    expect(equalRes.data.error.code).toBe('INVALID_DEADLINE');
+  });
+
+  it('transitions from open to funded to claimable as time advances past deadline', async () => {
+    const deadline = nowInMockSeconds() + 7200; // 2 hours in future
+    const createRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Lifecycle Progression Campaign',
+      description: 'Testing lifecycle progression with injected time advancement',
+      acceptedTokens: ['USDC'],
+      targetAmount: 200,
+      deadline,
+    });
+    expect(createRes.status).toBe(201);
+    const campaignId = createRes.data.data.id;
+
+    // 1 hour later (before deadline, unreached goal)
+    advanceMockTimeSeconds(3600);
+    let detailRes = await get(`/api/campaigns/${campaignId}`);
+    expect(detailRes.status).toBe(200);
+    expect(detailRes.data.data.progress.status).toBe('open');
+    expect(detailRes.data.data.progress.canClaim).toBe(false);
+
+    // Contributor pledges 200 (reaches target)
+    await post(`/api/campaigns/${campaignId}/pledges`, {
+      contributor: CONTRIBUTOR,
+      amount: 200,
+      assetCode: 'USDC',
+    });
+
+    // Check status: funded, but deadline not yet reached
+    detailRes = await get(`/api/campaigns/${campaignId}`);
+    expect(detailRes.data.data.progress.status).toBe('funded');
+    expect(detailRes.data.data.progress.canClaim).toBe(false);
+
+    // Claim attempt before deadline must fail
+    const earlyClaim = await post(`/api/campaigns/${campaignId}/claim`, {
+      creator: CREATOR,
+      transactionHash: 'c'.repeat(64),
+      confirmedAt: nowInMockSeconds(),
+    });
+    expect(earlyClaim.status).toBe(400);
+    expect(earlyClaim.data.error.code).toBe('INVALID_CAMPAIGN_STATE');
+
+    // Advance time to 1 second past deadline (7201 total from start)
+    advanceMockTimeSeconds(3601);
+    detailRes = await get(`/api/campaigns/${campaignId}`);
+    expect(detailRes.data.data.progress.canClaim).toBe(true);
+
+    // Claim now succeeds
+    const claimRes = await post(`/api/campaigns/${campaignId}/claim`, {
+      creator: CREATOR,
+      transactionHash: 'd'.repeat(64),
+      confirmedAt: nowInMockSeconds(),
+    });
+    expect(claimRes.status).toBe(200);
+    expect(claimRes.data.data.progress.status).toBe('claimed');
+  });
+
+  it('transitions underfunded campaign to failed and refundable once deadline passes', async () => {
+    const deadline = nowInMockSeconds() + 1800; // 30 minutes
+    const createRes = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Underfunded Lifecycle Campaign',
+      description: 'Testing underfunded transition to failed state with injected time',
+      acceptedTokens: ['USDC'],
+      targetAmount: 500,
+      deadline,
+    });
+    expect(createRes.status).toBe(201);
+    const campaignId = createRes.data.data.id;
+
+    // Pledge partial amount (150 of 500)
+    await post(`/api/campaigns/${campaignId}/pledges`, {
+      contributor: CONTRIBUTOR,
+      amount: 150,
+      assetCode: 'USDC',
+    });
+
+    const mockSoroban = {
+      txHash: 'e'.repeat(64),
+      contractId: 'C' + 'B'.repeat(55),
+      networkPassphrase: 'Test SDF Network ; September 2015',
+      rpcUrl: 'http://localhost:8000/soroban/rpc',
+      walletAddress: CONTRIBUTOR,
+    };
+
+    // Attempt refund before deadline -> must fail
+    const earlyRefund = await post(`/api/campaigns/${campaignId}/refund`, {
+      contributor: CONTRIBUTOR,
+      soroban: mockSoroban,
+    });
+    expect(earlyRefund.status).toBe(400);
+    expect(earlyRefund.data.error.code).toBe('INVALID_CAMPAIGN_STATE');
+
+    // Advance time past deadline
+    advanceMockTimeSeconds(1801);
+
+    // Campaign should now be failed and refundable
+    const detailRes = await get(`/api/campaigns/${campaignId}`);
+    expect(detailRes.status).toBe(200);
+    expect(detailRes.data.data.progress.status).toBe('failed');
+    expect(detailRes.data.data.progress.canRefund).toBe(true);
+    expect(detailRes.data.data.progress.canClaim).toBe(false);
+
+    // Refund now succeeds
+    const refundRes = await post(`/api/campaigns/${campaignId}/refund`, {
+      contributor: CONTRIBUTOR,
+      soroban: mockSoroban,
+    });
+    expect(refundRes.status).toBe(200);
+    expect(refundRes.data.data.refundedAmount).toBe(150);
+    expect(refundRes.data.data.pledgedAmount).toBe(0);
+  });
+
+  it('correctly filters campaigns by open and failed status based on injected time', async () => {
+    const fixedBaseSec = nowInMockSeconds();
+
+    // Create Campaign A: expires in 1000s
+    const resA = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Campaign Expiring Soon',
+      description: 'Will expire and fail when deadline passes',
+      acceptedTokens: ['USDC'],
+      targetAmount: 500,
+      deadline: fixedBaseSec + 1000,
+    });
+    const idA = resA.data.data.id;
+
+    // Create Campaign B: expires in 5000s
+    const resB = await post('/api/campaigns', {
+      creator: CREATOR,
+      title: 'Campaign Expiring Later',
+      description: 'Will remain open while campaign A expires',
+      acceptedTokens: ['USDC'],
+      targetAmount: 500,
+      deadline: fixedBaseSec + 5000,
+    });
+    const idB = resB.data.data.id;
+
+    // At baseline: both should be open
+    let openList = await get('/api/campaigns?status=open');
+    expect(openList.status).toBe(200);
+    expect(openList.data.data.some((c: { id: string }) => c.id === idA)).toBe(true);
+    expect(openList.data.data.some((c: { id: string }) => c.id === idB)).toBe(true);
+
+    // Advance time past Campaign A's deadline (advance 1001s)
+    advanceMockTimeSeconds(1001);
+
+    // Campaign A is now failed; Campaign B is still open
+    openList = await get('/api/campaigns?status=open');
+    expect(openList.data.data.some((c: { id: string }) => c.id === idA)).toBe(false);
+    expect(openList.data.data.some((c: { id: string }) => c.id === idB)).toBe(true);
+
+    const failedList = await get('/api/campaigns?status=failed');
+    expect(failedList.status).toBe(200);
+    expect(failedList.data.data.some((c: { id: string }) => c.id === idA)).toBe(true);
+    expect(failedList.data.data.some((c: { id: string }) => c.id === idB)).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ The integration test suite provides:
 - **Isolated Test Database**: Each test worker uses a temporary SQLite database (`/tmp/stellar-goal-vault-integration-*.db`) to prevent test pollution and cross-contamination
 - **Parallel Execution**: Tests run in parallel using 4 worker threads by default
 - **State Machine Verification**: Complete validation of campaign state transitions
+- **Deterministic Mocked Time**: Deadline and lifecycle tests mock wall-clock time (`vi.spyOn(Date, 'now')`) at a fixed baseline epoch, guaranteeing invariant test behavior across timezones and execution environments
 - **Edge Case Coverage**: Double claims, invalid refunds, unauthorized actions, etc.
 - **Event History Tracking**: Full audit trail of all campaign events
 - **Concurrent Request Handling**: Stress tests for data consistency under load
