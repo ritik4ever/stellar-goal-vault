@@ -219,7 +219,6 @@ function migrate(database: SQLiteDatabase): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_campaign_comments_campaign_id ON campaign_comments(campaign_id);
-
   `);
 
   const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
@@ -360,5 +359,60 @@ function migrate(database: SQLiteDatabase): void {
     ON campaign_events(json_extract(blockchain_metadata, '$.txHash'));
     CREATE INDEX IF NOT EXISTS idx_campaign_events_ledger
     ON campaign_events(json_extract(blockchain_metadata, '$.ledgerNumber'));
+  `);
+
+  // Database-level guardrails for campaign and pledge invariants. Triggers
+  // are used because SQLite cannot add CHECK constraints to an existing table
+  // without rebuilding it; this protects both fresh and already-migrated DBs.
+  // Keep this after legacy ALTER TABLE steps so every referenced column exists
+  // when an older database is upgraded.
+  database.exec(`
+    CREATE TRIGGER IF NOT EXISTS campaigns_integrity_before_insert
+    BEFORE INSERT ON campaigns
+    WHEN trim(NEW.id) = '' OR trim(NEW.creator) = '' OR trim(NEW.title) = ''
+      OR trim(NEW.description) = '' OR NEW.target_amount <= 0
+      OR NEW.pledged_amount < 0 OR NEW.pledged_amount > NEW.target_amount
+      OR NEW.deadline <= 0 OR NEW.created_at <= 0
+      OR (NEW.claimed_at IS NOT NULL AND NEW.failed_at IS NOT NULL)
+      OR json_valid(NEW.accepted_tokens_json) = 0
+      OR json_type(NEW.accepted_tokens_json) <> 'array'
+      OR json_array_length(NEW.accepted_tokens_json) = 0
+    BEGIN
+      SELECT RAISE(ABORT, 'campaign integrity constraint failed');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS campaigns_integrity_before_update
+    BEFORE UPDATE OF id, creator, title, description, accepted_tokens_json,
+      target_amount, pledged_amount, deadline, created_at, claimed_at, failed_at
+    ON campaigns
+    WHEN trim(NEW.id) = '' OR trim(NEW.creator) = '' OR trim(NEW.title) = ''
+      OR trim(NEW.description) = '' OR NEW.target_amount <= 0
+      OR NEW.pledged_amount < 0 OR NEW.pledged_amount > NEW.target_amount
+      OR NEW.deadline <= 0 OR NEW.created_at <= 0
+      OR (NEW.claimed_at IS NOT NULL AND NEW.failed_at IS NOT NULL)
+      OR json_valid(NEW.accepted_tokens_json) = 0
+      OR json_type(NEW.accepted_tokens_json) <> 'array'
+      OR json_array_length(NEW.accepted_tokens_json) = 0
+    BEGIN
+      SELECT RAISE(ABORT, 'campaign integrity constraint failed');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS pledges_integrity_before_insert
+    BEFORE INSERT ON pledges
+    WHEN trim(NEW.campaign_id) = '' OR trim(NEW.contributor) = ''
+      OR NEW.amount <= 0 OR trim(NEW.asset_code) = '' OR NEW.created_at <= 0
+    BEGIN
+      SELECT RAISE(ABORT, 'pledge integrity constraint failed');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS pledges_integrity_before_update
+    BEFORE UPDATE OF campaign_id, contributor, amount, asset_code, created_at, refunded_at
+    ON pledges
+    WHEN trim(NEW.campaign_id) = '' OR trim(NEW.contributor) = ''
+      OR NEW.amount <= 0 OR trim(NEW.asset_code) = '' OR NEW.created_at <= 0
+      OR (NEW.refunded_at IS NOT NULL AND NEW.refunded_at < NEW.created_at)
+    BEGIN
+      SELECT RAISE(ABORT, 'pledge integrity constraint failed');
+    END;
   `);
 }
