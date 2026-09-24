@@ -56,3 +56,25 @@ npx vitest bench --run -t "1,000"
 
 Compare `hz` (higher is better) across runs on the same machine. Treat results as
 a relative regression signal for the list pipeline, not an absolute latency SLA.
+
+## Cost Drivers & Recommended Limits
+
+### Main Cost Drivers
+1. **String Allocation (`toLowerCase()`)**: Previously, `searchCampaigns` called `.toLowerCase()` on all three string fields (title, creator, id) for every single campaign evaluated, dominating CPU time during search. The primary fix leverages short-circuiting (`||`), halting evaluation early on the first match.
+2. **Array Sorting (`Array.prototype.sort`)**: Sorting the campaigns array inherently requires an $O(N \log N)$ comparison pass and an $O(N)$ copy (`[...campaigns]`) to avoid mutating React state props directly.
+
+### Recommended Limits
+- **Client-Side Rendering**: Due to the $O(N)$ filtering and $O(N \log N)$ sorting requirements on the main thread, the recommended upper limit for the client-side dataset is **~5,000 to 10,000 campaigns**. Beyond this scale, rendering blocking latency will become noticeable during active typing. 
+- **Future Scale**: For datasets exceeding 10,000 campaigns, the repository should implement either server-side search/pagination or offload the pipeline to a WebWorker.
+
+### Reproducing the Benchmark
+To reproduce the performance profile and confirm regressions/improvements:
+1. Generate the deterministic datasets internally by running the bench script:
+   ```bash
+   cd frontend
+   npm run bench
+   ```
+2. For specific test sizes, use Vitest's filter command:
+   ```bash
+   npx vitest bench --run src/components/benchmarks/campaignsTable.bench.ts -t "5,000"
+   ```
