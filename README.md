@@ -1,5 +1,7 @@
 # Stellar Goal Vault
 
+[![codecov](https://codecov.io/gh/sarah-obasi-analytics/stellar-goal-vault/graph/badge.svg)](https://codecov.io/gh/sarah-obasi-analytics/stellar-goal-vault)
+
 Stellar Goal Vault is a lightweight crowdfunding MVP for the Stellar ecosystem.
 
 It includes:
