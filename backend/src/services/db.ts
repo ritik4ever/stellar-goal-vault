@@ -1,6 +1,41 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import opentelemetry, { SpanKind } from '@opentelemetry/api';
+
+const tracer = opentelemetry.trace.getTracer('sqlite');
+
+function wrapStatement(stmt: any, sql: string) {
+  return new Proxy(stmt, {
+    get(target, prop) {
+      if (['run', 'get', 'all', 'iterate'].includes(prop as string)) {
+        return (...args: any[]) => {
+          return tracer.startActiveSpan(`sqlite ${prop as string}`, {
+            kind: SpanKind.CLIENT,
+            attributes: {
+              'db.system': 'sqlite',
+              'db.statement': sql,
+              'db.operation': prop as string,
+            }
+          }, (span) => {
+            try {
+              const result = target[prop](...args);
+              return result;
+            } catch (err) {
+              span.recordException(err as Error);
+              span.setStatus({ code: opentelemetry.SpanStatusCode.ERROR });
+              throw err;
+            } finally {
+              span.end();
+            }
+          });
+        };
+      }
+      const val = target[prop];
+      return typeof val === 'function' ? val.bind(target) : val;
+    }
+  });
+}
 
 type SQLiteDatabase = ReturnType<typeof Database>;
 
@@ -32,7 +67,43 @@ export function initDb(): void {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  db = new Database(dbPath);
+  const rawDb = new Database(dbPath);
+
+  db = new Proxy(rawDb, {
+    get(target, prop) {
+      if (prop === 'prepare') {
+        return (sql: string, ...args: any[]) => {
+          const stmt = target.prepare(sql, ...args);
+          return wrapStatement(stmt, sql);
+        };
+      }
+      if (prop === 'exec') {
+        return (sql: string, ...args: any[]) => {
+          return tracer.startActiveSpan('sqlite exec', {
+            kind: SpanKind.CLIENT,
+            attributes: {
+              'db.system': 'sqlite',
+              'db.statement': sql,
+              'db.operation': 'exec',
+            }
+          }, (span) => {
+            try {
+              const result = target.exec(sql, ...args);
+              return result;
+            } catch (err) {
+              span.recordException(err as Error);
+              span.setStatus({ code: opentelemetry.SpanStatusCode.ERROR });
+              throw err;
+            } finally {
+              span.end();
+            }
+          });
+        };
+      }
+      const val = target[prop as keyof typeof target];
+      return typeof val === 'function' ? val.bind(target) : val;
+    }
+  }) as SQLiteDatabase;
 
   // Enable Write-Ahead Logging (WAL) mode.
   // This is the chosen journal mode to prevent unnecessary lock contention,
