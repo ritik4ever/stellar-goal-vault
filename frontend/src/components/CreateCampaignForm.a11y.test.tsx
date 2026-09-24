@@ -22,6 +22,31 @@ async function fillBasicsAndAdvance(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe.each(THEMES)('CreateCampaignForm Accessibility (%s theme)', (theme: ThemeMode) => {
+  it('exposes named form controls and moves focus to each new step', async () => {
+    const user = userEvent.setup();
+    render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC', 'XLM']} />);
+
+    expect(screen.getByRole('form', { name: /basics/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/creator account/i)).toBeInTheDocument();
+
+    await fillBasicsAndAdvance(user);
+
+    expect(screen.getByRole('heading', { name: 'Funding' })).toHaveFocus();
+    expect(screen.getByRole('group', { name: /accepted tokens/i })).toBeInTheDocument();
+  });
+
+  it('associates validation messages with invalid controls', async () => {
+    const user = userEvent.setup();
+    render(<CreateCampaignForm onCreate={async () => {}} />);
+
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+
+    const creator = screen.getByLabelText(/creator account/i);
+    expect(creator).toHaveAttribute('aria-invalid', 'true');
+    expect(creator).toHaveAttribute('aria-describedby', 'creator-error');
+    expect(screen.getByText('Creator account is required')).toHaveAttribute('id', 'creator-error');
+  });
+
   it('has no accessibility violations on the Basics step', async () => {
     const { container } = render(
       <CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC', 'XLM']} />,

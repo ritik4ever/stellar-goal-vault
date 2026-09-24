@@ -525,6 +525,7 @@ function App() {
       const apiError = toApiError(error);
       setCreateError(apiError);
       addToast(apiError.message, 'error');
+      throw error;
     }
   }
 
@@ -802,7 +803,9 @@ function App() {
         <CreateCampaignForm
           onCreate={handleCreate}
           apiError={createError}
-          allowedAssets={appConfig?.allowedAssets ?? []}
+          isLoading={initialLoad || !appConfig}
+          onRetry={() => window.location.reload()}
+          allowedAssets={appConfig?.allowedAssets}
         />
         <ErrorBoundary componentName="CampaignDetailPanel">
           <CampaignDetailPanel
