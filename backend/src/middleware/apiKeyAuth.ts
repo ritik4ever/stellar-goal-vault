@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../types/errors';
-import { recordFailedApiKeyAttempt, recordApiKeyUsage } from '../services/abuseControl';
 
 export interface RequestWithApiKey extends Request {
   apiKey?: string;
@@ -14,10 +13,6 @@ export interface RequestWithApiKey extends Request {
  *
  * Environment variable: API_KEYS (comma-separated list of valid API keys)
  * Header format: Authorization: Bearer <api-key>
- * 
- * Abuse controls:
- * - Failed authentication attempts are rate limited (10 failures per minute per IP)
- * - Per-API-key usage is tracked to prevent individual key abuse (1000 requests per minute)
  */
 export function apiKeyAuthMiddleware(
   req: RequestWithApiKey,
@@ -62,24 +57,7 @@ export function apiKeyAuthMiddleware(
   }
 
   if (!validApiKeys.includes(apiKey)) {
-    // Record failed attempt for abuse control (only when API keys are configured)
-    if (recordFailedApiKeyAttempt(req.ip || '')) {
-      throw new AppError(
-        'Too many failed authentication attempts. Please try again later.',
-        429,
-        'TOO_MANY_FAILED_ATTEMPTS',
-      );
-    }
     throw new AppError('Invalid API key', 403, 'FORBIDDEN');
-  }
-
-  // Check per-API-key usage to prevent abuse (only for valid keys)
-  if (recordApiKeyUsage(apiKey)) {
-    throw new AppError(
-      'API key rate limit exceeded. Please contact administrator for higher limits.',
-      429,
-      'API_KEY_RATE_LIMITED',
-    );
   }
 
   req.isAuthenticated = true;
