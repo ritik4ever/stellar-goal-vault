@@ -61,6 +61,41 @@ fi
 echo -e "${GREEN}Contract built successfully${NC}"
 echo ""
 
+# ── WASM hash verification ──────────────────────────────────────────────────
+WASM_FILE="target/wasm32v1-none/release/stellar_goal_vault.wasm"
+HASH_FILE="wasm.sha256"
+
+if [ ! -f "$WASM_FILE" ]; then
+    # Fallback: find any .wasm file in the target directory
+    WASM_FILE=$(find target -name "*.wasm" -path "*/release/*" | head -1)
+    if [ -z "$WASM_FILE" ]; then
+        echo -e "${RED}Error: No WASM file found after build.${NC}"
+        exit 1
+    fi
+fi
+
+CURRENT_HASH=$(sha256sum "$WASM_FILE" | awk '{print $1}')
+echo "Computed WASM SHA256: $CURRENT_HASH"
+
+if [ -f "$HASH_FILE" ]; then
+    EXPECTED_HASH=$(cat "$HASH_FILE" | tr -d '[:space:]')
+    if [ "$CURRENT_HASH" != "$EXPECTED_HASH" ]; then
+        echo -e "${RED}Error: WASM hash mismatch!${NC}"
+        echo -e "  Expected: ${YELLOW}$EXPECTED_HASH${NC} (from $HASH_FILE)"
+        echo -e "  Actual:   ${YELLOW}$CURRENT_HASH${NC} (from built binary)"
+        echo ""
+        echo "The contract binary has changed since wasm.sha256 was last updated."
+        echo "If this is intentional, update the hash file:"
+        echo "  echo \"$CURRENT_HASH\" > $CONTRACTS_DIR/$HASH_FILE"
+        exit 1
+    fi
+    echo -e "${GREEN}✅ WASM hash verified: $CURRENT_HASH${NC}"
+else
+    echo -e "${YELLOW}⚠️  No wasm.sha256 found — skipping hash verification.${NC}"
+    echo "To enable hash verification, run: echo \"$CURRENT_HASH\" > $CONTRACTS_DIR/$HASH_FILE"
+fi
+echo ""
+
 # Deploy the contract
 echo -e "${YELLOW}Deploying contract to testnet...${NC}"
 
