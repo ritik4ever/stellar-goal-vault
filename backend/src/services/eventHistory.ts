@@ -17,8 +17,8 @@ const ensureIndexes = (() => {
         ON campaign_events (json_extract(blockchain_metadata, '$.ledgerNumber'));
       CREATE INDEX IF NOT EXISTS idx_campaign_events_source
         ON campaign_events (json_extract(blockchain_metadata, '$.source'));
-      created = true;
     `);
+    created = true;
   };
 })();
 

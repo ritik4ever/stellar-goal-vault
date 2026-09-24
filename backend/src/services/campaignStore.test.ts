@@ -23,6 +23,7 @@ let getPledges: CampaignStoreModule['getPledges'];
 let getDb: DbModule['getDb'];
 let getCampaignHistory: EventHistoryModule['getCampaignHistory'];
 let addPledge: CampaignStoreModule['addPledge'];
+let claimCampaign: CampaignStoreModule['claimCampaign'];
 let getCampaignAnalytics: CampaignStoreModule['getCampaignAnalytics'];
 
 const CREATOR = `G${'A'.repeat(55)}`;
@@ -50,6 +51,7 @@ beforeAll(async () => {
     getCampaign,
     getPledges,
     addPledge,
+    claimCampaign,
     getCampaignAnalytics,
   } = await import('./campaignStore'));
   ({ getDb } = await import('./db'));
@@ -77,6 +79,63 @@ describe('campaign store search', () => {
     const result = listCampaigns({ searchQuery: 'nonexistent-campaign-xyz-123' });
     expect(result.campaigns).toEqual([]);
     expect(result.totalCount).toBe(0);
+  });
+
+  it('rejects invalid campaign creation payloads and missing campaign lookups', () => {
+    expect(() =>
+      createCampaign({
+        creator: CREATOR,
+        title: 'Missing tokens',
+        description: 'This should fail because no accepted tokens are passed.',
+        assetCode: '',
+        targetAmount: 100,
+        deadline: FIXED_DEADLINE,
+      }),
+    ).toThrowError(/At least one accepted token is required/i);
+
+    expect(getCampaign('campaign-does-not-exist')).toBeUndefined();
+  });
+
+  it('rejects duplicate claim attempts and non-creator claim attempts without duplicating the claim event', () => {
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Permission and duplicate claim checks',
+      description: 'Ensures permission gates and duplicate claim handling remain strict.',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: FIXED_DEADLINE,
+    });
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 100 });
+    getDb().prepare(`UPDATE campaigns SET deadline = ? WHERE id = ?`).run(FIXED_NOW - 5, campaign.id);
+
+    const claimedCampaign = claimCampaign(campaign.id, {
+      creator: CREATOR,
+      transactionHash: 'd'.repeat(64),
+      confirmedAt: FIXED_NOW,
+    });
+
+    expect(claimedCampaign.claimedAt).toBeDefined();
+
+    expect(() =>
+      claimCampaign(campaign.id, {
+        creator: CREATOR,
+        transactionHash: 'e'.repeat(64),
+        confirmedAt: FIXED_NOW + 1,
+      }),
+    ).toThrowError(/already claimed/i);
+
+    expect(() =>
+      claimCampaign(campaign.id, {
+        creator: CONTRIBUTOR,
+        transactionHash: 'f'.repeat(64),
+        confirmedAt: FIXED_NOW + 2,
+      }),
+    ).toThrowError(/Only the campaign creator can claim funds/i);
+
+    expect(
+      getCampaignHistory(campaign.id).filter((event) => event.eventType === 'claimed'),
+    ).toHaveLength(1);
   });
 
   it('handles empty search query gracefully', () => {
@@ -289,18 +348,18 @@ describe('campaign persistence regression tests', () => {
     
     // Insert a pledge manually to simulate a potential conflict
     db.prepare(`
-      INSERT INTO pledges (campaign_id, contributor, amount, transaction_hash, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(campaign.id, CONTRIBUTOR, 100, TX_HASH, FIXED_DEADLINE - 100);
+      INSERT INTO pledges (campaign_id, contributor, amount, asset_code, transaction_hash, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(campaign.id, CONTRIBUTOR, 100, 'USDC', TX_HASH, FIXED_DEADLINE - 100);
 
     // Attempting to reconcile with the same transaction hash should fail or be handled
     // The current implementation uses idempotency, so we test that the constraint
     // is respected by the database layer if we try to insert directly
     expect(() => {
       db.prepare(`
-        INSERT INTO pledges (campaign_id, contributor, amount, transaction_hash, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(campaign.id, CONTRIBUTOR2, 50, TX_HASH, FIXED_DEADLINE - 90);
+        INSERT INTO pledges (campaign_id, contributor, amount, asset_code, transaction_hash, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(campaign.id, CONTRIBUTOR2, 50, 'USDC', TX_HASH, FIXED_DEADLINE - 90);
     }).toThrow();
   });
 
