@@ -34,8 +34,10 @@ describe('Security regression — request input handling', () => {
       .send(raw);
 
     expect(res.status).toBe(400);
-    expect(res.body).toHaveProperty('error', 'Validation failed');
-    expect(Array.isArray(res.body.details)).toBe(true);
+    // validateBody now uses the structured error envelope via next(AppError)
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(Array.isArray(res.body.error.details)).toBe(true);
   });
 
   it('rejects create campaign when metadata.imageUrl uses plain http (protocol enforcement)', async () => {
@@ -46,8 +48,9 @@ describe('Security regression — request input handling', () => {
     const res = await request(app).post('/api/campaigns').send(payload);
 
     expect(res.status).toBe(400);
-    expect(res.body).toHaveProperty('error', 'Validation failed');
-    const messages = res.body.details.map((d: any) => String(d.message).toLowerCase());
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    const messages = res.body.error.details.map((d: any) => String(d.message).toLowerCase());
     expect(messages.some((m: string) => m.includes('https'))).toBe(true);
   });
 
@@ -59,8 +62,9 @@ describe('Security regression — request input handling', () => {
     const res = await request(app).post('/api/campaigns').send(payload);
 
     expect(res.status).toBe(400);
-    expect(res.body).toHaveProperty('error', 'Validation failed');
-    const messages = res.body.details.map((d: any) => String(d.message).toLowerCase());
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    const messages = res.body.error.details.map((d: any) => String(d.message).toLowerCase());
     expect(messages.some((m: string) => m.includes('private') || m.includes('loopback'))).toBe(true);
   });
 

@@ -40,8 +40,11 @@ describe('logger', () => {
     expect(payload.message).toContain('POST /api/campaigns 201');
   });
 
-  it('logs client error requests as warn with structured fields', () => {
-    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+  // http_request is always emitted at info level so operators can filter by
+  // event name without cross-correlating warn/error streams.  The status field
+  // carries sufficient information to derive severity programmatically.
+  it('logs 4xx requests via logger.info (status field carries severity)', () => {
+    const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
 
     logRequest(
       {
@@ -54,8 +57,8 @@ describe('logger', () => {
       'info',
     );
 
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    const payload = warnSpy.mock.calls[0][0] as any;
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    const payload = infoSpy.mock.calls[0][0] as any;
 
     expect(payload).toMatchObject({
       event: 'http_request',
@@ -67,8 +70,8 @@ describe('logger', () => {
     });
   });
 
-  it('logs server error requests as error with structured fields', () => {
-    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+  it('logs 5xx requests via logger.info (status field carries severity)', () => {
+    const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
 
     logRequest(
       {
@@ -81,8 +84,8 @@ describe('logger', () => {
       'info',
     );
 
-    expect(errorSpy).toHaveBeenCalledTimes(1);
-    const payload = errorSpy.mock.calls[0][0] as any;
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    const payload = infoSpy.mock.calls[0][0] as any;
 
     expect(payload).toMatchObject({
       event: 'http_request',

@@ -52,7 +52,12 @@ and **failing** (`failing`).
 
 ## Structured logs
 
-Every request emits one `http_request` line when the response finishes, success or failure:
+Every request emits one `http_request` line when the response finishes, success or failure.
+The `http_request` event is **always emitted at `info` level** regardless of status code.
+The `status` field carries sufficient information to derive severity programmatically
+(e.g. `status >= 500` → error, `status >= 400` → warn), which keeps log queries simple:
+operators can filter by `event == "http_request"` in one stream without cross-correlating
+`warn` and `error` outputs.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -60,7 +65,7 @@ Every request emits one `http_request` line when the response finishes, success 
 | `message` | string | `"<METHOD> <path> <status> <ms>ms"` |
 | `requestId` | string | Echoed in the `X-Request-ID` header and in error bodies |
 | `method`, `path` | string | Request method and original URL |
-| `status` | number | HTTP status code |
+| `status` | number | HTTP status code (use this to determine severity) |
 | `duration_ms` | number | Non-negative, two decimals |
 
 Requests that fail in a route or middleware also emit a `request_error` line from the central error
@@ -75,8 +80,15 @@ handler in `backend/src/index.ts`:
 | `err.message`, `err.name`, `err.stack` | string | Serialized error |
 | `indexer` | object | Background indexer freshness state (see `GET /api/health`) |
 
-Failing API responses carry the matching envelope: `{ success: false, error: { code, message,
-requestId, details? } }`, so a `requestId` from a client report can be found in the logs.
+Failing API responses carry the matching envelope:
+`{ success: false, error: { code, message, requestId, details? } }`,
+so a `requestId` from a client report can be found in the logs.
+
+Validation failures from `validateBody` middleware are routed through `next(AppError)` so
+the central error handler emits the same `request_error` structured log with `code:
+VALIDATION_ERROR` and the `details` array of `{ field, message }` issues.  This makes
+validation failures filterable by `code == "VALIDATION_ERROR"` without parsing free-form
+messages.
 
 ## Not covered
 

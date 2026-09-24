@@ -211,13 +211,16 @@ export function logRequest(
     path: string;
     status: number;
     durationMs: number;
+    headers?: Record<string, string>;
   },
   _configuredLevel?: LogLevel,
 ): void {
   const durationMs = Number(request.durationMs.toFixed(2));
-  const level = request.status >= 500 ? 'error' : request.status >= 400 ? 'warn' : 'info';
-  
-  const payload = {
+
+  // Always emit http_request at info level so operators can filter by event name
+  // without having to cross-correlate warn/error streams.  The status field
+  // carries sufficient information to derive severity programmatically.
+  logger.info({
     event: 'http_request',
     message: `${request.method} ${request.path} ${request.status} ${durationMs}ms`,
     requestId: request.requestId,
@@ -225,15 +228,7 @@ export function logRequest(
     path: request.path,
     status: request.status,
     duration_ms: durationMs,
-  };
-
-  if (level === 'error') {
-    logger.error(payload);
-  } else if (level === 'warn') {
-    logger.warn(payload);
-  } else {
-    logger.info(payload);
-  }
+  });
 }
 
 export function logLine(

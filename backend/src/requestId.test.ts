@@ -1,11 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { Express } from 'express';
 
 import { REQUEST_ID_HEADER } from './middleware/requestId';
+import { logger } from './logger';
 
 const TEST_DB_PATH = path.join(
   '/tmp',
@@ -29,6 +30,10 @@ afterAll(() => {
   fs.rmSync(TEST_DB_PATH, { force: true });
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('request id middleware', () => {
   it('echoes an incoming X-Request-ID header', async () => {
     const response = await request(app)
@@ -49,17 +54,20 @@ describe('request id middleware', () => {
   });
 
   it('includes request id in structured request logs', async () => {
-    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    // The backend uses pino which does not route through console.info.
+    // Spy on logger.info to capture the structured http_request log line
+    // emitted by the requestIdMiddleware finish handler.
+    const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
 
     await request(app).get('/api/health').set(REQUEST_ID_HEADER, 'log-context-request-id');
 
-    const loggedLine = infoSpy.mock.calls
-      .map(([message]) => String(message))
-      .find((message) => message.includes('http_request'));
-
-    expect(loggedLine).toBeDefined();
-    expect(loggedLine).toContain('log-context-request-id');
-
-    infoSpy.mockRestore();
+    await vi.waitFor(() => {
+      const payload = infoSpy.mock.calls
+        .map(([p]) => p as Record<string, unknown>)
+        .find(
+          (p) => p?.event === 'http_request' && p.requestId === 'log-context-request-id',
+        );
+      expect(payload, 'no http_request log found for log-context-request-id').toBeDefined();
+    });
   });
 });
