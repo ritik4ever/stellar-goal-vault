@@ -289,6 +289,15 @@ export function CampaignDetailPanel({
         </div>
       </div>
 
+      {connectedWallet && connectedWallet === activeCampaign.creator && (
+        <div style={{ marginBottom: 16 }}>
+          <Link to={`/campaigns/${activeCampaign.id}/analytics`} className="analytics-link">
+            <BarChart3 size={16} />
+            View Campaign Analytics
+          </Link>
+        </div>
+      )}
+
       <div className="detail-grid">
         <article className="detail-stat">
           <span>Campaign ID</span>

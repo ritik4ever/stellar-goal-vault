@@ -35,6 +35,7 @@ import {
   createComment,
   deleteComment,
   getCampaign,
+  getCampaignAnalytics,
   getCampaignWithProgress,
   getContributorSummary,
   getGlobalStats,

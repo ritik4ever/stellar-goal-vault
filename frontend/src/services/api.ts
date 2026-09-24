@@ -1,6 +1,7 @@
 import {
   AppConfig,
   Campaign,
+  CampaignAnalytics,
   CampaignEvent,
   ContributorBadge,
   ContributorBackedCampaign,
