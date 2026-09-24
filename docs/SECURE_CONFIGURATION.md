@@ -28,6 +28,23 @@ real `.env`, API key, private key, or database URL. Secret scanning
 | `RATE_LIMIT_WINDOW_MS` / limits | Positive numeric integers | `60000` / `120` | Disabling or misconfiguring rate limits exposes write endpoints to spam/bruteforce. |
 | `SECRET_KEY` / `SERVER_PRIVATE_KEY` (contract deploy) | Long random value, injected at runtime | never set locally | A committed/weak key compromises contract control. |
 
+## Startup validation (enforced automatically)
+
+The table above is guidance; the rules below are **enforced by `validateEnv()`
+at backend startup** — the server refuses to boot on a violating
+configuration. Non-production (`development`/`test`) still permits every
+local-development override.
+
+| Setting | Rule | Applies in |
+| --- | --- | --- |
+| `NODE_ENV` | Accepted values are exactly `development`, `test`, `production`; anything else (e.g. `prod`) fails fast. Unset stays valid and resolves to `development`. | all environments |
+| `ALLOWED_ORIGINS` | Must be a non-empty, non-wildcard explicit list. | production |
+| `API_KEYS` | Must be non-empty. | production |
+| `CONTRACT_ID` | Must be set. | production |
+| `LOG_LEVEL` | `debug` is rejected. | production |
+| `SOROBAN_RPC_URL` | Must be `https://`. | production |
+| `WEBHOOK_SECRET` | Required when `WEBHOOK_URL` is set. | production |
+
 ## Details
 
 ### `ALLOWED_ORIGINS` (CORS)
