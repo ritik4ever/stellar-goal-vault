@@ -105,18 +105,4 @@ describe('request id middleware', () => {
     });
   });
 
-  it('includes the assigned ID in the existing request log format', async () => {
-    const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
-    const requestId = 'legacy-log-request-id';
-
-    await request(app).get('/api/openapi.json').set(REQUEST_ID_HEADER, requestId);
-
-    await vi.waitFor(() => {
-      expect(
-        infoSpy.mock.calls.some(
-          ([payload]) => typeof payload === 'string' && payload.includes(`requestId=${requestId}`),
-        ),
-      ).toBe(true);
-    });
-  });
 });

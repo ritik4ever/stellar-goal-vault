@@ -71,6 +71,12 @@ export function requestIdMiddleware(req: RequestWithId, res: Response, next: Nex
   req.requestId = requestId;
   res.setHeader(REQUEST_ID_HEADER, requestId);
 
+  // Extract retry info from headers (often set by proxies or client interceptors)
+  const retryCountStr = req.header('x-retry-count');
+  if (retryCountStr) req.retryCount = parseInt(retryCountStr, 10);
+  const retryReason = req.header('x-retry-reason');
+  if (retryReason) req.retryReason = retryReason;
+
   const startedAt = process.hrtime.bigint();
 
   res.on('finish', () => {
@@ -80,6 +86,8 @@ export function requestIdMiddleware(req: RequestWithId, res: Response, next: Nex
     const redactedPath = redactUrl(req.originalUrl || req.path);
     const redactedHeaders = redactHeaders(req.headers as Record<string, string>);
 
+    const finalOutcome = req.finalOutcome || (res.statusCode >= 400 ? 'failure' : 'success');
+
     logRequest(
       {
         requestId,
@@ -88,6 +96,11 @@ export function requestIdMiddleware(req: RequestWithId, res: Response, next: Nex
         status: res.statusCode,
         durationMs,
         headers: redactedHeaders,
+        ip: req.ip,
+        userAgent: req.get('user-agent'),
+        retryCount: req.retryCount,
+        retryReason: req.retryReason,
+        finalOutcome,
       },
       config.logLevel,
     );

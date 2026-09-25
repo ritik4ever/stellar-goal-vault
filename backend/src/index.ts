@@ -16,7 +16,6 @@ import { apiKeyAuthMiddleware } from './middleware/apiKeyAuth';
 import { cacheMiddleware } from './middleware/cacheMiddleware';
 import { idempotencyMiddleware } from './middleware/idempotencyMiddleware';
 import { requestIdMiddleware } from './middleware/requestId';
-import { requestLoggingMiddleware } from './middleware/requestLogging';
 import { validateBody } from './middleware/validateBody';
 import type { RequestWithId } from './middleware/types';
 import { initRedisCache } from './services/cache';
@@ -100,7 +99,6 @@ export const app = express();
 // (for example CORS, body parsing, authentication, rate limiting, or docs).
 // The finish logger is installed here too so every handled request is logged.
 app.use(requestIdMiddleware);
-app.use(requestLoggingMiddleware);
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
