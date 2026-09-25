@@ -8,7 +8,6 @@ import {
   rpc,
 } from '@stellar/stellar-sdk';
 import { getAppConfig } from './api';
-import { parseSimulationError } from './freighter';
 import { SorobanRefundMetadata } from '../types/campaign';
 import { GoalVaultContract } from '../generated';
 
@@ -25,7 +24,8 @@ function stringifyErrorDetails(value: unknown): string {
 }
 
 function getSimulationErrorMessage(simulation: unknown): string {
-  return parseSimulationError(simulation);
+  const raw = simulation as { error?: unknown };
+  return `Soroban simulation failed: ${stringifyErrorDetails(raw.error ?? simulation)}`;
 }
 
 function getSendErrorMessage(response: unknown): string {
