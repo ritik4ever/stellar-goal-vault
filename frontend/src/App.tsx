@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
@@ -8,9 +7,20 @@ import { lazy, Suspense } from "react";
 import { CampaignsTable } from "./components/CampaignsTable";
 import { CampaignTimeline } from "./components/CampaignTimeline";
 import { NotificationBell } from "./components/NotificationBell";
-import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { IssueBacklog } from "./components/IssueBacklog";
 import { SkeletonAnalytics } from "./components/SkeletonAnalytics";
+import { SkeletonCard } from "./components/SkeletonCard";
+
+// Heavy panel components are lazy-loaded so they do not block the initial
+// render of the campaign board and metrics. Each has a lightweight skeleton
+// fallback that matches its visual footprint.
+const CampaignDetailPanel = lazy(() =>
+  import("./components/CampaignDetailPanel").then((m) => ({ default: m.CampaignDetailPanel })),
+);
+
+const CreateCampaignForm = lazy(() =>
+  import("./components/CreateCampaignForm").then((m) => ({ default: m.CreateCampaignForm })),
+);
 
 const CreatorAnalytics = lazy(() =>
   import("./components/CreatorAnalytics").then((m) => ({ default: m.CreatorAnalytics })),
@@ -819,29 +829,61 @@ function App() {
       )}
 
       <section className="layout-grid animate-fade-in" style={{ animationDelay: '0.2s' }}>
-        <CreateCampaignForm
-          onCreate={handleCreate}
-          apiError={createError}
-          isLoading={initialLoad || !appConfig}
-          onRetry={() => window.location.reload()}
-          allowedAssets={appConfig?.allowedAssets}
-        />
+        <ErrorBoundary componentName="CreateCampaignForm">
+          <Suspense
+            fallback={
+              <section className="card wizard-card" aria-busy="true" aria-label="Loading create campaign form">
+                <div className="section-heading">
+                  <div className="skeleton skeleton-line" style={{ width: 180, height: 24 }} />
+                </div>
+                <SkeletonCard />
+              </section>
+            }
+          >
+            <CreateCampaignForm
+              onCreate={handleCreate}
+              apiError={createError}
+              isLoading={initialLoad || !appConfig}
+              onRetry={() => window.location.reload()}
+              allowedAssets={appConfig?.allowedAssets}
+            />
+          </Suspense>
+        </ErrorBoundary>
         <ErrorBoundary componentName="CampaignDetailPanel">
-          <CampaignDetailPanel
-            campaign={selectedCampaign}
-            appConfig={appConfig}
-            connectedWallet={connectedWallet}
-            isConnectingWallet={isConnectingWallet}
-            isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
-            isLoading={isSelectedLoading || initialLoad}
-            notFoundCampaignId={invalidUrlCampaignId}
-            onConnectWallet={handleConnectWallet}
-            onDisconnectWallet={handleDisconnectWallet}
-            onPledge={handlePledge}
-            onClaim={handleClaim}
-            onSoftDelete={handleSoftDelete}
-            onRefund={handleRefund}
-          />
+          <Suspense
+            fallback={
+              <section className="card detail-panel" aria-busy="true" aria-label="Loading campaign details">
+                <div className="section-heading">
+                  <div className="skeleton skeleton-line" style={{ width: 220, height: 24 }} />
+                  <div className="skeleton skeleton-line" style={{ width: 320, height: 14, marginTop: 8 }} />
+                </div>
+                <div className="detail-grid">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <article key={i} className="detail-stat">
+                      <div className="skeleton skeleton-line" style={{ width: 120 }} />
+                      <div className="skeleton skeleton-line" style={{ width: 80, height: 18, marginTop: 8 }} />
+                    </article>
+                  ))}
+                </div>
+              </section>
+            }
+          >
+            <CampaignDetailPanel
+              campaign={selectedCampaign}
+              appConfig={appConfig}
+              connectedWallet={connectedWallet}
+              isConnectingWallet={isConnectingWallet}
+              isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+              isLoading={isSelectedLoading || initialLoad}
+              notFoundCampaignId={invalidUrlCampaignId}
+              onConnectWallet={handleConnectWallet}
+              onDisconnectWallet={handleDisconnectWallet}
+              onPledge={handlePledge}
+              onClaim={handleClaim}
+              onSoftDelete={handleSoftDelete}
+              onRefund={handleRefund}
+            />
+          </Suspense>
         </ErrorBoundary>
       </section>
 
