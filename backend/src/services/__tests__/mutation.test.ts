@@ -16,7 +16,16 @@
 
 import fs from 'fs';
 import path from 'path';
-import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, afterAll, afterEach, describe, expect, it } from 'vitest';
+
+import {
+  buildFutureDeadline,
+  buildPastDeadline,
+  freezeClock,
+  ONE_DAY_SECONDS,
+  type Clock,
+  WALLETS,
+} from '../../../tests/fixtures';
 
 const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-mutation-${process.pid}.db`);
 
@@ -50,17 +59,20 @@ let getCampaignHistory: EventHistoryModule['getCampaignHistory'];
 let getEventByTxHash: EventHistoryModule['getEventByTxHash'];
 let getEventsByLedger: EventHistoryModule['getEventsByLedger'];
 let getEventsBySource: EventHistoryModule['getEventsBySource'];
+let setCurrentTime: CampaignStoreModule['setCurrentTime'];
+let resetTime: CampaignStoreModule['resetTime'];
+let clock: Clock;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
-const CONTRIBUTOR2 = `G${'C'.repeat(55)}`;
+const CREATOR = WALLETS.creator;
+const CONTRIBUTOR = WALLETS.alice;
+const CONTRIBUTOR2 = WALLETS.bob;
 const TX_HASH = 'b'.repeat(64);
 const TX_HASH2 = 'c'.repeat(64);
 
 // ── Helper: future deadline (seconds) ────────────────────────────────────────
-const future = (offsetSeconds = 86400) => Math.floor(Date.now() / 1000) + offsetSeconds;
-const past = (offsetSeconds = 86400) => Math.floor(Date.now() / 1000) - offsetSeconds;
+const future = (offsetSeconds = ONE_DAY_SECONDS) => buildFutureDeadline(offsetSeconds);
+const past = (offsetSeconds = ONE_DAY_SECONDS) => buildPastDeadline(offsetSeconds);
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 beforeAll(async () => {
@@ -81,6 +93,8 @@ beforeAll(async () => {
     softDeleteCampaign,
     restoreCampaign,
     listCampaigns,
+    setCurrentTime,
+    resetTime,
   } = await import('../campaignStore'));
 
   ({ getDb } = await import('../db'));
@@ -95,6 +109,10 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  clock = freezeClock(undefined, {
+    setStoreTime: setCurrentTime,
+    resetStoreTime: resetTime,
+  });
   const db = getDb();
   db.prepare('DELETE FROM webhook_dead_letter_queue').run();
   db.prepare('DELETE FROM notifications').run();
@@ -102,6 +120,10 @@ beforeEach(() => {
   db.prepare('DELETE FROM pledges').run();
   db.prepare('DELETE FROM notifications').run();
   db.prepare('DELETE FROM campaigns').run();
+});
+
+afterEach(() => {
+  clock.restore();
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
