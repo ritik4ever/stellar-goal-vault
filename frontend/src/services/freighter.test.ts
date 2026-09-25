@@ -9,7 +9,7 @@ const freighterMocks = vi.hoisted(() => ({
 
 vi.mock('@stellar/freighter-api', () => freighterMocks);
 
-import { amountToContractUnits, connectFreighterWallet } from './freighter';
+import { amountToContractUnits, connectFreighterWallet, parseSimulationError } from './freighter';
 
 describe('freighter helpers', () => {
   beforeEach(() => {
@@ -49,5 +49,27 @@ describe('freighter helpers', () => {
         code: 'FREIGHTER_NETWORK_MISMATCH',
       },
     );
+  });
+});
+
+describe('parseSimulationError', () => {
+  it('maps known contract failures to user-friendly messages', () => {
+    expect(parseSimulationError({ error: 'campaign already claimed' })).toBe(
+      'This campaign has already been claimed.',
+    );
+    expect(parseSimulationError({ error: 'per-contributor cap exceeded' })).toBe(
+      'You have exceeded the maximum contribution limit for this campaign.',
+    );
+  });
+
+  it('handles unknown strings safely', () => {
+    expect(parseSimulationError({ error: 'Some obscure panic' })).toBe(
+      'Simulation failed: Some obscure panic',
+    );
+  });
+
+  it('handles missing or non-string errors gracefully', () => {
+    expect(parseSimulationError(undefined)).toBe('Simulation failed with an unknown error.');
+    expect(parseSimulationError({ error: null })).toBe('Simulation failed with an unknown error.');
   });
 });

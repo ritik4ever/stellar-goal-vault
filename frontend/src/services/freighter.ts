@@ -88,6 +88,46 @@ function estimateFeeFromTransaction(transaction: { fee: string }): EstimatedFee 
   }
 }
 
+export function parseSimulationError(simulation: any): string {
+  const errorMessage = typeof simulation?.error === 'string' ? simulation.error.toLowerCase() : '';
+  if (!errorMessage) {
+    return 'Simulation failed with an unknown error.';
+  }
+
+  if (errorMessage.includes('campaign already claimed')) {
+    return 'This campaign has already been claimed.';
+  }
+  if (errorMessage.includes('campaign canceled')) {
+    return 'This campaign was canceled.';
+  }
+  if (errorMessage.includes('campaign deadline reached')) {
+    return 'This campaign has ended and is no longer accepting pledges.';
+  }
+  if (errorMessage.includes('campaign funding cap exceeded')) {
+    return 'This pledge would exceed the campaign funding cap.';
+  }
+  if (errorMessage.includes('token not accepted by this campaign')) {
+    return 'This token is not accepted by the campaign.';
+  }
+  if (errorMessage.includes('per-contributor cap exceeded')) {
+    return 'You have exceeded the maximum contribution limit for this campaign.';
+  }
+  if (errorMessage.includes('contribution below minimum')) {
+    return 'Your contribution is below the minimum required amount.';
+  }
+  if (errorMessage.includes('creator mismatch')) {
+    return 'Only the campaign creator can perform this action.';
+  }
+  if (errorMessage.includes('campaign is still active')) {
+    return 'This campaign is still active and cannot be claimed yet.';
+  }
+  if (errorMessage.includes('campaign is not funded')) {
+    return 'This campaign did not reach its funding goal.';
+  }
+
+  return `Simulation failed: ${simulation.error}`;
+}
+
 export function amountToContractUnits(amount: number, decimals: number): bigint {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw buildError('INVALID_AMOUNT', 'Pledge amount must be greater than zero.');
@@ -239,11 +279,11 @@ export async function submitFreighterClaim(params: {
     );
   });
 
-  if ('error' in simulation) {
-    throw buildError('SIMULATION_FAILED', `Simulation failed: ${simulation.error}`);
+  if (rpc.Api.isSimulationError(simulation)) {
+    throw buildError('CONTRACT_CALL_REJECTED', parseSimulationError(simulation));
   }
 
-  if ('restorePreamble' in simulation) {
+  if (rpc.Api.isSimulationRestore(simulation)) {
     throw buildError(
       'STATE_RESTORE_REQUIRED',
       'The contract state is archived and must be restored before claiming.',
@@ -379,11 +419,11 @@ export async function submitFreighterPledge(params: {
     );
   });
 
-  if ('error' in simulation) {
-    throw buildError('SIMULATION_FAILED', `Simulation failed: ${simulation.error}`);
+  if (rpc.Api.isSimulationError(simulation)) {
+    throw buildError('CONTRACT_CALL_REJECTED', parseSimulationError(simulation));
   }
 
-  if ('restorePreamble' in simulation) {
+  if (rpc.Api.isSimulationRestore(simulation)) {
     throw buildError(
       'STATE_RESTORE_REQUIRED',
       'The contract state is archived and must be restored before pledging.',
