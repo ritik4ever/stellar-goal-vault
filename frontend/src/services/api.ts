@@ -15,6 +15,7 @@ import {
   ReconcilePledgePayload,
   SorobanRefundMetadata,
 } from '../types/campaign';
+import { HISTORY_PAGE_SIZE, sortHistoryEvents } from '../lib/campaignDetailLoading';
 import { apiRequest } from './httpClient';
 
 export type CampaignListResponse = {
@@ -161,7 +162,7 @@ export async function refundCampaign(
   return body.data;
 }
 
-const HISTORY_DEFAULT_PAGE_SIZE = 20;
+const HISTORY_DEFAULT_PAGE_SIZE = HISTORY_PAGE_SIZE;
 
 export async function getCampaignHistoryPage(
   campaignId: string,
@@ -174,11 +175,9 @@ export async function getCampaignHistoryPage(
     method: 'GET',
     params: { page, pageSize },
   });
-  // Backend returns in stable order; re-sort by timestamp/id to preserve ordering across chunks
-  const sorted = [...body.data].sort(
-    (left, right) => left.timestamp - right.timestamp || left.id - right.id,
-  );
-  return { data: sorted, hasMore: body.hasMore };
+  // Backend returns in stable order; re-sort through the shared helper so this
+  // transport layer and the detail panel cannot drift apart on ordering.
+  return { data: sortHistoryEvents(body.data), hasMore: body.hasMore };
 }
 
 export async function getCampaignHistory(campaignId: string): Promise<CampaignEvent[]> {

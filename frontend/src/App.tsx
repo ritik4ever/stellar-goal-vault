@@ -59,6 +59,10 @@ import { useCampaignShareCard } from "./components/CampaignShareCard";
 import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
 import { appendUniqueCampaigns } from "./lib/campaignListPagination";
 import {
+  mergeCampaignDetail,
+  mergeHistoryPages,
+} from "./lib/campaignDetailLoading";
+import {
   ApiError,
   AppConfig,
   Campaign,
@@ -365,14 +369,9 @@ function App() {
         page: nextPage,
         pageSize: 20,
       });
-      // Preserve ordering: backend already sorted, append unseen events preserving timestamp,id order
-      setHistory((current) => {
-        const seen = new Set(current.map((e) => e.id));
-        const unseen = data.filter((e) => !seen.has(e.id));
-        const merged = [...current, ...unseen];
-        merged.sort((a, b) => a.timestamp - b.timestamp || a.id - b.id);
-        return merged;
-      });
+      // Dedupe against the loaded chunks and re-sort by (timestamp, id) so pages
+      // that interleave with the window on screen stay in one stable order.
+      setHistory((current) => mergeHistoryPages(current, data));
       setHistoryPage(nextPage);
       setHasMoreHistory(hasMore);
     } catch (error) {
@@ -493,24 +492,14 @@ function App() {
     });
   }, [addToast, selectedCampaignId]);
 
-  const selectedCampaign = useMemo(() => {
-    const summaryCampaign =
-      campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
-
-    if (!summaryCampaign) {
-      return selectedCampaignDetails;
-    }
-
-    if (!selectedCampaignDetails || selectedCampaignDetails.id !== summaryCampaign.id) {
-      return summaryCampaign;
-    }
-
-    return {
-      ...summaryCampaign,
-      pledges: selectedCampaignDetails.pledges,
-      metadata: selectedCampaignDetails.metadata ?? summaryCampaign.metadata,
-    };
-  }, [campaigns, selectedCampaignDetails, selectedCampaignId]);
+  const selectedCampaign = useMemo(
+    () =>
+      mergeCampaignDetail(
+        campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null,
+        selectedCampaignDetails,
+      ),
+    [campaigns, selectedCampaignDetails, selectedCampaignId],
+  );
 
   const ogMeta = useMemo(() => {
     const c = selectedCampaign;

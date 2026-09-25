@@ -56,3 +56,50 @@ npx vitest bench --run -t "1,000"
 
 Compare `hz` (higher is better) across runs on the same machine. Treat results as
 a relative regression signal for the list pipeline, not an absolute latency SLA.
+
+---
+
+# Campaign Detail Loading Benchmark
+
+Opening a campaign issues two parallel requests (the detail record and the first
+history page) and then does client-side work on the results. That CPU-side work
+is measured by `frontend/src/components/benchmarks/campaignDetail.bench.ts`:
+
+- `sortHistoryEvents` — the transport's per-page order check.
+- `mergeHistoryPages` — the "load more" dedupe + re-sort, measured at 20 / 200 /
+  2,000 loaded history events.
+- `mergeCampaignDetail` — the summary/detail fold, measured with 0 / 100 / 1,000
+  pledges.
+
+- **Input size:** deterministic history windows of **20, 200 and 2,000** events
+  (1, 10 and 100 loaded pages at `HISTORY_PAGE_SIZE`) plus detail records with
+  0 / 100 / 1,000 pledges.
+- **Output metrics:** Vitest reports ops/sec (`hz`) plus min/mean/p50/p99/max per case.
+- **Datasets are generated in-process** from a fixed formula — no network and no
+  mutable external data, so results are reproducible locally.
+
+## Running
+
+```bash
+cd frontend
+npm run bench             # every *.bench.ts, including this one
+# or just the campaign-detail pipeline
+npx vitest bench --run src/components/benchmarks/campaignDetail.bench.ts
+npx vitest bench --run -t "2,000"
+```
+
+Correctness at scale is pinned separately (ordering, de-duplication and input
+immutability invariants, no timing assertions):
+
+```bash
+npx vitest run src/components/benchmarks/campaignDetailPipeline.test.ts
+```
+
+## Interpreting results
+
+Compare `hz` across runs on the same machine. `mergeHistoryPages` grows with the
+number of loaded events (it re-sorts the whole window), while
+`mergeCampaignDetail` is flat in pledge count (it adopts `pledges` by reference).
+See [`PERFORMANCE.md`](./PERFORMANCE.md) and
+[`CAMPAIGN_DETAIL_PERFORMANCE.md`](./CAMPAIGN_DETAIL_PERFORMANCE.md) for the
+cost-driver and recommended-limit tables.

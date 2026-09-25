@@ -18,6 +18,11 @@ npm run bench
 
 This executes `vitest bench --run` against the deterministic 1k / 5k / 10k campaign datasets and prints ops/sec plus min/mean/percentile statistics. No network access is needed — all data is generated in-process from a fixed seed.
 
+The same command also runs the campaign-detail pipeline benchmark
+(`src/components/benchmarks/campaignDetail.bench.ts`). Its cost drivers,
+recommended limits and the before/after method are documented in
+[`CAMPAIGN_DETAIL_PERFORMANCE.md`](./CAMPAIGN_DETAIL_PERFORMANCE.md).
+
 ## Main Cost Drivers (Baseline)
 
 | Module | Approx. Gzipped Size | Cost Driver Reason |
@@ -86,6 +91,8 @@ The campaign list pipeline (`searchCampaigns → applyFilters → sortCampaigns`
 |---|---|---|
 | `src/components/benchmarks/campaignsTable.bench.ts` | `vitest bench` (ops/sec) | 1k, 5k, **10k** |
 | `src/components/benchmarks/campaignPipelineScale.test.ts` | `vitest test` (correctness) | **10k** |
+| `src/components/benchmarks/campaignDetail.bench.ts` | `vitest bench` (ops/sec) | 20 / 200 / 2,000 loaded history events, 0 / 100 / 1,000 pledges |
+| `src/components/benchmarks/campaignDetailPipeline.test.ts` | `vitest test` (correctness) | **10k** history events |
 
 ### Benchmark scenarios (per dataset size)
 
