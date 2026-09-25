@@ -1,59 +1,69 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * See https://playwright.dev/docs/test-configuration.
+ * CI-friendly, parallel-safe Playwright config.
+ *
+ * Isolation levers (safe under `fullyParallel` / shard / matrix):
+ * - Ports + baseURL come from env so concurrent CI jobs do not collide.
+ * - Per-worker output/report dirs avoid clobbering artifacts.
+ * - `forbidOnly` + retries only in CI; local keeps `reuseExistingServer`.
  */
+const FRONTEND_PORT = process.env.PLAYWRIGHT_FRONTEND_PORT || '3000';
+const BACKEND_PORT = process.env.PLAYWRIGHT_BACKEND_PORT || '3001';
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${FRONTEND_PORT}`;
+const BACKEND_HEALTH =
+  process.env.PLAYWRIGHT_BACKEND_HEALTH_URL ||
+  `http://localhost:${BACKEND_PORT}/api/health`;
+const OUTPUT_DIR = process.env.PLAYWRIGHT_OUTPUT_DIR || 'test-results';
+const REPORT_DIR = process.env.PLAYWRIGHT_HTML_REPORT || 'playwright-report';
+
 export default defineConfig({
-  testDir: './e2e',
-  /* Run tests in files in parallel */
+  testDir: './tests',
   fullyParallel: true,
-  /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
-  /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 1 : undefined,
-  /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: 'html',
+  workers: process.env.CI ? Number(process.env.PLAYWRIGHT_WORKERS || 2) : undefined,
+  reporter: [
+    ['list'],
+    ['html', { open: 'never', outputFolder: REPORT_DIR }],
+  ],
+  outputDir: OUTPUT_DIR,
+  timeout: 60_000,
   expect: {
     toHaveScreenshot: {
       pathTemplate: '{testDir}/screenshots/{testFilePath}/{arg}{ext}',
     },
   },
-  /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
-    /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:3000',
-
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
+    baseURL: BASE_URL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'on-first-retry',
   },
-
-  /* Configure projects for major browsers */
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-
-  /* Run your local dev server before starting the tests */
-  webServer: [
-    {
-      command: 'npm run dev:backend',
-      url: 'http://localhost:3001/api/health',
-      reuseExistingServer: !process.env.CI,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    },
-    {
-      command: 'npm run dev:frontend',
-      url: 'http://localhost:3000',
-      reuseExistingServer: !process.env.CI,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    },
-  ],
+  webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
+    ? undefined
+    : [
+        {
+          command: `PORT=${BACKEND_PORT} npm run dev:backend`,
+          url: BACKEND_HEALTH,
+          reuseExistingServer: !process.env.CI,
+          stdout: 'pipe',
+          stderr: 'pipe',
+          timeout: 120_000,
+        },
+        {
+          command: `PORT=${FRONTEND_PORT} npm run dev:frontend`,
+          url: BASE_URL,
+          reuseExistingServer: !process.env.CI,
+          stdout: 'pipe',
+          stderr: 'pipe',
+          timeout: 120_000,
+        },
+      ],
 });
