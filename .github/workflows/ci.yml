@@ -23,6 +23,32 @@ jobs:
           cache: "npm"
           cache-dependency-path: backend/package-lock.json
 
+      - name: Validate Node.js and npm versions
+        run: |
+          echo "Node.js version: $(node --version)"
+          echo "npm version: $(npm --version)"
+          node_version=$(node --version | cut -d'v' -f2)
+          major_version=$(echo "$node_version" | cut -d'.' -f1)
+          if [ "$major_version" -lt 18 ]; then
+            echo "Error: Node.js version must be >= 18"
+            exit 1
+          fi
+
+      - name: Validate backend directory exists
+        run: |
+          if [ ! -d "backend" ]; then
+            echo "Error: backend directory not found"
+            exit 1
+          fi
+
+      - name: Validate backend lockfile exists
+        run: |
+          if [ ! -f "backend/package-lock.json" ]; then
+            echo "Error: backend/package-lock.json not found"
+            echo "Please run 'npm install' in the backend directory to generate the lockfile"
+            exit 1
+          fi
+
       - name: Install backend dependencies
         working-directory: backend
         run: npm ci
@@ -30,6 +56,10 @@ jobs:
       - name: Build backend
         working-directory: backend
         run: npm run build
+
+      - name: Validate generated OpenAPI specification is current
+        working-directory: backend
+        run: npm run check:openapi
 
       - name: Lint backend
         working-directory: backend
@@ -67,6 +97,32 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Validate Node.js and npm versions
+        run: |
+          echo "Node.js version: $(node --version)"
+          echo "npm version: $(npm --version)"
+          node_version=$(node --version | cut -d'v' -f2)
+          major_version=$(echo "$node_version" | cut -d'.' -f1)
+          if [ "$major_version" -lt 18 ]; then
+            echo "Error: Node.js version must be >= 18"
+            exit 1
+          fi
+
+      - name: Validate frontend directory exists
+        run: |
+          if [ ! -d "frontend" ]; then
+            echo "Error: frontend directory not found"
+            exit 1
+          fi
+
+      - name: Validate frontend lockfile exists
+        run: |
+          if [ ! -f "frontend/package-lock.json" ]; then
+            echo "Error: frontend/package-lock.json not found"
+            echo "Please run 'npm install' in the frontend directory to generate the lockfile"
+            exit 1
+          fi
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
@@ -94,6 +150,32 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
+      - name: Validate Node.js and npm versions
+        run: |
+          echo "Node.js version: $(node --version)"
+          echo "npm version: $(npm --version)"
+          node_version=$(node --version | cut -d'v' -f2)
+          major_version=$(echo "$node_version" | cut -d'.' -f1)
+          if [ "$major_version" -lt 18 ]; then
+            echo "Error: Node.js version must be >= 18"
+            exit 1
+          fi
+
+      - name: Validate root directory has package.json
+        run: |
+          if [ ! -f "package.json" ]; then
+            echo "Error: package.json not found in root directory"
+            exit 1
+          fi
+
+      - name: Validate root lockfile exists
+        run: |
+          if [ ! -f "package-lock.json" ]; then
+            echo "Error: package-lock.json not found in root directory"
+            echo "Please run 'npm install' to generate the lockfile"
+            exit 1
+          fi
+
       - name: Install root dependencies
         run: npm install
 
@@ -108,15 +190,32 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Validate contracts directory exists
+        run: |
+          if [ ! -d "contracts" ]; then
+            echo "Error: contracts directory not found"
+            exit 1
+          fi
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Validate Rust and Cargo versions
+        run: |
+          echo "Rust version: $(rustc --version)"
+          echo "Cargo version: $(cargo --version)"
+          rust_version=$(rustc --version | cut -d' ' -f2 | cut -d'+' -f1)
+          # Check if version is at least 1.70 (as an example)
+          if [ "$(printf '%s\n' "1.70" "$rust_version" | sort -V | head -n1)" != "1.70" ]; then
+            echo "Warning: Rust version is older than 1.70. Some features may not be available."
+          fi
+
       - name: Build contract
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release
-        
+
       - name: Run contract tests
         working-directory: contracts
         run: cargo test
