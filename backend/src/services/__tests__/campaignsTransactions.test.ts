@@ -159,7 +159,9 @@ describe('softDeleteCampaign – transaction rollback (#870)', () => {
     const refreshed = getCampaign(campaign.id);
     expect(refreshed?.deletedAt).toBeUndefined();
 
-    const archivedEvents = getCampaignHistory(campaign.id).filter((e) => e.eventType === 'archived');
+    const archivedEvents = getCampaignHistory(campaign.id).filter(
+      (e) => e.eventType === 'archived',
+    );
     expect(archivedEvents).toHaveLength(0);
   });
 
@@ -176,7 +178,9 @@ describe('softDeleteCampaign – transaction rollback (#870)', () => {
     const deleted = softDeleteCampaign(campaign.id);
     expect(deleted.deletedAt).toBeDefined();
 
-    const archivedEvents = getCampaignHistory(campaign.id).filter((e) => e.eventType === 'archived');
+    const archivedEvents = getCampaignHistory(campaign.id).filter(
+      (e) => e.eventType === 'archived',
+    );
     expect(archivedEvents).toHaveLength(1);
   });
 });
@@ -195,7 +199,9 @@ describe('restoreCampaign – transaction rollback (#870)', () => {
     expect(() => restoreCampaign(campaign.id)).toThrow('Simulated restored event failure');
 
     expect(getCampaign(campaign.id)?.deletedAt).toBeDefined();
-    const restoredEvents = getCampaignHistory(campaign.id).filter((e) => e.eventType === 'restored');
+    const restoredEvents = getCampaignHistory(campaign.id).filter(
+      (e) => e.eventType === 'restored',
+    );
     expect(restoredEvents).toHaveLength(0);
   });
 
@@ -213,7 +219,9 @@ describe('restoreCampaign – transaction rollback (#870)', () => {
     const restored = restoreCampaign(campaign.id);
     expect(restored.deletedAt).toBeUndefined();
 
-    const restoredEvents = getCampaignHistory(campaign.id).filter((e) => e.eventType === 'restored');
+    const restoredEvents = getCampaignHistory(campaign.id).filter(
+      (e) => e.eventType === 'restored',
+    );
     expect(restoredEvents).toHaveLength(1);
 
     const { campaigns } = listCampaigns({});

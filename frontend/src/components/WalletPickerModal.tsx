@@ -29,7 +29,7 @@ export function WalletPickerModal({
           setIsLoading(false);
         })
         .catch(() => {
-          setWallets(Object.values(WALLET_INFO).map(w => ({ ...w, detected: false })));
+          setWallets(Object.values(WALLET_INFO).map((w) => ({ ...w, detected: false })));
           setIsLoading(false);
         });
     }
@@ -60,7 +60,7 @@ export function WalletPickerModal({
             <div className="wallet-list">
               {wallets.map((wallet) => {
                 const isConnectingThis = connectingWallet === wallet.id;
-                
+
                 return (
                   <button
                     key={wallet.id}

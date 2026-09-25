@@ -79,9 +79,7 @@ describe('query layer indexes (#889)', () => {
       .map((row) => row.detail)
       .join(' | ');
 
-    expect(plan).toMatch(
-      /idx_campaign_events_campaign_timestamp|idx_campaign_events_campaign_id/i,
-    );
+    expect(plan).toMatch(/idx_campaign_events_campaign_timestamp|idx_campaign_events_campaign_id/i);
   });
 
   it('keeps getPledgesByContributor write/read behavior correct', async () => {

@@ -98,9 +98,7 @@ describe('campaign detail pipeline at 10,000 history events', () => {
 
       // Within one shared close time, ids must ascend.
       const firstPage = sorted.slice(0, HISTORY_PAGE_SIZE).map((event) => event.id);
-      expect(firstPage).toEqual(
-        Array.from({ length: HISTORY_PAGE_SIZE }, (_, index) => index),
-      );
+      expect(firstPage).toEqual(Array.from({ length: HISTORY_PAGE_SIZE }, (_, index) => index));
       expect(sorted.filter((event) => event.timestamp === BASE_TIME)).toHaveLength(
         HISTORY_PAGE_SIZE,
       );

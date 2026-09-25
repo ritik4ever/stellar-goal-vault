@@ -95,7 +95,9 @@ export function ShareButtons({ campaign }: ShareButtonsProps) {
       <button
         type="button"
         className="btn-ghost btn-copy"
-        onClick={() => { void handleCopyLink(); }}
+        onClick={() => {
+          void handleCopyLink();
+        }}
         aria-label="Copy campaign link"
         title={copied ? 'Copied!' : 'Copy link'}
       >

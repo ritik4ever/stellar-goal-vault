@@ -1,14 +1,14 @@
-import React, { Suspense, lazy } from "react";
-import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import "./index.css";
+import React, { Suspense, lazy } from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import './index.css';
 
-const App = lazy(() => import("./App"));
+const App = lazy(() => import('./App'));
 const ContributorProfile = lazy(() =>
-  import("./components/ContributorProfile").then((m) => ({ default: m.ContributorProfile })),
+  import('./components/ContributorProfile').then((m) => ({ default: m.ContributorProfile })),
 );
 const NotFoundPage = lazy(() =>
-  import("./components/NotFoundPage").then((m) => ({ default: m.NotFoundPage })),
+  import('./components/NotFoundPage').then((m) => ({ default: m.NotFoundPage })),
 );
 
 // Register the service worker for PWA offline support.
@@ -36,10 +36,16 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <BrowserRouter>
-      <Suspense fallback={<div className="app-shell" aria-busy="true">Loading…</div>}>
+      <Suspense
+        fallback={
+          <div className="app-shell" aria-busy="true">
+            Loading…
+          </div>
+        }
+      >
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/campaigns/:id" element={<App />} />

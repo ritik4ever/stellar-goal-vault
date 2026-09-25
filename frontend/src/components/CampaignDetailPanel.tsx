@@ -1,5 +1,3 @@
-
-
 import { FormEvent, useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { MousePointer2, Download, Link as LinkIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -104,11 +102,17 @@ export function CampaignDetailPanel({
   const handleCopyLink = useCallback(() => {
     if (!campaign) return;
     const url = `${window.location.origin}/campaigns/${campaign.id}`;
-    navigator.clipboard.writeText(url).then(() => {
-      addToast('Campaign link copied to clipboard.', 'success', { href: url, label: url.slice(0, 40) + '…' });
-    }).catch(() => {
-      addToast('Failed to copy link.', 'error');
-    });
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        addToast('Campaign link copied to clipboard.', 'success', {
+          href: url,
+          label: url.slice(0, 40) + '…',
+        });
+      })
+      .catch(() => {
+        addToast('Failed to copy link.', 'error');
+      });
   }, [campaign, addToast]);
 
   useEffect(() => {
@@ -122,8 +126,6 @@ export function CampaignDetailPanel({
       }
     };
   }, []);
-
-
 
   const showSkeleton = useMinDisplayTime(isLoading);
   if (showSkeleton) {
@@ -236,9 +238,7 @@ export function CampaignDetailPanel({
   return (
     <section className="card detail-panel" aria-labelledby="campaign-detail-title">
       {/* Full-width Campaign Banner */}
-      <div
-        className="campaign-detail-banner"
-      >
+      <div className="campaign-detail-banner">
         {activeCampaign.metadata?.imageUrl && !bannerImageError ? (
           <img
             src={activeCampaign.metadata.imageUrl}
@@ -256,7 +256,9 @@ export function CampaignDetailPanel({
 
       <div className="wallet-status" role="group" aria-labelledby="wallet-status-title">
         <div>
-          <h3 id="wallet-status-title" className="wallet-status-title">Wallet status</h3>
+          <h3 id="wallet-status-title" className="wallet-status-title">
+            Wallet status
+          </h3>
           <p className="muted">
             {connectedWallet
               ? `Connected to ${networkName(appConfig)}`
@@ -329,11 +331,19 @@ export function CampaignDetailPanel({
         </article>
         <article className="detail-stat">
           <span>Time left</span>
-          <strong><Countdown deadline={activeCampaign.deadline} /></strong>
+          <strong>
+            <Countdown deadline={activeCampaign.deadline} />
+          </strong>
         </article>
       </div>
 
-      <Suspense fallback={<div className="contributor-summary" aria-busy="true">Loading contributors…</div>}>
+      <Suspense
+        fallback={
+          <div className="contributor-summary" aria-busy="true">
+            Loading contributors…
+          </div>
+        }
+      >
         <ContributorSummary
           campaignId={activeCampaign.id}
           assetCode={activeCampaign.assetCode}
@@ -368,7 +378,12 @@ export function CampaignDetailPanel({
         {activeCampaign.acceptedTokens?.length > 1 && (
           <label className="field-group">
             <span>Token</span>
-            <select value={selectedToken} onChange={(e) => setPledgeToken(e.target.value)} required disabled={isSubmitting || isPledgePending}>
+            <select
+              value={selectedToken}
+              onChange={(e) => setPledgeToken(e.target.value)}
+              required
+              disabled={isSubmitting || isPledgePending}
+            >
               {activeCampaign.acceptedTokens.map((token) => (
                 <option key={token} value={token}>
                   {token}

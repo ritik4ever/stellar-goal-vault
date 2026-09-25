@@ -10,14 +10,14 @@ import {
   getDistinctAssetCodes,
   searchCampaigns,
   sortCampaigns,
-} from "./campaignsTableUtils";
-import { SearchInput } from "./SearchInput";
-import { SortDropdown, SortOption } from "./SortDropdown";
-import { AddressAvatar } from "./AddressAvatar";
-import { SkeletonCard } from "./SkeletonCard";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
-import { useMediaQuery } from "../hooks/useMediaQuery";
-import { useMinDisplayTime } from "../hooks/useMinDisplayTime";
+} from './campaignsTableUtils';
+import { SearchInput } from './SearchInput';
+import { SortDropdown, SortOption } from './SortDropdown';
+import { AddressAvatar } from './AddressAvatar';
+import { SkeletonCard } from './SkeletonCard';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 type StatusFilterValue = '' | CampaignStatus;
 
@@ -258,7 +258,9 @@ export function CampaignsTable({
             <AlertCircle size={20} aria-hidden="true" />
             <div style={{ flex: 1 }}>
               <p style={{ margin: 0, fontWeight: 500 }}>Unable to load campaigns</p>
-              <p className="muted" style={{ margin: '4px 0 0 0' }}>{error.message}</p>
+              <p className="muted" style={{ margin: '4px 0 0 0' }}>
+                {error.message}
+              </p>
             </div>
           </div>
           {error.onRetry && (
