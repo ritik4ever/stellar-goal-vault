@@ -6,7 +6,7 @@ import { config } from '../config';
 import { requestContext } from '../requestContext';
 import type { RequestWithId } from './types';
 
-export const REQUEST_ID_HEADER = 'X-Request-ID';
+export const REQUEST_ID_HEADER = 'X-Request-Id';
 
 // Sensitive headers and query parameters to redact from logs
 const SENSITIVE_HEADERS = new Set([

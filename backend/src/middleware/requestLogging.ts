@@ -12,13 +12,14 @@ export function requestLoggingMiddleware(req: Request, res: Response, next: Next
     // Using string replacement or URL parse to remove query string
     const path = req.originalUrl.split('?')[0];
 
+    const requestId = (req as RequestWithId).requestId;
     const logData = {
       method: req.method,
       path: path,
       statusCode: res.statusCode,
       durationMs,
       duration: `${durationMs.toFixed(2)}ms`,
-      requestId: (req as RequestWithId).id,
+      requestId,
       ip: req.ip,
       userAgent: req.get('user-agent'),
     };

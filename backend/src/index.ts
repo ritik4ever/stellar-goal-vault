@@ -92,7 +92,15 @@ import {
   setTrendingCacheEntry,
   invalidateCampaignCache,
   setCampaignCacheEntry,
-} from './services/campaignCache';export const app = express();
+} from './services/campaignCache';
+
+export const app = express();
+
+// Assign request IDs before any middleware that may short-circuit the request
+// (for example CORS, body parsing, authentication, rate limiting, or docs).
+// The finish logger is installed here too so every handled request is logged.
+app.use(requestIdMiddleware);
+app.use(requestLoggingMiddleware);
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
@@ -138,6 +146,7 @@ app.use(
       'X-RateLimit-Limit',
       'X-RateLimit-Remaining',
       'X-RateLimit-Reset',
+      'X-Request-Id',
       'Retry-After',
     ],
   }),
@@ -148,7 +157,7 @@ app.use(compression({ threshold: 1024 }));
 const bodySizeLimit = process.env.MAX_BODY_SIZE || '16kb';
 app.use(express.json({ limit: bodySizeLimit }));
 
-// OpenAPI documentation endpoints are public and bypass API middleware.
+// Public OpenAPI/docs endpoints bypass API auth and rate limiting, but still receive IDs and logs.
 const openApiDocument = generateOpenApiDocument();
 app.get('/api/openapi.json', (_req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/json');
@@ -233,9 +242,6 @@ export function applyRateLimit(limitOverride?: number) {
 }
 
 app.use(applyRateLimit());
-
-app.use(requestIdMiddleware);
-app.use(requestLoggingMiddleware);
 
 function sendValidationError(issues: z.ZodIssue[]): never {
   throw new AppError(

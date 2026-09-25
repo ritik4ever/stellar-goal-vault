@@ -8,7 +8,7 @@ The backend now includes request logging middleware that records one log line pe
 - Request path (query string removed)
 - Response status code
 - Request duration
-- Request ID (when available)
+- Request ID (`X-Request-Id`; incoming IDs are propagated, otherwise a UUID is generated)
 - Remote IP and user agent
 
 ## Safety
