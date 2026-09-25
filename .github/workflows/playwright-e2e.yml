@@ -106,10 +106,38 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install chromium
 
-      - name: Run Playwright tests
+      - name: Verify E2E coverage tooling
+        run: npm run test:e2e:coverage:tools
+
+      - name: Run Playwright tests with coverage collection
         run: npm run test:e2e
         env:
           CI: true
+          E2E_COVERAGE: "1"
+
+      - name: Build E2E coverage report and enforce threshold
+        if: always()
+        run: npm run test:e2e:coverage:report
+        env:
+          E2E_COVERAGE_ALLOW_EMPTY: "0"
+
+      - name: Publish E2E coverage summary
+        if: always()
+        run: |
+          if [ -f coverage/e2e/coverage.txt ]; then
+            cat coverage/e2e/coverage.txt
+          else
+            echo "No coverage/e2e/coverage.txt produced"
+          fi
+
+      - name: Upload E2E coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-coverage
+          path: coverage/e2e/
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Upload Playwright report on failure
         if: failure()
