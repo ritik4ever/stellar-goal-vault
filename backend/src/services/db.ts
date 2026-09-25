@@ -34,16 +34,22 @@ export function initDb(customPath?: string): void {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  db = new Database(dbPath);
+  const database = new Database(dbPath);
 
-  // Enable Write-Ahead Logging (WAL) mode.
-  // This is the chosen journal mode to prevent unnecessary lock contention,
-  // allowing reads and writes to occur concurrently without blocking each other.
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('foreign_keys = ON');
+  try {
+    // Enable Write-Ahead Logging (WAL) mode.
+    // This is the chosen journal mode to prevent unnecessary lock contention,
+    // allowing reads and writes to occur concurrently without blocking each other.
+    database.pragma('journal_mode = WAL');
+    database.pragma('synchronous = NORMAL');
+    database.pragma('foreign_keys = ON');
 
-  migrate(db);
+    migrate(database);
+    db = database;
+  } catch (error) {
+    database.close();
+    throw error;
+  }
 }
 
 export function resetDbForTests(): void {
@@ -203,6 +209,10 @@ export function ensureCampaignsIntegrityConstraints(
 }
 
 function migrate(database: SQLiteDatabase): void {
+  database.transaction(() => runMigrations(database))();
+}
+
+function runMigrations(database: SQLiteDatabase): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
       id                    TEXT PRIMARY KEY,
@@ -404,10 +414,11 @@ function migrate(database: SQLiteDatabase): void {
     WHERE transaction_hash IS NOT NULL
   `);
 
-  try {
-    database.exec(`ALTER TABLE campaign_events ADD COLUMN blockchain_metadata TEXT;`);
-  } catch {
-    // Column already exists, ignore error.
+  const campaignEventColumns = database.prepare(`PRAGMA table_info(campaign_events)`).all() as Array<{
+    name: string;
+  }>;
+  if (!campaignEventColumns.some((column) => column.name === 'blockchain_metadata')) {
+    database.exec(`ALTER TABLE campaign_events ADD COLUMN blockchain_metadata TEXT`);
   }
 
   const hasMaxPerContributor = campaignColumns.some(
