@@ -120,7 +120,9 @@ describe('Concurrent Pledge Race Condition Tests', () => {
     // Only one pledge of 300 should succeed, next one will exceed 500 cap
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(2);
-    expect((rejected[0] as PromiseRejectedResult).reason.code).toBe('CAMPAIGN_FUNDING_CAP_EXCEEDED');
+    expect((rejected[0] as PromiseRejectedResult).reason.code).toBe(
+      'CAMPAIGN_FUNDING_CAP_EXCEEDED',
+    );
 
     const campaign = getCampaign(campaignId);
     expect(campaign).toBeDefined();

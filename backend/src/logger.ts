@@ -1,7 +1,6 @@
 import pino from 'pino';
 import { getRequestId } from './requestContext';
 
-
 /**
  * Keys that must never appear in logs.
  * Covers auth headers, wallet material, and secret-configuration env/config fields
@@ -40,7 +39,8 @@ export function redactSensitive(value: unknown, depth = 0): unknown {
   if (depth > 6 || value == null) return value;
   if (typeof value === 'string') {
     if (/^Bearer\s+\S+/i.test(value)) return 'Bearer [REDACTED]';
-    if (/^ghp_[A-Za-z0-9]+/.test(value) || /^gho_[A-Za-z0-9]+/.test(value)) return '[REDACTED_TOKEN]';
+    if (/^ghp_[A-Za-z0-9]+/.test(value) || /^gho_[A-Za-z0-9]+/.test(value))
+      return '[REDACTED_TOKEN]';
     if (/^[a-z][a-z0-9+.-]*:\/\/[^\s]*@[^\s]+/i.test(value)) return redactUrlCredentials(value);
     return value;
   }
@@ -69,7 +69,10 @@ export function redactSecretConfig(
       if (typeof value === 'string' && value.length === 0) {
         out[key] = '';
       } else if (typeof value === 'string' && key.toUpperCase().includes('API_KEY')) {
-        const count = value.split(',').map((s) => s.trim()).filter(Boolean).length;
+        const count = value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean).length;
         out[key] = `[REDACTED:${count} key${count === 1 ? '' : 's'}]`;
       } else if (typeof value === 'string' && /url/i.test(key) && /:\/\//.test(value)) {
         out[key] = redactUrlCredentials(value).replace(/:\/\/[^@]*@/, '://***@');
@@ -159,16 +162,21 @@ export const logger = pino({
       'creator',
     ],
     censor: (value: any, path: string[]) => {
-      if (typeof value === 'string' && (path.includes('address') || path.includes('creator')) && value.startsWith('G') && value.length > 50) {
+      if (
+        typeof value === 'string' &&
+        (path.includes('address') || path.includes('creator')) &&
+        value.startsWith('G') &&
+        value.length > 50
+      ) {
         return `${value.slice(0, 5)}...${value.slice(-5)}`;
       }
       return '[REDACTED]';
-    }
+    },
   },
   mixin() {
     const requestId = getRequestId();
     return requestId ? { requestId } : {};
-  }
+  },
 });
 
 export function logInfo(event: string, fields: LogFields, _configuredLevel?: LogLevel): void {
@@ -200,7 +208,7 @@ export function logError(
       message: typeof safeMessage === 'string' ? safeMessage : normalizedError.message,
       stack: normalizedError.stack,
       name: normalizedError.name,
-    }
+    },
   });
 }
 

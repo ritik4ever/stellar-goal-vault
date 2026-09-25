@@ -117,33 +117,30 @@ for (const windowSize of HISTORY_WINDOW_SIZES) {
   const reversedFirstPage = orderedFirstPage.slice().reverse();
   const nextUnseenPage = makeInterleavedPage(100_000, HISTORY_PAGE_SIZE);
 
-  describe(
-    `campaign detail loading — ${windowSize.toLocaleString('en-US')} loaded history events`,
-    () => {
-      bench(`sortHistoryEvents(ordered page of ${HISTORY_PAGE_SIZE})`, () => {
-        // The steady state: the API already returns pages in order, so the
-        // transport's defensive re-sort is a linear scan.
-        sortHistoryEvents(orderedFirstPage);
-      });
+  describe(`campaign detail loading — ${windowSize.toLocaleString('en-US')} loaded history events`, () => {
+    bench(`sortHistoryEvents(ordered page of ${HISTORY_PAGE_SIZE})`, () => {
+      // The steady state: the API already returns pages in order, so the
+      // transport's defensive re-sort is a linear scan.
+      sortHistoryEvents(orderedFirstPage);
+    });
 
-      bench(`sortHistoryEvents(reversed page of ${HISTORY_PAGE_SIZE})`, () => {
-        // The page arrives out of order, so the full `n log n` sort runs.
-        sortHistoryEvents(reversedFirstPage);
-      });
+    bench(`sortHistoryEvents(reversed page of ${HISTORY_PAGE_SIZE})`, () => {
+      // The page arrives out of order, so the full `n log n` sort runs.
+      sortHistoryEvents(reversedFirstPage);
+    });
 
-      bench('mergeHistoryPages(current, next unseen page)', () => {
-        // Steady-state "load more": one fresh page merged into the window
-        // already on screen. The page interleaves, so the union is re-sorted.
-        mergeHistoryPages(loadedWindow, nextUnseenPage);
-      });
+    bench('mergeHistoryPages(current, next unseen page)', () => {
+      // Steady-state "load more": one fresh page merged into the window
+      // already on screen. The page interleaves, so the union is re-sorted.
+      mergeHistoryPages(loadedWindow, nextUnseenPage);
+    });
 
-      bench('mergeHistoryPages(current, fully overlapping page)', () => {
-        // Worst case for the dedupe scan and the reference-identity fast path:
-        // every incoming id is already loaded, so no re-sort is needed.
-        mergeHistoryPages(loadedWindow, orderedFirstPage);
-      });
-    },
-  );
+    bench('mergeHistoryPages(current, fully overlapping page)', () => {
+      // Worst case for the dedupe scan and the reference-identity fast path:
+      // every incoming id is already loaded, so no re-sort is needed.
+      mergeHistoryPages(loadedWindow, orderedFirstPage);
+    });
+  });
 }
 
 describe('campaign detail loading — detail record merge', () => {

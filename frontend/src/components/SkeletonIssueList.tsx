@@ -5,7 +5,10 @@ export function SkeletonIssueList() {
         <h2>Contribution backlog</h2>
         <p className="muted">Loading open issue ideas...</p>
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }} aria-hidden="true">
+      <div
+        style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}
+        aria-hidden="true"
+      >
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="skeleton" style={{ width: 80, height: 28, borderRadius: 999 }} />
         ))}

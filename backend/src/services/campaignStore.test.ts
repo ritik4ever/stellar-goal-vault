@@ -107,7 +107,9 @@ describe('campaign store search', () => {
     });
 
     addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 100 });
-    getDb().prepare(`UPDATE campaigns SET deadline = ? WHERE id = ?`).run(FIXED_NOW - 5, campaign.id);
+    getDb()
+      .prepare(`UPDATE campaigns SET deadline = ? WHERE id = ?`)
+      .run(FIXED_NOW - 5, campaign.id);
 
     const claimedCampaign = claimCampaign(campaign.id, {
       creator: CREATOR,
@@ -162,7 +164,9 @@ describe('campaign store search', () => {
 
     expect(listCampaigns({ searchQuery: 'rocket' }).campaigns[0].id).toBe(campaign.id);
     expect(
-      listCampaigns({ searchQuery: campaign.creator }).campaigns.some((row) => row.id === campaign.id),
+      listCampaigns({ searchQuery: campaign.creator }).campaigns.some(
+        (row) => row.id === campaign.id,
+      ),
     ).toBe(true);
     expect(listCampaigns({ searchQuery: campaign.id }).campaigns[0].id).toBe(campaign.id);
   });
@@ -345,21 +349,25 @@ describe('campaign persistence regression tests', () => {
     });
 
     const db = getDb();
-    
+
     // Insert a pledge manually to simulate a potential conflict
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO pledges (campaign_id, contributor, amount, asset_code, transaction_hash, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(campaign.id, CONTRIBUTOR, 100, 'USDC', TX_HASH, FIXED_DEADLINE - 100);
+    `,
+    ).run(campaign.id, CONTRIBUTOR, 100, 'USDC', TX_HASH, FIXED_DEADLINE - 100);
 
     // Attempting to reconcile with the same transaction hash should fail or be handled
     // The current implementation uses idempotency, so we test that the constraint
     // is respected by the database layer if we try to insert directly
     expect(() => {
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO pledges (campaign_id, contributor, amount, asset_code, transaction_hash, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
-      `).run(campaign.id, CONTRIBUTOR2, 50, 'USDC', TX_HASH, FIXED_DEADLINE - 90);
+      `,
+      ).run(campaign.id, CONTRIBUTOR2, 50, 'USDC', TX_HASH, FIXED_DEADLINE - 90);
     }).toThrow();
   });
 

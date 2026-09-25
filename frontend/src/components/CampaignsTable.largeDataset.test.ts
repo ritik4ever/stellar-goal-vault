@@ -61,7 +61,9 @@ describe('campaign list large-dataset regression', () => {
 
     // Filter correctness: USDC + open intersection
     const filtered = applyFilters(campaigns, 'USDC', 'open');
-    const expected = campaigns.filter((c) => c.assetCode === 'USDC' && c.progress.status === 'open');
+    const expected = campaigns.filter(
+      (c) => c.assetCode === 'USDC' && c.progress.status === 'open',
+    );
     expect(filtered).toHaveLength(expected.length);
     expect(new Set(filtered.map((c) => c.id)).size).toBe(filtered.length);
 

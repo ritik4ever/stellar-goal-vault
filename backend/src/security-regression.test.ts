@@ -65,7 +65,9 @@ describe('Security regression — request input handling', () => {
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     const messages = res.body.error.details.map((d: any) => String(d.message).toLowerCase());
-    expect(messages.some((m: string) => m.includes('private') || m.includes('loopback'))).toBe(true);
+    expect(messages.some((m: string) => m.includes('private') || m.includes('loopback'))).toBe(
+      true,
+    );
   });
 
   it('returns 413 Payload Too Large for oversized request bodies', async () => {
