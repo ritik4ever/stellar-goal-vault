@@ -690,9 +690,9 @@ describe('claimCampaign – guards', () => {
     const c = fundedExpiredCampaign();
     claimCampaign(c.id, { creator: CREATOR, transactionHash: TX_HASH });
     const first = getCampaign(c.id)!.claimedAt;
-    expect(() =>
-      claimCampaign(c.id, { creator: CREATOR, transactionHash: TX_HASH2 }),
-    ).toThrow('Campaign already claimed');
+    expect(() => claimCampaign(c.id, { creator: CREATOR, transactionHash: TX_HASH2 })).toThrow(
+      'Campaign already claimed',
+    );
     // claimedAt must remain unchanged after failed double-claim
     expect(getCampaign(c.id)!.claimedAt).toBe(first);
   });

@@ -1,3 +1,5 @@
+import { logInfo, logError } from '../logger';
+import { config } from '../config';
 import { createClient, RedisClientType } from 'redis';
 
 type RedisClient = RedisClientType;

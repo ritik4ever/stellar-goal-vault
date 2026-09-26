@@ -24,9 +24,7 @@ export function buildIdempotencyCacheKey(
   return `idempotency:${apiKey}:${campaignId}:${idempotencyKey}`;
 }
 
-export async function getIdempotencyCacheEntry(
-  key: string,
-): Promise<IdempotencyCacheEntry | null> {
+export async function getIdempotencyCacheEntry(key: string): Promise<IdempotencyCacheEntry | null> {
   if (isCacheAvailable()) {
     const cached = await getCacheValue(key);
     if (cached) {
@@ -48,13 +46,13 @@ export async function setIdempotencyCacheEntry(
 ): Promise<void> {
   const serialized = JSON.stringify(entry);
 
+  memoryCache.set(key, entry);
+
   if (isCacheAvailable()) {
     await setCacheValue(key, serialized, IDEMPOTENCY_TTL_SECONDS).catch(() => {
       // Silently fail Redis writes; memory cache still works
     });
   }
-
-  memoryCache.set(key, entry);
 }
 
 export function clearIdempotencyCache(): void {

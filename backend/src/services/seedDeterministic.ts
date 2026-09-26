@@ -63,8 +63,20 @@ const BASE_CAMPAIGNS: SeedCampaign[] = [
 ];
 
 const BASE_PLEDGES: SeedPledge[] = [
-  { campaignId: '1', contributor: `G${'D'.repeat(55)}`, amount: 100, assetCode: 'USDC', createdAt: FIXED_NOW - 250 },
-  { campaignId: '2', contributor: `G${'E'.repeat(55)}`, amount: 250, assetCode: 'XLM', createdAt: FIXED_NOW - 150 },
+  {
+    campaignId: '1',
+    contributor: `G${'D'.repeat(55)}`,
+    amount: 100,
+    assetCode: 'USDC',
+    createdAt: FIXED_NOW - 250,
+  },
+  {
+    campaignId: '2',
+    contributor: `G${'E'.repeat(55)}`,
+    amount: 250,
+    assetCode: 'XLM',
+    createdAt: FIXED_NOW - 150,
+  },
 ];
 
 // Deterministic status/asset rotation used to extend past the 3 base campaigns.
@@ -220,9 +232,7 @@ export function parseCountArg(argv: string[]): number {
     return BASE_CAMPAIGNS.length;
   }
 
-  const raw = argv[flagIndex].includes('=')
-    ? argv[flagIndex].split('=')[1]
-    : argv[flagIndex + 1];
+  const raw = argv[flagIndex].includes('=') ? argv[flagIndex].split('=')[1] : argv[flagIndex + 1];
 
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {

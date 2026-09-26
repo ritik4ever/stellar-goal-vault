@@ -1,7 +1,7 @@
-const autocannon = require("autocannon");
+const autocannon = require('autocannon');
 
 const DEFAULTS = {
-  baseUrl: "http://127.0.0.1:3001",
+  baseUrl: 'http://127.0.0.1:3001',
   connections: 20,
   duration: 20,
   timeout: 10,
@@ -10,7 +10,7 @@ const DEFAULTS = {
   pledgeWeight: 1,
   targetAmount: 1000000,
   pledgeAmount: 5,
-  assetCode: "USDC",
+  assetCode: 'USDC',
   deadlineHours: 24,
 };
 
@@ -41,51 +41,55 @@ function parseArgs(argv) {
     const arg = argv[index];
     const nextValue = argv[index + 1];
     switch (arg) {
-      case "--base-url":
+      case '--base-url':
         config.baseUrl = nextValue;
         index += 1;
         break;
-      case "--connections":
-        config.connections = parseNumber(nextValue, config.connections, "--connections");
+      case '--connections':
+        config.connections = parseNumber(nextValue, config.connections, '--connections');
         index += 1;
         break;
-      case "--duration":
-        config.duration = parseNumber(nextValue, config.duration, "--duration");
+      case '--duration':
+        config.duration = parseNumber(nextValue, config.duration, '--duration');
         index += 1;
         break;
-      case "--timeout":
-        config.timeout = parseNumber(nextValue, config.timeout, "--timeout");
+      case '--timeout':
+        config.timeout = parseNumber(nextValue, config.timeout, '--timeout');
         index += 1;
         break;
-      case "--campaigns":
-        config.campaigns = parseNumber(nextValue, config.campaigns, "--campaigns");
+      case '--campaigns':
+        config.campaigns = parseNumber(nextValue, config.campaigns, '--campaigns');
         index += 1;
         break;
-      case "--read-weight":
-        config.readWeight = parseNonNegativeNumber(nextValue, config.readWeight, "--read-weight");
+      case '--read-weight':
+        config.readWeight = parseNonNegativeNumber(nextValue, config.readWeight, '--read-weight');
         index += 1;
         break;
-      case "--pledge-weight":
-        config.pledgeWeight = parseNonNegativeNumber(nextValue, config.pledgeWeight, "--pledge-weight");
+      case '--pledge-weight':
+        config.pledgeWeight = parseNonNegativeNumber(
+          nextValue,
+          config.pledgeWeight,
+          '--pledge-weight',
+        );
         index += 1;
         break;
-      case "--target-amount":
-        config.targetAmount = parseNumber(nextValue, config.targetAmount, "--target-amount");
+      case '--target-amount':
+        config.targetAmount = parseNumber(nextValue, config.targetAmount, '--target-amount');
         index += 1;
         break;
-      case "--pledge-amount":
-        config.pledgeAmount = parseNumber(nextValue, config.pledgeAmount, "--pledge-amount");
+      case '--pledge-amount':
+        config.pledgeAmount = parseNumber(nextValue, config.pledgeAmount, '--pledge-amount');
         index += 1;
         break;
-      case "--asset-code":
+      case '--asset-code':
         config.assetCode = String(nextValue || config.assetCode).toUpperCase();
         index += 1;
         break;
-      case "--deadline-hours":
-        config.deadlineHours = parseNumber(nextValue, config.deadlineHours, "--deadline-hours");
+      case '--deadline-hours':
+        config.deadlineHours = parseNumber(nextValue, config.deadlineHours, '--deadline-hours');
         index += 1;
         break;
-      case "--help":
+      case '--help':
         printHelp();
         process.exit(0);
         break;
@@ -94,7 +98,7 @@ function parseArgs(argv) {
     }
   }
   if (config.readWeight < 1 && config.pledgeWeight < 1) {
-    throw new Error("At least one of --read-weight or --pledge-weight must be greater than zero.");
+    throw new Error('At least one of --read-weight or --pledge-weight must be greater than zero.');
   }
   return config;
 }
@@ -124,12 +128,12 @@ Thresholds (hardcoded for CI):
 }
 
 function createStellarLikeAccount(seed) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   const normalizedSeed = String(seed)
     .toUpperCase()
-    .split("")
+    .split('')
     .filter((character) => alphabet.includes(character))
-    .join("");
+    .join('');
   let body = normalizedSeed;
   while (body.length < 55) {
     body += alphabet[body.length % alphabet.length];
@@ -141,20 +145,20 @@ async function requestJson(baseUrl, path, init = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
-      "content-type": "application/json",
+      'content-type': 'application/json',
       ...(init.headers || {}),
     },
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`${init.method || "GET"} ${path} failed with ${response.status}: ${body}`);
+    throw new Error(`${init.method || 'GET'} ${path} failed with ${response.status}: ${body}`);
   }
   return response.json();
 }
 
 async function waitForHealthyBackend(baseUrl) {
   try {
-    await requestJson(baseUrl, "/api/health");
+    await requestJson(baseUrl, '/api/health');
   } catch (error) {
     throw new Error(
       `Backend is not reachable at ${baseUrl}. Start it before running the CI load test.\n${error.message}`,
@@ -171,13 +175,13 @@ async function seedCampaigns(config) {
     const payload = {
       creator: createStellarLikeAccount(`LOADCREATOR${index}`),
       title: `Load Test Campaign ${suffix}`,
-      description: "Synthetic campaign used by the CI load test script.",
+      description: 'Synthetic campaign used by the CI load test script.',
       acceptedTokens: [config.assetCode],
       targetAmount: config.targetAmount,
       deadline,
     };
-    const response = await requestJson(config.baseUrl, "/api/campaigns", {
-      method: "POST",
+    const response = await requestJson(config.baseUrl, '/api/campaigns', {
+      method: 'POST',
       body: JSON.stringify(payload),
     });
     campaigns.push(response.data);
@@ -190,12 +194,12 @@ function buildRequests(config, campaigns) {
   let pledgeCounter = 0;
   for (let index = 0; index < config.readWeight; index += 1) {
     requests.push({
-      method: "GET",
+      method: 'GET',
       path: `/api/campaigns?page=1&limit=${Math.max(10, campaigns.length)}&asset=${encodeURIComponent(config.assetCode)}`,
     });
     const campaign = campaigns[index % campaigns.length];
     requests.push({
-      method: "GET",
+      method: 'GET',
       path: `/api/campaigns/${campaign.id}`,
     });
   }
@@ -204,9 +208,9 @@ function buildRequests(config, campaigns) {
     const contributor = createStellarLikeAccount(`LOADPLEDGER${pledgeCounter}`);
     pledgeCounter += 1;
     requests.push({
-      method: "POST",
+      method: 'POST',
       path: `/api/campaigns/${campaign.id}/pledges`,
-      headers: { "content-type": "application/json" },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ contributor, amount: config.pledgeAmount }),
     });
   }
@@ -245,28 +249,30 @@ function formatFixed(value, digits = 2) {
 }
 
 function printSummary(config, campaigns, result) {
-  const successfulRequests = Math.max(0, result["2xx"] || 0);
+  const successfulRequests = Math.max(0, result['2xx'] || 0);
   const failedRequests = (result.non2xx || 0) + (result.errors || 0) + (result.timeouts || 0);
   const totalRequests = successfulRequests + failedRequests;
   const errorRate = totalRequests === 0 ? 0 : (failedRequests / totalRequests) * 100;
 
   const p99 = result.latency.p99;
 
-  console.log("\nLoad test configuration");
+  console.log('\nLoad test configuration');
   console.log(`- Base URL: ${config.baseUrl}`);
   console.log(`- Connections: ${config.connections}`);
   console.log(`- Duration: ${config.duration}s`);
   console.log(`- Seed campaigns: ${campaigns.length}`);
-  console.log(`- Scenario mix: ${config.readWeight} read slots / ${config.pledgeWeight} pledge slots`);
+  console.log(
+    `- Scenario mix: ${config.readWeight} read slots / ${config.pledgeWeight} pledge slots`,
+  );
 
-  console.log("\nLatency percentiles (ms)");
+  console.log('\nLatency percentiles (ms)');
   console.log(`- p50: ${formatFixed(result.latency.p50)}`);
   console.log(`- p90: ${formatFixed(result.latency.p90)}`);
   console.log(`- p97.5: ${formatFixed(result.latency.p97_5)}`);
   console.log(`- p99: ${formatFixed(p99)}`);
   console.log(`- max: ${formatFixed(result.latency.max)}`);
 
-  console.log("\nRequest summary");
+  console.log('\nRequest summary');
   console.log(`- Total requests: ${totalRequests}`);
   console.log(`- 2xx responses: ${successfulRequests}`);
   console.log(`- Non-2xx responses: ${result.non2xx || 0}`);
@@ -276,19 +282,41 @@ function printSummary(config, campaigns, result) {
   console.log(`- Avg req/sec: ${formatFixed(result.requests.average)}`);
   console.log(`- Avg throughput: ${formatFixed(result.throughput.average / 1024)} KiB/s`);
 
-  console.log("\nThreshold check");
+  console.log('\nThreshold check');
   const p99Pass = p99 <= P99_THRESHOLD_MS;
   const errorRatePass = errorRate <= ERROR_RATE_THRESHOLD_PCT;
-  console.log(`- p99 latency: ${formatFixed(p99)}ms ${p99Pass ? "✅" : "❌"} (threshold: ${P99_THRESHOLD_MS}ms)`);
-  console.log(`- Error rate: ${formatFixed(errorRate)}% ${errorRatePass ? "✅" : "❌"} (threshold: ${ERROR_RATE_THRESHOLD_PCT}%)`);
-  console.log(`- Overall: ${p99Pass && errorRatePass ? "PASS ✅" : "FAIL ❌"}`);
+  console.log(
+    `- p99 latency: ${formatFixed(p99)}ms ${p99Pass ? '✅' : '❌'} (threshold: ${P99_THRESHOLD_MS}ms)`,
+  );
+  console.log(
+    `- Error rate: ${formatFixed(errorRate)}% ${errorRatePass ? '✅' : '❌'} (threshold: ${ERROR_RATE_THRESHOLD_PCT}%)`,
+  );
+  console.log(`- Overall: ${p99Pass && errorRatePass ? 'PASS ✅' : 'FAIL ❌'}`);
 
   const summary = {
-    thresholds: { p99: { value: p99, threshold: P99_THRESHOLD_MS, pass: p99Pass }, errorRate: { value: errorRate, threshold: ERROR_RATE_THRESHOLD_PCT, pass: errorRatePass } },
+    thresholds: {
+      p99: { value: p99, threshold: P99_THRESHOLD_MS, pass: p99Pass },
+      errorRate: { value: errorRate, threshold: ERROR_RATE_THRESHOLD_PCT, pass: errorRatePass },
+    },
     config,
     campaigns: campaigns.length,
-    latency: { p50: result.latency.p50, p90: result.latency.p90, p97_5: result.latency.p97_5, p99, max: result.latency.max },
-    requests: { total: totalRequests, "2xx": successfulRequests, non2xx: result.non2xx || 0, errors: result.errors || 0, timeouts: result.timeouts || 0, errorRate, avgReqSec: result.requests.average, avgThroughputKiBs: result.throughput.average / 1024 },
+    latency: {
+      p50: result.latency.p50,
+      p90: result.latency.p90,
+      p97_5: result.latency.p97_5,
+      p99,
+      max: result.latency.max,
+    },
+    requests: {
+      total: totalRequests,
+      '2xx': successfulRequests,
+      non2xx: result.non2xx || 0,
+      errors: result.errors || 0,
+      timeouts: result.timeouts || 0,
+      errorRate,
+      avgReqSec: result.requests.average,
+      avgThroughputKiBs: result.throughput.average / 1024,
+    },
     passed: p99Pass && errorRatePass,
   };
 
