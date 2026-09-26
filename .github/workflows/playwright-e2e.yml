@@ -70,6 +70,8 @@ jobs:
           CONTRACT_AMOUNT_DECIMALS=2
           DEFAULT_MAX_PER_CONTRIBUTOR=0
           REDIS_URL=redis://redis:6379
+          # Lets the E2E suite freeze/advance the backend clock (e2e/fixtures/time.ts).
+          E2E_TIME_CONTROL=1
           EOF
 
       - name: Set up Docker Buildx

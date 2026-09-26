@@ -1,6 +1,6 @@
 import { APIRequestContext, expect } from '@playwright/test';
 import { Campaign, CampaignStatus, ClaimPayload, createApi, CreateCampaignPayload } from './api';
-import { deadlineInHours } from './time';
+import { deadlineInHours, type TestClock } from './time';
 import { TEST_CONTRIBUTORS, TEST_CREATORS } from './wallets';
 
 export type FixtureCampaignState = 'open' | 'funded' | 'failed' | 'claimed';
@@ -20,23 +20,33 @@ export interface CreateFixtureOptions {
 }
 
 /**
+ * Virtual seconds jumped to move a short-lived fixture past its deadline. Two
+ * hours is safely beyond the one-hour deadline used for `failed`/`claimed`, and
+ * is instant because the clock is virtual.
+ */
+const DEADLINE_PASS_SECONDS = 2 * 3600;
+
+/**
  * Creates a campaign in an exact lifecycle state without copying setup blocks
  * or sleeping on wall-clock time. Declarative state transitions (funding,
- * deadline elapsed, claiming) are driven by API writes and `expect.poll` over
- * fresh list reads.
+ * deadline elapsed, claiming) are driven by API writes, the virtual clock, and
+ * `expect.poll` over fresh list reads.
  */
 export class CampaignBuilder {
   constructor(
     private readonly request: APIRequestContext,
     private readonly scope: string,
+    private readonly clock?: TestClock,
   ) {}
 
   async create(options: CreateFixtureOptions = {}): Promise<Campaign> {
     const api = createApi(this.request);
     const state = options.state ?? 'open';
     const targetAmount = options.targetAmount ?? 100;
-    const deadline =
-      options.deadline ?? deadlineInHours(state === 'failed' || state === 'claimed' ? 0.002 : 720);
+    // Failed/claimed fixtures start with a deadline one hour out and are then
+    // pushed past it with the virtual clock, so nothing waits on real time.
+    const shortLived = state === 'failed' || state === 'claimed';
+    const deadline = options.deadline ?? deadlineInHours(shortLived ? 1 : 720);
 
     const created = await api.createCampaign({
       creator: options.creator ?? TEST_CREATORS.alice,
@@ -56,6 +66,11 @@ export class CampaignBuilder {
         contributor: options.contributor ?? TEST_CONTRIBUTORS.dave,
         amount: pledgeAmount,
       });
+    }
+
+    if (shortLived) {
+      // Move both clocks past the deadline instead of waiting it out.
+      await this.clock?.advance(DEADLINE_PASS_SECONDS);
     }
 
     if (state === 'failed') {

@@ -150,11 +150,11 @@ export function getCurrentTimeState(): number | null {
   return _currentTime;
 }
 
-function nowInSeconds(): number {
+export function nowInSeconds(): number {
   return Math.floor(getCurrentTime() / 1000);
 }
 
-function nowInMilliseconds(): number {
+export function nowInMilliseconds(): number {
   return getCurrentTime();
 }
 

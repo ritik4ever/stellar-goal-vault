@@ -40,6 +40,10 @@ import {
   getTrendingCampaigns,
   getTopContributors,
   initCampaignStore,
+  nowInMilliseconds,
+  nowInSeconds,
+  resetGlobalTime,
+  setGlobalTime,
   listCampaignPledges,
   listCampaigns,
   listContributorPledges,
@@ -719,7 +723,7 @@ app.post(
     try {
     const body = req.body as z.infer<typeof createCampaignPayloadSchema>;
 
-    if (body.deadline <= Math.floor(Date.now() / 1000)) {
+    if (body.deadline <= nowInSeconds()) {
       throw new AppError('deadline must be in the future.', 400, 'INVALID_DEADLINE');
     }
 
@@ -1112,6 +1116,42 @@ app.post('/api/webhooks/dead-letter/:id/retry', async (req: Request, res: Respon
     });
   }
 });
+
+// ── Deterministic time control for the Playwright E2E suite ──────────────────
+// Deadline/lifecycle E2E tests must not depend on the wall clock. When
+// E2E_TIME_CONTROL=1 the suite can freeze and advance the backend clock, using
+// the same injectable clock campaignStore already exposes for unit tests
+// (setGlobalTime/resetGlobalTime). These routes never exist without the env var,
+// so production is unaffected.
+if (process.env.E2E_TIME_CONTROL === '1') {
+  app.get('/api/e2e/time', (_req: Request, res: Response) => {
+    res.json({ data: { now: nowInMilliseconds() } });
+  });
+
+  app.post('/api/e2e/time', async (req: Request, res: Response) => {
+    const now = Number((req.body as { now?: unknown } | undefined)?.now);
+    if (!Number.isFinite(now) || now <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_TIME',
+          message: 'now must be a positive unix timestamp in milliseconds.',
+        },
+      });
+    }
+    setGlobalTime(Math.floor(now));
+    // Cached reads were computed against the old instant; drop them so the next
+    // read reflects the new clock instead of a 30s-stale snapshot.
+    await invalidateCampaignCache();
+    res.json({ data: { now: nowInMilliseconds() } });
+  });
+
+  app.delete('/api/e2e/time', async (_req: Request, res: Response) => {
+    resetGlobalTime();
+    await invalidateCampaignCache();
+    res.json({ data: { now: nowInMilliseconds() } });
+  });
+}
 
 function isErrorWithMessage(error: unknown): error is { message: string; [key: string]: unknown } {
   return (
