@@ -26,6 +26,7 @@ test.describe('Deterministic pledge accounting', () => {
   test('rejects over-cap and unaccepted-asset pledges deterministically', async ({
     campaign,
     request,
+    clock,
   }) => {
     const funded = await campaign.create({ state: 'funded', targetAmount: 50 });
 
@@ -50,8 +51,10 @@ test.describe('Deterministic pledge accounting', () => {
     const closed = await campaign.create({
       state: 'funded',
       targetAmount: 30,
-      deadline: deadlineInHours(0.002),
+      deadline: deadlineInHours(1),
     });
+    // Move past the deadline on the virtual clock; no real-time wait.
+    await clock.advance(3601);
     await campaign.waitForClaimable(closed.id);
 
     const deadline = await request.post(`/api/campaigns/${closed.id}/pledges`, {
