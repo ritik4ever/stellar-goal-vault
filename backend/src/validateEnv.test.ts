@@ -15,10 +15,11 @@ describe('Environment & Request Input Configuration Validation', () => {
     SOROBAN_RPC_URL: 'https://soroban-mainnet.stellar.org:443',
     SOROBAN_NETWORK_PASSPHRASE: 'Public Global Stellar Network ; September 2015',
     ALLOWED_ORIGINS: 'https://app.example.com',
-    API_KEYS: 'secret-key-1,secret-key-2',
+    API_KEYS: 'abcdefghijklmnop,qrstuvwxyz012345',
     LOG_LEVEL: 'info',
     WEBHOOK_URL: 'https://example.com/webhook',
     WEBHOOK_SECRET: 'webhook-secret-123',
+    REDIS_URL: 'redis://:prodcachepass@cache.internal:6379/0',
     MAX_BODY_SIZE: '16kb',
     RATE_LIMIT_WINDOW_MS: '60000',
     RATE_LIMIT_MAX_REQUESTS: '120',
@@ -119,5 +120,86 @@ describe('Environment & Request Input Configuration Validation', () => {
       WEBHOOK_URL: 'https://example.com/webhook',
     };
     expect(() => validateEnv(devEnv)).not.toThrow();
+  });
+
+  it('passes in production with a single 16-character API key', () => {
+    expect(() => validateEnv({ ...validProdEnv, API_KEYS: 'abcdefghijklmnop' })).not.toThrow();
+  });
+
+  it('passes in production with multiple valid API keys', () => {
+    expect(() =>
+      validateEnv({ ...validProdEnv, API_KEYS: 'abcdefghijklmnop,qrstuvwxyz012345' }),
+    ).not.toThrow();
+  });
+
+  it('fails in production when an API key is shorter than 16 characters', () => {
+    expect(() => validateEnv({ ...validProdEnv, API_KEYS: 'short-key' })).toThrow(
+      /at least 16 characters/,
+    );
+  });
+
+  it('fails in production when API_KEYS contains a blank entry', () => {
+    expect(() => validateEnv({ ...validProdEnv, API_KEYS: 'abcdefghijklmnop,,' })).toThrow(
+      /blank entries/,
+    );
+  });
+
+  it('fails in production when an API key has leading or trailing whitespace', () => {
+    expect(() => validateEnv({ ...validProdEnv, API_KEYS: ' abcdefghijklmnop' })).toThrow(
+      /leading or trailing whitespace/,
+    );
+  });
+
+  it('fails in production when WEBHOOK_SECRET is shorter than 16 characters', () => {
+    expect(() => validateEnv({ ...validProdEnv, WEBHOOK_SECRET: 'short' })).toThrow(
+      /at least 16 characters/,
+    );
+  });
+
+  it('passes in production with a 16-character WEBHOOK_SECRET for a configured webhook', () => {
+    expect(() =>
+      validateEnv({ ...validProdEnv, WEBHOOK_SECRET: 'abcdefghijklmnop' }),
+    ).not.toThrow();
+  });
+
+  it('passes in production when REDIS_URL is unset', () => {
+    const env = { ...validProdEnv };
+    delete env.REDIS_URL;
+    expect(() => validateEnv(env)).not.toThrow();
+  });
+
+  it('fails in production when REDIS_URL has no authentication password', () => {
+    expect(() =>
+      validateEnv({ ...validProdEnv, REDIS_URL: 'redis://cache.internal:6379' }),
+    ).toThrow(/include a password in production/);
+  });
+
+  it('passes in production with an authenticated rediss:// REDIS_URL', () => {
+    expect(() =>
+      validateEnv({ ...validProdEnv, REDIS_URL: 'rediss://:cachemstrpw@cache.internal:6380/0' }),
+    ).not.toThrow();
+  });
+
+  it('fails in production when REDIS_URL uses a non-Redis scheme', () => {
+    expect(() =>
+      validateEnv({ ...validProdEnv, REDIS_URL: 'https://cache.internal:6379' }),
+    ).toThrow(/redis:\/\/ or rediss:\/\//);
+  });
+
+  it('fails in production when REDIS_URL is malformed', () => {
+    expect(() => validateEnv({ ...validProdEnv, REDIS_URL: 'not-a-redis-url' })).toThrow(
+      /valid URL in production/,
+    );
+  });
+
+  it('does not enforce secret-format rules outside production', () => {
+    expect(() =>
+      validateEnv({
+        ...validDevEnv,
+        API_KEYS: 'short',
+        WEBHOOK_SECRET: 'x',
+        REDIS_URL: 'redis://host:6379',
+      }),
+    ).not.toThrow();
   });
 });

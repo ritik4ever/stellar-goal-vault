@@ -12,21 +12,21 @@ real `.env`, API key, private key, or database URL. Secret scanning
 
 ## Quick reference
 
-| Setting | Safe production default | Local-development override | Risk if weakened |
-| --- | --- | --- | --- |
-| `NODE_ENV` | `production` | `development` | In `development`, API-key auth and other production hardening are skipped. |
-| `CONTRACT_ID` | A real deployed contract ID | `mock-contract` or empty in tests | Wrong/empty ID breaks pledge signing or lets the app start unconfigured. |
-| `SOROBAN_RPC_URL` | An HTTPS RPC endpoint you control/trust | testnet RPC | A malicious RPC can return false simulation/ledger data. |
-| `SOROBAN_NETWORK_PASSPHRASE` | The passphrase matching the network | testnet passphrase | A mismatch signs transactions for the wrong network. |
-| `ALLOWED_ORIGINS` | Explicit HTTPS origins, comma-separated | `*` (allow all) | `*` in production allows any site to call the API from a browser. |
-| `API_KEYS` | A strong, random, comma-separated list | unset (auth disabled) | Unset in production disables write authentication entirely. |
-| `WEBHOOK_SECRET` | A long random secret | unset | Unset means webhook signatures cannot be verified by the receiver. |
-| `DB_PATH` | A path on persistent, access-controlled storage | `backend/data/campaigns.db` | World-readable/lost storage exposes or loses data. |
-| `REDIS_URL` | Authenticated URL (`redis://:password@host`) | unset (in-memory cache) | An unauthenticated cache can be read/poisoned by other tenants. |
-| `LOG_LEVEL` | `info` (never log secrets) | `debug` | Debug logs can leak request bodies/keys into logs. |
-| `MAX_BODY_SIZE` | Valid size string (e.g. `16kb`, `1mb`) | `16kb` | Unvalidated or overly large payload limits enable body payload DoS attacks. |
-| `RATE_LIMIT_WINDOW_MS` / limits | Positive numeric integers | `60000` / `120` | Disabling or misconfiguring rate limits exposes write endpoints to spam/bruteforce. |
-| `SECRET_KEY` / `SERVER_PRIVATE_KEY` (contract deploy) | Long random value, injected at runtime | never set locally | A committed/weak key compromises contract control. |
+| Setting                                               | Safe production default                         | Local-development override        | Risk if weakened                                                                    |
+| ----------------------------------------------------- | ----------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------- |
+| `NODE_ENV`                                            | `production`                                    | `development`                     | In `development`, API-key auth and other production hardening are skipped.          |
+| `CONTRACT_ID`                                         | A real deployed contract ID                     | `mock-contract` or empty in tests | Wrong/empty ID breaks pledge signing or lets the app start unconfigured.            |
+| `SOROBAN_RPC_URL`                                     | An HTTPS RPC endpoint you control/trust         | testnet RPC                       | A malicious RPC can return false simulation/ledger data.                            |
+| `SOROBAN_NETWORK_PASSPHRASE`                          | The passphrase matching the network             | testnet passphrase                | A mismatch signs transactions for the wrong network.                                |
+| `ALLOWED_ORIGINS`                                     | Explicit HTTPS origins, comma-separated         | `*` (allow all)                   | `*` in production allows any site to call the API from a browser.                   |
+| `API_KEYS`                                            | A strong, random, comma-separated list          | unset (auth disabled)             | Unset in production disables write authentication entirely.                         |
+| `WEBHOOK_SECRET`                                      | A long random secret                            | unset                             | Unset means webhook signatures cannot be verified by the receiver.                  |
+| `DB_PATH`                                             | A path on persistent, access-controlled storage | `backend/data/campaigns.db`       | World-readable/lost storage exposes or loses data.                                  |
+| `REDIS_URL`                                           | Authenticated URL (`redis://:password@host`)    | unset (in-memory cache)           | An unauthenticated cache can be read/poisoned by other tenants.                     |
+| `LOG_LEVEL`                                           | `info` (never log secrets)                      | `debug`                           | Debug logs can leak request bodies/keys into logs.                                  |
+| `MAX_BODY_SIZE`                                       | Valid size string (e.g. `16kb`, `1mb`)          | `16kb`                            | Unvalidated or overly large payload limits enable body payload DoS attacks.         |
+| `RATE_LIMIT_WINDOW_MS` / limits                       | Positive numeric integers                       | `60000` / `120`                   | Disabling or misconfiguring rate limits exposes write endpoints to spam/bruteforce. |
+| `SECRET_KEY` / `SERVER_PRIVATE_KEY` (contract deploy) | Long random value, injected at runtime          | never set locally                 | A committed/weak key compromises contract control.                                  |
 
 ## Startup validation (enforced automatically)
 
@@ -35,15 +35,17 @@ at backend startup** — the server refuses to boot on a violating
 configuration. Non-production (`development`/`test`) still permits every
 local-development override.
 
-| Setting | Rule | Applies in |
-| --- | --- | --- |
-| `NODE_ENV` | Accepted values are exactly `development`, `test`, `production`; anything else (e.g. `prod`) fails fast. Unset stays valid and resolves to `development`. | all environments |
-| `ALLOWED_ORIGINS` | Must be a non-empty, non-wildcard explicit list. | production |
-| `API_KEYS` | Must be non-empty. | production |
-| `CONTRACT_ID` | Must be set. | production |
-| `LOG_LEVEL` | `debug` is rejected. | production |
-| `SOROBAN_RPC_URL` | Must be `https://`. | production |
-| `WEBHOOK_SECRET` | Required when `WEBHOOK_URL` is set. | production |
+| Setting              | Rule                                                                                                                                                      | Applies in       |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `NODE_ENV`           | Accepted values are exactly `development`, `test`, `production`; anything else (e.g. `prod`) fails fast. Unset stays valid and resolves to `development`. | all environments |
+| `ALLOWED_ORIGINS`    | Must be a non-empty, non-wildcard explicit list.                                                                                                          | production       |
+| `API_KEYS`           | Must be non-empty.                                                                                                                                        | production       |
+| `API_KEYS` (entries) | Each entry must be at least 16 characters, with no blank or whitespace-padded entries.                                                                    | production       |
+| `CONTRACT_ID`        | Must be set.                                                                                                                                              | production       |
+| `LOG_LEVEL`          | `debug` is rejected.                                                                                                                                      | production       |
+| `SOROBAN_RPC_URL`    | Must be `https://`.                                                                                                                                       | production       |
+| `WEBHOOK_SECRET`     | Required when `WEBHOOK_URL` is set, and must be at least 16 characters.                                                                                   | production       |
+| `REDIS_URL`          | Optional. If set, must be a `redis://` or `rediss://` URL that includes a password.                                                                       | production       |
 
 ## Details
 
@@ -69,6 +71,9 @@ local-development override.
 - **Risk of weakening:** the middleware is only mounted when
   `NODE_ENV=production`; if `API_KEYS` is empty there, **write endpoints are
   unauthenticated**. Always set `API_KEYS` in production.
+- **Enforced by `validateEnv()`:** each entry must be at least 16 characters,
+  with no blank entries and no leading/trailing whitespace. The runtime compares
+  keys exactly, so a whitespace-padded entry can never authenticate.
 - Generate with: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 
 ### `WEBHOOK_SECRET`
@@ -80,6 +85,8 @@ local-development override.
   no URL is configured.
 - **Risk of weakening:** without a secret, receivers cannot distinguish genuine
   callbacks from forgeries.
+- **Enforced by `validateEnv()`:** when `WEBHOOK_URL` is set in production, the
+  secret must be present and at least 16 characters.
 
 ### `SOROBAN_RPC_URL` and `SOROBAN_NETWORK_PASSPHRASE`
 
@@ -98,6 +105,9 @@ local-development override.
 - **Local development:** SQLite file under `backend/data/`, in-memory cache.
 - **Risk of weakening:** a shared/unauth cache can be read or poisoned; a
   world-readable DB exposes campaign and pledge data.
+- **Enforced by `validateEnv()`:** `REDIS_URL` is optional in production (the
+  cache falls back to in-memory). If set, it must be a `redis://` or `rediss://`
+  URL that includes a password.
 
 ### Secret material (`SECRET_KEY`, `SERVER_PRIVATE_KEY`)
 
