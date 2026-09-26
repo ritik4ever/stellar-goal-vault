@@ -439,7 +439,7 @@ function runMigrations(database: SQLiteDatabase): void {
       actor_wallet  TEXT,
       is_read       INTEGER NOT NULL DEFAULT 0,
       created_at    INTEGER NOT NULL,
-      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_notifications_target_wallet

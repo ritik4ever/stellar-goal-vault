@@ -1551,39 +1551,42 @@ export function refundContributor(
   const refundedAmount = round(refundablePledges.reduce((sum, pledge) => sum + pledge.amount, 0));
   const refundedAt = reconciliation?.createdAt ?? nowInSeconds();
 
-  db.prepare(
-    `UPDATE pledges SET refunded_at = ? WHERE campaign_id = ? AND contributor = ? AND refunded_at IS NULL`,
-  ).run(refundedAt, campaignId, contributor);
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE pledges SET refunded_at = ? WHERE campaign_id = ? AND contributor = ? AND refunded_at IS NULL`,
+    ).run(refundedAt, campaignId, contributor);
 
-  db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount - ? WHERE id = ?`).run(
-    refundedAmount,
-    campaignId,
-  );
+    db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount - ? WHERE id = ?`).run(
+      refundedAmount,
+      campaignId,
+    );
 
-  recordEvent(campaignId, 'refunded', refundedAt, contributor, refundedAmount, {
-    refundedPledgeCount: refundablePledges.length,
-    refundSource: reconciliation?.source ?? 'local',
-    txHash: reconciliation?.txHash,
-    contractId: reconciliation?.contractId,
-    networkPassphrase: reconciliation?.networkPassphrase,
-    rpcUrl: reconciliation?.rpcUrl,
-    walletAddress: reconciliation?.walletAddress,
-    ledger: reconciliation?.ledger,
-    latestLedger: reconciliation?.latestLedger,
-  });
+    recordEvent(campaignId, 'refunded', refundedAt, contributor, refundedAmount, {
+      refundedPledgeCount: refundablePledges.length,
+      refundSource: reconciliation?.source ?? 'local',
+      txHash: reconciliation?.txHash,
+      contractId: reconciliation?.contractId,
+      networkPassphrase: reconciliation?.networkPassphrase,
+      rpcUrl: reconciliation?.rpcUrl,
+      walletAddress: reconciliation?.walletAddress,
+      ledger: reconciliation?.ledger,
+      latestLedger: reconciliation?.latestLedger,
+    });
+
+    createNotification({
+      campaignId,
+      type: 'refund_available',
+      title: `Refund processed for "${campaign.title}"`,
+      body: `${refundedAmount} ${campaign.assetCode} has been refunded to your wallet`,
+      targetWallet: contributor,
+    });
+  })();
 
   void dispatchWebhook('pledge_refunded', campaignId, {
     contributor,
     refundedAmount,
     refundedPledgeCount: refundablePledges.length,
     refundedAt,
-  });
-  createNotification({
-    campaignId,
-    type: 'refund_available',
-    title: `Refund processed for "${campaign.title}"`,
-    body: `${refundedAmount} ${campaign.assetCode} has been refunded to your wallet`,
-    targetWallet: contributor,
   });
 
   return {
