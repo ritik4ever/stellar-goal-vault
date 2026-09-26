@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: '0 6 * * 1'
   workflow_dispatch:
+    inputs:
+      benchmark:
+        description: 'Benchmark to run'
+        required: false
+        default: 'campaign-detail'
+        type: choice
+        options:
+          - campaign-detail
+          - all
 
 jobs:
   load-test:
@@ -89,12 +98,54 @@ jobs:
               print("✅ All thresholds passed!")
           EOF
 
+      - name: Run campaign detail benchmark
+        id: campaign-detail-benchmark
+        working-directory: backend
+        run: |
+          node scripts/benchmark-campaign-detail.js 2>&1 | tee campaign-detail-benchmark-output.txt
+
+      - name: Check campaign detail benchmark thresholds
+        id: check-campaign-detail-thresholds
+        run: |
+          python3 << 'EOF'
+          import json, os
+
+          with open("backend/campaign-detail-benchmark-output.txt") as f:
+              content = f.read()
+
+          start = content.index("---JSON-START---") + len("---JSON-START---")
+          end = content.index("---JSON-END---")
+          summary = json.loads(content[start:end].strip())
+
+          p99 = summary["latency"]["p99"]
+          error_rate = summary["requests"]["errorRate"]
+          passed = summary["passed"]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"summary={json.dumps(summary)}\n")
+              out.write(f"p99={p99}\n")
+              out.write(f"error-rate={error_rate}\n")
+              out.write(f"passed={passed}\n")
+
+          print(f"Campaign detail p99: {p99}ms")
+          print(f"Campaign detail error rate: {error_rate}%")
+          print(f"Passed: {passed}")
+
+          if not passed:
+              print("❌ Campaign detail benchmark thresholds exceeded!")
+              exit(1)
+          else:
+              print("✅ Campaign detail benchmark thresholds passed!")
+          EOF
+
       - name: Upload load test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: load-test-results
-          path: backend/load-test-output.txt
+          path: |
+            backend/load-test-output.txt
+            backend/campaign-detail-benchmark-output.txt
 
       - name: Cleanup backend
         if: always()
