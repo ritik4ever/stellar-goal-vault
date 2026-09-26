@@ -8,6 +8,19 @@ let getCampaignPledgedAmountStmt: Statement | undefined;
 let addPledgeInsertStmt: Statement | undefined;
 let updateCampaignPledgedAmountStmt: Statement | undefined;
 let reconcileOnChainPledgeInsertStmt: Statement | undefined;
+let getContributorPledgedTotalStmt: Statement | undefined;
+let preparedStatementsDb: ReturnType<typeof getDb> | undefined;
+
+function ensurePreparedStatementsForCurrentDb(db: ReturnType<typeof getDb>): void {
+  if (preparedStatementsDb === db) return;
+
+  getCampaignPledgedAmountStmt = undefined;
+  addPledgeInsertStmt = undefined;
+  updateCampaignPledgedAmountStmt = undefined;
+  reconcileOnChainPledgeInsertStmt = undefined;
+  getContributorPledgedTotalStmt = undefined;
+  preparedStatementsDb = db;
+}
 
 export type CampaignStatus = 'open' | 'funded' | 'claimed' | 'failed';
 
@@ -30,7 +43,7 @@ export interface PledgeInput {
   contributor: string;
   amount: number;
   assetCode?: string; // Optional for backward compatibility if only one token
-  tokenId?: string; // Canonical token identifier (code:issuer for classic; contract addr for native). Falls back to assetCode if missing.
+  tokenId?: string; // Canonical token identifier; falls back to assetCode when omitted.
 }
 
 export interface ReconciledPledgeInput extends PledgeInput {
@@ -239,10 +252,9 @@ export function getPledgeByTransactionHash(transactionHash: string): PledgeRecor
   return row ? rowToPledge(row) : undefined;
 }
 
-let getContributorPledgedTotalStmt: any;
-
 export function getContributorPledgedTotal(campaignId: string, contributor: string): number {
   const db = getDb();
+  ensurePreparedStatementsForCurrentDb(db);
   if (!getContributorPledgedTotalStmt) {
     getContributorPledgedTotalStmt = db.prepare(
       `SELECT COALESCE(SUM(amount), 0) AS total
@@ -426,6 +438,18 @@ function checkContributorLimit(
       );
     }
   }
+}
+
+function normalizePledgeAmount(amount: number): number {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw toServiceError('Pledge amount must be a finite positive number.', 400, 'INVALID_AMOUNT');
+  }
+
+  const roundedAmount = round(amount);
+  if (roundedAmount <= 0) {
+    throw toServiceError('Pledge amount must be at least 0.01.', 400, 'INVALID_AMOUNT');
+  }
+  return roundedAmount;
 }
 
 /**
@@ -833,7 +857,7 @@ export function getContributorSummary(campaignId: string): ContributorSummary[] 
     FROM pledges 
     WHERE campaign_id = ?
     GROUP BY contributor 
-    ORDER BY totalPledged DESC
+    ORDER BY totalPledged DESC, contributor COLLATE BINARY ASC
   `,
     )
     .all(campaignId) as Array<{
@@ -989,6 +1013,7 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
  */
 export function addPledge(campaignId: string, input: PledgeInput): CampaignRecord {
   const db = getDb();
+  ensurePreparedStatementsForCurrentDb(db);
   const campaign = getCampaign(campaignId, { skipBalances: true });
   if (!campaign) {
     throw toServiceError('Campaign not found.', 404, 'NOT_FOUND');
@@ -1021,13 +1046,26 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
   }
 
   const createdAt = nowInSeconds();
-  const roundedAmount = round(input.amount);
+  const roundedAmount = normalizePledgeAmount(input.amount);
 
   db.transaction(() => {
+    const currentCampaign = getCampaign(campaignId, { skipBalances: true });
+    if (!currentCampaign || !calculateProgress(currentCampaign, undefined, 0).canPledge) {
+      throw toServiceError('Campaign is no longer accepting pledges.', 400, 'INVALID_CAMPAIGN_STATE');
+    }
+    const currentTokenAccepted = currentCampaign.acceptedTokens.some((accepted) => {
+      if (accepted === tokenId) return true;
+      if (!accepted.includes(':')) return accepted === assetCode;
+      return accepted.split(':')[0] === assetCode;
+    });
+    if (!currentTokenAccepted) {
+      throw toServiceError(`Token ${tokenId} is not accepted by this campaign.`, 400, 'INVALID_ASSET');
+    }
+
     // Re-check contributor limit within transaction to prevent race conditions
     const existingPledged = getContributorPledgedTotal(campaignId, input.contributor);
-    if (campaign.maxPerContributor !== undefined && campaign.maxPerContributor > 0) {
-      if (existingPledged + roundedAmount > campaign.maxPerContributor) {
+    if (currentCampaign.maxPerContributor !== undefined && currentCampaign.maxPerContributor > 0) {
+      if (existingPledged + roundedAmount > currentCampaign.maxPerContributor) {
         throw toServiceError(
           'Pledge exceeds maximum allowed per contributor.',
           400,
@@ -1042,7 +1080,7 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     }
     const currentPledgedAmount = getCampaignPledgedAmountStmt.get(campaignId) as { pledged_amount: number };
     const nextPledgedAmount = round(currentPledgedAmount.pledged_amount + roundedAmount);
-    if (nextPledgedAmount > campaign.targetAmount) {
+    if (nextPledgedAmount > currentCampaign.targetAmount) {
       throw toServiceError(
         'Pledge exceeds campaign funding cap.',
         400,
@@ -1078,14 +1116,11 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     );
 
     // Check if contributor has reached their limit and record event
-    if (
-      campaign.maxPerContributor !== undefined &&
-      campaign.maxPerContributor > 0
-    ) {
+    if (currentCampaign.maxPerContributor !== undefined && currentCampaign.maxPerContributor > 0) {
       const newContributorTotal = round(
         getContributorPledgedTotal(campaignId, input.contributor),
       );
-      if (newContributorTotal >= campaign.maxPerContributor) {
+      if (newContributorTotal >= currentCampaign.maxPerContributor) {
         recordEvent(
           campaignId,
           "pledge_limit_reached",
@@ -1093,14 +1128,14 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
           input.contributor,
           newContributorTotal,
           {
-            maxPerContributor: campaign.maxPerContributor,
+            maxPerContributor: currentCampaign.maxPerContributor,
             assetCode,
           },
           { source: "local" } as BlockchainMetadata,
         );
       }
     }
-  })();
+  }).immediate();
 
   return getCampaign(campaignId)!;
 }
@@ -1126,6 +1161,8 @@ export function reconcileOnChainPledge(
   campaignId: string,
   input: ReconciledPledgeInput,
 ): ReconcileOnChainPledgeResult {
+  const db = getDb();
+  ensurePreparedStatementsForCurrentDb(db);
   const existingPledge = getPledgeByTransactionHash(input.transactionHash);
   if (existingPledge) {
     if (existingPledge.campaignId !== campaignId) {
@@ -1144,9 +1181,8 @@ export function reconcileOnChainPledge(
     throw toServiceError('Campaign not found.', 404, 'NOT_FOUND');
   }
 
-  const db = getDb();
   const createdAt = input.confirmedAt ?? nowInSeconds();
-  const roundedAmount = round(input.amount);
+  const roundedAmount = normalizePledgeAmount(input.amount);
   const assetCode = (input.assetCode || campaign.assetCode).toUpperCase();
   const tokenId = input.tokenId || assetCode;
 
@@ -1173,10 +1209,24 @@ export function reconcileOnChainPledge(
 
 
   const insertedNewPledge = db.transaction(() => {
+    const currentCampaign = getCampaign(campaignId, { skipBalances: true });
+    if (!currentCampaign || !calculateProgress(currentCampaign, undefined, 0).canPledge) {
+      throw toServiceError('Campaign is no longer accepting pledges.', 400, 'INVALID_CAMPAIGN_STATE');
+    }
+
+    const currentTokenAccepted = currentCampaign.acceptedTokens.some((accepted) => {
+      if (accepted === tokenId) return true;
+      if (!accepted.includes(':')) return accepted === assetCode;
+      return accepted.split(':')[0] === assetCode;
+    });
+    if (!currentTokenAccepted) {
+      throw toServiceError(`Token ${tokenId} is not accepted by this campaign.`, 400, 'INVALID_ASSET');
+    }
+
     // Re-check contributor limit within transaction to prevent race conditions
     const existingPledged = getContributorPledgedTotal(campaignId, input.contributor);
-    if (campaign.maxPerContributor !== undefined && campaign.maxPerContributor > 0) {
-      if (existingPledged + roundedAmount > campaign.maxPerContributor) {
+    if (currentCampaign.maxPerContributor !== undefined && currentCampaign.maxPerContributor > 0) {
+      if (existingPledged + roundedAmount > currentCampaign.maxPerContributor) {
         throw toServiceError(
           'Pledge exceeds maximum allowed per contributor.',
           400,
@@ -1191,7 +1241,7 @@ export function reconcileOnChainPledge(
     }
     const currentPledgedAmount = getCampaignPledgedAmountStmt.get(campaignId) as { pledged_amount: number };
     const nextPledgedAmount = round(currentPledgedAmount.pledged_amount + roundedAmount);
-    if (nextPledgedAmount > campaign.targetAmount) {
+    if (nextPledgedAmount > currentCampaign.targetAmount) {
       throw toServiceError(
         'Pledge exceeds campaign funding cap.',
         400,
@@ -1260,37 +1310,37 @@ export function reconcileOnChainPledge(
       } as BlockchainMetadata,
     );
 
-    if (campaign.creator !== input.contributor) {
+    if (currentCampaign.creator !== input.contributor) {
       createNotification({
         campaignId,
         type: 'new_pledge',
-        title: `New on-chain pledge on "${campaign.title}"`,
+        title: `New on-chain pledge on "${currentCampaign.title}"`,
         body: `${input.contributor.slice(0, 8)}… pledged ${roundedAmount} ${assetCode} (on-chain)`,
-        targetWallet: campaign.creator,
+        targetWallet: currentCampaign.creator,
         actorWallet: input.contributor,
       });
     }
 
-    const wasFunded = campaign.pledgedAmount >= campaign.targetAmount;
+    const wasFunded = currentCampaign.pledgedAmount >= currentCampaign.targetAmount;
     const isFunded = nextPledgedAmount >= campaign.targetAmount;
     if (!wasFunded && isFunded) {
       void dispatchWebhook('campaign_funded', campaignId, {
         pledgedAmount: nextPledgedAmount,
-        targetAmount: campaign.targetAmount,
+        targetAmount: currentCampaign.targetAmount,
         assetCode,
         onChain: true,
       });
       createNotification({
         campaignId,
         type: 'campaign_funded',
-        title: `"${campaign.title}" is funded!`,
-        body: `Campaign reached its goal of ${campaign.targetAmount} ${assetCode}`,
-        targetWallet: campaign.creator,
+        title: `"${currentCampaign.title}" is funded!`,
+        body: `Campaign reached its goal of ${currentCampaign.targetAmount} ${assetCode}`,
+        targetWallet: currentCampaign.creator,
       });
     }
 
     return true;
-  })();
+  }).immediate();
 
   return {
     campaign: getCampaign(campaignId)!,

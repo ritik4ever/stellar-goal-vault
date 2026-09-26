@@ -110,3 +110,14 @@ Installed by `ensureQueryLayerIndexes()` for concrete application read plans:
   soft-deleted comment lists per campaign.
 - `idx_campaign_events_source` on `json_extract(blockchain_metadata, '$.source')` —
   filtering local vs soroban history events.
+
+### Pledge query invariants (#891)
+
+Pledge writes use an SQLite `IMMEDIATE` transaction before reading contributor
+totals or campaign accounting. This reserves the writer before the cap checks,
+then re-reads campaign lifecycle and cap data inside the transaction. A second
+writer therefore cannot validate against the same stale pledged total. Pledge
+amounts must be finite, positive, and remain at least `0.01` after currency
+rounding. Rejected writes leave the pledge row, cached campaign total, and event
+history unchanged. Contributor summaries break equal-total ties by contributor
+address so query results are deterministic.
