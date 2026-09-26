@@ -61,3 +61,8 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+        continue-on-error: false
+
