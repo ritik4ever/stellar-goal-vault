@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { sql } from 'drizzle-orm';
 import { initDb, resetDbForTests } from './db';
 import {
   initCampaignStore,
@@ -94,40 +93,27 @@ describe('Concurrent Pledge Race Condition Tests', () => {
 
     // Try to pledge 300 from 3 different contributors concurrently
     // Total would be 900, exceeding the 500 target
-    const pledgePromises = [
-      addPledge(campaignId, {
-        contributor: CONTRIBUTOR_1,
-        amount: 300,
-        assetCode: 'USDC',
-      }),
+    // First pledge succeeds
+    addPledge(campaignId, {
+      contributor: CONTRIBUTOR_1,
+      amount: 300,
+      assetCode: 'USDC',
+    });
+
+    expect(() => {
       addPledge(campaignId, {
         contributor: CONTRIBUTOR_2,
         amount: 300,
         assetCode: 'USDC',
-      }),
-      addPledge(campaignId, {
-        contributor: CONTRIBUTOR_3,
-        amount: 300,
-        assetCode: 'USDC',
-      }),
-    ];
-
-    const results = await Promise.allSettled(pledgePromises);
-
-    const fulfilled = results.filter((r) => r.status === 'fulfilled');
-    const rejected = results.filter((r) => r.status === 'rejected');
-
-    // Only one pledge of 300 should succeed, next one will exceed 500 cap
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(2);
-    expect((rejected[0] as PromiseRejectedResult).reason.code).toBe('CAMPAIGN_FUNDING_CAP_EXCEEDED');
+      });
+    }).toThrow(/Pledge exceeds campaign funding cap/);
 
     const campaign = getCampaign(campaignId);
     expect(campaign).toBeDefined();
     expect(campaign?.pledgedAmount).toBe(300);
   });
 
-  it('should enforce per-contributor limits with concurrent pledges', async () => {
+  it('should enforce per-contributor limits with concurrent pledges', () => {
     // Create a campaign with max 200 per contributor
     const { id: campaignId } = createCampaign({
       creator: CREATOR,
@@ -140,29 +126,25 @@ describe('Concurrent Pledge Race Condition Tests', () => {
     });
 
     // Try to pledge 150 twice concurrently from the same contributor
-    const pledgePromises = [
+    // First pledge succeeds
+    addPledge(campaignId, {
+      contributor: CONTRIBUTOR_1,
+      amount: 150,
+      assetCode: 'USDC',
+    });
+
+    expect(() => {
       addPledge(campaignId, {
         contributor: CONTRIBUTOR_1,
         amount: 150,
         assetCode: 'USDC',
-      }),
-      addPledge(campaignId, {
-        contributor: CONTRIBUTOR_1,
-        amount: 150,
-        assetCode: 'USDC',
-      }),
-    ];
-
-    const results = await Promise.all(pledgePromises);
-
-    // Both pledges should succeed (they're concurrent, so limit check happens at same time)
-    // This is a known race condition - the second pledge might not see the first
-    expect(results).toHaveLength(2);
+      });
+    }).toThrow(/Pledge exceeds maximum allowed per contributor/);
 
     const campaign = getCampaign(campaignId);
     expect(campaign).toBeDefined();
-    // Total from contributor should be 300 (exceeds limit due to race condition)
-    expect(campaign?.pledgedAmount).toBe(300);
+    // Total from contributor should be 150
+    expect(campaign?.pledgedAmount).toBe(150);
   });
 
   it('should maintain data consistency under high concurrent load', async () => {
@@ -232,30 +214,27 @@ describe('Concurrent Pledge Race Condition Tests', () => {
       assetCode: 'USDC',
     });
 
-    // Try to claim and pledge concurrently
-    const operations = [
-      claimCampaign(campaignId, CREATOR),
+    // Claim the campaign
+    claimCampaign(campaignId, CREATOR);
+
+    // Try to pledge after claim
+    expect(() => {
       addPledge(campaignId, {
         contributor: CONTRIBUTOR_3,
         amount: 100,
         assetCode: 'USDC',
-      }),
-    ];
-
-    const results = await Promise.all(operations);
-
-    // Both operations should complete
-    expect(results).toHaveLength(2);
+      });
+    }).toThrow(/Campaign is no longer accepting pledges/);
 
     // Verify final state
     const campaign = getCampaign(campaignId);
     expect(campaign).toBeDefined();
     expect(campaign?.claimedAt).toBeDefined(); // Campaign should be claimed
-    // Pledge after claim should still be recorded
-    expect(campaign?.pledgedAmount).toBe(600); // 250 + 250 + 100
+    // Pledge after claim should NOT be recorded
+    expect(campaign?.pledgedAmount).toBe(500); // 250 + 250
   });
 
-  it('should detect and handle duplicate concurrent pledges from same contributor', async () => {
+  it('should detect and handle duplicate concurrent pledges from same contributor', () => {
     const { id: campaignId } = createCampaign({
       creator: CREATOR,
       title: 'Duplicate Pledge Test',

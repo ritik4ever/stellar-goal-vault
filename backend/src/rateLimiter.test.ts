@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { applyRateLimit, clearRateLimitCache } from './index';
+import { applyRateLimit } from './index';
 import { Request, Response } from 'express';
 
 describe('Rate Limiter Middleware', () => {
@@ -9,7 +9,6 @@ describe('Rate Limiter Middleware', () => {
   let headers: Record<string, string>;
 
   beforeEach(() => {
-    clearRateLimitCache();
     nextCalled = false;
     headers = {};
     mockReq = {
@@ -57,13 +56,13 @@ describe('Rate Limiter Middleware', () => {
 
     // Second request
     nextCalled = false;
-    delete (mockReq as any).rateLimitedProcessed;
+    (mockReq as any).rateLimitedProcessed = false;
     middleware(mockReq as Request, mockRes as Response, next);
     expect(nextCalled).toBe(true);
 
     // Third request - should exceed limit
     nextCalled = false;
-    delete (mockReq as any).rateLimitedProcessed;
+    (mockReq as any).rateLimitedProcessed = false;
     expect(() => {
       middleware(mockReq as Request, mockRes as Response, next);
     }).toThrow(/Rate limit exceeded/);

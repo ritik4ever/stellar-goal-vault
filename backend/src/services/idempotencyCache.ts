@@ -48,13 +48,13 @@ export async function setIdempotencyCacheEntry(
 ): Promise<void> {
   const serialized = JSON.stringify(entry);
 
+  memoryCache.set(key, entry);
+
   if (isCacheAvailable()) {
     await setCacheValue(key, serialized, IDEMPOTENCY_TTL_SECONDS).catch(() => {
       // Silently fail Redis writes; memory cache still works
     });
   }
-
-  memoryCache.set(key, entry);
 }
 
 export function clearIdempotencyCache(): void {
