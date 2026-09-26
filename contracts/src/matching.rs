@@ -1,0 +1,1 @@
+pub fn match_amount(a:i128,b:i128,c:i128)>->i128{if a<b-c{a}else{b-c}}
