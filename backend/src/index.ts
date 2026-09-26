@@ -190,6 +190,20 @@ export function clearRateLimitCache() {
   rateLimitBuckets.clear();
 }
 
+/**
+ * Remove expired client buckets and cap memory usage when callers rotate
+ * source addresses. Map insertion order lets us evict the oldest entries
+ * without retaining attacker-controlled keys indefinitely.
+ */
+export function pruneRateLimitBuckets(now = Date.now()): void {
+  for (const [key, bucket] of rateLimitBuckets) {
+    if (bucket.resetAt <= now) {
+      rateLimitBuckets.delete(key);
+    }
+  }
+
+}
+
 export function applyRateLimit(limitOverride?: number) {
   return (req: Request, res: Response, next: express.NextFunction) => {
     const rateLimitedReq = req as Request & { rateLimitedProcessed?: boolean };
@@ -214,6 +228,7 @@ export function applyRateLimit(limitOverride?: number) {
 
     const key = `${req.ip}:${isWrite ? 'write' : 'read'}`;
     const now = Date.now();
+    pruneRateLimitBuckets(now);
     const current = rateLimitBuckets.get(key);
 
     let count = 1;
