@@ -93,3 +93,5 @@ messages.
 ## Not covered
 
 Address fields (`address`, `creator`) are redacted by the logger, so the tests do not assert them.
+
+For operator diagnostics and recovery steps, see the [Service Metrics Troubleshooting Runbook](SERVICE_METRICS_RUNBOOK.md).

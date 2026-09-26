@@ -94,6 +94,8 @@ A map of every documentation file in the repository, organized by topic. Use thi
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Contract (testnet), backend (Render), frontend (Vercel) deployment |
 | [RUNBOOK.md](RUNBOOK.md) | Operations: database reset, API key rotation, contract redeploy, rollback |
 | [docs/HEALTH_RUNBOOK.md](docs/HEALTH_RUNBOOK.md) | Health check signal reference: DB, indexer, Soroban RPC, memory — diagnostics and recovery |
+| [docs/SERVICE_METRICS_RUNBOOK.md](docs/SERVICE_METRICS_RUNBOOK.md) | Troubleshooting JSON service metrics, stale aggregates, health signals, and request logs |
+| [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | Observable API contract: aggregate metrics, health payloads, and structured request logs |
 | [TODO.md](TODO.md) | Pending implementation: contributor summary endpoint |
 
 ---
