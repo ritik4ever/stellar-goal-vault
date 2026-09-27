@@ -52,9 +52,9 @@ afterAll(() => {
   } catch {}
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   clock = freezeClock();
-  const { getDb } = require('../src/services/db');
+  const { getDb } = await import('../src/services/db');
   const db = getDb();
   db.prepare('DELETE FROM campaign_events').run();
   db.prepare('DELETE FROM pledges').run();

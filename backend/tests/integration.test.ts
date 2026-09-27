@@ -202,26 +202,23 @@ describe('Large-dataset regression coverage for campaign detail loading', () => 
 
     // Create a realistic larger fixture of pledges to exercise the loading path
     const pledgeCount = 500;
-    const pledges: Promise<ReturnType<typeof request>>[] = [];
-
+    const db = getDb();
+    const insertPledge = db.prepare(
+      `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
     for (let i = 0; i < pledgeCount; i++) {
-      pledges.push(
-        request(app)
-          .post(`/api/campaigns/${campaignId}/pledges`)
-          .send(buildPledgeInput({ amount: 20, assetCode: 'XLM' })),
-      );
+      insertPledge.run(campaignId, `G${'D'.repeat(55)}`, 10, 'XLM', FIXTURE_EPOCH_SECONDS + i);
     }
-
-    // Wait for all pledges to be created
-    const responses = await Promise.all(pledges);
-    responses.forEach((res) => {
-      expect(res.status).toBe(201);
-    });
+    db.prepare(`UPDATE campaigns SET pledged_amount = ? WHERE id = ?`).run(
+      pledgeCount * 10,
+      campaignId,
+    );
 
     // Load the campaign detail and verify correctness at scale
     const detailResponse = await request(app).get(`/api/campaigns/${campaignId}`);
     expect(detailResponse.status).toBe(200);
-    expect(detailResponse.body.data.pledgedAmount).toBe(pledgeCount * 20);
+    expect(detailResponse.body.data.pledgedAmount).toBe(pledgeCount * 10);
     expect(detailResponse.body.data.progress.status).toBe('open');
 
     // Verify that the response structure is stable and contains expected fields

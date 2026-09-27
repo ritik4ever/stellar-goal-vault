@@ -312,8 +312,11 @@ function runMigrations(database: SQLiteDatabase): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_campaign_comments_campaign_id ON campaign_comments(campaign_id);
-
   `);
+
+  // Migration-runner query indexes: backfill, deduplication, and pledged_amount
+  // accounting indexes to ensure concrete read/write plans run fast.
+  ensureMigrationRunnerIndexes(database);
 
   const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
     name: string;
@@ -468,6 +471,24 @@ function runMigrations(database: SQLiteDatabase): void {
   // Campaigns persistence integrity: CHECK on fresh tables + triggers for
   // existing DBs (SQLite cannot ADD CHECK via ALTER TABLE).
   ensureCampaignsIntegrityConstraints(database);
+}
+
+/**
+ * Indexes used by the migration runner (runMigrations) to accelerate backfill,
+ * deduplication, and pledged_amount accounting queries across schema upgrades.
+ * Safe to call repeatedly (IF NOT EXISTS).
+ */
+export function ensureMigrationRunnerIndexes(database: SQLiteDatabase = getDb()): void {
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pledges_token_id_null
+      ON pledges(token_id) WHERE token_id IS NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_refunded
+      ON pledges(campaign_id, refunded_at);
+
+    CREATE INDEX IF NOT EXISTS idx_pledges_tx_hash_migration
+      ON pledges(transaction_hash) WHERE transaction_hash IS NOT NULL;
+  `);
 }
 
 /**

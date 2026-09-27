@@ -111,6 +111,14 @@ Installed by `ensureQueryLayerIndexes()` for concrete application read plans:
 - `idx_campaign_events_source` on `json_extract(blockchain_metadata, '$.source')` —
   filtering local vs soroban history events.
 
+### Migration-runner query indexes
+
+Installed by `ensureMigrationRunnerIndexes()` / `runMigrations` to accelerate backfill, deduplication, and cached accounting query plans during schema upgrades:
+
+- `idx_pledges_token_id_null` partial index on `pledges(token_id)` where `token_id IS NULL` — speeds legacy `token_id` backfill (`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`).
+- `idx_pledges_campaign_refunded` covering index on `pledges(campaign_id, refunded_at)` — accelerates campaign `pledged_amount` recomputation (`UPDATE campaigns SET pledged_amount = ...`).
+- `idx_pledges_tx_hash_migration` partial index on `pledges(transaction_hash)` where `transaction_hash IS NOT NULL` — accelerates `transaction_hash` deduplication (`GROUP BY transaction_hash`).
+
 ### Pledge query invariants (#891)
 
 Pledge writes use an SQLite `IMMEDIATE` transaction before reading contributor
