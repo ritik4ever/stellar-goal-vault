@@ -1,7 +1,26 @@
+import type { Statement } from 'better-sqlite3';
 import { getDb, initDb } from './db';
 import { getCampaignHistory, recordEvent, BlockchainMetadata } from './eventHistory';
 import { createNotification } from './notificationService';
 import { dispatchWebhook } from './webhookService';
+
+let getCampaignPledgedAmountStmt: Statement | undefined;
+let addPledgeInsertStmt: Statement | undefined;
+let updateCampaignPledgedAmountStmt: Statement | undefined;
+let reconcileOnChainPledgeInsertStmt: Statement | undefined;
+let getContributorPledgedTotalStmt: Statement | undefined;
+let preparedStatementsDb: ReturnType<typeof getDb> | undefined;
+
+function ensurePreparedStatementsForCurrentDb(db: ReturnType<typeof getDb>): void {
+  if (preparedStatementsDb === db) return;
+
+  getCampaignPledgedAmountStmt = undefined;
+  addPledgeInsertStmt = undefined;
+  updateCampaignPledgedAmountStmt = undefined;
+  reconcileOnChainPledgeInsertStmt = undefined;
+  getContributorPledgedTotalStmt = undefined;
+  preparedStatementsDb = db;
+}
 
 export type CampaignStatus = 'open' | 'funded' | 'claimed' | 'failed';
 
@@ -24,7 +43,7 @@ export interface PledgeInput {
   contributor: string;
   amount: number;
   assetCode?: string; // Optional for backward compatibility if only one token
-  tokenId?: string; // Canonical token identifier (code:issuer for classic; contract addr for native). Falls back to assetCode if missing.
+  tokenId?: string; // Canonical token identifier; falls back to assetCode when omitted.
 }
 
 export interface ReconciledPledgeInput extends PledgeInput {
@@ -130,12 +149,41 @@ function toServiceError(message: string, statusCode: number, code = 'BAD_REQUEST
   return error;
 }
 
+let _currentTime: number | null = null;
+
+export function setCurrentTime(time: number): void {
+  _currentTime = time;
+}
+
+export function resetTime(): void {
+  _currentTime = null;
+}
+
+export function getCurrentTimeState(): number | null {
+  return _currentTime;
+}
+
 function nowInSeconds(): number {
-  return Math.floor(Date.now() / 1000);
+  return Math.floor(getCurrentTime() / 1000);
 }
 
 function nowInMilliseconds(): number {
+  return getCurrentTime();
+}
+
+function getCurrentTime(): number {
+  if (_currentTime !== null) {
+    return _currentTime;
+  }
   return Date.now();
+}
+
+export function setGlobalTime(time: number): void {
+  _currentTime = time;
+}
+
+export function resetGlobalTime(): void {
+  _currentTime = null;
 }
 
 function round(value: number): number {
@@ -206,13 +254,15 @@ export function getPledgeByTransactionHash(transactionHash: string): PledgeRecor
 
 export function getContributorPledgedTotal(campaignId: string, contributor: string): number {
   const db = getDb();
-  const row = db
-    .prepare(
+  ensurePreparedStatementsForCurrentDb(db);
+  if (!getContributorPledgedTotalStmt) {
+    getContributorPledgedTotalStmt = db.prepare(
       `SELECT COALESCE(SUM(amount), 0) AS total
        FROM pledges
        WHERE campaign_id = ? AND contributor = ? AND refunded_at IS NULL`,
-    )
-    .get(campaignId, contributor) as { total: number };
+    );
+  }
+  const row = getContributorPledgedTotalStmt.get(campaignId, contributor) as { total: number };
 
   return row.total;
 }
@@ -340,7 +390,37 @@ export function listContributorPledges(
 export function initCampaignStore(): void {
   initDb();
   const db = getDb();
+  db.exec(`CREATE TABLE IF NOT EXISTS campaigns (
+    id TEXT PRIMARY KEY,
+    creator TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    accepted_tokens_json TEXT NOT NULL,
+    target_amount REAL NOT NULL,
+    pledged_amount REAL NOT NULL DEFAULT 0,
+    deadline INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    claimed_at INTEGER,
+    failed_at INTEGER,
+    deleted_at INTEGER,
+    metadata_json TEXT,
+    max_per_contributor REAL
+  );`);
+  db.exec(`CREATE TABLE IF NOT EXISTS pledges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id TEXT NOT NULL,
+    contributor TEXT NOT NULL,
+    amount REAL NOT NULL,
+    asset_code TEXT NOT NULL,
+    token_id TEXT,
+    created_at INTEGER NOT NULL,
+    refunded_at INTEGER,
+    transaction_hash TEXT,
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+  );`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);');
   db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_contributor_created_at ON pledges(contributor, created_at);');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_transaction_hash ON pledges(transaction_hash);');
 }
 
 function checkContributorLimit(
@@ -358,6 +438,18 @@ function checkContributorLimit(
       );
     }
   }
+}
+
+function normalizePledgeAmount(amount: number): number {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw toServiceError('Pledge amount must be a finite positive number.', 400, 'INVALID_AMOUNT');
+  }
+
+  const roundedAmount = round(amount);
+  if (roundedAmount <= 0) {
+    throw toServiceError('Pledge amount must be at least 0.01.', 400, 'INVALID_AMOUNT');
+  }
+  return roundedAmount;
 }
 
 /**
@@ -418,10 +510,21 @@ export interface ListCampaignsOptions {
   page?: number;
   limit?: number;
   sort?: CampaignSortField;
-  order?: SortOrder;
-  createdAfter?: number;
-  createdBefore?: number;
+  sortOrder?: SortOrder;
 }
+
+export interface CampaignDetailOptions {
+  includePledges?: boolean;
+  includeHistory?: boolean;
+}
+
+export interface CampaignDetailResult {
+  campaign: CampaignRecord;
+  progress: CampaignProgress;
+  pledges?: PledgeRecord[];
+  history?: BlockchainMetadata[];
+}
+
 
 export interface ListCampaignsResult {
   campaigns: CampaignRecord[];
@@ -470,8 +573,12 @@ const MAX_CAMPAIGN_DURATION_SECONDS = 60 * 60 * 24 * 180;
 /**
  * Retrieves a paginated, filtered list of campaigns from the database.
  *
- * @param options - Optional filters: `searchQuery`, `assetCode`, `status`, `includeDeleted`, `page`, `limit`.
- * @returns A {@link ListCampaignsResult} with the matching campaign records and the total count.
+ * Results are always ordered by the requested sort field plus a deterministic
+ * `id` tie-breaker, so consecutive `page`/`limit` requests form stable,
+ * non-overlapping chunks even when many campaigns share the same sort value.
+ *
+ * @param options - Optional filters: `searchQuery`, `assetCode`, `status`, `includeDeleted`, `page`, `limit`, `sort`, `order`.
+ * @returns A {@link ListCampaignsResult} with the matching campaign records, per-campaign active pledge counts, and the total count.
  */
 export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResult {
   const db = getDb();
@@ -570,22 +677,29 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
   const sortField = options?.sort ?? 'createdAt';
   const sortOrder = options?.order ?? 'desc';
   const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
-  let orderByClause: string;
+  let primaryOrder: string;
   switch (sortField) {
     case 'deadline':
-      orderByClause = `campaigns.deadline ${orderDir}`;
+      primaryOrder = `campaigns.deadline ${orderDir}`;
       break;
     case 'pledgedAmount':
-      orderByClause = `campaigns.pledged_amount ${orderDir}`;
+      primaryOrder = `campaigns.pledged_amount ${orderDir}`;
       break;
     case 'targetAmount':
-      orderByClause = `campaigns.target_amount ${orderDir}`;
+      primaryOrder = `campaigns.target_amount ${orderDir}`;
       break;
     case 'createdAt':
     default:
-      orderByClause = `campaigns.created_at ${orderDir}`;
+      primaryOrder = `campaigns.created_at ${orderDir}`;
       break;
   }
+
+  // Append a deterministic tie-breaker so OFFSET/LIMIT pagination is stable:
+  // rows sharing the same sort key always resolve to the same relative order
+  // across requests. Without it, SQLite is free to return tied rows in a
+  // different order per query, which makes later chunks duplicate or skip
+  // campaigns as the list grows.
+  const orderByClause = `${primaryOrder}, CAST(campaigns.id AS INTEGER) ${orderDir}`;
 
   const dataQuery = paginate
     ? `SELECT campaigns.*, COUNT(pledges.id) as pledge_count FROM campaigns LEFT JOIN pledges ON campaigns.id = pledges.campaign_id AND pledges.refunded_at IS NULL${whereClause} GROUP BY campaigns.id ORDER BY ${orderByClause} LIMIT ? OFFSET ?`
@@ -632,7 +746,21 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
  * @param campaignId - The unique campaign identifier.
  * @returns The {@link CampaignRecord} if found, or `undefined` if it does not exist.
  */
-export function getCampaign(campaignId: string): CampaignRecord | undefined {
+export interface GetCampaignOptions {
+  skipBalances?: boolean;
+}
+
+/**
+ * Fetches a single campaign by its ID.
+ *
+ * @param campaignId - The unique campaign identifier.
+ * @param options - Optional flags to skip loading expensive related data.
+ * @returns The {@link CampaignRecord} if found, or `undefined` if it does not exist.
+ */
+export function getCampaign(
+  campaignId: string,
+  options: GetCampaignOptions = {},
+): CampaignRecord | undefined {
   const db = getDb();
   const row = db.prepare(`SELECT * FROM campaigns WHERE id = ?`).get(campaignId) as
     CampaignRow | undefined;
@@ -651,7 +779,9 @@ export function getCampaign(campaignId: string): CampaignRecord | undefined {
       });
     }
     const campaign = rowToCampaign(row);
-    campaign.tokenBalances = getCampaignTokenBalances(campaignId);
+    if (!options.skipBalances) {
+      campaign.tokenBalances = getCampaignTokenBalances(campaignId);
+    }
     return campaign;
   }
   return undefined;
@@ -727,7 +857,7 @@ export function getContributorSummary(campaignId: string): ContributorSummary[] 
     FROM pledges 
     WHERE campaign_id = ?
     GROUP BY contributor 
-    ORDER BY totalPledged DESC
+    ORDER BY totalPledged DESC, contributor COLLATE BINARY ASC
   `,
     )
     .all(campaignId) as Array<{
@@ -762,11 +892,21 @@ export function getCampaignWithProgress(campaignId: string, pledgePreviewLimit =
     return undefined;
   }
 
+  // Incremental/bounded detail: fetch only preview pledges via LIMIT in SQL, not full scan+slice.
+  // History is loaded incrementally via GET /api/campaigns/:id/history, so omit it here.
+  const db = getDb();
+  const previewRows = db
+    .prepare(
+      `SELECT * FROM pledges WHERE campaign_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+    )
+    .all(campaignId, pledgePreviewLimit) as PledgeRow[];
+  const previewPledges = previewRows.map(rowToPledge);
+
   return {
     ...campaign,
     progress: calculateProgress(campaign),
-    pledges: getPledges(campaignId).slice(0, pledgePreviewLimit),
-    history: getCampaignHistory(campaignId),
+    pledges: previewPledges,
+    history: [],
   };
 }
 
@@ -814,42 +954,47 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
     maxPerContributor: input.maxPerContributor,
   };
 
-  db.prepare(
-    `INSERT INTO campaigns (
-      id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, failed_at, metadata_json, max_per_contributor
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-    )`,
-  ).run(
-    campaign.id,
-    campaign.creator,
-    campaign.title,
-    campaign.description,
-    JSON.stringify(campaign.acceptedTokens),
-    campaign.targetAmount,
-    campaign.pledgedAmount,
-    campaign.deadline,
-    campaign.createdAt,
-    null,
-    null,
-    campaign.metadata ? JSON.stringify(campaign.metadata) : null,
-    campaign.maxPerContributor ?? null,
-  );
+  // Explicit transaction: campaign INSERT + initial "created" event commit
+  // together so a mid-operation failure leaves no orphaned campaign row and
+  // retries remain safe (campaigns persistence / #870).
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO campaigns (
+        id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, failed_at, metadata_json, max_per_contributor
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      )`,
+    ).run(
+      campaign.id,
+      campaign.creator,
+      campaign.title,
+      campaign.description,
+      JSON.stringify(campaign.acceptedTokens),
+      campaign.targetAmount,
+      campaign.pledgedAmount,
+      campaign.deadline,
+      campaign.createdAt,
+      null,
+      null,
+      campaign.metadata ? JSON.stringify(campaign.metadata) : null,
+      campaign.maxPerContributor ?? null,
+    );
 
-  recordEvent(
-    campaign.id,
-    'created',
-    campaign.createdAt,
-    campaign.creator,
-    undefined,
-    {
-      title: campaign.title,
-      acceptedTokens: campaign.acceptedTokens,
-      targetAmount: campaign.targetAmount,
-      deadline: campaign.deadline,
-    },
-    { source: 'local' } as BlockchainMetadata,
-  );
+    recordEvent(
+      campaign.id,
+      'created',
+      campaign.createdAt,
+      campaign.creator,
+      undefined,
+      {
+        title: campaign.title,
+        acceptedTokens: campaign.acceptedTokens,
+        targetAmount: campaign.targetAmount,
+        deadline: campaign.deadline,
+      },
+      { source: 'local' } as BlockchainMetadata,
+    );
+  })();
 
   return campaign;
 }
@@ -868,7 +1013,8 @@ export function createCampaign(input: CampaignInput): CampaignRecord {
  */
 export function addPledge(campaignId: string, input: PledgeInput): CampaignRecord {
   const db = getDb();
-  const campaign = getCampaign(campaignId);
+  ensurePreparedStatementsForCurrentDb(db);
+  const campaign = getCampaign(campaignId, { skipBalances: true });
   if (!campaign) {
     throw toServiceError('Campaign not found.', 404, 'NOT_FOUND');
   }
@@ -894,19 +1040,32 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     );
   }
 
-  const progress = calculateProgress(campaign);
+  const progress = calculateProgress(campaign, undefined, 0); // avoid DB count query since we only need canPledge
   if (!progress.canPledge) {
     throw toServiceError('Campaign is no longer accepting pledges.', 400, 'INVALID_CAMPAIGN_STATE');
   }
 
   const createdAt = nowInSeconds();
-  const roundedAmount = round(input.amount);
+  const roundedAmount = normalizePledgeAmount(input.amount);
 
   db.transaction(() => {
+    const currentCampaign = getCampaign(campaignId, { skipBalances: true });
+    if (!currentCampaign || !calculateProgress(currentCampaign, undefined, 0).canPledge) {
+      throw toServiceError('Campaign is no longer accepting pledges.', 400, 'INVALID_CAMPAIGN_STATE');
+    }
+    const currentTokenAccepted = currentCampaign.acceptedTokens.some((accepted) => {
+      if (accepted === tokenId) return true;
+      if (!accepted.includes(':')) return accepted === assetCode;
+      return accepted.split(':')[0] === assetCode;
+    });
+    if (!currentTokenAccepted) {
+      throw toServiceError(`Token ${tokenId} is not accepted by this campaign.`, 400, 'INVALID_ASSET');
+    }
+
     // Re-check contributor limit within transaction to prevent race conditions
     const existingPledged = getContributorPledgedTotal(campaignId, input.contributor);
-    if (campaign.maxPerContributor !== undefined && campaign.maxPerContributor > 0) {
-      if (existingPledged + roundedAmount > campaign.maxPerContributor) {
+    if (currentCampaign.maxPerContributor !== undefined && currentCampaign.maxPerContributor > 0) {
+      if (existingPledged + roundedAmount > currentCampaign.maxPerContributor) {
         throw toServiceError(
           'Pledge exceeds maximum allowed per contributor.',
           400,
@@ -916,11 +1075,12 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     }
 
     // Re-check campaign funding cap within transaction
-    const currentPledgedAmount = db
-      .prepare(`SELECT pledged_amount FROM campaigns WHERE id = ?`)
-      .get(campaignId) as { pledged_amount: number };
+    if (!getCampaignPledgedAmountStmt) {
+      getCampaignPledgedAmountStmt = db.prepare(`SELECT pledged_amount FROM campaigns WHERE id = ?`);
+    }
+    const currentPledgedAmount = getCampaignPledgedAmountStmt.get(campaignId) as { pledged_amount: number };
     const nextPledgedAmount = round(currentPledgedAmount.pledged_amount + roundedAmount);
-    if (nextPledgedAmount > campaign.targetAmount) {
+    if (nextPledgedAmount > currentCampaign.targetAmount) {
       throw toServiceError(
         'Pledge exceeds campaign funding cap.',
         400,
@@ -928,15 +1088,18 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
       );
     }
 
-    db.prepare(
-      `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
-       VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-    ).run(campaignId, input.contributor, roundedAmount, assetCode, createdAt);
+    if (!addPledgeInsertStmt) {
+      addPledgeInsertStmt = db.prepare(
+        `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
+         VALUES (?, ?, ?, ?, ?, NULL, NULL)`
+      );
+    }
+    addPledgeInsertStmt.run(campaignId, input.contributor, roundedAmount, assetCode, createdAt);
 
-    db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`).run(
-      roundedAmount,
-      campaignId,
-    );
+    if (!updateCampaignPledgedAmountStmt) {
+      updateCampaignPledgedAmountStmt = db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`);
+    }
+    updateCampaignPledgedAmountStmt.run(roundedAmount, campaignId);
 
     recordEvent(
       campaignId,
@@ -953,14 +1116,11 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
     );
 
     // Check if contributor has reached their limit and record event
-    if (
-      campaign.maxPerContributor !== undefined &&
-      campaign.maxPerContributor > 0
-    ) {
+    if (currentCampaign.maxPerContributor !== undefined && currentCampaign.maxPerContributor > 0) {
       const newContributorTotal = round(
         getContributorPledgedTotal(campaignId, input.contributor),
       );
-      if (newContributorTotal >= campaign.maxPerContributor) {
+      if (newContributorTotal >= currentCampaign.maxPerContributor) {
         recordEvent(
           campaignId,
           "pledge_limit_reached",
@@ -968,14 +1128,14 @@ export function addPledge(campaignId: string, input: PledgeInput): CampaignRecor
           input.contributor,
           newContributorTotal,
           {
-            maxPerContributor: campaign.maxPerContributor,
+            maxPerContributor: currentCampaign.maxPerContributor,
             assetCode,
           },
           { source: "local" } as BlockchainMetadata,
         );
       }
     }
-  })();
+  }).immediate();
 
   return getCampaign(campaignId)!;
 }
@@ -1001,6 +1161,8 @@ export function reconcileOnChainPledge(
   campaignId: string,
   input: ReconciledPledgeInput,
 ): ReconcileOnChainPledgeResult {
+  const db = getDb();
+  ensurePreparedStatementsForCurrentDb(db);
   const existingPledge = getPledgeByTransactionHash(input.transactionHash);
   if (existingPledge) {
     if (existingPledge.campaignId !== campaignId) {
@@ -1014,14 +1176,13 @@ export function reconcileOnChainPledge(
     return { campaign: getCampaign(campaignId)!, existing: true };
   }
 
-  const campaign = getCampaign(campaignId);
+  const campaign = getCampaign(campaignId, { skipBalances: true });
   if (!campaign) {
     throw toServiceError('Campaign not found.', 404, 'NOT_FOUND');
   }
 
-  const db = getDb();
   const createdAt = input.confirmedAt ?? nowInSeconds();
-  const roundedAmount = round(input.amount);
+  const roundedAmount = normalizePledgeAmount(input.amount);
   const assetCode = (input.assetCode || campaign.assetCode).toUpperCase();
   const tokenId = input.tokenId || assetCode;
 
@@ -1040,7 +1201,7 @@ export function reconcileOnChainPledge(
     );
   }
 
-  const progress = calculateProgress(campaign);
+  const progress = calculateProgress(campaign, undefined, 0); // avoid DB count query since we only need canPledge
   if (!progress.canPledge) {
     throw toServiceError('Campaign is no longer accepting pledges.', 400, 'INVALID_CAMPAIGN_STATE');
   }
@@ -1048,10 +1209,24 @@ export function reconcileOnChainPledge(
 
 
   const insertedNewPledge = db.transaction(() => {
+    const currentCampaign = getCampaign(campaignId, { skipBalances: true });
+    if (!currentCampaign || !calculateProgress(currentCampaign, undefined, 0).canPledge) {
+      throw toServiceError('Campaign is no longer accepting pledges.', 400, 'INVALID_CAMPAIGN_STATE');
+    }
+
+    const currentTokenAccepted = currentCampaign.acceptedTokens.some((accepted) => {
+      if (accepted === tokenId) return true;
+      if (!accepted.includes(':')) return accepted === assetCode;
+      return accepted.split(':')[0] === assetCode;
+    });
+    if (!currentTokenAccepted) {
+      throw toServiceError(`Token ${tokenId} is not accepted by this campaign.`, 400, 'INVALID_ASSET');
+    }
+
     // Re-check contributor limit within transaction to prevent race conditions
     const existingPledged = getContributorPledgedTotal(campaignId, input.contributor);
-    if (campaign.maxPerContributor !== undefined && campaign.maxPerContributor > 0) {
-      if (existingPledged + roundedAmount > campaign.maxPerContributor) {
+    if (currentCampaign.maxPerContributor !== undefined && currentCampaign.maxPerContributor > 0) {
+      if (existingPledged + roundedAmount > currentCampaign.maxPerContributor) {
         throw toServiceError(
           'Pledge exceeds maximum allowed per contributor.',
           400,
@@ -1061,32 +1236,35 @@ export function reconcileOnChainPledge(
     }
 
     // Re-check campaign funding cap within transaction
-    const currentPledgedAmount = db
-      .prepare(`SELECT pledged_amount FROM campaigns WHERE id = ?`)
-      .get(campaignId) as { pledged_amount: number };
+    if (!getCampaignPledgedAmountStmt) {
+      getCampaignPledgedAmountStmt = db.prepare(`SELECT pledged_amount FROM campaigns WHERE id = ?`);
+    }
+    const currentPledgedAmount = getCampaignPledgedAmountStmt.get(campaignId) as { pledged_amount: number };
     const nextPledgedAmount = round(currentPledgedAmount.pledged_amount + roundedAmount);
-    if (nextPledgedAmount > campaign.targetAmount) {
+    if (nextPledgedAmount > currentCampaign.targetAmount) {
       throw toServiceError(
         'Pledge exceeds campaign funding cap.',
         400,
         'CAMPAIGN_FUNDING_CAP_EXCEEDED',
       );
     }
-    const result = db
-      .prepare(
+
+    if (!reconcileOnChainPledgeInsertStmt) {
+      reconcileOnChainPledgeInsertStmt = db.prepare(
         `INSERT OR IGNORE INTO pledges (
           campaign_id, contributor, amount, asset_code, token_id, created_at, refunded_at, transaction_hash
-        ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
-      )
-      .run(
-        campaignId,
-        input.contributor,
-        roundedAmount,
-        assetCode,
-        tokenId,
-        createdAt,
-        input.transactionHash,
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`
       );
+    }
+    const result = reconcileOnChainPledgeInsertStmt.run(
+      campaignId,
+      input.contributor,
+      roundedAmount,
+      assetCode,
+      tokenId,
+      createdAt,
+      input.transactionHash,
+    );
 
     if (result.changes === 0) {
       const duplicatePledge = getPledgeByTransactionHash(input.transactionHash);
@@ -1109,10 +1287,10 @@ export function reconcileOnChainPledge(
       return false;
     }
 
-    db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`).run(
-      roundedAmount,
-      campaignId,
-    );
+    if (!updateCampaignPledgedAmountStmt) {
+      updateCampaignPledgedAmountStmt = db.prepare(`UPDATE campaigns SET pledged_amount = pledged_amount + ? WHERE id = ?`);
+    }
+    updateCampaignPledgedAmountStmt.run(roundedAmount, campaignId);
 
     recordEvent(
       campaignId,
@@ -1132,37 +1310,37 @@ export function reconcileOnChainPledge(
       } as BlockchainMetadata,
     );
 
-    if (campaign.creator !== input.contributor) {
+    if (currentCampaign.creator !== input.contributor) {
       createNotification({
         campaignId,
         type: 'new_pledge',
-        title: `New on-chain pledge on "${campaign.title}"`,
+        title: `New on-chain pledge on "${currentCampaign.title}"`,
         body: `${input.contributor.slice(0, 8)}… pledged ${roundedAmount} ${assetCode} (on-chain)`,
-        targetWallet: campaign.creator,
+        targetWallet: currentCampaign.creator,
         actorWallet: input.contributor,
       });
     }
 
-    const wasFunded = campaign.pledgedAmount >= campaign.targetAmount;
+    const wasFunded = currentCampaign.pledgedAmount >= currentCampaign.targetAmount;
     const isFunded = nextPledgedAmount >= campaign.targetAmount;
     if (!wasFunded && isFunded) {
       void dispatchWebhook('campaign_funded', campaignId, {
         pledgedAmount: nextPledgedAmount,
-        targetAmount: campaign.targetAmount,
+        targetAmount: currentCampaign.targetAmount,
         assetCode,
         onChain: true,
       });
       createNotification({
         campaignId,
         type: 'campaign_funded',
-        title: `"${campaign.title}" is funded!`,
-        body: `Campaign reached its goal of ${campaign.targetAmount} ${assetCode}`,
-        targetWallet: campaign.creator,
+        title: `"${currentCampaign.title}" is funded!`,
+        body: `Campaign reached its goal of ${currentCampaign.targetAmount} ${assetCode}`,
+        targetWallet: currentCampaign.creator,
       });
     }
 
     return true;
-  })();
+  }).immediate();
 
   return {
     campaign: getCampaign(campaignId)!,
@@ -1321,15 +1499,19 @@ export function softDeleteCampaign(campaignId: string): CampaignRecord {
   }
 
   const deletedAt = nowInSeconds();
-  const changes = db
-    .prepare(`UPDATE campaigns SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`)
-    .run(deletedAt, campaignId);
+  // Explicit transaction: soft-delete UPDATE + archived event commit together
+  // so partial failure leaves no inconsistent lifecycle state (#870).
+  db.transaction(() => {
+    const changes = db
+      .prepare(`UPDATE campaigns SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`)
+      .run(deletedAt, campaignId);
 
-  if (changes.changes === 0) {
-    throw toServiceError('Campaign not found or already deleted.', 404, 'NOT_FOUND');
-  }
+    if (changes.changes === 0) {
+      throw toServiceError('Campaign not found or already deleted.', 404, 'NOT_FOUND');
+    }
 
-  recordEvent(campaignId, 'archived', deletedAt, campaign.creator);
+    recordEvent(campaignId, 'archived', deletedAt, campaign.creator);
+  })();
 
   return getCampaign(campaignId)!;
 }
@@ -1354,15 +1536,19 @@ export function restoreCampaign(campaignId: string): CampaignRecord {
   }
 
   const restoredAt = nowInSeconds();
-  const changes = db
-    .prepare(`UPDATE campaigns SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`)
-    .run(campaignId);
+  // Explicit transaction: restore UPDATE + restored event commit together
+  // so mid-operation failures leave no partial archived/restored state (#870).
+  db.transaction(() => {
+    const changes = db
+      .prepare(`UPDATE campaigns SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`)
+      .run(campaignId);
 
-  if (changes.changes === 0) {
-    throw toServiceError('Campaign not found or not archived.', 404, 'NOT_FOUND');
-  }
+    if (changes.changes === 0) {
+      throw toServiceError('Campaign not found or not archived.', 404, 'NOT_FOUND');
+    }
 
-  recordEvent(campaignId, 'restored', restoredAt, campaign.creator);
+    recordEvent(campaignId, 'restored', restoredAt, campaign.creator);
+  })();
 
   return getCampaign(campaignId)!;
 }

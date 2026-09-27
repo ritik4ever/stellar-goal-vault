@@ -6,11 +6,15 @@ import helmet from 'helmet';
 import { createServer, Server } from 'node:http';
 
 import { validateEnv } from './validateEnv';
+
+validateEnv();
+
 import { z } from 'zod';
 import path from 'path';
 import { config, walletIntegrationReady } from './config';
 import { apiKeyAuthMiddleware } from './middleware/apiKeyAuth';
 import { cacheMiddleware } from './middleware/cacheMiddleware';
+import { idempotencyMiddleware } from './middleware/idempotencyMiddleware';
 import { requestIdMiddleware } from './middleware/requestId';
 import { validateBody } from './middleware/validateBody';
 import type { RequestWithId } from './middleware/types';
@@ -49,7 +53,7 @@ import {
 } from './services/campaignStore';
 import { checkDbHealth } from './services/db';
 import { getCampaignTimeline, listCampaignHistory } from './services/eventHistory';
-import { startEventIndexer } from './services/eventIndexer';
+import { startEventIndexer, getIndexerStatus } from './services/eventIndexer';
 import {
   listNotifications,
   getUnreadCount,
@@ -79,7 +83,7 @@ import {
   normalizeQueryValue,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
-import { logError, logInfo, logger } from './logger';
+import { logError, logInfo, logger, summarizeSecretConfig } from './logger';
 import {
   buildCampaignCacheKey,
   getCampaignCacheEntry,
@@ -87,7 +91,14 @@ import {
   setTrendingCacheEntry,
   invalidateCampaignCache,
   setCampaignCacheEntry,
-} from './services/campaignCache';export const app = express();
+} from './services/campaignCache';
+
+export const app = express();
+
+// Assign request IDs before any middleware that may short-circuit the request
+// (for example CORS, body parsing, authentication, rate limiting, or docs).
+// The finish logger is installed here too so every handled request is logged.
+app.use(requestIdMiddleware);
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
@@ -133,6 +144,7 @@ app.use(
       'X-RateLimit-Limit',
       'X-RateLimit-Remaining',
       'X-RateLimit-Reset',
+      'X-Request-Id',
       'Retry-After',
     ],
   }),
@@ -143,7 +155,7 @@ app.use(compression({ threshold: 1024 }));
 const bodySizeLimit = process.env.MAX_BODY_SIZE || '16kb';
 app.use(express.json({ limit: bodySizeLimit }));
 
-// OpenAPI documentation endpoints are public and bypass API middleware.
+// Public OpenAPI/docs endpoints bypass API auth and rate limiting, but still receive IDs and logs.
 const openApiDocument = generateOpenApiDocument();
 app.get('/api/openapi.json', (_req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/json');
@@ -168,7 +180,15 @@ if (process.env.NODE_ENV === 'production') {
   app.use(cacheMiddleware(300));
 }
 
-const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+import { LRUCache } from 'lru-cache';
+
+const rateLimitBuckets = new LRUCache<string, { count: number; resetAt: number }>({
+  max: 5000,
+});
+
+export function clearRateLimitCache() {
+  rateLimitBuckets.clear();
+}
 
 export function applyRateLimit(limitOverride?: number) {
   return (req: Request, res: Response, next: express.NextFunction) => {
@@ -180,6 +200,11 @@ export function applyRateLimit(limitOverride?: number) {
 
     // Skip rate limiting when client IP is unavailable (common in test environments)
     if (!req.ip) {
+      return next();
+    }
+
+    // Skip rate limiting for local development to avoid blocking normal workflow
+    if (process.env.NODE_ENV === 'development' || (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test')) {
       return next();
     }
 
@@ -215,8 +240,6 @@ export function applyRateLimit(limitOverride?: number) {
 }
 
 app.use(applyRateLimit());
-
-app.use(requestIdMiddleware);
 
 function sendValidationError(issues: z.ZodIssue[]): never {
   throw new AppError(
@@ -338,8 +361,34 @@ export function filterCampaignList(
 }
 
 app.get('/api/health', (_req: Request, res: Response) => {
+  const start = process.hrtime();
   const database = checkDbHealth();
-  const healthy = database.reachable;
+  const indexer = getIndexerStatus();
+
+  // Operators distinguish healthy-but-idle from stale/failing via indexer.freshness.
+  // Degrade when DB is down or indexer is stale/failing (isHealthy already encodes this).
+  const healthy = database.reachable && indexer.isHealthy;
+
+  const end = process.hrtime(start);
+  const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+
+  logInfo('health_check', {
+    operation: 'health_check_shallow',
+    outcome: healthy ? 'success' : 'failure',
+    latency_ms: latencyMs,
+    db_reachable: database.reachable,
+    indexer_healthy: indexer.isHealthy,
+    indexer_freshness: indexer.freshness,
+    indexer_lag_ms: indexer.lagMs,
+  });
+
+  const memUsage = process.memoryUsage();
+  const memory = {
+    rss: memUsage.rss,
+    heapUsed: memUsage.heapUsed,
+    heapTotal: memUsage.heapTotal,
+    external: memUsage.external,
+  };
 
   res.status(healthy ? 200 : 503).json({
     service: 'stellar-goal-vault-backend',
@@ -347,6 +396,8 @@ app.get('/api/health', (_req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
     uptimeSeconds: Number(process.uptime().toFixed(3)),
     database,
+    indexer,
+    memory,
   });
 });
 app.get('/api/contributors/:address/pledges', async (req: Request, res: Response) => {
@@ -363,6 +414,7 @@ app.get('/api/contributors/:address/pledges', async (req: Request, res: Response
 });
 
 app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Response) => {
+  const start = process.hrtime();
   try {
     const database = checkDbHealth();
     const hasContractId = !!config.contractId;
@@ -386,12 +438,39 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
       sorobanHealthy = false;
     }
 
-    const allHealthy = database.reachable && hasContractId && sorobanHealthy;
+    const indexer = getIndexerStatus();
+    // Align overall with component.indexer.status (isHealthy includes freshness/lag).
+    const allHealthy =
+      database.reachable && hasContractId && sorobanHealthy && indexer.isHealthy;
+
+    const end = process.hrtime(start);
+    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+
+    logInfo('health_check', {
+      operation: 'health_check_deep',
+      outcome: allHealthy ? 'success' : 'failure',
+      latency_ms: latencyMs,
+      db_reachable: database.reachable,
+      soroban_healthy: sorobanHealthy,
+      indexer_healthy: indexer.isHealthy,
+      indexer_freshness: indexer.freshness,
+      indexer_lag_ms: indexer.lagMs,
+      has_contract_id: hasContractId,
+    });
+
+    const memUsage = process.memoryUsage();
+    const memory = {
+      rss: memUsage.rss,
+      heapUsed: memUsage.heapUsed,
+      heapTotal: memUsage.heapTotal,
+      external: memUsage.external,
+    };
 
     res.status(allHealthy ? 200 : 503).json({
       overall: allHealthy ? 'up' : 'down',
       timestamp: new Date().toISOString(),
       uptimeSeconds: Number(process.uptime().toFixed(3)),
+      memory,
       components: {
         db: {
           status: database.reachable ? 'up' : 'down',
@@ -407,9 +486,21 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
           status: hasContractId ? 'up' : 'down',
           details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
         },
+        indexer: {
+          status: indexer.isHealthy ? 'up' : 'down',
+          details: indexer,
+        },
       },
     });
   } catch (error) {
+    const end = process.hrtime(start);
+    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+    logError(error, {
+      event: 'health_check_error',
+      operation: 'health_check_deep',
+      outcome: 'failure',
+      latency_ms: latencyMs,
+    });
     res.status(503).json({
       overall: 'down',
       timestamp: new Date().toISOString(),
@@ -461,11 +552,14 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
     listOptions.limit = params.limit;
   }
 
-  const { campaigns, totalCount } = listCampaigns(listOptions);
+  const { campaigns, pledgeCounts, totalCount } = listCampaigns(listOptions);
 
+  // `listCampaigns` already aggregated active pledge counts in SQL for exactly
+  // the rows on this page, so reuse them instead of letting `calculateProgress`
+  // issue one COUNT query per campaign (an N+1 read on the hot list endpoint).
   const data = campaigns.map((campaign) => ({
     ...campaign,
-    progress: calculateProgress(campaign),
+    progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
   }));
 
   const page = params.page ?? 1;
@@ -517,11 +611,12 @@ app.get('/api/campaigns/trending', (req: Request, res: Response) => {
   res.send(responseBody);
 });
 
-app.get('/api/campaigns/:id', (req: Request, res: Response) => {
-  const parsedId = parseCampaignId(req.params.id);
-  if (!parsedId.ok) {
-    sendValidationError(parsedId.issues);
-  }
+app.get('/api/campaigns/:id', async (req: Request, res: Response, next: express.NextFunction) => {
+  try {
+    const parsedId = parseCampaignId(req.params.id);
+    if (!parsedId.ok) {
+      sendValidationError(parsedId.issues);
+    }
 
     const cacheKey = `campaigns:detail:${parsedId.value}`;
     const cached = await getCampaignCacheEntry(cacheKey);
@@ -1085,6 +1180,7 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
       path: req.originalUrl || req.path,
       status: statusCode,
       code,
+      indexer: getIndexerStatus(),
     },
     config.logLevel,
   );
@@ -1108,6 +1204,8 @@ function printStartupBanner(): void {
       port: config.port,
       environment: nodeEnv,
       databasePath: dbPath,
+      // Presence-only; values never logged (see redactSecretConfig / issue #955)
+      ...summarizeSecretConfig(),
     },
     config.logLevel,
   );

@@ -19,6 +19,11 @@ const parseOrigins = (originsStr: string): string[] => {
     .filter(Boolean);
 };
 
+// `ALLOWED_ORIGINS` is the documented variable; `CORS_ALLOWED_ORIGINS` is kept
+// as a backwards-compatible alias so existing deployments keep working. See
+// docs/SECURE_CONFIGURATION.md for the secure production default.
+const configuredOrigins = process.env.ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS || '';
+
 const parseInteger = (value: string | undefined, fallback: number): number => {
   if (!value) {
     return fallback;
@@ -31,7 +36,7 @@ const parseInteger = (value: string | undefined, fallback: number): number => {
 export const config = {
   port: Number(process.env.PORT ?? 3001),
   logLevel: normalizeLogLevel(process.env.LOG_LEVEL),
-  corsAllowedOrigins: parseOrigins(process.env.CORS_ALLOWED_ORIGINS ?? ''),
+  corsAllowedOrigins: parseOrigins(configuredOrigins),
   allowedAssets: (process.env.ALLOWED_ASSETS ?? 'USDC,XLM')
     .split(',')
     .map((value) => value.trim().toUpperCase())

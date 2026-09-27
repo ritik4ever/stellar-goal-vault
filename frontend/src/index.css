@@ -280,7 +280,35 @@ select {
   font-weight: 700;
 }
 
+.campaign-detail-banner {
+  width: calc(100% + 5rem);
+  height: 240px;
+  margin: -40px -40px 1.5rem;
+  overflow: hidden;
+  position: relative;
+  background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+}
+
+.campaign-detail-banner-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 /* Forms & Inputs */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .form-grid,
 .field-group {
   display: grid;
@@ -1294,11 +1322,36 @@ tbody tr:hover td {
   background: var(--bg-input);
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .detail-stat span {
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+
+.detail-stat-value,
+.wallet-address-row,
+.wallet-address-value {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.detail-stat-value,
+.wallet-address-row {
+  gap: 10px;
+}
+
+.wallet-address-value {
+  gap: 8px;
+}
+
+.detail-stat-value strong,
+.wallet-address-value strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .row {
@@ -1853,6 +1906,42 @@ tbody tr:hover td {
     margin: 0 -12px;
     padding: 0 12px;
   }
+
+  .campaign-detail-banner {
+    width: calc(100% + 3rem);
+    height: 180px;
+    margin: -24px -24px 1.25rem;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .wallet-status,
+  .wallet-connected {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .wallet-address-row {
+    width: 100%;
+  }
+
+  .wallet-address-value {
+    flex: 1;
+  }
+
+  .campaign-detail-actions {
+    flex-direction: column;
+  }
+
+  .campaign-detail-actions .btn-primary,
+  .campaign-detail-actions .btn-ghost,
+  .external-link-container .btn-ghost,
+  .share-actions .btn-ghost {
+    width: 100%;
+  }
 }
 
 /* Mobile card view overrides for campaign board */
@@ -2313,11 +2402,14 @@ tbody tr:hover td {
   .wizard-stepper ol {
     flex-wrap: nowrap;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
     padding-bottom: 4px;
   }
 
   .wizard-step-button {
     white-space: nowrap;
+    min-height: 44px;
   }
 
   .wizard-nav {
@@ -2331,5 +2423,16 @@ tbody tr:hover td {
 
   .review-block dl {
     grid-template-columns: 1fr;
+  }
+
+  /* Reduce the gap on the two-column optional-fields row so stacked
+     fields don't have excessive vertical space on narrow screens */
+  .wizard-step-panel .row {
+    gap: 16px;
+  }
+
+  /* Prevent the wizard card from causing horizontal page overflow */
+  .wizard-card {
+    overflow: hidden;
   }
 }

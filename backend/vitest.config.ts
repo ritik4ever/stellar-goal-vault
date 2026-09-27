@@ -6,7 +6,7 @@ export default defineConfig({
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts', 'tests/**/*.integration.ts'],
     exclude: ['node_modules', 'dist'],
     threads: true,
-    maxThreads: 4,
+    maxThreads: 1,
     minThreads: 1,
     isolate: true,
     globals: true,

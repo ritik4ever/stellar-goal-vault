@@ -36,12 +36,6 @@ export async function initRedisCache(): Promise<void> {
     logError(error instanceof Error ? error : new Error(String(error)), { event: 'redis_connection_failed' }, config.logLevel);
     redisClient = null;
     isConnected = false;
-  } catch {
-    redisClient = null;
-    isConnected = false;
-  } catch {
-    redisClient = null;
-    isConnected = false;
   }
 }
 

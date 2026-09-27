@@ -1,8 +1,9 @@
 import { createClient, RedisClientType } from 'redis';
 import { LRUCache } from 'lru-cache';
 import { config } from '../config';
+import { logError, logInfo } from '../logger';
 
-const CACHE_TTL_MS = 30_000;
+const CACHE_TTL_MS = 30000;
 const CACHE_TTL_SECONDS = 30;
 const CACHE_MAX_SIZE = Number(process.env.CAMPAIGN_CACHE_MAX_SIZE ?? 100);
 
@@ -41,11 +42,11 @@ let isRedisConnected = false;
 
 if (config.redisUrl) {
   redisClient = createClient({ url: config.redisUrl });
-  redisClient.on('error', (err) => console.error('Redis Client Error', err));
+  redisClient.on('error', (err) => logError(err, { event: 'redis_client_error' }));
   redisClient.on('connect', () => { isRedisConnected = true; });
   redisClient.on('disconnect', () => { isRedisConnected = false; });
   // Fire and forget connect
-  redisClient.connect().catch(console.error);
+  redisClient.connect().catch((err) => logError(err, { event: 'redis_connect_error' }));
 }
 
 export function buildCampaignCacheKey(queryString: string): string {
@@ -63,7 +64,7 @@ export async function getCampaignCacheEntry(key: string): Promise<string | undef
       if (val !== null) return val;
       return undefined;
     } catch (err) {
-      console.error('Redis get error', err);
+      logError(err, { event: 'redis_get_error', key });
       // Fallback to memory cache
     }
   }
@@ -76,7 +77,7 @@ export async function setCampaignCacheEntry(key: string, body: string): Promise<
       await redisClient.set(key, body, { EX: CACHE_TTL_SECONDS });
       return;
     } catch (err) {
-      console.error('Redis set error', err);
+      logError(err, { event: 'redis_set_error', key });
     }
   }
   memoryCache.set(key, { body });
@@ -91,7 +92,7 @@ export async function invalidateCampaignCache(): Promise<void> {
         await redisClient.del(keys);
       }
     } catch (err) {
-      console.error('Redis invalidate error', err);
+      logError(err, { event: 'redis_invalidate_error' });
     }
   }
   memoryCache.clear();

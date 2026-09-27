@@ -27,6 +27,292 @@ use soroban_sdk::{
         });
     }
 
+    /// Builds a synthetic metadata String of `len` bytes for boundary tests.
+    fn oversized_metadata(env: &Env, len: usize) -> String {
+        let buf: [u8; 501] = [b'x'; 501];
+        String::from_bytes(env, &buf[..len])
+    }
+
+    // ---- #895: campaign-creation boundary validation ---------------------
+    // Invalid boundary input must panic with a stable error and leave the
+    // campaign counter (and therefore all storage) untouched.
+
+    #[test]
+    #[should_panic(expected = "max_per_contributor must not exceed target_amount")]
+    fn test_create_campaign_rejects_cap_above_target() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        // Cap (1_001) exceeds target (1_000) — inconsistent accounting state.
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "cap above target"),
+            &1_001_i128,
+        );
+    }
+
+    #[test]
+    fn test_create_campaign_allows_cap_equal_target() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        // Boundary: cap == target is a consistent configuration and must be
+        // accepted (cap > target is rejected; cap < target and 0 are fine).
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "cap equals target"),
+            &1_000_i128,
+        );
+
+        assert_eq!(client.get_campaign(&campaign_id).target_amount, 1_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "accepted_tokens must contain valid token contract addresses")]
+    fn test_create_campaign_rejects_non_token_address() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        // A plain generated address is not a token contract.
+        let not_a_token = Address::generate(&env);
+
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, not_a_token],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "fake token"),
+            &0_i128,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "metadata must not exceed 500 bytes")]
+    fn test_create_campaign_rejects_oversized_metadata() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        // 501 bytes — one over MAX_METADATA_LEN.
+        let long_meta = oversized_metadata(&env, 501);
+
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &long_meta,
+            &0_i128,
+        );
+    }
+
+    #[test]
+    fn test_create_campaign_accepts_metadata_exactly_500_bytes() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let exact_meta = oversized_metadata(&env, 500);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &exact_meta,
+            &0_i128,
+        );
+
+        assert_eq!(client.get_campaign(&campaign_id).metadata.len(), 500);
+    }
+
+    #[test]
+    fn test_create_campaign_rejection_does_not_mutate_state() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        assert_eq!(client.get_next_campaign_id(), 0);
+
+        // A metadata violation is the last check in the boundary sequence;
+        // everything before it (auth, amounts, deadlines, tokens) has already
+        // run, so this proves no earlier check mutates storage either.
+        let long_meta = oversized_metadata(&env, 501);
+        // `crate::std` resolves through the `#[cfg(test)] extern crate std;`
+        // in lib.rs — the crate itself is `#![no_std]`.
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.create_campaign(
+                &creator,
+                &soroban_sdk::vec![&env, token.clone()],
+                &500_i128,
+                &(env.ledger().timestamp() + 1_000),
+                &long_meta,
+                &0_i128,
+            );
+        }));
+        assert!(result.is_err(), "creation must be rejected");
+
+        // Counter unchanged — no campaign row was written.
+        assert_eq!(client.get_next_campaign_id(), 0);
+        // A later valid creation starts at id 1 and works normally.
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "after rejected create"),
+            &0_i128,
+        );
+        assert_eq!(campaign_id, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "too many accepted tokens")]
+    fn test_create_campaign_rejects_count_before_duplicate_scan() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        // 11 copies of the SAME address: both "too many" and "duplicate".
+        // The count check must win — proving it runs before the O(n^2) scan.
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let mut tokens = soroban_sdk::vec![&env];
+        for _ in 0..11 {
+            tokens.push_back(token.clone());
+        }
+
+        client.create_campaign(
+            &creator,
+            &tokens,
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "count before dedup"),
+            &0_i128,
+        );
+    }
+
+    // ---- #895: per-contributor cap enforcement ---------------------------
+    // The cap recorded at creation time is now read at contribute time.
+
+    #[test]
+    #[should_panic(expected = "per-contributor cap exceeded")]
+    fn test_contribute_enforces_per_contributor_cap_across_tokens() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token_id);
+        asset_client.mint(&contributor, &1_000);
+
+        let client = deploy_contract(&env);
+
+        // Cap of 600 across ALL tokens; target 2_000 is never reachable.
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_id.clone()],
+            &2_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "cap enforcement test"),
+            &600_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token_id, &400);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 400);
+
+        // 400 + 300 = 700 > cap 600 — must panic.
+        client.contribute(&campaign_id, &contributor, &token_id, &300);
+    }
+
+    #[test]
+    fn test_contribute_allows_exactly_at_per_contributor_cap() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "cap boundary test"),
+            &500_i128,
+        );
+
+        // Exactly at the cap: 300 + 200 = 500 must be accepted.
+        client.contribute(&campaign_id, &contributor, &token, &300);
+        client.contribute(&campaign_id, &contributor, &token, &200);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
+    }
+
+    #[test]
+    #[should_panic(expected = "per-contributor cap exceeded")]
+    fn test_contribute_rejects_pledge_over_per_contributor_cap() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "over cap enforcement"),
+            &500_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &400);
+        // 400 + 101 = 501 > cap 500.
+        client.contribute(&campaign_id, &contributor, &token, &101);
+    }
+
 
     #[test]
     fn test_claim_success() {
@@ -449,6 +735,61 @@ use soroban_sdk::{
 
         client.set_paused(&admin, &true);
         client.contribute(&campaign_id, &contributor, &token, &500);
+    }
+    
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_campaign_blocked_when_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        client.set_paused(&admin, &true);
+
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "paused create should fail"),
+            &0_i128,
+        );
+    }
+
+    #[test]
+    fn test_create_campaign_succeeds_when_unpaused() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        // Explicitly unpaused (default), then create — preserves existing lifecycle.
+        client.set_paused(&admin, &false);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "unpaused create ok"),
+            &0_i128,
+        );
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.creator, creator);
+        assert_eq!(campaign.target_amount, 500);
+        assert!(!campaign.claimed);
+        assert!(!campaign.canceled);
+        assert_eq!(campaign.contributor_count, 0);
     }
 
     #[test]
@@ -1229,6 +1570,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1242,6 +1584,7 @@ use soroban_sdk::{
     }
 
     #[test]
+    #[should_panic(expected = "caller is not admin")]
     fn test_set_fee_recipient_admin_only() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1474,5 +1817,292 @@ use soroban_sdk::{
         assert_eq!(token_client.balance(&creator), 1_000);
         assert_eq!(token_client.balance(&fee_recipient), 0);
     }
+
+
+    // --- Failure-path coverage (issue #989) ---
+    // Invalid input, missing data, duplicate actions, deadline/timeout, and
+    // permission failures asserted by panic behavior (not snapshots alone).
+
+    #[test]
+    #[should_panic(expected = "target amount must be positive")]
+    fn test_create_campaign_rejects_non_positive_target() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &0_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "zero target"),
+            &0_i128,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "deadline must be in the future")]
+    fn test_create_campaign_rejects_past_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let now = env.ledger().timestamp();
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &now,
+            &String::from_str(&env, "past deadline"),
+            &0_i128,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "deadline exceeds maximum campaign duration")]
+    fn test_create_campaign_rejects_duration_over_max() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        // MAX_CAMPAIGN_DURATION_SECONDS = 180 days; exceed by one second.
+        let excessive = env.ledger().timestamp() + (60 * 60 * 24 * 180) + 1;
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &excessive,
+            &String::from_str(&env, "too long"),
+            &0_i128,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "accepted_tokens must not be empty")]
+    fn test_create_campaign_rejects_empty_accepted_tokens() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let client = deploy_contract(&env);
+
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "no tokens"),
+            &0_i128,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate token addresses")]
+    fn test_create_campaign_rejects_duplicate_tokens() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone(), token.clone()],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "dup tokens"),
+            &0_i128,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "max_per_contributor must not be negative")]
+    fn test_create_campaign_rejects_negative_max_per_contributor() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "neg cap"),
+            &(-1_i128),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign not found")]
+    fn test_get_campaign_missing_id_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let client = deploy_contract(&env);
+        let _ = client.get_campaign(&999_u64);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign funding cap exceeded")]
+    fn test_contribute_rejects_funding_cap_exceeded() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 2_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "over target"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &1_001);
+    }
+
+    #[test]
+    #[should_panic(expected = "token not accepted by this campaign")]
+    fn test_contribute_rejects_unaccepted_token() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let accepted = deploy_token(&env, &admin, &contributor, 1_000);
+        let other = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, accepted],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "wrong token"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &other, &500);
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign deadline reached")]
+    fn test_contribute_rejects_after_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "late pledge"),
+            &0_i128,
+        );
+
+        advance_time(&env, deadline_offset + 1);
+        client.contribute(&campaign_id, &contributor, &token, &500);
+    }
+
+    #[test]
+    #[should_panic(expected = "funded campaigns cannot be refunded")]
+    fn test_refund_rejects_funded_campaign_after_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "funded no refund"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &1_000);
+        advance_time(&env, deadline_offset + 1);
+        client.refund(&campaign_id, &contributor);
+    }
+
+    #[test]
+    #[should_panic(expected = "nothing to refund")]
+    fn test_refund_rejects_when_nothing_to_refund() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 500);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "no pledge refund"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &500);
+        advance_time(&env, deadline_offset + 1);
+        // Stranger never pledged — nothing to refund.
+        client.refund(&campaign_id, &stranger);
+    }
+
+
+    #[test]
+    #[should_panic(expected = "fee must be non-negative")]
+    fn test_set_fee_rejects_negative() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+        client.set_fee(&admin, &(-1_i128));
+    }
+
 
 }

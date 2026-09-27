@@ -8,8 +8,24 @@ The backend now includes request logging middleware that records one log line pe
 - Request path (query string removed)
 - Response status code
 - Request duration
-- Request ID (when available)
+- Request ID (`X-Request-Id`; incoming IDs are propagated, otherwise a UUID is generated)
 - Remote IP and user agent
+
+## Structured fields
+
+In addition to the base fields above, each request log line carries stable,
+machine-readable fields so logs and metrics can be filtered without parsing
+free-form messages:
+
+- `requestId` — correlation ID for the request (`X-Request-Id`)
+- `campaignId` — campaign identifier when the request is scoped to a campaign
+- `operation` — operation name (e.g. `campaign.create`, `campaign.update`)
+- `outcome` — normalized result (`success`, `client_error`, `server_error`)
+- `latencyMs` — request latency in milliseconds (numeric)
+
+These fields are emitted as top-level keys in production JSON logs and as
+`key=value` pairs in development text logs, so both can be filtered by
+`operation` and `requestId` directly.
 
 ## Safety
 
@@ -33,7 +49,7 @@ For operator troubleshooting guidance and runbook actions, see `OPERATOR_REQUEST
 ## Example development log
 
 ```txt
-[2026-03-27T22:00:00.000Z] GET /api/health status=200 duration=3.12ms requestId=abc ip=127.0.0.1
+[2026-03-27T22:00:00.000Z] GET /api/health status=200 duration=3.12ms requestId=abc operation=health.check outcome=success latencyMs=3.12 ip=127.0.0.1
 ```
 
 ## Example production log
@@ -47,6 +63,10 @@ For operator troubleshooting guidance and runbook actions, see `OPERATOR_REQUEST
   "statusCode": 200,
   "durationMs": 3.12,
   "duration": "3.12ms",
-  "requestId": "abc"
+  "requestId": "abc",
+  "campaignId": "cmp_123",
+  "operation": "campaign.update",
+  "outcome": "success",
+  "latencyMs": 3.12
 }
 ```

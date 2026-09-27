@@ -133,12 +133,24 @@ export default defineConfig(async () => {
   return {
     plugins,
     build: {
+      chunkSizeWarningLimit: 600, // Recommend keeping chunks under 600KB unminified/uncompressed
       rollupOptions: {
         output: {
           manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
-            'vendor-stellar': ['@stellar/stellar-sdk'],
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            'vendor-stellar': [
+              '@stellar/stellar-sdk', 
+              '@stellar/freighter-api',
+              '@lobstrco/signer-extension-api',
+              '@creit.tech/xbull-wallet-connect'
+            ],
             'vendor-charts': ['recharts'],
+            'vendor-ui': ['lucide-react'],
+            // react-markdown and its remark/rehype dependency tree are only
+            // needed inside CampaignDetailPanel (which is already lazy-loaded).
+            // Isolating them here prevents the markdown parser from landing in
+            // the main app chunk and keeps the vendor-react chunk stable.
+            'vendor-markdown': ['react-markdown'],
           },
         },
       },
