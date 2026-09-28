@@ -236,7 +236,7 @@ export function logRequest(
     ip: request.ip,
     userAgent: request.userAgent,
     ...(request.retryCount !== undefined ? { retryCount: request.retryCount } : {}),
-    ...(request.retryReason ? { retryReason: request.retryReason } : {}),
+    ...(request.retryReason ? { retryReason: redactSensitive(request.retryReason) } : {}),
     ...(request.finalOutcome ? { finalOutcome: request.finalOutcome } : {}),
   });
 }
