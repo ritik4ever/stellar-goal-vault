@@ -8,7 +8,7 @@
     "@stellar/stellar-sdk": "^14.5.0",
     "@types/swagger-ui-express": "^4.1.8",
     "axios": "^1.20.0",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^13.0.3",
     "compression": "^1.8.2",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
