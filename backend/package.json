@@ -11,7 +11,7 @@
     "better-sqlite3": "^12.6.2",
     "compression": "^1.8.2",
     "cors": "^2.8.5",
-    "dotenv": "^17.3.1",
+    "dotenv": "^18.0.3",
     "express": "^4.21.2",
     "helmet": "^7.1.0",
     "lru-cache": "^11.5.3",
