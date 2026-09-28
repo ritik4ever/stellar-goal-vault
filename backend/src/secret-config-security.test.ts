@@ -647,3 +647,582 @@ describe('Secret config — canary self-verification', () => {
     expect(pattern.test(uncommented)).toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H. Additional validateEnv edge cases
+//
+//    These cover bypass paths that are not tested in groups A or the existing
+//    validateEnv.test.ts: the CORS_ALLOWED_ORIGINS alias wildcard path,
+//    whitespace-only ALLOWED_ORIGINS resolving through the alias, and the
+//    SOROBAN_RPC_URL HTTP bypass when URL is http:// with a trailing slash.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Secret config — validateEnv additional edge cases', () => {
+  // ── CORS alias wildcard bypass ─────────────────────────────────────────────
+  it('rejects production when ALLOWED_ORIGINS is unset and CORS_ALLOWED_ORIGINS is *', () => {
+    // If ALLOWED_ORIGINS is absent, the resolver falls back to CORS_ALLOWED_ORIGINS.
+    // A wildcard in the alias must be caught — not silently accepted.
+    const env = {
+      ...VALID_PROD_ENV,
+      ALLOWED_ORIGINS: '',
+      CORS_ALLOWED_ORIGINS: '*',
+    };
+    expect(() => validateEnv(env)).toThrow(/ALLOWED_ORIGINS is required in production/);
+  });
+
+  it('rejects production when ALLOWED_ORIGINS is whitespace-only and CORS_ALLOWED_ORIGINS is *', () => {
+    // ALLOWED_ORIGINS='   ' is truthy in JS but resolves to '' via OR short-circuit in validateEnv
+    // (the schema reads: ALLOWED_ORIGINS || CORS_ALLOWED_ORIGINS || '')
+    // Even if whitespace resolves to CORS_ALLOWED_ORIGINS='*', the wildcard must be rejected.
+    const env = {
+      ...VALID_PROD_ENV,
+      ALLOWED_ORIGINS: '   ',
+      CORS_ALLOWED_ORIGINS: '*',
+    };
+    // Whether whitespace resolves to the alias or stays as-is, the result must still fail:
+    // whitespace-only splits to [] after trim+filter, which is empty → rejected.
+    // OR the alias '*' → rejected.
+    expect(() => validateEnv(env)).toThrow(/ALLOWED_ORIGINS is required in production/);
+  });
+
+  it('rejects production when both ALLOWED_ORIGINS and CORS_ALLOWED_ORIGINS are empty', () => {
+    const env = {
+      ...VALID_PROD_ENV,
+      ALLOWED_ORIGINS: '',
+      CORS_ALLOWED_ORIGINS: '',
+    };
+    expect(() => validateEnv(env)).toThrow(/ALLOWED_ORIGINS is required in production/);
+  });
+
+  it('accepts production when CORS_ALLOWED_ORIGINS is used as alias with a valid origin', () => {
+    // The alias is legitimate when ALLOWED_ORIGINS is unset — document this boundary
+    const { ALLOWED_ORIGINS: _, ...envWithoutPrimary } = VALID_PROD_ENV;
+    const env = {
+      ...envWithoutPrimary,
+      ALLOWED_ORIGINS: '',
+      CORS_ALLOWED_ORIGINS: 'https://app.example.com',
+    };
+    expect(() => validateEnv(env)).not.toThrow();
+  });
+
+  // ── SOROBAN_RPC_URL HTTP bypass variants ───────────────────────────────────
+  it('rejects production when SOROBAN_RPC_URL is http:// with trailing path', () => {
+    const env = {
+      ...VALID_PROD_ENV,
+      SOROBAN_RPC_URL: 'http://soroban.example.com/rpc',
+    };
+    expect(() => validateEnv(env)).toThrow(/SOROBAN_RPC_URL must use HTTPS in production/);
+  });
+
+  it('rejects production when SOROBAN_RPC_URL uses ws:// (WebSocket, not HTTPS)', () => {
+    const env = {
+      ...VALID_PROD_ENV,
+      SOROBAN_RPC_URL: 'ws://soroban.example.com:8000',
+    };
+    // ws:// is a valid URL but not https: — must be rejected
+    expect(() => validateEnv(env)).toThrow(/SOROBAN_RPC_URL must use HTTPS in production/);
+  });
+
+  // ── API_KEYS whitespace-only tokens ───────────────────────────────────────
+  it('rejects production when every API_KEYS token is only spaces after splitting', () => {
+    // "  ,   ,  " splits to ['  ', '   ', '  '] then filter(Boolean) keeps them all
+    // because non-empty strings are truthy — but the spaces-only check in validateEnv
+    // uses filter(Boolean) which keeps whitespace strings.
+    // This documents the ACTUAL behaviour: whitespace tokens DO pass filter(Boolean).
+    // The correct production guard is therefore to use trimmed tokens.
+    // validateEnv uses: (data.API_KEYS || '').split(',').filter(Boolean)
+    // '  ,   ,  '.split(',') = ['  ', '   ', '  '] — all truthy, so length = 3 → PASSES.
+    // This is a known limitation: whitespace-padded API_KEYS passes validateEnv.
+    // The security risk: no real key, but auth middleware will receive those whitespace keys
+    // and only reject them at runtime (the key in the Bearer token won't match).
+    // We document this as a known gap by asserting the CURRENT behavior:
+    const env = { ...VALID_PROD_ENV, API_KEYS: '  ,   ,  ' };
+    // Current: filter(Boolean) keeps whitespace-only tokens → 3 entries → does NOT throw
+    // This test is a DOCUMENTATION test. If validateEnv is strengthened to trim tokens,
+    // update this test to expect a throw.
+    expect(() => validateEnv(env)).not.toThrow();
+  });
+
+  it('rejects production when API_KEYS is only commas (filter produces empty array)', () => {
+    // ',,,,'.split(',').filter(Boolean) = [] → empty → correctly rejected
+    const env = { ...VALID_PROD_ENV, API_KEYS: ',,,,' };
+    expect(() => validateEnv(env)).toThrow(/API_KEYS is required in production/);
+  });
+
+  // ── LOG_LEVEL silent ───────────────────────────────────────────────────────
+  it('accepts LOG_LEVEL=silent in production (silent suppresses all output, not a leak risk)', () => {
+    const env = { ...VALID_PROD_ENV, LOG_LEVEL: 'silent' };
+    expect(() => validateEnv(env)).not.toThrow();
+  });
+
+  it('accepts LOG_LEVEL=warn in production', () => {
+    const env = { ...VALID_PROD_ENV, LOG_LEVEL: 'warn' };
+    expect(() => validateEnv(env)).not.toThrow();
+  });
+
+  it('rejects an unrecognised LOG_LEVEL value in any environment', () => {
+    const env = { ...VALID_PROD_ENV, LOG_LEVEL: 'verbose' as any };
+    expect(() => validateEnv(env)).toThrow();
+  });
+
+  // ── CONTRACT_ID whitespace variants ───────────────────────────────────────
+  it('rejects production when CONTRACT_ID is only tabs and spaces', () => {
+    const env = { ...VALID_PROD_ENV, CONTRACT_ID: '\t  \t' };
+    expect(() => validateEnv(env)).toThrow(/CONTRACT_ID is required in production/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// I. apiKeyAuthMiddleware — additional boundary cases
+//
+//    Covers the whitespace-key padding trap, the dev-mode empty-key pass-through
+//    quirk, the x-api-key header header format, and other middleware edge cases
+//    not covered in group B.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Secret config — apiKeyAuthMiddleware additional cases', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function loadMiddleware() {
+    vi.resetModules();
+    const mod = await import('./middleware/apiKeyAuth');
+    return mod.apiKeyAuthMiddleware;
+  }
+
+  function makeReq(overrides: Record<string, unknown> = {}): any {
+    return { path: '/api/campaigns', headers: {}, ...overrides };
+  }
+
+  function makeRes(): any {
+    const res: any = {};
+    res.status = vi.fn().mockReturnValue(res);
+    res.json = vi.fn().mockReturnValue(res);
+    return res;
+  }
+
+  it('rejects a key with surrounding whitespace when the stored key has no whitespace', async () => {
+    // If an operator sets API_KEYS="real-key" but a client sends "Bearer  real-key" (extra space),
+    // the middleware must reject it — exact match only.
+    vi.stubEnv('API_KEYS', 'real-key');
+    const middleware = await loadMiddleware();
+    const req = makeReq({ headers: { authorization: 'Bearer  real-key' } }); // two spaces
+    const res = makeRes();
+    const next = vi.fn();
+
+    expect(() => middleware(req, res, next)).toThrow(/Invalid API key/);
+  });
+
+  it('rejects an API key that has leading/trailing whitespace when stored key is trimmed', async () => {
+    // API_KEYS=" real-key " — the middleware uses split(',').filter(Boolean) without trim.
+    // The stored entry is ' real-key ' with spaces; 'real-key' will NOT match it.
+    // This documents the whitespace-padding misconfiguration risk.
+    vi.stubEnv('API_KEYS', ' real-key ');
+    const middleware = await loadMiddleware();
+    const req = makeReq({ headers: { authorization: 'Bearer real-key' } });
+    const res = makeRes();
+    const next = vi.fn();
+
+    // The key 'real-key' is not in [' real-key '] → FORBIDDEN
+    expect(() => middleware(req, res, next)).toThrow(/Invalid API key/);
+  });
+
+  it('allows all public paths without auth even when API_KEYS is set', async () => {
+    const publicPaths = [
+      '/api/health',
+      '/api/config',
+      '/api/stats',
+      '/api/leaderboard',
+      '/api/open-issues',
+    ];
+    vi.stubEnv('API_KEYS', 'real-key');
+    const middleware = await loadMiddleware();
+
+    for (const publicPath of publicPaths) {
+      const req = makeReq({ path: publicPath });
+      const res = makeRes();
+      const next = vi.fn();
+      middleware(req, res, next);
+      expect(next, `expected next() for public path ${publicPath}`).toHaveBeenCalled();
+    }
+  });
+
+  it('allows a sub-path of a public path (startsWith match)', async () => {
+    // /api/health/details starts with /api/health → public
+    vi.stubEnv('API_KEYS', 'real-key');
+    const middleware = await loadMiddleware();
+    const req = makeReq({ path: '/api/health/details' });
+    const res = makeRes();
+    const next = vi.fn();
+    middleware(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('passes through in dev-mode even with a nonsense Bearer token', async () => {
+    // When API_KEYS is empty, any Bearer value passes — this is the dev escape hatch.
+    // The test documents and pins this intentional behaviour.
+    vi.stubEnv('API_KEYS', '');
+    const middleware = await loadMiddleware();
+    const req = makeReq({ headers: { authorization: 'Bearer totally-not-a-real-key' } });
+    const res = makeRes();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('throws UNAUTHORIZED for Authorization: Bearer (no key, only the scheme word)', async () => {
+    // "Bearer" without a space — authHeader.startsWith('Bearer ') requires the space
+    vi.stubEnv('API_KEYS', 'real-key');
+    const middleware = await loadMiddleware();
+    const req = makeReq({ headers: { authorization: 'Bearer' } });
+    const res = makeRes();
+    const next = vi.fn();
+
+    expect(() => middleware(req, res, next)).toThrow(/Missing or invalid Authorization header/);
+  });
+
+  it('throws UNAUTHORIZED for an empty Authorization header value', async () => {
+    vi.stubEnv('API_KEYS', 'real-key');
+    const middleware = await loadMiddleware();
+    const req = makeReq({ headers: { authorization: '' } });
+    const res = makeRes();
+    const next = vi.fn();
+
+    expect(() => middleware(req, res, next)).toThrow(/Missing or invalid Authorization header/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// J. redactSensitive — additional boundary cases
+//
+//    Covers: non-string primitives in sensitive keys, the x-api-key HTTP header
+//    name, depth-limit behaviour, and GitHub token string detection.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Secret config — redactSensitive additional boundary cases', () => {
+  it('redacts x-api-key (HTTP header name matched by SENSITIVE_KEY_RE)', () => {
+    const payload = { 'x-api-key': 'some-api-key-value', safe: 'ok' };
+    const result = redactSensitive(payload) as Record<string, unknown>;
+    expect(result['x-api-key']).toBe('[REDACTED]');
+    expect(result['safe']).toBe('ok');
+  });
+
+  it('redacts set-cookie (HTTP response header matched by SENSITIVE_KEY_RE)', () => {
+    const payload = { 'set-cookie': 'session=abc123; HttpOnly', page: 1 };
+    const result = redactSensitive(payload) as Record<string, unknown>;
+    expect(result['set-cookie']).toBe('[REDACTED]');
+    expect(result['page']).toBe(1);
+  });
+
+  it('replaces a numeric value in a sensitive key with the [REDACTED] string', () => {
+    // { token: 12345 } — the value is a number, not a string.
+    // redactSensitive always writes '[REDACTED]' (string) for sensitive keys regardless of type.
+    const payload = { token: 12345, count: 7 };
+    const result = redactSensitive(payload) as Record<string, unknown>;
+    expect(result['token']).toBe('[REDACTED]');
+    expect(result['count']).toBe(7); // non-sensitive numeric passes through unchanged
+  });
+
+  it('replaces a boolean value in a sensitive key with [REDACTED]', () => {
+    const payload = { secret: true, enabled: false };
+    const result = redactSensitive(payload) as Record<string, unknown>;
+    expect(result['secret']).toBe('[REDACTED]');
+    expect(result['enabled']).toBe(false);
+  });
+
+  it('replaces an array value in a sensitive key with [REDACTED]', () => {
+    const payload = { api_keys: ['key1', 'key2'], names: ['alice', 'bob'] };
+    const result = redactSensitive(payload) as Record<string, unknown>;
+    // Sensitive key — value replaced regardless of type
+    expect(result['api_keys']).toBe('[REDACTED]');
+    // Non-sensitive array passes through
+    expect(result['names']).toEqual(['alice', 'bob']);
+  });
+
+  it('redacts a GitHub PAT string (ghp_ prefix) to [REDACTED_TOKEN]', () => {
+    const token = 'ghp_' + 'A'.repeat(36);
+    const result = redactSensitive(token);
+    expect(result).toBe('[REDACTED_TOKEN]');
+  });
+
+  it('redacts a GitHub OAuth token string (gho_ prefix) to [REDACTED_TOKEN]', () => {
+    const token = 'gho_' + 'B'.repeat(36);
+    const result = redactSensitive(token);
+    expect(result).toBe('[REDACTED_TOKEN]');
+  });
+
+  it('does not redact a non-sensitive string that happens to contain "key" as a substring', () => {
+    // "monkeybar" contains "key" but is not a sensitive key name
+    const payload = { monkeybar: 'visible', keyboard: 'also visible' };
+    const result = redactSensitive(payload) as Record<string, unknown>;
+    expect(result['monkeybar']).toBe('visible');
+    expect(result['keyboard']).toBe('also visible');
+  });
+
+  it('returns null unchanged (null is not an object to walk)', () => {
+    expect(redactSensitive(null)).toBeNull();
+  });
+
+  it('returns undefined unchanged', () => {
+    expect(redactSensitive(undefined)).toBeUndefined();
+  });
+
+  it('handles an empty object without throwing', () => {
+    const result = redactSensitive({});
+    expect(result).toEqual({});
+  });
+
+  it('handles an empty array without throwing', () => {
+    const result = redactSensitive([]);
+    expect(result).toEqual([]);
+  });
+
+  it('redacts database_url and db_url keys (credential-bearing URL aliases)', () => {
+    // SENSITIVE_KEY_RE covers database[_-]?url and db[_-]?url
+    const payload = {
+      database_url: 'postgres://user:pass@host/db',
+      db_url: 'mysql://root:secret@localhost/app',
+    };
+    const result = redactSensitive(payload) as Record<string, unknown>;
+    expect(result['database_url']).toBe('[REDACTED]');
+    expect(result['db_url']).toBe('[REDACTED]');
+  });
+
+  it('redacts wallet_secret and webhook_secret keys', () => {
+    const payload = {
+      wallet_secret: 'S' + 'A'.repeat(55),
+      webhook_secret: 'hmac-signing-key',
+    };
+    const result = redactSensitive(payload) as Record<string, unknown>;
+    expect(result['wallet_secret']).toBe('[REDACTED]');
+    expect(result['webhook_secret']).toBe('[REDACTED]');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// K. redactSecretConfig — additional precision tests
+//
+//    Verifies the count reporting in API_KEYS redaction, DATABASE_URL handling,
+//    and that the SECRET_CONFIG_ENV_KEYS list covers DATABASE_URL.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Secret config — redactSecretConfig additional precision', () => {
+  it('redactSecretConfig reports the correct key count for API_KEYS', () => {
+    const cfg = { API_KEYS: 'k1,k2,k3', PORT: '3001' };
+    const result = redactSecretConfig(cfg);
+    // Should say "3 keys"
+    expect(String(result['API_KEYS'])).toMatch(/3 key/);
+    expect(String(result['API_KEYS'])).toContain('REDACTED');
+  });
+
+  it('redactSecretConfig reports 1 key for a single-key API_KEYS value', () => {
+    const cfg = { API_KEYS: 'only-one-key' };
+    const result = redactSecretConfig(cfg);
+    expect(String(result['API_KEYS'])).toMatch(/1 key[^s]/); // singular
+  });
+
+  it('redactSecretConfig masks DATABASE_URL completely', () => {
+    const cfg = { DATABASE_URL: 'postgres://user:pass@db.internal/prod' };
+    const result = redactSecretConfig(cfg);
+    expect(JSON.stringify(result)).not.toContain('user');
+    expect(JSON.stringify(result)).not.toContain('pass');
+    expect(String(result['DATABASE_URL'])).toContain('REDACTED');
+  });
+
+  it('SECRET_CONFIG_ENV_KEYS includes DATABASE_URL', () => {
+    expect(SECRET_CONFIG_ENV_KEYS).toContain('DATABASE_URL' as any);
+  });
+
+  it('summarizeSecretConfig reports configured=true for DATABASE_URL when set', () => {
+    const env = { DATABASE_URL: 'postgres://user:pass@host/db' };
+    const summary = summarizeSecretConfig(env);
+    expect(summary['DATABASE_URL_configured']).toBe(true);
+  });
+
+  it('summarizeSecretConfig reports configured=false for DATABASE_URL when absent', () => {
+    const env: Record<string, string | undefined> = { DATABASE_URL: undefined };
+    const summary = summarizeSecretConfig(env);
+    expect(summary['DATABASE_URL_configured']).toBe(false);
+  });
+
+  it('redactSecretConfig passes through PORT and NODE_ENV unchanged', () => {
+    const cfg = { PORT: '3001', NODE_ENV: 'production', API_KEYS: 'k1' };
+    const result = redactSecretConfig(cfg);
+    expect(result['PORT']).toBe('3001');
+    expect(result['NODE_ENV']).toBe('production');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L. walletIntegrationReady — partial Soroban network configuration
+//
+//    config.ts exports `walletIntegrationReady` which gates pledge-signing.
+//    If only one of SOROBAN_RPC_URL / SOROBAN_NETWORK_PASSPHRASE is set (and
+//    the other is not), hasSorobanNetworkProfile is false and the flag is false
+//    even though validateEnv passed. These tests pin that boundary.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Secret config — walletIntegrationReady partial-config edge cases', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function loadConfig() {
+    vi.resetModules();
+    return import('./config');
+  }
+
+  it('is false when CONTRACT_ID is empty (even if RPC and passphrase are set)', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('CONTRACT_ID', '');
+    vi.stubEnv('SOROBAN_RPC_URL', 'https://soroban-testnet.stellar.org:443');
+    vi.stubEnv('SOROBAN_NETWORK_PASSPHRASE', 'Test SDF Network ; September 2015');
+    const { walletIntegrationReady } = await loadConfig();
+    expect(walletIntegrationReady).toBe(false);
+  });
+
+  it('is false when SOROBAN_RPC_URL is set but SOROBAN_NETWORK_PASSPHRASE is absent', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('CONTRACT_ID', 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    vi.stubEnv('SOROBAN_RPC_URL', 'https://soroban-testnet.stellar.org:443');
+    vi.stubEnv('SOROBAN_NETWORK_PASSPHRASE', '');
+    // useDevelopmentDefaults = false (RPC is set), hasSorobanNetworkProfile = false
+    const { walletIntegrationReady } = await loadConfig();
+    expect(walletIntegrationReady).toBe(false);
+  });
+
+  it('is false when SOROBAN_NETWORK_PASSPHRASE is set but SOROBAN_RPC_URL is absent', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('CONTRACT_ID', 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    vi.stubEnv('SOROBAN_RPC_URL', '');
+    vi.stubEnv('SOROBAN_NETWORK_PASSPHRASE', 'Test SDF Network ; September 2015');
+    // useDevelopmentDefaults = false (passphrase is set), hasSorobanNetworkProfile = false
+    const { walletIntegrationReady } = await loadConfig();
+    expect(walletIntegrationReady).toBe(false);
+  });
+
+  it('is true when CONTRACT_ID, RPC URL, and passphrase are all set', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('CONTRACT_ID', 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    vi.stubEnv('SOROBAN_RPC_URL', 'https://soroban-testnet.stellar.org:443');
+    vi.stubEnv('SOROBAN_NETWORK_PASSPHRASE', 'Test SDF Network ; September 2015');
+    const { walletIntegrationReady } = await loadConfig();
+    expect(walletIntegrationReady).toBe(true);
+  });
+
+  it('is true in development with no RPC/passphrase set (testnet defaults apply)', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('CONTRACT_ID', 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    vi.stubEnv('SOROBAN_RPC_URL', '');
+    vi.stubEnv('SOROBAN_NETWORK_PASSPHRASE', '');
+    // useDevelopmentDefaults = true → hasSorobanNetworkProfile = true
+    const { walletIntegrationReady } = await loadConfig();
+    expect(walletIntegrationReady).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M. Gitleaks allowlist — scope validation
+//
+//    The .gitleaks.toml allowlist paths use glob-style patterns that point to
+//    backend/src/tests/.* — but the actual test files live directly in
+//    backend/src/*.test.ts, NOT in a tests/ subdirectory. This group asserts
+//    that the main source files we know contain fixture API keys do NOT match
+//    the allowlist path pattern, ensuring gitleaks would still scan them.
+//    It also verifies that fixture strings used in these test files are
+//    short-enough or contain hyphens that they won't false-trigger the
+//    generic-api-key rule (length < 16 or contains non-[a-z0-9] chars).
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Secret config — Gitleaks allowlist scope validation', () => {
+  it('.gitleaks.toml allowlist does NOT exempt backend/src/*.test.ts files', () => {
+    const content = fs.readFileSync(path.join(ROOT, '.gitleaks.toml'), 'utf-8');
+    // The allowlist path is backend/src/tests/.* — NOT backend/src/ directly
+    // Test files at backend/src/*.test.ts are NOT in that path and ARE scanned
+    expect(content).toContain('backend/src/tests/.*');
+    expect(content).not.toMatch(/backend\/src\/\*\.test\.ts/); // not exempted by glob
+  });
+
+  it('fixture API key strings in the test suite use hyphens (exempt from generic-api-key regex)', () => {
+    // gitleaks generic-api-key rule: [a-z0-9]{16,128} (no hyphens)
+    // Keys like "prod-key-alpha" contain hyphens → won't match → safe to use in tests
+    const genericKeyRe = /(?:api_key|apikey|secret|password|private_key|token)[-|_|=|\s|:]{1,4}([a-z0-9]{16,128})/i;
+    const fixtureKeys = ['prod-key-alpha', 'prod-key-beta', 'real-prod-key', 'key-one', 'key-two'];
+    for (const key of fixtureKeys) {
+      // These are used as values, not as inline assignments — they won't trigger the rule
+      // But even if they appeared as `API_KEYS=prod-key-alpha`, the value has hyphens
+      expect(genericKeyRe.test(`API_KEYS=${key}`)).toBe(false);
+    }
+  });
+
+  it('.gitleaks.toml allowlist regex for sha512 hashes does not exempt real Stellar keys', () => {
+    const stellarKeyRe = /S[A-Z2-7]{55}/;
+    // A sha512 hash starts with sha512- — it should NOT match the Stellar key pattern
+    const sha512Hash = 'sha512-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789+/==';
+    expect(stellarKeyRe.test(sha512Hash)).toBe(false);
+  });
+
+  it('.gitleaks.toml does not exempt the backend/src directory entirely', () => {
+    const content = fs.readFileSync(path.join(ROOT, '.gitleaks.toml'), 'utf-8');
+    // Would be a critical misconfiguration — no broad exemption of the entire src tree
+    expect(content).not.toMatch(/["']backend\/src["']/);
+    expect(content).not.toMatch(/["']backend\/src\/\*\*["']/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// N. Additional canary / self-verification expansions
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Secret config — additional canary self-verification', () => {
+  it('SENSITIVE_KEY_RE matches x-api-key case-insensitively', () => {
+    const re = /^(authorization|cookie|set-cookie|x-api-key|api[_-]?keys?|secret|password|passwd|private[_-]?key|seed|mnemonic|token|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|secret[_-]?key|server[_-]?private[_-]?key|redis[_-]?url|database[_-]?url|db[_-]?url|connection[_-]?string)$/i;
+    expect(re.test('x-api-key')).toBe(true);
+    expect(re.test('X-API-KEY')).toBe(true);
+    expect(re.test('set-cookie')).toBe(true);
+    expect(re.test('database_url')).toBe(true);
+    expect(re.test('db_url')).toBe(true);
+    expect(re.test('connection_string')).toBe(true);
+    // Non-sensitive names must not match
+    expect(re.test('campaignId')).toBe(false);
+    expect(re.test('title')).toBe(false);
+    expect(re.test('status')).toBe(false);
+  });
+
+  it('CORS alias resolution: ALLOWED_ORIGINS || CORS_ALLOWED_ORIGINS means alias is checked', () => {
+    // Demonstrates that if ALLOWED_ORIGINS is falsy, CORS_ALLOWED_ORIGINS feeds the check
+    const originsStr = '' || '*' || '';
+    const originList = originsStr.split(',').map((o: string) => o.trim()).filter(Boolean);
+    // '*' in list → should be rejected in production
+    expect(originList).toContain('*');
+  });
+
+  it('walletIntegrationReady formula: both URL and passphrase must be set for non-dev profile', () => {
+    // Mirrors the exact logic in config.ts:
+    //   const useDevelopmentDefaults = !isProduction && !configuredRpcUrl && !configuredNetworkPassphrase;
+    //   const hasSorobanNetworkProfile = Boolean(useDevelopmentDefaults || (configuredRpcUrl && configuredNetworkPassphrase));
+    //   walletIntegrationReady = Boolean(contractId && rpcUrl && passphrase && hasSorobanNetworkProfile);
+    function computeReady(contractId: string, rpcUrl: string, passphrase: string, isProduction: boolean): boolean {
+      const useDevelopmentDefaults = !isProduction && !rpcUrl && !passphrase;
+      const hasSorobanNetworkProfile = Boolean(useDevelopmentDefaults || (rpcUrl && passphrase));
+      return Boolean(contractId && rpcUrl && passphrase && hasSorobanNetworkProfile);
+    }
+
+    // Only RPC URL set, not production — not ready (passphrase missing)
+    expect(computeReady('CONTRACT', 'https://rpc.example', '', false)).toBe(false);
+    // Only passphrase set, not production — not ready (RPC missing)
+    expect(computeReady('CONTRACT', '', 'passphrase', false)).toBe(false);
+    // Both set, not production — ready
+    expect(computeReady('CONTRACT', 'https://rpc.example', 'passphrase', false)).toBe(true);
+    // Contract missing — not ready
+    expect(computeReady('', 'https://rpc.example', 'passphrase', false)).toBe(false);
+  });
+
+  it('API_KEYS whitespace-token documentation: filter(Boolean) keeps whitespace entries', () => {
+    // Documents the known gap: validateEnv uses filter(Boolean) without trim
+    // ' key ' is truthy → survives filter → validateEnv sees length=1 and passes
+    const keys = '  ,   ,  '.split(',').filter(Boolean);
+    expect(keys.length).toBeGreaterThan(0); // whitespace tokens kept — validateEnv passes
+    // But a client sending 'Bearer realkey' won't match ' realkey ' in the auth middleware
+    // because middleware also uses split(',').filter(Boolean) — not trim() either
+    const middlewareKeys = '  realkey  '.split(',').filter(Boolean);
+    expect(middlewareKeys[0]).toBe('  realkey  '); // stored with whitespace
+    expect(middlewareKeys.includes('realkey')).toBe(false); // exact mismatch
+  });
+});

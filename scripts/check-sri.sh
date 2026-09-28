@@ -31,13 +31,13 @@ while IFS= read -r line; do
       ERRORS=$((ERRORS + 1))
     fi
   fi
-done < "$HTTL_FILE"
+done < "$HTML_FILE"
 
 if [ "$ERRORS" -gt 0 ]; then
   echo ""
   echo "SRI check FAILED: $ERRORS attribute(s) missing."
-  echo "Generate a hash with: openssl dgest -sha384 -binary <file> | openssl base64 -A"
+  echo "Generate a hash with: openssl dgst -sha384 -binary <file> | openssl base64 -A"
   exit 1
 fi
 
-echo "SRI check passed ‟ all CDN resources carry integrity and crossorigin attributes."
+echo "SRI check passed: all CDN resources carry integrity and crossorigin attributes."
