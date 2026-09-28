@@ -18,12 +18,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
-
-      - name: Restore backend node_modules cache
-        uses: actions/cache@v4
-        with:
-          path: backend/node_modules
-          key: backend-node-modules-${{ runner.os }}-${{ hashFiles('backend/package-lock.json') }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
 
       - name: Install backend dependencies
         working-directory: backend

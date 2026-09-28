@@ -113,6 +113,17 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
       - name: Build contract
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release
