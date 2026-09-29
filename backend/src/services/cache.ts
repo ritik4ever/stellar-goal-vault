@@ -1,4 +1,6 @@
 import { createClient, RedisClientType } from 'redis';
+import { config } from '../config';
+import { logError, logInfo } from '../logger';
 
 type RedisClient = RedisClientType;
 
@@ -34,12 +36,6 @@ export async function initRedisCache(): Promise<void> {
     logInfo('redis_connected', {}, config.logLevel);
   } catch (error) {
     logError(error instanceof Error ? error : new Error(String(error)), { event: 'redis_connection_failed' }, config.logLevel);
-    redisClient = null;
-    isConnected = false;
-  } catch {
-    redisClient = null;
-    isConnected = false;
-  } catch {
     redisClient = null;
     isConnected = false;
   }

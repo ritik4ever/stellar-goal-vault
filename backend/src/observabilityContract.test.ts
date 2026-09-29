@@ -46,6 +46,19 @@ const HEALTH_FIELDS = {
   timestamp: 'string',
   uptimeSeconds: 'number',
   database: 'object',
+  indexer: 'object',
+} as const;
+
+/** Keys of the nested `indexer` object on GET /api/health (issue #1024). */
+const INDEXER_HEALTH_FIELDS = {
+  lastSuccessfulPollTime: 'number_or_null',
+  lastKnownLedger: 'number',
+  isHealthy: 'boolean',
+  consecutiveFailures: 'number',
+  lagMs: 'number_or_null',
+  freshness: 'string',
+  staleLagMs: 'number',
+  freshLagMs: 'number',
 } as const;
 
 /** Fields on the `http_request` log line (success and failure alike). */
@@ -68,6 +81,7 @@ const REQUEST_ERROR_LOG_FIELDS = {
   status: 'number',
   code: 'string',
   err: 'object',
+  indexer: 'object',
 } as const;
 
 /** Fields inside `err` on error logs. */

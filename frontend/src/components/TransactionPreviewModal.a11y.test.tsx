@@ -48,4 +48,27 @@ describe.each(THEMES)('TransactionPreviewModal Accessibility (%s theme)', (theme
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
   });
+
+  it('exposes accessible names for confirm and cancel actions', () => {
+    render(
+      <TransactionPreviewModal preview={previewWithFee} onConfirm={() => {}} onCancel={() => {}} />,
+    );
+
+    expect(screen.getByRole('button', { name: /confirm/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /cancel/i })).toBeDefined();
+  });
+
+  it('supports keyboard activation of the confirm action', () => {
+    const onConfirm = vi.vitest.fn();
+    render(
+      <TransactionPreviewModal preview={previewWithFee} onConfirm={onConfirm} onCancel={() => {}} />,
+    );
+
+    const confirmButton = screen.getByRole('button', { name: /confirm/i });
+    confirmButton.focus();
+    expect(confirmButton).toHaveFocus();
+    fireEvent.keyDown(confirmButton, { key: 'Enter', code: 'Enter' });
+    fireEvent.click(confirmButton);
+    expect(onConfirm).toHaveBeenCalled();
+  });
 });

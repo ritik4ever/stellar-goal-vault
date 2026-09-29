@@ -250,6 +250,10 @@ const campaignListResponseSchema = z
   .object({
     data: z.array(campaignSchema),
     pagination: paginationSchema,
+    requestId: z.string().openapi({
+      description: 'Correlation ID also returned in the X-Request-Id response header.',
+      example: 'req-123',
+    }),
   })
   .openapi('CampaignListResponse');
 
@@ -312,6 +316,13 @@ const healthResponseSchema = z
       error: z.string().optional(),
     }),
     jobs: z.record(z.string(), jobHealthSchema),
+    indexer: z.object({
+      lastSuccessfulPollTime: z.number().nullable(),
+      lastKnownLedger: z.number(),
+      isHealthy: z.boolean(),
+      consecutiveFailures: z.number(),
+      lagMs: z.number().nullable(),
+    }),
   })
   .openapi('HealthResponse');
 
@@ -324,6 +335,16 @@ const deepHealthResponseSchema = z
       db: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
       soroban: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
       contract: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
+      indexer: z.object({
+        status: z.enum(['up', 'down']),
+        details: z.object({
+          lastSuccessfulPollTime: z.number().nullable(),
+          lastKnownLedger: z.number(),
+          isHealthy: z.boolean(),
+          consecutiveFailures: z.number(),
+          lagMs: z.number().nullable(),
+        }),
+      }),
     }),
   })
   .openapi('DeepHealthResponse');

@@ -19,6 +19,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
+# Versioned SQL migrations are read from disk at startup (dist/db/../../migrations).
+COPY --from=builder /app/migrations ./migrations
 
 # Use non-root user included in Alpine node images
 USER node

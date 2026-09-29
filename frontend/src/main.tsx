@@ -1,10 +1,15 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import App from "./App";
-import { ContributorProfile } from "./components/ContributorProfile";
-import { NotFoundPage } from "./components/NotFoundPage";
 import "./index.css";
+
+const App = lazy(() => import("./App"));
+const ContributorProfile = lazy(() =>
+  import("./components/ContributorProfile").then((m) => ({ default: m.ContributorProfile })),
+);
+const NotFoundPage = lazy(() =>
+  import("./components/NotFoundPage").then((m) => ({ default: m.NotFoundPage })),
+);
 
 // Register the service worker for PWA offline support.
 // `virtual:pwa-register` is injected by vite-plugin-pwa at build time.
@@ -34,12 +39,14 @@ if ('serviceWorker' in navigator) {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<App />} />
-        <Route path="/campaigns/:id" element={<App />} />
-        <Route path="/contributors/:address" element={<ContributorProfile />} />
-        <Route path="*" element={<NotFoundPage />} />
-      </Routes>
+      <Suspense fallback={<div className="app-shell" aria-busy="true">Loading…</div>}>
+        <Routes>
+          <Route path="/" element={<App />} />
+          <Route path="/campaigns/:id" element={<App />} />
+          <Route path="/contributors/:address" element={<ContributorProfile />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   </React.StrictMode>,
 );

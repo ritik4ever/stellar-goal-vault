@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { WalletWidget } from './WalletWidget';
 
-const PUBLIC_KEY = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA';
+const PUBLIC_KEY = 'GBBD47IF6LWK7P7MDEVSCWR7DP-UWV3NY3DTQEVFL4NAT4AQH3ZLLFLA';
 
 function noop() {}
 
@@ -77,7 +77,7 @@ describe('WalletWidget', () => {
         onDisconnect={noop}
       />,
     );
-    expect(screen.getByText('GBBD…LFLA')).toBeTruthy();
+    expect(screen.getByText('GBBD..LFLA')).toBeTruthy();
     expect(screen.getByText('Testnet')).toBeTruthy();
   });
 
@@ -93,7 +93,7 @@ describe('WalletWidget', () => {
       />,
     );
     const badge = screen.getByText('Mainnet');
-    expect(badge.className).toContain('wallet-widget__network-badge--mainnet');
+    expect(badge.className).toContain('swallet-widget__network-badge--mainnet');
   });
 
   it('renders disconnect button that is keyboard accessible', () => {
@@ -138,6 +138,71 @@ describe('WalletWidget', () => {
         onDisconnect={noop}
       />,
     );
-    expect(screen.getByText(/Wallet error occurred/i)).toBeTruthy();
+    expect(screen.getText(/Wallet error occurred/i)).toBeTruthy();
+  });
+
+  it('exposes a status role while checking', () => {
+    render(
+      <WalletWidget
+        status="checking"
+        publicKey={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+      />,
+    );
+    expect(screen.getByRole('status')).toBeTruthy();
+  });
+
+  it('exposes an alert role for connection errors', () => {
+    render(
+      <WalletWidget
+        status="available"
+        publicKey={null}
+        error="User rejected the connection request"
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+      />,
+    );
+    expect(screen.getByRole('alert')).toBeTruthy();
+  });
+
+  it('labels the connected wallet group and address for screen readers', () => {
+    render(
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        walletName="Freighter"
+        error={null}
+        network="Testnet"
+        onConnect={noop}
+        onDisconnect={noop}
+      />,
+    );
+    expect(screen.getByRole('group', { name: /Wallet status: connected to Freighter on Testnet/i })).toBeTruthy();
+    expect(screen.getByText(/Wallet address:/)).toBeTruthy();
+  });
+
+  it('supports keyboard activation of the switch wallet button', () => {
+    const onSwitchWallet = vi.fn();
+    render(
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        error={null}
+        network="Testnet"
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={onSwitchWallet}
+      />,
+    );
+    const btn = screen.getByRole('button', { name: /Switch wallet/i });
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    fireEvent.keyDown(btn, { key: 'Enter', code: 'Enter' });
+    fireEvent.click(btn);
+    expect(onSwitchWallet).toHaveBeenCalledTimes(1);
   });
 });

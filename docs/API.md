@@ -63,12 +63,19 @@ Basic liveness check. Returns service status and a lightweight database reachabi
       "consecutive_failures": 0,
       "details": { "ledger_lag": 0 }
     }
+  "indexer": {
+    "lastSuccessfulPollTime": 1779500000000,
+    "lastKnownLedger": 123456,
+    "isHealthy": true,
+    "consecutiveFailures": 0,
+    "lagMs": 1500
   }
 }
 ```
 
 - `status` is `"ok"` when both the API and the database probe succeed, `"degraded"` otherwise.
 - `database.status` is `"up"` or `"down"` based on a lightweight SQLite reachability check.
+- `indexer` exposes the last successful update and freshness/lag for the background event indexer.
 - Returns `503` when the service is degraded.
 - `jobs` reports freshness for background work (`event_indexer`, `webhook_delivery`). It is
   informational and never changes `status` or the HTTP code. The example above is abridged;
@@ -90,7 +97,17 @@ Extended health check that probes the database, Soroban RPC, and the configured 
   "components": {
     "db": { "status": "up", "details": "reachable" },
     "soroban": { "status": "up", "details": "rpc reachable" },
-    "contract": { "status": "up", "details": "contract id configured" }
+    "contract": { "status": "up", "details": "contract id configured" },
+    "indexer": {
+      "status": "up",
+      "details": {
+        "lastSuccessfulPollTime": 1779500000000,
+        "lastKnownLedger": 123456,
+        "isHealthy": true,
+        "consecutiveFailures": 0,
+        "lagMs": 1500
+      }
+    }
   }
 }
 ```
@@ -118,6 +135,11 @@ Returns all campaigns with computed progress. Supports filtering, sorting, and p
 | `limit`        | integer  | Results per page 1–100 (requires `page`).                               |
 | `createdAfter` | ISO 8601 | Return campaigns created after this timestamp.                          |
 | `createdBefore`| ISO 8601 | Return campaigns created before this timestamp.                         |
+
+> **Pagination stability:** results are ordered by the requested `sort` field and then by
+> `id` in the same `order` direction. That tie-breaker makes consecutive `page` requests
+> form stable, non-overlapping chunks even when many campaigns share the same sort value,
+> so loading later chunks never repeats or skips a campaign.
 
 **Response `200 OK`:**
 

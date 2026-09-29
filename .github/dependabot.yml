@@ -12,6 +12,7 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
     reviewers:
       - "ritik4ever"
     assignees:
@@ -36,6 +37,7 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
     reviewers:
       - "ritik4ever"
     assignees:
@@ -60,6 +62,7 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
     reviewers:
       - "ritik4ever"
     assignees:

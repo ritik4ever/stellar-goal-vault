@@ -16,7 +16,16 @@
 
 import fs from 'fs';
 import path from 'path';
-import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, afterAll, afterEach, describe, expect, it } from 'vitest';
+
+import {
+  buildFutureDeadline,
+  buildPastDeadline,
+  freezeClock,
+  ONE_DAY_SECONDS,
+  type Clock,
+  WALLETS,
+} from '../../../tests/fixtures';
 
 const TEST_DB_PATH = path.join('/tmp', `stellar-goal-vault-mutation-${process.pid}.db`);
 
@@ -50,17 +59,20 @@ let getCampaignHistory: EventHistoryModule['getCampaignHistory'];
 let getEventByTxHash: EventHistoryModule['getEventByTxHash'];
 let getEventsByLedger: EventHistoryModule['getEventsByLedger'];
 let getEventsBySource: EventHistoryModule['getEventsBySource'];
+let setCurrentTime: CampaignStoreModule['setCurrentTime'];
+let resetTime: CampaignStoreModule['resetTime'];
+let clock: Clock;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
-const CONTRIBUTOR2 = `G${'C'.repeat(55)}`;
+const CREATOR = WALLETS.creator;
+const CONTRIBUTOR = WALLETS.alice;
+const CONTRIBUTOR2 = WALLETS.bob;
 const TX_HASH = 'b'.repeat(64);
 const TX_HASH2 = 'c'.repeat(64);
 
 // ── Helper: future deadline (seconds) ────────────────────────────────────────
-const future = (offsetSeconds = 86400) => Math.floor(Date.now() / 1000) + offsetSeconds;
-const past = (offsetSeconds = 86400) => Math.floor(Date.now() / 1000) - offsetSeconds;
+const future = (offsetSeconds = ONE_DAY_SECONDS) => buildFutureDeadline(offsetSeconds);
+const past = (offsetSeconds = ONE_DAY_SECONDS) => buildPastDeadline(offsetSeconds);
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 beforeAll(async () => {
@@ -81,6 +93,8 @@ beforeAll(async () => {
     softDeleteCampaign,
     restoreCampaign,
     listCampaigns,
+    setCurrentTime,
+    resetTime,
   } = await import('../campaignStore'));
 
   ({ getDb } = await import('../db'));
@@ -91,14 +105,27 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  getDb().close();
   fs.rmSync(TEST_DB_PATH, { force: true });
 });
 
 beforeEach(() => {
+  clock = freezeClock(undefined, {
+    setStoreTime: setCurrentTime,
+    resetStoreTime: resetTime,
+  });
   const db = getDb();
+  db.prepare('DELETE FROM webhook_dead_letter_queue').run();
+  db.prepare('DELETE FROM notifications').run();
   db.prepare('DELETE FROM campaign_events').run();
+  db.prepare('DELETE FROM notifications').run();
   db.prepare('DELETE FROM pledges').run();
+  db.prepare('DELETE FROM notifications').run();
   db.prepare('DELETE FROM campaigns').run();
+});
+
+afterEach(() => {
+  clock.restore();
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -469,6 +496,26 @@ describe('addPledge – guard conditions', () => {
       'Pledge exceeds maximum allowed per contributor',
     );
   });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 0.004])(
+    'rejects invalid or sub-cent pledge amount %s without mutating accounting',
+    (amount) => {
+      const c = createCampaign({
+        creator: CREATOR,
+        title: 'Invalid pledge amount',
+        description: 'desc',
+        assetCode: 'USDC',
+        targetAmount: 500,
+        deadline: future(),
+      });
+
+      expect(() => addPledge(c.id, { contributor: CONTRIBUTOR, amount })).toThrow(
+        'Pledge amount must',
+      );
+      expect(getCampaign(c.id)?.pledgedAmount).toBe(0);
+      expect(getPledges(c.id)).toHaveLength(0);
+    },
+  );
 
   it('contributor limit is per-contributor, not global', () => {
     const c = createCampaign({
@@ -968,6 +1015,23 @@ describe('getGlobalStats – status bucket counting', () => {
 // getContributorSummary — isFullyRefunded flag mutations
 // ═════════════════════════════════════════════════════════════════════════════
 describe('getContributorSummary – isFullyRefunded flag', () => {
+  it('orders equal active totals by contributor address deterministically', () => {
+    const c = createCampaign({
+      creator: CREATOR,
+      title: 'Stable contributor summary',
+      description: 'desc',
+      assetCode: 'USDC',
+      targetAmount: 500,
+      deadline: future(),
+    });
+    addPledge(c.id, { contributor: CONTRIBUTOR2, amount: 50 });
+    addPledge(c.id, { contributor: CONTRIBUTOR, amount: 50 });
+
+    expect(getContributorSummary(c.id).map((entry) => entry.contributor)).toEqual(
+      [CONTRIBUTOR, CONTRIBUTOR2].sort(),
+    );
+  });
+
   it('isFullyRefunded is false when contributor has active pledges', () => {
     const c = createCampaign({
       creator: CREATOR,

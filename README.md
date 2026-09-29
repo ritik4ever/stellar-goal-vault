@@ -552,6 +552,10 @@ The script will:
 
 ## Environment variables
 
+See [docs/SECURE_CONFIGURATION.md](./docs/SECURE_CONFIGURATION.md) for the safe
+production default, local-development override, and the risk of weakening each
+security-relevant setting.
+
 Backend:
 
 - `PORT` defaults to `3001`

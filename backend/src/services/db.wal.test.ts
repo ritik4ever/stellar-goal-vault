@@ -38,4 +38,26 @@ describe('SQLite WAL configuration (#218)', () => {
     const row = getDb().pragma('foreign_keys', { simple: true });
     expect(row).toBe(1);
   });
+
+  it('creates the campaign comments table before its indexes', async () => {
+    const { initDb, getDb } = await import('./db');
+    initDb();
+
+    const table = getDb()
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'campaign_comments'")
+      .get() as { name?: string } | undefined;
+    const columns = getDb().prepare('PRAGMA table_info(campaign_comments)').all() as Array<{
+      name: string;
+    }>;
+
+    expect(table?.name).toBe('campaign_comments');
+    expect(columns.map((column) => column.name)).toEqual([
+      'id',
+      'campaign_id',
+      'author',
+      'content',
+      'created_at',
+      'deleted_at',
+    ]);
+  });
 });
