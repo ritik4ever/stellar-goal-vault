@@ -11,12 +11,6 @@ vi.mock('./ContributorSummary', () => ({
   ContributorSummary: () => <div data-testid="contributor-summary-mock" />,
 }));
 
-// Mock the campaign service for failure path testing
-vi.mock('../services/campaignService', () => ({
-  claimCampaign: vi.fn(),
-  refundCampaign: vi.fn(),
-}));
-
 const mockConfig: AppConfig = {
   allowedAssets: ['USDC', 'XLM'],
   soroban: {
@@ -83,7 +77,9 @@ describe('CampaignDetailPanel', () => {
       </BrowserRouter>
     );
     expect(screen.getByText('Campaign not found')).toBeInTheDocument();
-    expect(screen.getByText(/campaign #999 does not exist/i)).toBeInTheDocument();
+    expect(screen.getByText(/does not exist or may have been removed/i)).toHaveTextContent(
+      /campaign #999 does not exist/i,
+    );
     expect(screen.getByRole('link', { name: 'Back to campaigns' })).toBeInTheDocument();
   });
 
@@ -175,74 +171,9 @@ describe('CampaignDetailPanel', () => {
       expect(screen.getByRole('region')).toBeInTheDocument();
     });
 
-    it('handles duplicate actions by preventing multiple submissions', async () => {
-      const mockOnPledge = vi.fn().mockRejectedValue(new Error('Duplicate pledge'));
-      
-      // Mock the pledge function to simulate duplicate action
-      vi.doMock('../services/campaignService', () => ({
-        pledgeCampaign: mockOnPledge,
-      }));
+    // Submission, duplicate prevention and retry failures are exercised through
+    // the real onPledge callback in CampaignDetailPanel.pledge.test.tsx.
 
-      render(
-        <BrowserRouter>
-          <CampaignDetailPanel
-            campaign={mockCampaign}
-            appConfig={mockConfig}
-            isLoading={false}
-          />
-        </BrowserRouter>
-      );
-
-      // Attempt to trigger a pledge action
-      const pledgeButton = screen.getByRole('button', { name: /pledge/i });
-      if (pledgeButton) {
-        await pledgeButton.click();
-        // Should handle the error gracefully without crashing
-        await waitFor(() => {
-          expect(mockOnPledge).toHaveBeenCalled();
-        });
-      }
-    });
-
-    it('handles timeout/retry scenarios', async () => {
-      // Simulate a timeout scenario by mocking the service to throw a timeout error
-      vi.doMock('../services/campaignService', () => ({
-        pledgeCampaign: vi.fn().mockRejectedValue(new Error('Request timeout')),
-      }));
-
-      render(
-        <BrowserRouter>
-          <CampaignDetailPanel
-            campaign={mockCampaign}
-            appConfig={mockConfig}
-            isLoading={false}
-          />
-        </BrowserRouter>
-      );
-
-      // Component should still render despite service errors
-      expect(screen.getByText('Test Campaign')).toBeInTheDocument();
-    });
-
-    it('handles permission failures', async () => {
-      // Simulate a permission denied error
-      vi.doMock('../services/campaignService', () => ({
-        pledgeCampaign: vi.fn().mockRejectedValue(new Error('Permission denied')),
-      }));
-
-      render(
-        <BrowserRouter>
-          <CampaignDetailPanel
-            campaign={mockCampaign}
-            appConfig={mockConfig}
-            isLoading={false}
-          />
-        </BrowserRouter>
-      );
-
-      // Component should still render despite permission errors
-      expect(screen.getByText('Test Campaign')).toBeInTheDocument();
-    });
   });
 });
 
