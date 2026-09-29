@@ -3,6 +3,21 @@ import path from 'path';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+vi.mock('./services/sorobanRpc', () => ({
+  ensureSorobanRefundConfig: vi.fn(),
+}));
+vi.mock('./services/eventIndexer', () => ({
+  getIndexerStatus: vi.fn().mockReturnValue({
+    lastSuccessfulPollTime: Date.now(),
+    lastKnownLedger: 1,
+    isHealthy: true,
+    consecutiveFailures: 0,
+    lagMs: 0,
+  }),
+  startEventIndexer: vi.fn(),
+  stopEventIndexer: vi.fn(),
+}));
+
 import type { Express } from 'express';
 
 import { REQUEST_ID_HEADER } from './middleware/requestId';
@@ -88,9 +103,6 @@ describe('request id middleware', () => {
   });
 
   it('includes request id in structured request logs', async () => {
-    // The backend uses pino which does not route through console.info.
-    // Spy on logger.info to capture the structured http_request log line
-    // emitted by the requestIdMiddleware finish handler.
     const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
 
     await request(app).get('/api/openapi.json').set(REQUEST_ID_HEADER, 'log-context-request-id');
@@ -103,6 +115,45 @@ describe('request id middleware', () => {
         );
       expect(payload, 'no http_request log found for log-context-request-id').toBeDefined();
     });
+
+    infoSpy.mockRestore();
+  });
+
+  it('correlates campaign-list success and validation responses', async () => {
+    const success = await request(app)
+      .get('/api/campaigns')
+      .set(REQUEST_ID_HEADER, 'campaign-list-success');
+
+    expect(success.status).toBe(200);
+    expect(success.headers[REQUEST_ID_HEADER.toLowerCase()]).toBe('campaign-list-success');
+    expect(success.body.requestId).toBe('campaign-list-success');
+
+    const invalid = await request(app)
+      .get('/api/campaigns?page=1')
+      .set(REQUEST_ID_HEADER, 'campaign-list-invalid');
+
+    expect(invalid.status).toBe(400);
+    expect(invalid.body).toEqual(
+      expect.objectContaining({
+        success: false,
+        error: expect.objectContaining({
+          code: 'VALIDATION_ERROR',
+          requestId: 'campaign-list-invalid',
+        }),
+      }),
+    );
+  });
+
+  it('replaces unsafe incoming IDs with a generated correlation ID', async () => {
+    const response = await request(app)
+      .get('/api/campaigns')
+      .set(REQUEST_ID_HEADER, 'bad id');
+
+    expect(response.status).toBe(200);
+    expect(response.headers[REQUEST_ID_HEADER.toLowerCase()]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(response.body.requestId).toBe(response.headers[REQUEST_ID_HEADER.toLowerCase()]);
   });
 
   it('correlates campaign-list success and validation responses', async () => {

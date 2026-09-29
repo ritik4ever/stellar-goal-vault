@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
-const UNAUTHORIZED_CREATOR = `G${'C'.repeat(55)}`;
+const CREATOR = 'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ';
+const CONTRIBUTOR = 'GBBXILIJHRPV2GWBGPQLWSGR57FO6OODNMBZB5EUKBFX3MRINA7NMKUI';
+const UNAUTHORIZED_CREATOR = 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI';
 
 function campaignPayload(title: string, deadline: number) {
   return {

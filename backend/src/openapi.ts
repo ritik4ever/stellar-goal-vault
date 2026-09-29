@@ -33,7 +33,7 @@ const stellarAddressSchema = z
   .regex(/^G[A-Z2-7]{55}$/)
   .openapi({
     description: 'A 56-character Stellar public key (G...).',
-    example: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    example: 'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ',
   });
 
 const assetCodeSchema = z

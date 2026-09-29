@@ -15,7 +15,7 @@ import {
 describe('shared backend fixtures', () => {
   it('builds deterministic wallet addresses and default inputs', () => {
     expect(buildAddress('a')).toBe(WALLETS.creator);
-    expect(buildAddress('invalid-value')).toBe(`GI${'I'.repeat(54)}`);
+    expect(buildAddress('invalid-value')).toBe(WALLETS.creator);
     expect(buildCampaignInput()).toMatchObject({
       creator: WALLETS.creator,
       acceptedTokens: ['USDC'],

@@ -24,9 +24,9 @@ let getContributorPledgedTotal: CampaignStoreModule['getContributorPledgedTotal'
 let getDb: DbModule['getDb'];
 let parsePledgeListPaginationQuery: ValidationModule['parsePledgeListPaginationQuery'];
 
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR_A = `G${'B'.repeat(55)}`;
-const CONTRIBUTOR_B = `G${'C'.repeat(55)}`;
+const CREATOR = 'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ';
+const CONTRIBUTOR_A = 'GBBXILIJHRPV2GWBGPQLWSGR57FO6OODNMBZB5EUKBFX3MRINA7NMKUI';
+const CONTRIBUTOR_B = 'GBJI32M2VAAYQU3S6LOXCWNIOCXG7I2I3J3JO3XPT5PEYXL72W3QNOMU';
 
 function nowInSeconds(): number {
   return Math.floor(Date.now() / 1000);

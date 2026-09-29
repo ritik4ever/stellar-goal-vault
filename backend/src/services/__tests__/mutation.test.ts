@@ -64,9 +64,9 @@ let resetTime: CampaignStoreModule['resetTime'];
 let clock: Clock;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const CREATOR = WALLETS.creator;
-const CONTRIBUTOR = WALLETS.alice;
-const CONTRIBUTOR2 = WALLETS.bob;
+const CREATOR = 'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ';
+const CONTRIBUTOR = 'GBBXILIJHRPV2GWBGPQLWSGR57FO6OODNMBZB5EUKBFX3MRINA7NMKUI';
+const CONTRIBUTOR2 = 'GBJI32M2VAAYQU3S6LOXCWNIOCXG7I2I3J3JO3XPT5PEYXL72W3QNOMU';
 const TX_HASH = 'b'.repeat(64);
 const TX_HASH2 = 'c'.repeat(64);
 

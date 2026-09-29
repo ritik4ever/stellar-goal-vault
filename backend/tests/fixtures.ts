@@ -38,22 +38,40 @@ export function buildPastDeadline(
   return baseSeconds - offsetSeconds;
 }
 
-/** Deterministic Stellar-looking account address: `G` followed by 55 repeats. */
+const VALID_STELLAR_KEYS = [
+  'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ',
+  'GBBXILIJHRPV2GWBGPQLWSGR57FO6OODNMBZB5EUKBFX3MRINA7NMKUI',
+  'GBJI32M2VAAYQU3S6LOXCWNIOCXG7I2I3J3JO3XPT5PEYXL72W3QNOMU',
+  'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI',
+  'GAGKDMDHZH3CZUOP7E73Q5J4XIP2ZOIPUGR56LDMNVNHJU4TTS6VO6BO',
+  'GD2ME4AD7WMKZOJE3RXTZZ5BGRJSH7FMXBYAL2FVP35FXKUWM7APZGVA',
+  'GB3VWGOXVSXPGT346HO4DDZJT2ULJ37PDBWIFIRCBIG3PNPQQTJF6N3N',
+  'GCD6DQZQLFYGYXM6KV3QVHGSRXS6LB4LJ27M5KG66U3FAZ3BKMZNL3WL',
+] as const;
+
+function charIndex(char: string): number {
+  if (char >= 'A' && char <= 'Z') return char.charCodeAt(0) - 65;
+  if (char >= '0' && char <= '9') return 26 + (char.charCodeAt(0) - 48);
+  return 0;
+}
+
+/** Deterministic valid Stellar account address derived from `fill`. */
 export function buildAddress(fill: string): string {
   const char =
     fill
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, '')
       .charAt(0) || 'A';
-  return `G${char.repeat(55)}`;
+  const index = charIndex(char) % VALID_STELLAR_KEYS.length;
+  return VALID_STELLAR_KEYS[index];
 }
 
-/** Named wallets shared across the suite (all valid 56-char account ids). */
+/** Named wallets shared across the suite (all valid Stellar public keys). */
 export const WALLETS = {
-  creator: buildAddress('A'),
-  alice: buildAddress('B'),
-  bob: buildAddress('C'),
-  carol: buildAddress('D'),
+  creator: VALID_STELLAR_KEYS[0],
+  alice: VALID_STELLAR_KEYS[1],
+  bob: VALID_STELLAR_KEYS[2],
+  carol: VALID_STELLAR_KEYS[3],
 } as const;
 
 /**

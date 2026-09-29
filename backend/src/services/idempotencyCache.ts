@@ -20,8 +20,9 @@ export function buildIdempotencyCacheKey(
   apiKey: string,
   campaignId: string,
   idempotencyKey: string,
+  contributor?: string,
 ): string {
-  return `idempotency:${apiKey}:${campaignId}:${idempotencyKey}`;
+  return `idempotency:${apiKey}:${campaignId}:${idempotencyKey}${contributor ? `:${contributor}` : ''}`;
 }
 
 export async function getIdempotencyCacheEntry(

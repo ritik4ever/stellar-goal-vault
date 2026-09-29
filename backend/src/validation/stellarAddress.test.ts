@@ -8,7 +8,7 @@ import { stellarAccountIdSchema } from './schemas';
 // These are well-known Stellar addresses referenced in official Stellar docs.
 const VALID_KEYS = [
   // Stellar Laboratory default test account (used in stellar.org docs)
-  'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+  'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ',
   // Stellar quickstart network mode example (developers.stellar.org/docs/tools/quickstart/network-modes)
   'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI',
   // Stellar testnet USDC issuer (well-known testnet address)
@@ -20,9 +20,9 @@ const VALID_KEYS = [
 // ---------------------------------------------------------------------------
 const INVALID_KEYS = [
   // Wrong length (55 chars)
-  'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCW',
+  'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCK',
   // Wrong length (57 chars)
-  'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNN',
+  'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQA',
   // Starts with wrong letter
   'SAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
   // All G's — structurally plausible but invalid checksum
@@ -38,7 +38,7 @@ const INVALID_KEYS = [
   // Numeric string
   '12345678901234567890123456789012345678901234567890123456',
   // Correct length but corrupted last char (bad checksum)
-  'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWO',
+  'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKR',
 ];
 
 // ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ describe('isValidStellarPublicKey', () => {
 
   it('rejects a key with a flipped bit in the payload (bad checksum)', () => {
     // Take a valid key and flip one character in the middle
-    const valid = 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN';
+    const valid = 'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ';
     const corrupted = valid.slice(0, 20) + 'X' + valid.slice(21);
     expect(isValidStellarPublicKey(corrupted)).toBe(false);
   });
@@ -73,14 +73,14 @@ describe('isValidStellarPublicKey', () => {
 describe('stellarAccountIdSchema', () => {
   it('passes for a valid Stellar public key', () => {
     const result = stellarAccountIdSchema.safeParse(
-      'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+      'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ',
     );
     expect(result.success).toBe(true);
   });
 
   it('trims whitespace before validating', () => {
     const result = stellarAccountIdSchema.safeParse(
-      '  GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN  ',
+      '  GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ  ',
     );
     expect(result.success).toBe(true);
   });
@@ -97,7 +97,7 @@ describe('stellarAccountIdSchema', () => {
   });
 
   it('returns a validation error for wrong length', () => {
-    const result = stellarAccountIdSchema.safeParse('GAAZI4TCR3TY5OJHCTJC2A4QSY6');
+    const result = stellarAccountIdSchema.safeParse('GDOGOQQQWCIPOHLIYHQIVI5HKYHJ');
     expect(result.success).toBe(false);
   });
 

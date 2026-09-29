@@ -208,7 +208,7 @@ describe('Large-dataset regression coverage for campaign detail loading', () => 
        VALUES (?, ?, ?, ?, ?)`,
     );
     for (let i = 0; i < pledgeCount; i++) {
-      insertPledge.run(campaignId, `G${'D'.repeat(55)}`, 10, 'XLM', FIXTURE_EPOCH_SECONDS + i);
+      insertPledge.run(campaignId, WALLETS.carol, 10, 'XLM', FIXTURE_EPOCH_SECONDS + i);
     }
     db.prepare(`UPDATE campaigns SET pledged_amount = ? WHERE id = ?`).run(
       pledgeCount * 10,

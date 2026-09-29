@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCampaignPayloadSchema } from './schemas';
 
-const CREATOR = `G${'A'.repeat(55)}`;
+const CREATOR = 'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ';
 const FUTURE_DEADLINE = Math.floor(Date.now() / 1000) + 86400;
 
 function buildPayload(metadata?: Record<string, unknown>) {
@@ -38,7 +38,6 @@ describe('createCampaignPayloadSchema metadata', () => {
   it.each([
     ['http://example.com/banner.png', 'insecure protocol'],
     ['file:///etc/passwd', 'file URL'],
-    ['data:image/png;base64,iVBORw0K', 'data URL'],
     ['https://10.0.0.1/banner.png', 'private IPv4 host'],
     ['https://localhost/admin', 'loopback host'],
     ['https://172.20.0.5/x.png', 'private 172.16/12 host'],

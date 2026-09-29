@@ -26,7 +26,7 @@ type SeedPledge = {
 const BASE_CAMPAIGNS: SeedCampaign[] = [
   {
     id: '1',
-    creator: `G${'A'.repeat(55)}`,
+    creator: 'GDOGOQQQWCIPOHLIYHQIVI5HKYHYI6IDBGRW245JZC623TVFFKFQZCKQ',
     title: 'Open deterministic campaign',
     description: 'Deterministic campaign seed for open status checks.',
     assetCode: 'USDC',
@@ -38,7 +38,7 @@ const BASE_CAMPAIGNS: SeedCampaign[] = [
   },
   {
     id: '2',
-    creator: `G${'B'.repeat(55)}`,
+    creator: 'GBBXILIJHRPV2GWBGPQLWSGR57FO6OODNMBZB5EUKBFX3MRINA7NMKUI',
     title: 'Funded deterministic campaign',
     description: 'Deterministic campaign seed for funded status checks.',
     assetCode: 'XLM',
@@ -50,7 +50,7 @@ const BASE_CAMPAIGNS: SeedCampaign[] = [
   },
   {
     id: '3',
-    creator: `G${'C'.repeat(55)}`,
+    creator: 'GBJI32M2VAAYQU3S6LOXCWNIOCXG7I2I3J3JO3XPT5PEYXL72W3QNOMU',
     title: 'Claimed deterministic campaign',
     description: 'Deterministic campaign seed for claimed status checks.',
     assetCode: 'USDC',
@@ -63,8 +63,8 @@ const BASE_CAMPAIGNS: SeedCampaign[] = [
 ];
 
 const BASE_PLEDGES: SeedPledge[] = [
-  { campaignId: '1', contributor: `G${'D'.repeat(55)}`, amount: 100, assetCode: 'USDC', createdAt: FIXED_NOW - 250 },
-  { campaignId: '2', contributor: `G${'E'.repeat(55)}`, amount: 250, assetCode: 'XLM', createdAt: FIXED_NOW - 150 },
+  { campaignId: '1', contributor: 'GAOQXKAN3GLBFBJELIPATTF5YSYIUPYIRSJKELA6SWE2QRS6ULIIPXRP', amount: 100, assetCode: 'USDC', createdAt: FIXED_NOW - 250 },
+  { campaignId: '2', contributor: 'GBBXILIJHRPV2GWBGPQLWSGR57FO6OODNMBZB5EUKBFX3MRINA7NMKUI', amount: 250, assetCode: 'XLM', createdAt: FIXED_NOW - 150 },
 ];
 
 // Deterministic status/asset rotation used to extend past the 3 base campaigns.

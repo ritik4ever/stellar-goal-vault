@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { config } from '../config';
 import type { CampaignStatus, CampaignSortField, SortOrder } from '../services/campaignStore';
 import { httpsOnlyUrlSchema } from './urlSafety';
+import { isValidStellarPublicKey } from './stellarAddress';
 
 extendZodWithOpenApi(z);
 
@@ -65,6 +66,10 @@ export const stellarAccountIdSchema = z
   .regex(
     STELLAR_ACCOUNT_REGEX,
     'Must be a valid Stellar account ID (starts with G and is exactly 56 characters).',
+  )
+  .refine(
+    (address) => isValidStellarPublicKey(address),
+    'creator must be a valid Stellar public key',
   );
 
 export const assetCodeSchema = z
