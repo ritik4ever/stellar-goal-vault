@@ -58,8 +58,13 @@ Use `CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS` for new objects and guarded
 `ALTER TABLE` changes for existing objects, following the patterns in
 `db.ts`. Additive changes must account for databases created by older
 versions, backfill only when the existing data has a clear default, and avoid
-rewriting lifecycle or accounting history. Update the focused database test
-when a schema object or invariant changes.
+rewriting lifecycle or accounting history. Column migrations must precede
+dependent partial and composite indexes so upgrades from older schema snapshots
+succeed without missing-column errors. Search synchronization triggers
+(`after_campaigns_delete`) ensure deleted campaigns do not leak stale FTS
+entries. All migration statements run within a single SQLite transaction
+(`migrate()`) to guarantee complete rollback upon any failure. Update the focused
+database tests when a schema object or invariant changes.
 
 ## Index Strategy
 

@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-type SQLiteDatabase = ReturnType<typeof Database>;
+export type SQLiteDatabase = ReturnType<typeof Database>;
 
 // Module-level singleton for production use only.
 // Tests should use initDb(path) with an isolated path or :memory:.
@@ -208,11 +208,11 @@ export function ensureCampaignsIntegrityConstraints(
   `);
 }
 
-function migrate(database: SQLiteDatabase): void {
+export function migrate(database: SQLiteDatabase = getDb()): void {
   database.transaction(() => runMigrations(database))();
 }
 
-function runMigrations(database: SQLiteDatabase): void {
+export function runMigrations(database: SQLiteDatabase): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
       id                    TEXT PRIMARY KEY,
@@ -234,7 +234,6 @@ function runMigrations(database: SQLiteDatabase): void {
 
     CREATE INDEX IF NOT EXISTS idx_campaigns_creator ON campaigns(creator);
     CREATE INDEX IF NOT EXISTS idx_campaigns_deadline ON campaigns(deadline);
-    CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(claimed_at, failed_at, deleted_at);
 
     -- 🌟 1. Create our new cheat-sheet search index table
     CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
@@ -254,6 +253,11 @@ function runMigrations(database: SQLiteDatabase): void {
       UPDATE campaigns_fts 
       SET title = new.title, description = new.description 
       WHERE id = old.id;
+    END;
+
+    -- 🔄 4. Automatically delete from the cheat-sheet if a campaign is deleted
+    CREATE TRIGGER IF NOT EXISTS after_campaigns_delete AFTER DELETE ON campaigns BEGIN
+      DELETE FROM campaigns_fts WHERE id = old.id;
     END;
 
     CREATE TABLE IF NOT EXISTS pledges (
@@ -314,10 +318,6 @@ function runMigrations(database: SQLiteDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_campaign_comments_campaign_id ON campaign_comments(campaign_id);
   `);
 
-  // Migration-runner query indexes: backfill, deduplication, and pledged_amount
-  // accounting indexes to ensure concrete read/write plans run fast.
-  ensureMigrationRunnerIndexes(database);
-
   const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
     name: string;
   }>;
@@ -337,9 +337,6 @@ function runMigrations(database: SQLiteDatabase): void {
     database.exec(`ALTER TABLE pledges ADD COLUMN token_id TEXT`);
   }
 
-  // Backfill token_id for existing pledges where it's still NULL
-  database.exec(`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`);
-
   // Add failed_at column if not exists
   const campaignColumns = database.prepare(`PRAGMA table_info(campaigns)`).all() as Array<{
     name: string;
@@ -347,6 +344,18 @@ function runMigrations(database: SQLiteDatabase): void {
   if (!campaignColumns.some((column) => column.name === 'failed_at')) {
     database.exec(`ALTER TABLE campaigns ADD COLUMN failed_at INTEGER`);
   }
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(claimed_at, failed_at, deleted_at);
+  `);
+
+  // Migration-runner query indexes: backfill, deduplication, and pledged_amount
+  // accounting indexes to ensure concrete read/write plans run fast.
+  // Installed after ensuring required columns exist on legacy databases.
+  ensureMigrationRunnerIndexes(database);
+
+  // Backfill token_id for existing pledges where it's still NULL
+  database.exec(`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`);
 
   // Migrate asset_code to accepted_tokens_json if needed
   if (

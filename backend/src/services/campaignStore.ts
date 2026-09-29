@@ -266,7 +266,7 @@ export function getContributorPledgedTotal(campaignId: string, contributor: stri
        WHERE campaign_id = ? AND contributor = ? AND refunded_at IS NULL`,
     );
   }
-  const row = getContributorPledgedTotalStmt.get(campaignId, contributor) as { total: number };
+  const row = getContributorPledgedTotalStmt!.get(campaignId, contributor) as { total: number };
 
   return row.total;
 }
