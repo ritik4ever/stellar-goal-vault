@@ -103,6 +103,12 @@ export const envSchema = z
       .optional()
       .describe('Configurable webhook URL for status change notifications'),
     WEBHOOK_SECRET: z.string().optional().describe('Secret used to compute HMAC-SHA256 signature'),
+    REDIS_URL: z
+      .string()
+      .optional()
+      .describe(
+        'Optional Redis URL for production caching; if set, must be an authenticated redis:// or rediss:// URL',
+      ),
   })
   .superRefine((data, ctx) => {
     const nodeEnv = data.NODE_ENV;
@@ -150,13 +156,39 @@ export const envSchema = z
         });
       }
 
-      const apiKeys = (data.API_KEYS || '').split(',').filter(Boolean);
+      const rawApiKeyEntries = (data.API_KEYS || '').split(',');
+      const apiKeys = rawApiKeyEntries.filter(Boolean);
       if (apiKeys.length === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['API_KEYS'],
           message: 'API_KEYS is required in production to secure write endpoints',
         });
+      } else {
+        for (const key of rawApiKeyEntries) {
+          if (!key.trim()) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['API_KEYS'],
+              message:
+                'API_KEYS must not contain blank entries (e.g. "a,,b"): the auth middleware silently drops them, weakening the configured credential set.',
+            });
+          } else if (key !== key.trim()) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['API_KEYS'],
+              message:
+                'API_KEYS entries must not have leading or trailing whitespace: the auth middleware compares keys exactly, so a padded entry can never authenticate.',
+            });
+          } else if (key.length < 16) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['API_KEYS'],
+              message:
+                "Each API_KEYS entry must be at least 16 characters long: shorter keys are trivially guessable yet authenticate write endpoints in production. Generate with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+            });
+          }
+        }
       }
 
       const originsStr = data.ALLOWED_ORIGINS || data.CORS_ALLOWED_ORIGINS || '';
@@ -199,13 +231,55 @@ export const envSchema = z
         }
       }
 
-      if ((data.WEBHOOK_URL ?? '').trim() && !(data.WEBHOOK_SECRET ?? '').trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['WEBHOOK_SECRET'],
-          message:
-            'WEBHOOK_SECRET is required in production when WEBHOOK_URL is configured: without it webhook signatures cannot be verified. Set WEBHOOK_SECRET or remove WEBHOOK_URL.',
-        });
+      const webhookUrl = (data.WEBHOOK_URL ?? '').trim();
+      if (webhookUrl) {
+        if (!(data.WEBHOOK_SECRET ?? '').trim()) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['WEBHOOK_SECRET'],
+            message:
+              'WEBHOOK_SECRET is required in production when WEBHOOK_URL is configured: without it webhook signatures cannot be verified. Set WEBHOOK_SECRET or remove WEBHOOK_URL.',
+          });
+        } else if ((data.WEBHOOK_SECRET ?? '').trim().length < 16) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['WEBHOOK_SECRET'],
+            message:
+              'WEBHOOK_SECRET must be at least 16 characters when WEBHOOK_URL is configured in production: a shorter secret is trivially forgeable for the HMAC-SHA256 webhook signature.',
+          });
+        }
+      }
+
+      const redisUrl = (data.REDIS_URL ?? '').trim();
+      if (redisUrl) {
+        let parsedRedisUrl: URL | null = null;
+        try {
+          parsedRedisUrl = new URL(redisUrl);
+        } catch {
+          parsedRedisUrl = null;
+        }
+        if (!parsedRedisUrl) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['REDIS_URL'],
+            message:
+              'REDIS_URL must be a valid URL in production when set (e.g. redis://:password@host:6379 or rediss://:password@host:6379).',
+          });
+        } else if (parsedRedisUrl.protocol !== 'redis:' && parsedRedisUrl.protocol !== 'rediss:') {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['REDIS_URL'],
+            message:
+              'REDIS_URL must use the redis:// or rediss:// scheme in production; other schemes are not valid Redis configurations.',
+          });
+        } else if (!parsedRedisUrl.password) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['REDIS_URL'],
+            message:
+              'REDIS_URL must include a password in production (e.g. redis://:password@host:6379): an unauthenticated cache can be read or poisoned by other tenants. Leave REDIS_URL unset to use the in-memory cache.',
+          });
+        }
       }
     }
   });
