@@ -3,9 +3,9 @@ import { vi } from 'vitest';
 import type { CampaignInput, PledgeInput } from '../src/services/campaignStore';
 
 /**
- * Reusable, deterministic fixtures for the API integration suite.
+ * Reusable, deterministic fixtures for backend unit and API integration suites.
  *
- * Goals (issue #978):
+ * Goals:
  * - Builders for campaigns, pledges, and wallets so tests don't copy large
  *   setup blocks.
  * - A frozen clock so time-dependent states (open/funded/failed) never depend
@@ -21,6 +21,22 @@ export const FIXTURE_EPOCH_SECONDS = 1_700_000_000;
 
 export const ONE_HOUR_SECONDS = 3_600;
 export const ONE_DAY_SECONDS = 86_400;
+
+/** Build a deterministic deadline relative to the fixture clock. */
+export function buildFutureDeadline(
+  offsetSeconds: number = ONE_DAY_SECONDS,
+  baseSeconds: number = FIXTURE_EPOCH_SECONDS,
+): number {
+  return baseSeconds + offsetSeconds;
+}
+
+/** Build a deterministic deadline that has already passed. */
+export function buildPastDeadline(
+  offsetSeconds: number = ONE_DAY_SECONDS,
+  baseSeconds: number = FIXTURE_EPOCH_SECONDS,
+): number {
+  return baseSeconds - offsetSeconds;
+}
 
 /** Deterministic Stellar-looking account address: `G` followed by 55 repeats. */
 export function buildAddress(fill: string): string {
@@ -44,7 +60,7 @@ export const WALLETS = {
  * Default future deadline relative to {@link FIXTURE_EPOCH_SECONDS}. Callers
  * that freeze the clock get a deterministic open campaign.
  */
-export const DEFAULT_DEADLINE = FIXTURE_EPOCH_SECONDS + ONE_DAY_SECONDS;
+export const DEFAULT_DEADLINE = buildFutureDeadline();
 
 /** Build a campaign input with sensible, deterministic defaults. */
 export function buildCampaignInput(overrides: Partial<CampaignInput> = {}): CampaignInput {
@@ -78,24 +94,40 @@ export interface Clock {
   restore(): void;
 }
 
+export interface ClockOptions {
+  /** Synchronize a store-specific clock that accepts milliseconds. */
+  setStoreTime?: (milliseconds: number) => void;
+  /** Clear the store-specific clock override. */
+  resetStoreTime?: () => void;
+}
+
 /**
  * Freeze `Date.now()` to a fixed instant so campaign status is deterministic.
  * Always restore in `afterEach` (or use `try/finally`).
  */
-export function freezeClock(seconds: number = FIXTURE_EPOCH_SECONDS): Clock {
+export function freezeClock(
+  seconds: number = FIXTURE_EPOCH_SECONDS,
+  options: ClockOptions = {},
+): Clock {
   const spy = vi.spyOn(Date, 'now').mockReturnValue(seconds * 1000);
   let current = seconds;
+
+  options.setStoreTime?.(seconds * 1000);
+
   return {
     set(next: number) {
       current = next;
       spy.mockReturnValue(current * 1000);
+      options.setStoreTime?.(current * 1000);
     },
     advance(delta: number) {
       current += delta;
       spy.mockReturnValue(current * 1000);
+      options.setStoreTime?.(current * 1000);
     },
     restore() {
       spy.mockRestore();
+      options.resetStoreTime?.();
     },
   };
 }
@@ -105,10 +137,9 @@ export function freezeClock(seconds: number = FIXTURE_EPOCH_SECONDS): Clock {
  * Used for performance regression testing of campaign detail loading.
  *
  * @param count - Number of pledges to generate.
- * @param campaignId - The ID of the campaign these pledges belong to.
  * @returns Array of PledgeInput objects.
  */
-export function buildLargePledgeDataset(count: number, campaignId: string): PledgeInput[] {
+export function buildLargePledgeDataset(count: number): PledgeInput[] {
   const pledges: PledgeInput[] = [];
   for (let i = 0; i < count; i++) {
     // Use deterministic but varied data to simulate realistic distribution

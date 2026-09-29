@@ -33,7 +33,10 @@ Both endpoints return HTTP **200** when healthy and **503** when degraded.
     "lastKnownLedger": 54321,
     "isHealthy": true,
     "consecutiveFailures": 0,
-    "lagMs": 8500
+    "lagMs": 8500,
+    "freshness": "fresh",
+    "staleLagMs": 300000,
+    "freshLagMs": 30000
   },
   "memory": {
     "rss": 75497472,
@@ -51,8 +54,10 @@ Both endpoints return HTTP **200** when healthy and **503** when degraded.
 | `status` | `"ok"` | `"degraded"` → HTTP 503 |
 | `database.status` | `"up"` | `"down"` |
 | `indexer.isHealthy` | `true` | `false` |
-| `indexer.consecutiveFailures` | `0` | `≥ 3` |
-| `indexer.lagMs` | `< 60 000` (< 1 min) | `> 300 000` (> 5 min) |
+| `indexer.consecutiveFailures` | `0` | `≥ 1` (failing) |
+| `indexer.freshness` | `"fresh"` or `"idle"` | `"stale"`, `"failing"`, or `"never"` |
+| `indexer.lagMs` | `≤ freshLagMs` (fresh) or `< staleLagMs` (idle) | `≥ staleLagMs` (stale) |
+| `indexer.freshLagMs` / `staleLagMs` | thresholds from env | tune via `SOROBAN_INDEXER_*_LAG_MS` |
 | `memory.heapUsed` | `< 200 MB` | `> 400 MB` → potential leak |
 | `memory.rss` | `< 300 MB` | `> 600 MB` → investigate |
 
@@ -127,7 +132,36 @@ See also: [RUNBOOK.md — SQLite Lock Contention](../RUNBOOK.md#1-sqlite-lock-co
 
 ---
 
-### 2. `indexer.isHealthy: false` / `indexer.consecutiveFailures ≥ 1`
+### 2. `indexer.freshness`: idle vs stale vs failing
+
+**What it means:** `freshness` is the bounded lag signal operators use to tell healthy-but-idle from stale or failing:
+
+| `freshness` | Meaning | HTTP `/api/health` |
+|-------------|---------|-------------------|
+| `fresh` | Last successful poll within `freshLagMs` | 200 when DB up |
+| `idle` | Lag between `freshLagMs` and `staleLagMs` — poller OK, no recent events needed | 200 when DB up |
+| `stale` | Lag ≥ `staleLagMs` — derived state may be behind chain | 503 / degraded |
+| `failing` | `consecutiveFailures > 0` — RPC polls erroring | 503 / degraded |
+| `never` | No successful poll yet | 503 / degraded |
+
+**Diagnosis**
+
+```bash
+curl -s http://localhost:3001/api/health | jq '{status, indexer}'
+```
+
+Compare `lagMs` to `freshLagMs` / `staleLagMs`. See also [INDEXER_RUNBOOK.md](INDEXER_RUNBOOK.md).
+
+**Recovery**
+
+- `idle`: no action required; confirm `isHealthy: true`.
+- `stale`: wait for catch-up or lower `SOROBAN_POLL_INTERVAL_MS`; restart if `lastKnownLedger` is stuck.
+- `failing`: fix Soroban RPC / network; indexer backs off automatically.
+
+---
+
+### 3. `indexer.isHealthy: false` / `indexer.consecutiveFailures ≥ 1`
+
 
 **What it means:** One or more Soroban RPC poll cycles have failed. The indexer applies exponential backoff so the next poll could be delayed up to 5 minutes.
 
@@ -170,7 +204,7 @@ curl -s https://status.stellar.org/api/v2/status.json | jq '.status.description'
 
 ---
 
-### 3. `indexer.lagMs` is very high (> 5 minutes)
+### 4. `indexer.lagMs` is very high (> 5 minutes)
 
 **What it means:** The indexer is running (no errors) but is far behind the chain. This can mean the process was down for an extended period, or the poll interval is too aggressive relative to RPC throttling.
 
@@ -198,7 +232,7 @@ sudo systemctl restart stellar-goal-vault-backend
 
 ---
 
-### 4. `components.soroban.status: "down"` (deep check only)
+### 5. `components.soroban.status: "down"` (deep check only)
 
 **What it means:** The `getHealth` JSON-RPC call to `SOROBAN_RPC_URL` timed out or returned HTTP 5xx.
 
@@ -228,7 +262,7 @@ sudo systemctl restart stellar-goal-vault-backend
 
 ---
 
-### 5. `components.contract.status: "down"` (deep check only)
+### 6. `components.contract.status: "down"` (deep check only)
 
 **What it means:** `CONTRACT_ID` environment variable is not set. Freighter-backed pledge signing will not work, but the REST API continues to operate.
 
@@ -255,7 +289,7 @@ sudo systemctl restart stellar-goal-vault-backend
 
 ---
 
-### 6. `memory.heapUsed` growing over time
+### 7. `memory.heapUsed` growing over time
 
 **What it means:** The Node.js heap is not being garbage-collected efficiently. Sustained growth without stabilization suggests a memory leak.
 
@@ -292,7 +326,7 @@ See also: [RUNBOOK.md — Backend OOM](../RUNBOOK.md#2-backend-oom-out-of-memory
 
 ---
 
-### 7. `status: "degraded"` / HTTP 503 from shallow endpoint
+### 8. `status: "degraded"` / HTTP 503 from shallow endpoint
 
 **What it means:** At least one of `database.reachable` or `indexer.isHealthy` is false. The API is still running but in a degraded state.
 
@@ -300,7 +334,7 @@ See also: [RUNBOOK.md — Backend OOM](../RUNBOOK.md#2-backend-oom-out-of-memory
 
 ```bash
 # Check which component is failing
-curl -s http://localhost:3001/api/health | jq '{status, database, indexer: {isHealthy: .indexer.isHealthy, consecutiveFailures: .indexer.consecutiveFailures}}'
+curl -s http://localhost:3001/api/health | jq '{status, database, indexer: {isHealthy: .indexer.isHealthy, freshness: .indexer.freshness, lagMs: .indexer.lagMs, consecutiveFailures: .indexer.consecutiveFailures}}'
 ```
 
 Follow the appropriate playbook above depending on which component shows failure:
@@ -309,7 +343,7 @@ Follow the appropriate playbook above depending on which component shows failure
 
 ---
 
-### 8. `overall: "down"` from deep endpoint when shallow reports `"ok"`
+### 9. `overall: "down"` from deep endpoint when shallow reports `"ok"`
 
 **What it means:** The DB and indexer are healthy, but either `CONTRACT_ID` is unset or the Soroban RPC is unreachable. The API and campaign operations continue normally; only on-chain features are affected.
 
@@ -328,7 +362,7 @@ Follow [Playbook 4](#4-componentsssorobanstatus-down-deep-check-only) or [Playbo
 ```bash
 # One-liner for shallow health with key signals
 curl -s http://localhost:3001/api/health \
-  | jq '{status, dbUp: .database.reachable, indexerOk: .indexer.isHealthy, failures: .indexer.consecutiveFailures, lagMs: .indexer.lagMs, heapMB: (.memory.heapUsed / 1048576 | round)}'
+  | jq '{status, dbUp: .database.reachable, indexerOk: .indexer.isHealthy, freshness: .indexer.freshness, failures: .indexer.consecutiveFailures, lagMs: .indexer.lagMs, heapMB: (.memory.heapUsed / 1048576 | round)}'
 
 # One-liner for deep health component summary
 curl -s http://localhost:3001/api/health/deep \
@@ -340,6 +374,7 @@ curl -s http://localhost:3001/api/health/deep \
 ## Related Documents
 
 - [RUNBOOK.md](../RUNBOOK.md) — SQLite lock contention, OOM, campaign status sync, contract failures
+- [INDEXER_RUNBOOK.md](INDEXER_RUNBOOK.md) — Soroban event indexer signals and playbooks
 - [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) — SQLite permissions, Soroban CLI, CORS, env vars
 - [docs/SECURE_CONFIGURATION.md](SECURE_CONFIGURATION.md) — Production environment variable reference
 - [DEPLOYMENT.md](../DEPLOYMENT.md) — Deploying the contract and backend to testnet/production

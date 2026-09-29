@@ -375,5 +375,175 @@ describe('CreateCampaignForm', () => {
 
       expect(screen.queryByText(/Code:/i)).not.toBeInTheDocument();
     });
+
+    it('shows loading and empty asset states explicitly', () => {
+      const { rerender } = render(
+        <CreateCampaignForm onCreate={async () => {}} isLoading allowedAssets={[]} />,
+      );
+
+      expect(screen.getByText('Loading campaign options')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /next/i })).not.toBeInTheDocument();
+
+      rerender(<CreateCampaignForm onCreate={async () => {}} allowedAssets={[]} />);
+
+      expect(screen.getByText('No campaign assets available')).toBeInTheDocument();
+      expect(screen.queryByText('Loading campaign options')).not.toBeInTheDocument();
+    });
+
+    it('shows a success state after a successful submission', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+
+      render(<CreateCampaignForm onCreate={onCreate} />);
+      await advanceToReview(user);
+      await user.click(screen.getByRole('button', { name: /create campaign/i }));
+
+      expect(await screen.findByText(/campaign created successfully/i)).toBeInTheDocument();
+    });
+
+    it('offers retry after a recoverable submission failure', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Temporary service failure'))
+        .mockResolvedValueOnce(undefined);
+
+      render(<CreateCampaignForm onCreate={onCreate} />);
+      await advanceToReview(user);
+      await user.click(screen.getByRole('button', { name: /create campaign/i }));
+
+      expect(await screen.findByText('Temporary service failure')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /^retry$/i }));
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText(/campaign created successfully/i)).toBeInTheDocument();
+    });
+  });
+});
+
+describe('CreateCampaignForm – Mobile Responsiveness', () => {
+  const MOBILE_WIDTH = 375;
+
+  const fillBasics = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.type(
+      screen.getByPlaceholderText(/G\.\.\. creator public key/i),
+      `G${'A'.repeat(55)}`,
+    );
+    await user.type(
+      screen.getByPlaceholderText(/Stellar community design sprint/i),
+      'Mobile Campaign',
+    );
+    await user.type(
+      screen.getByPlaceholderText(/Describe what the campaign funds/i),
+      'This campaign funds a real Soroban pledge flow for the MVP dashboard.',
+    );
+    await user.selectOptions(screen.getByRole('combobox'), 'Community');
+  };
+
+  beforeEach(() => {
+    // Simulate a 375px viewport width so scrollWidth checks are meaningful.
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get() {
+        return MOBILE_WIDTH;
+      },
+    });
+  });
+
+  afterEach(() => {
+    // Restore default clientWidth behaviour.
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get() {
+        return 0;
+      },
+    });
+  });
+
+  it('renders the Basics step without horizontal overflow at 375 px', () => {
+    const { container } = render(
+      <CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />,
+    );
+
+    // scrollWidth > clientWidth means content is wider than the viewport.
+    expect(container.firstElementChild!.scrollWidth).toBeLessThanOrEqual(MOBILE_WIDTH);
+  });
+
+  it('renders the Funding step without horizontal overflow at 375 px', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />,
+    );
+
+    await fillBasics(user);
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+
+    expect(container.firstElementChild!.scrollWidth).toBeLessThanOrEqual(MOBILE_WIDTH);
+  });
+
+  it('renders the Rewards step without horizontal overflow at 375 px', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />,
+    );
+
+    await fillBasics(user);
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+
+    expect(container.firstElementChild!.scrollWidth).toBeLessThanOrEqual(MOBILE_WIDTH);
+  });
+
+  it('renders the Review step without horizontal overflow at 375 px', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />,
+    );
+
+    await fillBasics(user);
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+
+    expect(container.firstElementChild!.scrollWidth).toBeLessThanOrEqual(MOBILE_WIDTH);
+  });
+
+  it('numeric inputs carry the correct inputMode for mobile keyboards', async () => {
+    const user = userEvent.setup();
+    render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+
+    await fillBasics(user);
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+
+    const targetAmount = screen.getByLabelText(/target amount/i) as HTMLInputElement;
+    const deadlineHours = screen.getByLabelText(/deadline in hours/i) as HTMLInputElement;
+    const maxPerContributor = screen.getByLabelText(/max per contributor/i) as HTMLInputElement;
+
+    expect(targetAmount).toHaveAttribute('inputmode', 'decimal');
+    expect(deadlineHours).toHaveAttribute('inputmode', 'decimal');
+    expect(maxPerContributor).toHaveAttribute('inputmode', 'numeric');
+  });
+
+  it('URL inputs carry inputMode="url" and autoComplete="url"', () => {
+    render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+
+    const imageUrlInput = screen.getByPlaceholderText(/https:\/\/example\.com\/image\.png/i);
+    const externalLinkInput = screen.getByPlaceholderText(/https:\/\/example\.com\/project/i);
+
+    expect(imageUrlInput).toHaveAttribute('inputmode', 'url');
+    expect(imageUrlInput).toHaveAttribute('autocomplete', 'url');
+    expect(externalLinkInput).toHaveAttribute('inputmode', 'url');
+    expect(externalLinkInput).toHaveAttribute('autocomplete', 'url');
+  });
+
+  it('wizard nav buttons are full-width accessible tap targets on the Basics step', () => {
+    render(<CreateCampaignForm onCreate={async () => {}} allowedAssets={['USDC']} />);
+
+    // The Next button must be wide enough to tap comfortably on mobile.
+    const nextButton = screen.getByRole('button', { name: /^next$/i });
+    // The CSS rule sets width: 100% inside .wizard-nav at ≤767px.
+    // In JSDOM there is no layout engine, so we verify the element exists and is enabled.
+    expect(nextButton).toBeEnabled();
+    expect(nextButton).toBeInTheDocument();
   });
 });

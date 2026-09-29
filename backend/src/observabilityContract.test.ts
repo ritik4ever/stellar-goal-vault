@@ -81,6 +81,7 @@ const REQUEST_ERROR_LOG_FIELDS = {
   status: 'number',
   code: 'string',
   err: 'object',
+  indexer: 'object',
 } as const;
 
 /** Fields inside `err` on error logs. */

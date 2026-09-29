@@ -1,4 +1,4 @@
-import { LayoutGrid } from 'lucide-react';
+import { LayoutGrid, RefreshCw, AlertCircle } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDebounce } from '../hooks/useDebounce';
 import { useSearchParams } from 'react-router-dom';
@@ -40,6 +40,11 @@ interface CampaignsTableProps {
   isLoadingMore?: boolean;
   isLoading?: boolean;
   invalidUrlCampaignId?: string | null;
+  error?: {
+    message: string;
+    onRetry?: () => void;
+    isRecoverable?: boolean;
+  } | null;
 }
 
 function formatTimestamp(value: number | string): string {
@@ -74,6 +79,7 @@ export function CampaignsTable({
   isLoadingMore = false,
   isLoading = false,
   invalidUrlCampaignId = null,
+  error = null,
 }: CampaignsTableProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlSort = (searchParams.get('sort') as SortOption | null) ?? 'createdAt';
@@ -85,6 +91,7 @@ export function CampaignsTable({
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>(urlStatus);
   const [searchQuery, setSearchQuery] = useState('');
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
   function handleSortChange(newSort: SortOption) {
@@ -121,7 +128,12 @@ export function CampaignsTable({
   function handleSearchChange(value: string) {
     setSearchQuery(value);
     if (value === '') {
-      onSearchChange?.('');
+      try {
+        onSearchChange?.('');
+      } catch (err) {
+        // Preserve user input even if search fails
+        console.error('Search change failed:', err);
+      }
     }
   }
 
@@ -152,7 +164,12 @@ export function CampaignsTable({
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
-          onLoadMore();
+          setLoadMoreError(null);
+          try {
+            onLoadMore();
+          } catch (err) {
+            setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more campaigns');
+          }
         }
       },
       { rootMargin: '200px' },
@@ -190,14 +207,20 @@ export function CampaignsTable({
   const hasStatusFilter = statusFilter !== '';
   const isFiltered = hasSearchQuery || hasAssetFilter || hasStatusFilter;
 
-  const filteredCampaigns = useMemo(() => {
+  const baseFilteredCampaigns = useMemo(() => {
     // Apply asset + status filters first (pure client-side).
-    const assetStatusFiltered = applyFilters(campaigns, assetCode, statusFilter);
+    return applyFilters(campaigns, assetCode, statusFilter);
+  }, [campaigns, assetCode, statusFilter]);
+
+  const searchedCampaigns = useMemo(() => {
     // Then apply search query client-side (title / creator / id).
-    const searched = searchCampaigns(assetStatusFiltered, debouncedSearchQuery);
+    return searchCampaigns(baseFilteredCampaigns, debouncedSearchQuery);
+  }, [baseFilteredCampaigns, debouncedSearchQuery]);
+
+  const filteredCampaigns = useMemo(() => {
     // Server already sorted; client sort acts as a stable tie-break.
-    return sortCampaigns(searched, sortBy);
-  }, [campaigns, assetCode, statusFilter, debouncedSearchQuery, sortBy]);
+    return sortCampaigns(searchedCampaigns, sortBy);
+  }, [searchedCampaigns, sortBy]);
 
   const isMobile = useMediaQuery('(max-width: 767px)');
 
@@ -219,6 +242,37 @@ export function CampaignsTable({
           {Array.from({ length: SKELETON_COUNT }).map((_, index) => (
             <SkeletonCard key={`skeleton-${index}`} />
           ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="card">
+        <div className="section-heading">
+          <h2>Campaign board</h2>
+        </div>
+        <div className="banner-error" role="alert">
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <AlertCircle size={20} aria-hidden="true" />
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: 0, fontWeight: 500 }}>Unable to load campaigns</p>
+              <p className="muted" style={{ margin: '4px 0 0 0' }}>{error.message}</p>
+            </div>
+          </div>
+          {error.onRetry && (
+            <button
+              className="btn-secondary"
+              type="button"
+              onClick={error.onRetry}
+              disabled={isLoading}
+              style={{ marginTop: 12 }}
+            >
+              <RefreshCw size={16} style={{ marginRight: 8 }} />
+              {isLoading ? 'Retrying...' : 'Retry'}
+            </button>
+          )}
         </div>
       </section>
     );
@@ -491,6 +545,27 @@ export function CampaignsTable({
           <div ref={loadMoreRef} aria-hidden="true" />
           {isLoadingMore ? (
             <p className="muted campaigns-load-more">Loading more campaigns...</p>
+          ) : null}
+          {loadMoreError ? (
+            <div className="banner-error" style={{ margin: '12px 0' }} role="alert">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertCircle size={16} aria-hidden="true" />
+                <span className="muted">{loadMoreError}</span>
+                {onLoadMore && (
+                  <button
+                    className="btn-ghost"
+                    type="button"
+                    onClick={() => {
+                      setLoadMoreError(null);
+                      onLoadMore();
+                    }}
+                    style={{ fontSize: '0.875rem', padding: '4px 8px' }}
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            </div>
           ) : null}
           {!hasMore && filteredCampaigns.length > 0 ? (
             <p className="muted campaigns-end-of-list">

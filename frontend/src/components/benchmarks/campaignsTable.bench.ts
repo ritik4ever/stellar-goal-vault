@@ -53,7 +53,7 @@ function makeCampaigns(count: number): Campaign[] {
   return Array.from({ length: count }, (_, index) => makeCampaign(index));
 }
 
-const DATASET_SIZES = [1_000, 5_000];
+const DATASET_SIZES = [1_000, 5_000, 10_000];
 
 for (const size of DATASET_SIZES) {
   const campaigns = makeCampaigns(size);
@@ -71,6 +71,21 @@ for (const size of DATASET_SIZES) {
 
     bench('search(all) + sort(deadline)', () => {
       sortCampaigns(campaigns, 'deadline');
+    });
+
+    bench('filter(all statuses) + sort(targetAmount)', () => {
+      // Exercises the full-pass applyFilters branch where both axes are empty
+      // strings (no-op) and the sort covers the entire dataset.
+      const filtered = applyFilters(campaigns, '', '');
+      sortCampaigns(filtered, 'targetAmount');
+    });
+
+    bench('search(no-match) + filter(EURC, funded) + sort(pledgedAmount)', () => {
+      // Worst-case path: full linear search with no early-exit, then filter on
+      // the smallest intersection, then sort a small result set.
+      const searched = searchCampaigns(campaigns, 'zzz_no_match_zzz');
+      const filtered = applyFilters(searched, 'EURC', 'funded');
+      sortCampaigns(filtered, 'pledgedAmount');
     });
   });
 }

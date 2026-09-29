@@ -1,40 +1,32 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { DashboardPage } from './dashboard';
+import { mockFreighter, TEST_CREATORS } from './fixtures';
 
 test.describe('Campaign Lifecycle', () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      (window as any).freighter = {
-        isConnected: () => Promise.resolve(true),
-        requestAccess: () =>
-          Promise.resolve('GBAF7Y6PJY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY'),
-        getNetworkDetails: () =>
-          Promise.resolve({
-            networkPassphrase: 'Test SDF Network ; September 2015',
-            sorobanRpcUrl: 'https://soroban-testnet.stellar.org:443',
-          }),
-        signTransaction: (xdr: string) => Promise.resolve(xdr),
-      };
-    });
+    await mockFreighter(page, TEST_CREATORS.alice);
   });
 
   test('should complete a full campaign lifecycle (Create -> Pledge -> Funded -> Claim)', async ({
     page,
+    campaign,
   }) => {
     const dashboard = new DashboardPage(page);
     const campaignTitle = `E2E Campaign ${Date.now()}`;
-    const creator = 'GBAF7Y6PJY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY6PY';
 
     await dashboard.goto();
 
     await test.step('Create Campaign', async () => {
-      await dashboard.creatorInput.fill(creator);
+      await dashboard.creatorInput.fill(TEST_CREATORS.alice);
       await dashboard.titleInput.fill(campaignTitle);
       await dashboard.descriptionInput.fill(
         'This is a test campaign created by Playwright E2E test suite.',
       );
       await dashboard.targetAmountInput.fill('100');
-      await dashboard.deadlineHoursInput.fill('0.001');
+      // 0.01h = 36s: long enough to complete create/pledge, and guarantees the
+      // post-deadline reload lands past the backend's 30s detail-cache TTL so
+      // the UI observes fresh claimable state.
+      await dashboard.deadlineHoursInput.fill('0.01');
 
       await dashboard.createButton.click();
       await expect(page.locator(`text=${campaignTitle}`)).toBeVisible();
@@ -57,10 +49,14 @@ test.describe('Campaign Lifecycle', () => {
     });
 
     await test.step('Wait for Deadline and Claim', async () => {
-      // Wait for the deadline to pass
-      await page.waitForTimeout(5000);
+      // Poll until the backend reports the deadline has passed, instead of a
+      // wall-clock waitForTimeout.
+      await campaign.waitForClaimableByTitle(campaignTitle, 45_000);
 
-      // Re-select to refresh status or just try to claim
+      // Reload to establish fresh UI state now that the server says claimable.
+      await page.reload();
+      await dashboard.connectWallet();
+      await dashboard.selectCampaign(campaignTitle);
       await dashboard.claim();
 
       await expect(page.locator('text=Campaign claimed successfully')).toBeVisible();

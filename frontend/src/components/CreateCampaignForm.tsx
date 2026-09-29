@@ -15,6 +15,8 @@ interface CreateCampaignFormProps {
   onCreate: (payload: CreateCampaignPayload) => Promise<void>;
   allowedAssets?: string[];
   apiError?: ApiError | null;
+  isLoading?: boolean;
+  onRetry?: () => void;
 }
 
 interface RewardTier {
@@ -145,21 +147,37 @@ function isStepValid(index: number, errors: FormErrors, values: WizardValues): b
 
 export function CreateCampaignForm({
   onCreate,
-  allowedAssets = [],
+  allowedAssets,
   apiError,
+  isLoading = false,
+  onRetry,
 }: CreateCampaignFormProps) {
-  const assetOptions = allowedAssets.length > 0 ? allowedAssets : ['USDC'];
+  const usesFallbackAsset = allowedAssets === undefined;
+  const assetOptions = allowedAssets ?? ['USDC'];
+  const hasAssetConfig = usesFallbackAsset || assetOptions.length > 0;
   const [values, setValues] = useState<WizardValues>({
     ...INITIAL_VALUES,
     acceptedTokens: assetOptions.slice(0, 1),
   });
   const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionSucceeded, setSubmissionSucceeded] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [lastSubmittedPayload, setLastSubmittedPayload] = useState<CreateCampaignPayload | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [maxStepReached, setMaxStepReached] = useState(0);
   const nextTierId = useRef(0);
+  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
+  const previousStepRef = useRef(currentStep);
 
   const errors = useMemo(() => computeErrors(values), [values]);
+
+  useEffect(() => {
+    if (previousStepRef.current !== currentStep) {
+      stepHeadingRef.current?.focus();
+    }
+    previousStepRef.current = currentStep;
+  }, [currentStep]);
 
   useEffect(() => {
     setValues((current) => {
@@ -276,28 +294,32 @@ export function CreateCampaignForm({
       return;
     }
 
+    const payload: CreateCampaignPayload = {
+      creator: values.creator.trim(),
+      title: values.title.trim(),
+      description: values.description.trim(),
+      acceptedTokens: values.acceptedTokens.map((t) => t.trim().toUpperCase()),
+      targetAmount: Number(values.targetAmount),
+      deadline: Math.floor(Date.now() / 1000) + Number(values.deadlineHours) * 3600,
+      metadata: {
+        imageUrl: values.imagePreview || values.imageUrl.trim() || undefined,
+        externalLink: values.externalLink.trim() || undefined,
+      },
+      maxPerContributor: values.maxPerContributor.trim()
+        ? Number(values.maxPerContributor)
+        : undefined,
+    };
+
+    await submitPayload(payload);
+  }
+
+  async function submitPayload(payload: CreateCampaignPayload) {
     setIsSubmitting(true);
+    setSubmissionSucceeded(false);
+    setSubmissionError(null);
+    setLastSubmittedPayload(payload);
     try {
-      const deadline = Math.floor(Date.now() / 1000) + Number(values.deadlineHours) * 3600;
-
-      // Use uploaded image (base64) if available, otherwise fall back to URL
-      const finalImageUrl = values.imagePreview || values.imageUrl.trim() || undefined;
-
-      await onCreate({
-        creator: values.creator.trim(),
-        title: values.title.trim(),
-        description: values.description.trim(),
-        acceptedTokens: values.acceptedTokens.map((t) => t.trim().toUpperCase()),
-        targetAmount: Number(values.targetAmount),
-        deadline,
-        metadata: {
-          imageUrl: finalImageUrl,
-          externalLink: values.externalLink.trim() || undefined,
-        },
-        maxPerContributor: values.maxPerContributor.trim()
-          ? Number(values.maxPerContributor)
-          : undefined,
-      });
+      await onCreate(payload);
 
       const resetValues: WizardValues = {
         ...INITIAL_VALUES,
@@ -307,21 +329,58 @@ export function CreateCampaignForm({
       setTouchedFields(new Set());
       setCurrentStep(0);
       setMaxStepReached(0);
+      setSubmissionSucceeded(true);
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : 'Unable to create campaign.');
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  function handleRetry() {
+    if (lastSubmittedPayload) {
+      void submitPayload(lastSubmittedPayload);
+      return;
+    }
+    onRetry?.();
+  }
+
   return (
-    <section className="card wizard-card">
+    <section className="card wizard-card" aria-labelledby="create-campaign-title">
       <div className="section-heading">
-        <h2>Create Campaign</h2>
+        <h2 id="create-campaign-title">Create Campaign</h2>
         <p className="muted">
           Spin up a Stellar goal vault for contributors and prototype the funding lifecycle.
         </p>
       </div>
 
-      <nav className="wizard-stepper" aria-label="Campaign creation steps">
+      {isLoading ? (
+        <div className="form-state" role="status" aria-live="polite" aria-busy="true">
+          <span className="loading-spinner" aria-hidden="true" />
+          <h3>Loading campaign options</h3>
+          <p className="muted">Preparing the assets available for this campaign.</p>
+        </div>
+      ) : !hasAssetConfig || assetOptions.length === 0 ? (
+        <div className="form-state" role="status" aria-live="polite">
+          <h3>No campaign assets available</h3>
+          <p className="muted">
+            Campaign creation will be available when an accepted asset is configured.
+          </p>
+          {(onRetry || lastSubmittedPayload) ? (
+            <button type="button" className="btn-ghost" onClick={handleRetry}>
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {submissionSucceeded ? (
+        <div className="form-success" role="status" aria-live="polite">
+          Campaign created successfully. You can create another campaign.
+        </div>
+      ) : null}
+
+      {!isLoading && hasAssetConfig && assetOptions.length > 0 ? <nav className="wizard-stepper" aria-label="Campaign creation steps">
         <ol>
           {STEPS.map((step, index) => {
             const isCurrent = index === currentStep;
@@ -351,9 +410,23 @@ export function CreateCampaignForm({
             );
           })}
         </ol>
-      </nav>
+      </nav> : null}
 
-      <form className="form-grid wizard-step-panel" onSubmit={handleSubmit} noValidate>
+      {!isLoading && hasAssetConfig && assetOptions.length > 0 ? <form
+        className="form-grid wizard-step-panel"
+        onSubmit={handleSubmit}
+        noValidate
+        aria-labelledby="campaign-step-heading"
+      >
+        <h3
+          id="campaign-step-heading"
+          ref={stepHeadingRef}
+          className="sr-only"
+          tabIndex={-1}
+          aria-live="polite"
+        >
+          {STEPS[currentStep].label}
+        </h3>
         {currentStep === 0 ? (
           <>
             <label className="field-group">
@@ -365,10 +438,16 @@ export function CreateCampaignForm({
                 onBlur={() => handleFieldBlur('creator')}
                 placeholder="G... creator public key"
                 className={errors.creator && touchedFields.has('creator') ? 'input-error' : ''}
+                aria-invalid={errors.creator && touchedFields.has('creator') ? 'true' : undefined}
+                aria-describedby={
+                  errors.creator && touchedFields.has('creator') ? 'creator-error' : undefined
+                }
                 required
               />
               {errors.creator && touchedFields.has('creator') ? (
-                <span className="field-error">{errors.creator}</span>
+                <span id="creator-error" className="field-error" role="alert">
+                  {errors.creator}
+                </span>
               ) : null}
             </label>
 
@@ -383,10 +462,16 @@ export function CreateCampaignForm({
                 minLength={4}
                 maxLength={80}
                 className={errors.title && touchedFields.has('title') ? 'input-error' : ''}
+                aria-invalid={errors.title && touchedFields.has('title') ? 'true' : undefined}
+                aria-describedby={
+                  errors.title && touchedFields.has('title') ? 'title-error' : undefined
+                }
                 required
               />
               {errors.title && touchedFields.has('title') ? (
-                <span className="field-error">{errors.title}</span>
+                <span id="title-error" className="field-error" role="alert">
+                  {errors.title}
+                </span>
               ) : null}
             </label>
 
@@ -401,10 +486,20 @@ export function CreateCampaignForm({
                 minLength={20}
                 maxLength={500}
                 className={errors.description && touchedFields.has('description') ? 'input-error' : ''}
+                aria-invalid={
+                  errors.description && touchedFields.has('description') ? 'true' : undefined
+                }
+                aria-describedby={
+                  errors.description && touchedFields.has('description')
+                    ? 'description-error'
+                    : undefined
+                }
                 required
               />
               {errors.description && touchedFields.has('description') ? (
-                <span className="field-error">{errors.description}</span>
+                <span id="description-error" className="field-error" role="alert">
+                  {errors.description}
+                </span>
               ) : null}
             </label>
 
@@ -415,6 +510,10 @@ export function CreateCampaignForm({
                 onChange={(event) => update('category', event.target.value)}
                 onBlur={() => handleFieldBlur('category')}
                 className={errors.category && touchedFields.has('category') ? 'input-error' : ''}
+                aria-invalid={errors.category && touchedFields.has('category') ? 'true' : undefined}
+                aria-describedby={
+                  errors.category && touchedFields.has('category') ? 'category-error' : undefined
+                }
                 required
               >
                 <option value="" disabled>
@@ -427,7 +526,9 @@ export function CreateCampaignForm({
                 ))}
               </select>
               {errors.category && touchedFields.has('category') ? (
-                <span className="field-error">{errors.category}</span>
+                <span id="category-error" className="field-error" role="alert">
+                  {errors.category}
+                </span>
               ) : null}
             </label>
 
@@ -436,6 +537,8 @@ export function CreateCampaignForm({
                 <span>Image URL (optional)</span>
                 <input
                   type="url"
+                  inputMode="url"
+                  autoComplete="url"
                   value={values.imageUrl}
                   onChange={(event) => update('imageUrl', event.target.value)}
                   placeholder="https://example.com/image.png"
@@ -446,6 +549,8 @@ export function CreateCampaignForm({
                 <span>External Link (optional)</span>
                 <input
                   type="url"
+                  inputMode="url"
+                  autoComplete="url"
                   value={values.externalLink}
                   onChange={(event) => update('externalLink', event.target.value)}
                   placeholder="https://example.com/project"
@@ -457,8 +562,8 @@ export function CreateCampaignForm({
 
         {currentStep === 1 ? (
           <>
-            <div className="field-group">
-              <span>Accepted tokens</span>
+            <fieldset className="field-group token-fieldset">
+              <legend>Accepted tokens</legend>
               <div className="token-checkboxes">
                 {assetOptions.map((asset) => (
                   <label key={asset} className="checkbox-label">
@@ -467,20 +572,33 @@ export function CreateCampaignForm({
                       checked={values.acceptedTokens.includes(asset)}
                       onChange={() => toggleToken(asset)}
                       onBlur={() => handleFieldBlur('acceptedTokens')}
+                      aria-invalid={
+                        errors.acceptedTokens && touchedFields.has('acceptedTokens')
+                          ? 'true'
+                          : undefined
+                      }
+                      aria-describedby={
+                        errors.acceptedTokens && touchedFields.has('acceptedTokens')
+                          ? 'accepted-tokens-error'
+                          : undefined
+                      }
                     />
                     {asset}
                   </label>
                 ))}
               </div>
               {errors.acceptedTokens && touchedFields.has('acceptedTokens') ? (
-                <span className="field-error">{errors.acceptedTokens}</span>
+                <span id="accepted-tokens-error" className="field-error" role="alert">
+                  {errors.acceptedTokens}
+                </span>
               ) : null}
-            </div>
+            </fieldset>
 
             <label className="field-group">
               <span>Target amount (cumulative sum of units)</span>
               <input
                 type="number"
+                inputMode="decimal"
                 min="0.01"
                 step="0.01"
                 value={values.targetAmount}
@@ -498,6 +616,7 @@ export function CreateCampaignForm({
               <span>Deadline in hours</span>
               <input
                 type="number"
+                inputMode="decimal"
                 min="0.0001"
                 step="0.0001"
                 value={values.deadlineHours}
@@ -515,6 +634,7 @@ export function CreateCampaignForm({
               <span>Max per contributor (optional)</span>
               <input
                 type="number"
+                inputMode="numeric"
                 min="1"
                 step="1"
                 value={values.maxPerContributor}
@@ -559,6 +679,7 @@ export function CreateCampaignForm({
                           type="button"
                           className="btn-ghost btn-small"
                           onClick={() => removeRewardTier(tier.id)}
+                          aria-label={`Remove reward tier ${index + 1}`}
                         >
                           Remove
                         </button>
@@ -573,9 +694,21 @@ export function CreateCampaignForm({
                           onBlur={() => handleTierFieldBlur(tier.id, 'title')}
                           placeholder="Early supporter badge"
                           className={tierErrors.title && titleTouched ? 'input-error' : ''}
+                          aria-invalid={tierErrors.title && titleTouched ? 'true' : undefined}
+                          aria-describedby={
+                            tierErrors.title && titleTouched
+                              ? `tier-${tier.id}-title-error`
+                              : undefined
+                          }
                         />
                         {tierErrors.title && titleTouched ? (
-                          <span className="field-error">{tierErrors.title}</span>
+                          <span
+                            id={`tier-${tier.id}-title-error`}
+                            className="field-error"
+                            role="alert"
+                          >
+                            {tierErrors.title}
+                          </span>
                         ) : null}
                       </label>
 
@@ -583,6 +716,7 @@ export function CreateCampaignForm({
                         <span>Minimum pledge amount</span>
                         <input
                           type="number"
+                          inputMode="decimal"
                           min="0.01"
                           step="0.01"
                           value={tier.minAmount}
@@ -591,9 +725,21 @@ export function CreateCampaignForm({
                           }
                           onBlur={() => handleTierFieldBlur(tier.id, 'minAmount')}
                           className={tierErrors.minAmount && amountTouched ? 'input-error' : ''}
+                          aria-invalid={tierErrors.minAmount && amountTouched ? 'true' : undefined}
+                          aria-describedby={
+                            tierErrors.minAmount && amountTouched
+                              ? `tier-${tier.id}-amount-error`
+                              : undefined
+                          }
                         />
                         {tierErrors.minAmount && amountTouched ? (
-                          <span className="field-error">{tierErrors.minAmount}</span>
+                          <span
+                            id={`tier-${tier.id}-amount-error`}
+                            className="field-error"
+                            role="alert"
+                          >
+                            {tierErrors.minAmount}
+                          </span>
                         ) : null}
                       </label>
 
@@ -675,10 +821,10 @@ export function CreateCampaignForm({
               )}
             </div>
 
-            {apiError ? (
-              <div className="form-error">
-                <p>{apiError.message}</p>
-                {apiError.details && apiError.details.length > 0 ? (
+            {apiError || submissionError ? (
+              <div className="form-error" role="alert" aria-live="assertive">
+                <p>{apiError?.message ?? submissionError}</p>
+                {apiError?.details && apiError.details.length > 0 ? (
                   <ul className="error-details">
                     {apiError.details.map((detail, index) => (
                       <li key={`${detail.field}-${index}`}>
@@ -687,12 +833,15 @@ export function CreateCampaignForm({
                     ))}
                   </ul>
                 ) : null}
-                {apiError.code ? (
+                {apiError?.code ? (
                   <small className="error-meta">
                     Code: {apiError.code}
                     {apiError.requestId ? ` | Request ID: ${apiError.requestId}` : ''}
                   </small>
                 ) : null}
+                <button type="button" className="btn-ghost" onClick={handleRetry}>
+                  Retry
+                </button>
               </div>
             ) : null}
           </div>
@@ -717,7 +866,7 @@ export function CreateCampaignForm({
             </button>
           )}
         </div>
-      </form>
+      </form> : null}
     </section>
   );
 }

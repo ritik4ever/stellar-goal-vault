@@ -46,6 +46,9 @@ export const config = {
     configuredNetworkPassphrase ?? (useDevelopmentDefaults ? DEFAULT_NETWORK_PASSPHRASE : ''),
   sorobanRpcUrl: configuredRpcUrl ?? (useDevelopmentDefaults ? DEFAULT_SOROBAN_RPC_URL : ''),
   contractId: process.env.CONTRACT_ID ?? '',
+  redisUrl: process.env.REDIS_URL ?? '',
+  webhookUrl: process.env.WEBHOOK_URL ?? '',
+  webhookSecret: process.env.WEBHOOK_SECRET ?? '',
   assetAddresses: (
     process.env.ASSET_ADDRESSES ??
     'XLM:CDLZFC3SYJYDZT7K3SSTH3YCUY6AFMCO3Y6S3G7FEYZNVNREK7Y6CYN5,USDC:CA6WSTPZ7RRCUC6H37CQFODG763XG2HXP2G6F367VCOGGVDP32P7665E'

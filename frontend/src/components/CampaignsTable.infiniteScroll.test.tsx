@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CampaignsTable } from './CampaignsTable';
@@ -31,6 +32,7 @@ const mockCampaign = (id: string): Campaign => ({
     status: 'open',
     percentFunded: 10,
     hoursLeft: 24,
+    canPledge: true,
     canClaim: false,
     canRefund: false,
   },
@@ -63,13 +65,16 @@ describe('CampaignsTable infinite scroll', () => {
     const campaigns = Array.from({ length: 20 }, (_, index) => mockCampaign(String(index + 1)));
 
     render(
-      <CampaignsTable
-        campaigns={campaigns}
-        selectedCampaignId={null}
-        onSelect={() => undefined}
-        onLoadMore={onLoadMore}
-        hasMore
-      />,
+      <MemoryRouter>
+        <CampaignsTable
+          campaigns={campaigns}
+          selectedCampaignId={null}
+          onSelect={() => undefined}
+          onLoadMore={onLoadMore}
+          hasMore
+          error={null}
+        />
+      </MemoryRouter>,
     );
 
     expect(observe).toHaveBeenCalled();
@@ -86,13 +91,16 @@ describe('CampaignsTable infinite scroll', () => {
 
   it('shows a loading indicator while the next page is loading', () => {
     render(
-      <CampaignsTable
-        campaigns={[mockCampaign('1')]}
-        selectedCampaignId={null}
-        onSelect={() => undefined}
-        hasMore
-        isLoadingMore
-      />,
+      <MemoryRouter>
+        <CampaignsTable
+          campaigns={[mockCampaign('1')]}
+          selectedCampaignId={null}
+          onSelect={() => undefined}
+          hasMore
+          isLoadingMore
+          error={null}
+        />
+      </MemoryRouter>,
     );
 
     expect(screen.getByText('Loading more campaigns...')).toBeInTheDocument();
@@ -100,12 +108,15 @@ describe('CampaignsTable infinite scroll', () => {
 
   it('shows an end-of-list message when there are no more pages', () => {
     render(
-      <CampaignsTable
-        campaigns={[mockCampaign('1')]}
-        selectedCampaignId={null}
-        onSelect={() => undefined}
-        hasMore={false}
-      />,
+      <MemoryRouter>
+        <CampaignsTable
+          campaigns={[mockCampaign('1')]}
+          selectedCampaignId={null}
+          onSelect={() => undefined}
+          hasMore={false}
+          error={null}
+        />
+      </MemoryRouter>,
     );
 
     expect(screen.getByText('You have reached the end of the campaign list.')).toBeInTheDocument();
