@@ -14,6 +14,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { CampaignsTable } from './CampaignsTable';
 import type { Campaign } from '../types/campaign';
@@ -111,12 +112,15 @@ afterEach(() => {
 
 function renderTable(campaigns: Campaign[] = mockCampaigns) {
   return render(
-    <CampaignsTable
-      campaigns={campaigns}
-      selectedCampaignId={null}
-      onSelect={vi.fn()}
-      isLoading={false}
-    />,
+    <MemoryRouter>
+      <CampaignsTable
+        campaigns={campaigns}
+        selectedCampaignId={null}
+        onSelect={vi.fn()}
+        isLoading={false}
+        error={null}
+      />
+    </MemoryRouter>,
   );
 }
 
@@ -147,12 +151,15 @@ describe('EmptyState – search produces zero results', () => {
 
   it('does NOT show EmptyState while loading', () => {
     render(
-      <CampaignsTable
-        campaigns={mockCampaigns}
-        selectedCampaignId={null}
-        onSelect={vi.fn()}
-        isLoading={true}
-      />,
+      <MemoryRouter>
+        <CampaignsTable
+          campaigns={mockCampaigns}
+          selectedCampaignId={null}
+          onSelect={vi.fn()}
+          isLoading={true}
+          error={null}
+        />
+      </MemoryRouter>,
     );
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
@@ -383,13 +390,16 @@ describe('Existing search behaviour – unchanged', () => {
     const onSearchChange = vi.fn();
 
     render(
-      <CampaignsTable
-        campaigns={mockCampaigns}
-        selectedCampaignId={null}
-        onSelect={vi.fn()}
-        onSearchChange={onSearchChange}
-        isLoading={false}
-      />,
+      <MemoryRouter>
+        <CampaignsTable
+          campaigns={mockCampaigns}
+          selectedCampaignId={null}
+          onSelect={vi.fn()}
+          onSearchChange={onSearchChange}
+          error={null}
+          isLoading={false}
+        />
+      </MemoryRouter>,
     );
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'solar');
@@ -403,13 +413,16 @@ describe('Existing search behaviour – unchanged', () => {
     const onSearchChange = vi.fn();
 
     render(
-      <CampaignsTable
-        campaigns={mockCampaigns}
-        selectedCampaignId={null}
-        onSelect={vi.fn()}
-        onSearchChange={onSearchChange}
-        isLoading={false}
-      />,
+      <MemoryRouter>
+        <CampaignsTable
+          campaigns={mockCampaigns}
+          selectedCampaignId={null}
+          onSelect={vi.fn()}
+          onSearchChange={onSearchChange}
+          error={null}
+          isLoading={false}
+        />
+      </MemoryRouter>,
     );
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'solar');

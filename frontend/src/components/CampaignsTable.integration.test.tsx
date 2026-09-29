@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { CampaignsTable } from './CampaignsTable';
 import type { Campaign } from '../types/campaign';
@@ -76,30 +77,31 @@ describe('CampaignsTable Search Integration', () => {
     vi.restoreAllMocks();
   });
 
-  describe('Search Input Rendering', () => {
-    it('should render search input in the table header', () => {
-      render(
+  function renderTable(props: any = {}) {
+    return render(
+      <MemoryRouter>
         <CampaignsTable
           campaigns={mockCampaigns}
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-        />,
-      );
+          error={null}
+          {...props}
+        />
+      </MemoryRouter>,
+    );
+  }
+
+  describe('Search Input Rendering', () => {
+    it('should render search input in the table header', () => {
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
       expect(searchInput).toBeInTheDocument();
     });
 
     it('should render filter dropdown alongside search input', () => {
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
       const filterLabel = screen.getByText(/Asset:/);
@@ -118,6 +120,8 @@ describe('CampaignsTable Search Integration', () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
+          error={null}
+          error={null}
         />,
       );
 
@@ -143,6 +147,8 @@ describe('CampaignsTable Search Integration', () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
+          error={null}
+          error={null}
         />,
       );
 
@@ -159,14 +165,7 @@ describe('CampaignsTable Search Integration', () => {
 
     it('should filter campaigns by campaign ID', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
@@ -182,14 +181,7 @@ describe('CampaignsTable Search Integration', () => {
 
     it('should be case-insensitive', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
@@ -203,14 +195,7 @@ describe('CampaignsTable Search Integration', () => {
 
     it('should update results when search input changes', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...') as HTMLInputElement;
 
@@ -234,14 +219,7 @@ describe('CampaignsTable Search Integration', () => {
   describe('Debouncing Behavior', () => {
     it('should not update results before debounce delay', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
@@ -255,14 +233,7 @@ describe('CampaignsTable Search Integration', () => {
 
     it('should debounce rapid search inputs', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
@@ -292,14 +263,7 @@ describe('CampaignsTable Search Integration', () => {
   describe('Clear Button Integration', () => {
     it('should show clear button when search text is present', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
@@ -315,14 +279,7 @@ describe('CampaignsTable Search Integration', () => {
 
     it('should clear search and show all campaigns when clear button clicked', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
@@ -349,14 +306,7 @@ describe('CampaignsTable Search Integration', () => {
   describe('Composition with Asset Filter', () => {
     it('should apply search AND asset filter together', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
       const assetFilter = screen.getByDisplayValue('All Assets');
@@ -383,14 +333,7 @@ describe('CampaignsTable Search Integration', () => {
 
   describe('Status Filter Tabs', () => {
     it('should show counts per status and a clear active filter', () => {
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const statusTabs = screen.getByRole('tablist', {
         name: /Filter campaigns by status/i,
@@ -420,14 +363,7 @@ describe('CampaignsTable Search Integration', () => {
     });
 
     it('should filter to one status at a time and allow returning to all', () => {
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const statusTabs = screen.getByRole('tablist', {
         name: /Filter campaigns by status/i,
@@ -457,14 +393,7 @@ describe('CampaignsTable Search Integration', () => {
   describe('Empty State Messages', () => {
     it('should show appropriate message when search finds no results', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
@@ -479,14 +408,7 @@ describe('CampaignsTable Search Integration', () => {
 
     it('should show all campaigns when search is cleared and no other filters active', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
@@ -552,14 +474,7 @@ describe('CampaignsTable Search Integration', () => {
 
   describe('Accessibility', () => {
     it('should have accessible search input with proper labels', () => {
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByLabelText('Search campaigns by title, creator, or ID');
       expect(searchInput).toBeInTheDocument();
@@ -567,14 +482,7 @@ describe('CampaignsTable Search Integration', () => {
 
     it('should allow keyboard navigation', async () => {
       const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 

@@ -45,9 +45,12 @@ rows cannot be persisted even if application validation is bypassed:
 Fresh databases receive these as `CHECK` constraints on `CREATE TABLE`. Existing
 databases receive equivalent `BEFORE INSERT/UPDATE` triggers
 (`campaigns_persistence_integrity_*`) because SQLite cannot add `CHECK` via
-`ALTER TABLE`. On migrate, negative `pledged_amount` values are soft-cleaned to
-`0` so valid accounting updates continue; other historical rows are left
-unchanged. Invalid inserts/updates are aborted.
+`ALTER TABLE`. The migration runner invokes the guard after schema upgrades so
+legacy datasets are cleaned only where the invariant is safe to repair, while
+invalid inserts and updates remain rejected at the database boundary. On
+migrate, negative `pledged_amount` values are soft-cleaned to `0` so valid
+accounting updates continue; other historical rows are left unchanged. Invalid
+inserts/updates are aborted.
 
 ## Migration expectations
 
@@ -55,8 +58,13 @@ Use `CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS` for new objects and guarded
 `ALTER TABLE` changes for existing objects, following the patterns in
 `db.ts`. Additive changes must account for databases created by older
 versions, backfill only when the existing data has a clear default, and avoid
-rewriting lifecycle or accounting history. Update the focused database test
-when a schema object or invariant changes.
+rewriting lifecycle or accounting history. Column migrations must precede
+dependent partial and composite indexes so upgrades from older schema snapshots
+succeed without missing-column errors. Search synchronization triggers
+(`after_campaigns_delete`) ensure deleted campaigns do not leak stale FTS
+entries. All migration statements run within a single SQLite transaction
+(`migrate()`) to guarantee complete rollback upon any failure. Update the focused
+database tests when a schema object or invariant changes.
 
 ## Index Strategy
 
@@ -110,3 +118,22 @@ Installed by `ensureQueryLayerIndexes()` for concrete application read plans:
   soft-deleted comment lists per campaign.
 - `idx_campaign_events_source` on `json_extract(blockchain_metadata, '$.source')` —
   filtering local vs soroban history events.
+
+### Migration-runner query indexes
+
+Installed by `ensureMigrationRunnerIndexes()` / `runMigrations` to accelerate backfill, deduplication, and cached accounting query plans during schema upgrades:
+
+- `idx_pledges_token_id_null` partial index on `pledges(token_id)` where `token_id IS NULL` — speeds legacy `token_id` backfill (`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`).
+- `idx_pledges_campaign_refunded` covering index on `pledges(campaign_id, refunded_at)` — accelerates campaign `pledged_amount` recomputation (`UPDATE campaigns SET pledged_amount = ...`).
+- `idx_pledges_tx_hash_migration` partial index on `pledges(transaction_hash)` where `transaction_hash IS NOT NULL` — accelerates `transaction_hash` deduplication (`GROUP BY transaction_hash`).
+
+### Pledge query invariants (#891)
+
+Pledge writes use an SQLite `IMMEDIATE` transaction before reading contributor
+totals or campaign accounting. This reserves the writer before the cap checks,
+then re-reads campaign lifecycle and cap data inside the transaction. A second
+writer therefore cannot validate against the same stale pledged total. Pledge
+amounts must be finite, positive, and remain at least `0.01` after currency
+rounding. Rejected writes leave the pledge row, cached campaign total, and event
+history unchanged. Contributor summaries break equal-total ties by contributor
+address so query results are deterministic.

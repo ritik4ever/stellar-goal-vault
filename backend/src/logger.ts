@@ -8,7 +8,7 @@ import { getRequestId } from './requestContext';
  * (API_KEYS, WEBHOOK_SECRET, SECRET_KEY, SERVER_PRIVATE_KEY, REDIS_URL, etc.).
  */
 const SENSITIVE_KEY_RE =
-  /^(authorization|cookie|set-cookie|x-api-key|api[_-]?keys?|secret|password|passwd|private[_-]?key|seed|mnemonic|token|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|secret[_-]?key|server[_-]?private[_-]?key|redis[_-]?url|database[_-]?url|db[_-]?url|connection[_-]?string)$/i;
+  /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-wallet-secret|x-secret-key|x-webhook-secret|api[_-]?keys?|secret|password|passwd|passphrase|private[_-]?key|seed|mnemonic|token|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|secret[_-]?key|server[_-]?private[_-]?key|redis[_-]?url|database[_-]?url|db[_-]?url|connection[_-]?string|signature|signing[_-]?secret)$/i;
 
 /** Secret-configuration env var names (uppercase) used for presence-only summaries. */
 export const SECRET_CONFIG_ENV_KEYS = [
@@ -39,9 +39,22 @@ function redactUrlCredentials(value: string): string {
 export function redactSensitive(value: unknown, depth = 0): unknown {
   if (depth > 6 || value == null) return value;
   if (typeof value === 'string') {
-    if (/^Bearer\s+\S+/i.test(value)) return 'Bearer [REDACTED]';
+    const trimmed = value.trim();
+    if (/^(Bearer|Basic)\s+\S+/i.test(trimmed)) {
+      const scheme = trimmed.split(/\s+/)[0];
+      return `${scheme} [REDACTED]`;
+    }
+    if (/^(Authorization|Proxy-Authorization|X-API-Key|X-Wallet-Secret|X-Secret-Key|X-Webhook-Secret)\s*:/i.test(trimmed)) {
+      return trimmed.replace(/:\s*.+$/, ': [REDACTED]');
+    }
     if (/^ghp_[A-Za-z0-9]+/.test(value) || /^gho_[A-Za-z0-9]+/.test(value)) return '[REDACTED_TOKEN]';
     if (/^[a-z][a-z0-9+.-]*:\/\/[^\s]*@[^\s]+/i.test(value)) return redactUrlCredentials(value);
+    if (/[?&](?:token|secret|password|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|private[_-]?key|signature)=[^&\s]+/i.test(value)) {
+      return value.replace(
+        /([?&](?:token|secret|password|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|private[_-]?key|signature)=)([^&#\s]+)/gi,
+        '$1[REDACTED]',
+      );
+    }
     return value;
   }
   if (Array.isArray(value)) return value.map((v) => redactSensitive(v, depth + 1));
@@ -211,13 +224,21 @@ export function logRequest(
     path: string;
     status: number;
     durationMs: number;
+    headers?: Record<string, string>;
+    ip?: string;
+    userAgent?: string;
+    retryCount?: number;
+    retryReason?: string;
+    finalOutcome?: string;
   },
   _configuredLevel?: LogLevel,
 ): void {
   const durationMs = Number(request.durationMs.toFixed(2));
-  const level = request.status >= 500 ? 'error' : request.status >= 400 ? 'warn' : 'info';
-  
-  const payload = {
+
+  // Always emit http_request at info level so operators can filter by event name
+  // without having to cross-correlate warn/error streams.  The status field
+  // carries sufficient information to derive severity programmatically.
+  logger.info({
     event: 'http_request',
     message: `${request.method} ${request.path} ${request.status} ${durationMs}ms`,
     requestId: request.requestId,
@@ -225,15 +246,12 @@ export function logRequest(
     path: request.path,
     status: request.status,
     duration_ms: durationMs,
-  };
-
-  if (level === 'error') {
-    logger.error(payload);
-  } else if (level === 'warn') {
-    logger.warn(payload);
-  } else {
-    logger.info(payload);
-  }
+    ip: request.ip,
+    userAgent: request.userAgent,
+    ...(request.retryCount !== undefined ? { retryCount: request.retryCount } : {}),
+    ...(request.retryReason ? { retryReason: redactSensitive(request.retryReason) } : {}),
+    ...(request.finalOutcome ? { finalOutcome: request.finalOutcome } : {}),
+  });
 }
 
 export function logLine(

@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-type SQLiteDatabase = ReturnType<typeof Database>;
+export type SQLiteDatabase = ReturnType<typeof Database>;
 
 // Module-level singleton for production use only.
 // Tests should use initDb(path) with an isolated path or :memory:.
@@ -34,16 +34,22 @@ export function initDb(customPath?: string): void {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  db = new Database(dbPath);
+  const database = new Database(dbPath);
 
-  // Enable Write-Ahead Logging (WAL) mode.
-  // This is the chosen journal mode to prevent unnecessary lock contention,
-  // allowing reads and writes to occur concurrently without blocking each other.
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('foreign_keys = ON');
+  try {
+    // Enable Write-Ahead Logging (WAL) mode.
+    // This is the chosen journal mode to prevent unnecessary lock contention,
+    // allowing reads and writes to occur concurrently without blocking each other.
+    database.pragma('journal_mode = WAL');
+    database.pragma('synchronous = NORMAL');
+    database.pragma('foreign_keys = ON');
 
-  migrate(db);
+    migrate(database);
+    db = database;
+  } catch (error) {
+    database.close();
+    throw error;
+  }
 }
 
 export function resetDbForTests(): void {
@@ -202,7 +208,11 @@ export function ensureCampaignsIntegrityConstraints(
   `);
 }
 
-function migrate(database: SQLiteDatabase): void {
+export function migrate(database: SQLiteDatabase = getDb()): void {
+  database.transaction(() => runMigrations(database))();
+}
+
+export function runMigrations(database: SQLiteDatabase): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
       id                    TEXT PRIMARY KEY,
@@ -224,7 +234,6 @@ function migrate(database: SQLiteDatabase): void {
 
     CREATE INDEX IF NOT EXISTS idx_campaigns_creator ON campaigns(creator);
     CREATE INDEX IF NOT EXISTS idx_campaigns_deadline ON campaigns(deadline);
-    CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(claimed_at, failed_at, deleted_at);
 
     -- 🌟 1. Create our new cheat-sheet search index table
     CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
@@ -244,6 +253,11 @@ function migrate(database: SQLiteDatabase): void {
       UPDATE campaigns_fts 
       SET title = new.title, description = new.description 
       WHERE id = old.id;
+    END;
+
+    -- 🔄 4. Automatically delete from the cheat-sheet if a campaign is deleted
+    CREATE TRIGGER IF NOT EXISTS after_campaigns_delete AFTER DELETE ON campaigns BEGIN
+      DELETE FROM campaigns_fts WHERE id = old.id;
     END;
 
     CREATE TABLE IF NOT EXISTS pledges (
@@ -302,7 +316,6 @@ function migrate(database: SQLiteDatabase): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_campaign_comments_campaign_id ON campaign_comments(campaign_id);
-
   `);
 
   const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
@@ -324,9 +337,6 @@ function migrate(database: SQLiteDatabase): void {
     database.exec(`ALTER TABLE pledges ADD COLUMN token_id TEXT`);
   }
 
-  // Backfill token_id for existing pledges where it's still NULL
-  database.exec(`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`);
-
   // Add failed_at column if not exists
   const campaignColumns = database.prepare(`PRAGMA table_info(campaigns)`).all() as Array<{
     name: string;
@@ -334,6 +344,18 @@ function migrate(database: SQLiteDatabase): void {
   if (!campaignColumns.some((column) => column.name === 'failed_at')) {
     database.exec(`ALTER TABLE campaigns ADD COLUMN failed_at INTEGER`);
   }
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(claimed_at, failed_at, deleted_at);
+  `);
+
+  // Migration-runner query indexes: backfill, deduplication, and pledged_amount
+  // accounting indexes to ensure concrete read/write plans run fast.
+  // Installed after ensuring required columns exist on legacy databases.
+  ensureMigrationRunnerIndexes(database);
+
+  // Backfill token_id for existing pledges where it's still NULL
+  database.exec(`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`);
 
   // Migrate asset_code to accepted_tokens_json if needed
   if (
@@ -404,10 +426,11 @@ function migrate(database: SQLiteDatabase): void {
     WHERE transaction_hash IS NOT NULL
   `);
 
-  try {
-    database.exec(`ALTER TABLE campaign_events ADD COLUMN blockchain_metadata TEXT;`);
-  } catch {
-    // Column already exists, ignore error.
+  const campaignEventColumns = database.prepare(`PRAGMA table_info(campaign_events)`).all() as Array<{
+    name: string;
+  }>;
+  if (!campaignEventColumns.some((column) => column.name === 'blockchain_metadata')) {
+    database.exec(`ALTER TABLE campaign_events ADD COLUMN blockchain_metadata TEXT`);
   }
 
   const hasMaxPerContributor = campaignColumns.some(
@@ -457,6 +480,24 @@ function migrate(database: SQLiteDatabase): void {
   // Campaigns persistence integrity: CHECK on fresh tables + triggers for
   // existing DBs (SQLite cannot ADD CHECK via ALTER TABLE).
   ensureCampaignsIntegrityConstraints(database);
+}
+
+/**
+ * Indexes used by the migration runner (runMigrations) to accelerate backfill,
+ * deduplication, and pledged_amount accounting queries across schema upgrades.
+ * Safe to call repeatedly (IF NOT EXISTS).
+ */
+export function ensureMigrationRunnerIndexes(database: SQLiteDatabase = getDb()): void {
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pledges_token_id_null
+      ON pledges(token_id) WHERE token_id IS NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_refunded
+      ON pledges(campaign_id, refunded_at);
+
+    CREATE INDEX IF NOT EXISTS idx_pledges_tx_hash_migration
+      ON pledges(transaction_hash) WHERE transaction_hash IS NOT NULL;
+  `);
 }
 
 /**

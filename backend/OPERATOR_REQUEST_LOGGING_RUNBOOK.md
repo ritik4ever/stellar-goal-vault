@@ -6,6 +6,16 @@ Scope
 - Applies to the request logging middleware described in `REQUEST_LOGGING.md`.
 - Covers signal interpretation, diagnostics, and recovery steps.
 
+Structured Fields
+- Request logs and service metrics emit stable, machine-readable fields so operators can filter by operation and correlation ID without parsing free-form messages.
+- Field reference:
+  - `requestId` — correlation ID assigned per request; use to trace a single request across logs and metrics.
+  - `campaignId` — campaign identifier when the request is scoped to a campaign.
+  - `operation` — stable operation name (e.g. `campaign.create`, `campaign.update`, `accounting.post`).
+  - `outcome` — terminal result of the operation (e.g. `success`, `error`, `rejected`).
+  - `latencyMs` — operation latency in milliseconds, measured from request start to response finish.
+- These fields are emitted as structured attributes on both log lines and service metrics; do not rely on message text for filtering.
+
 Signals and Actions
 
 1) Signal: No request logs appear for incoming requests
@@ -25,18 +35,21 @@ Signals and Actions
      - If logging level filters messages, adjust config to include `info` for request logs.
      - If service crashes before middleware runs, inspect stack traces and fix upstream errors.
 
-2) Signal: Logs appear but missing fields (no `requestId`, `ip`, or `duration`)
+2) Signal: Logs appear but missing structured fields (no `requestId`, `operation`, `outcome`, or `latencyMs`)
    - Likely causes:
      - Upstream middleware that assigns `requestId` removed or reordered.
      - Reverse proxy strips or alters `X-Forwarded-For` or headers.
      - Timing measurement failed due to early response/end handling.
+     - Operation name or outcome not set on the request context before logging.
    - Diagnostics:
      - Confirm request ID middleware is present and runs before request logging. Look in `backend/src/index.ts` for `requestId` middleware ordering.
      - Send a request with a test header and inspect logs for header propagation.
      - Verify reverse proxy (nginx / load balancer) is configured to forward client IPs via `X-Forwarded-For`.
+     - Filter logs/metrics by `operation` and `requestId` to confirm the fields are populated rather than embedded in the message.
    - Recovery:
      - Re-order middleware so the `requestId` assignment occurs before logging.
      - Configure proxy to forward `X-Forwarded-For` and set `app.set('trust proxy', true)` if needed.
+     - Ensure the operation name and outcome are attached to the request context before the log/metric is emitted.
 
 3) Signal: Request logs contain sensitive data
    - Likely causes:
@@ -45,7 +58,7 @@ Signals and Actions
      - Search commit history for changes to request logging implementation.
      - Inspect current middleware code for any `body` or `req.rawBody` logging.
    - Recovery:
-     - Revert or patch middleware to remove payload logging. Ensure only metadata (method, path, status, requestId, ip, user-agent, duration) are logged.
+     - Revert or patch middleware to remove payload logging. Ensure only metadata (method, path, status, requestId, campaignId, operation, outcome, latencyMs, ip, user-agent) are logged.
      - Rotate any secrets that may have been exposed (follow security runbook).
 
 4) Signal: High latency reported but request logs show short durations
@@ -55,6 +68,7 @@ Signals and Actions
    - Diagnostics:
      - Verify where the logging measurement starts and stops in the middleware — it should capture time from request start to response finish.
      - Correlate logs with traces/metrics (if present) to identify downstream delays.
+     - Compare `latencyMs` across logs and metrics for the same `requestId` to confirm they agree.
    - Recovery:
      - Update middleware to measure until `res.on('finish')` or `res.on('close')` to capture full response time.
      - Add additional instrumentation for long-running background jobs.
@@ -80,6 +94,16 @@ curl -v http://localhost:PORT/api/health
 ```
 
 - Inspect `backend/src/index.ts` to confirm middleware order.
+
+- Filter by operation and correlation ID without parsing messages:
+
+```bash
+# Logs: filter by operation and requestId
+docker-compose logs backend | grep '"operation":"campaign.create"' | grep '"requestId":"<id>"'
+
+# Metrics: query by operation and outcome labels
+# e.g. service_operation_latency_ms{operation="campaign.create",outcome="success"}
+```
 
 Notes for Operators
 - This runbook intentionally avoids any steps that require secrets or private credentials.

@@ -375,6 +375,49 @@ describe('CreateCampaignForm', () => {
 
       expect(screen.queryByText(/Code:/i)).not.toBeInTheDocument();
     });
+
+    it('shows loading and empty asset states explicitly', () => {
+      const { rerender } = render(
+        <CreateCampaignForm onCreate={async () => {}} isLoading allowedAssets={[]} />,
+      );
+
+      expect(screen.getByText('Loading campaign options')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /next/i })).not.toBeInTheDocument();
+
+      rerender(<CreateCampaignForm onCreate={async () => {}} allowedAssets={[]} />);
+
+      expect(screen.getByText('No campaign assets available')).toBeInTheDocument();
+      expect(screen.queryByText('Loading campaign options')).not.toBeInTheDocument();
+    });
+
+    it('shows a success state after a successful submission', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+
+      render(<CreateCampaignForm onCreate={onCreate} />);
+      await advanceToReview(user);
+      await user.click(screen.getByRole('button', { name: /create campaign/i }));
+
+      expect(await screen.findByText(/campaign created successfully/i)).toBeInTheDocument();
+    });
+
+    it('offers retry after a recoverable submission failure', async () => {
+      const user = userEvent.setup();
+      const onCreate = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Temporary service failure'))
+        .mockResolvedValueOnce(undefined);
+
+      render(<CreateCampaignForm onCreate={onCreate} />);
+      await advanceToReview(user);
+      await user.click(screen.getByRole('button', { name: /create campaign/i }));
+
+      expect(await screen.findByText('Temporary service failure')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /^retry$/i }));
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText(/campaign created successfully/i)).toBeInTheDocument();
+    });
   });
 });
 

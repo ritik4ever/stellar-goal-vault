@@ -250,6 +250,10 @@ const campaignListResponseSchema = z
   .object({
     data: z.array(campaignSchema),
     pagination: paginationSchema,
+    requestId: z.string().openapi({
+      description: 'Correlation ID also returned in the X-Request-Id response header.',
+      example: 'req-123',
+    }),
   })
   .openapi('CampaignListResponse');
 

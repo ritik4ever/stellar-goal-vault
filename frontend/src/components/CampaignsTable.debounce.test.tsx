@@ -34,7 +34,14 @@ const STUB_CAMPAIGN: Campaign = {
   pledgedAmount: 0,
   deadline: Date.now() / 1000 + 86400,
   createdAt: Date.now() / 1000,
-  progress: { percentage: 0, pledgedAmount: 0, targetAmount: 1000 },
+  progress: {
+    status: 'open',
+    percentFunded: 0,
+    hoursLeft: 24,
+    canPledge: true,
+    canClaim: false,
+    canRefund: false,
+  },
 };
 
 function renderTable(onSearchChange: (q: string) => void) {
@@ -47,6 +54,7 @@ function renderTable(onSearchChange: (q: string) => void) {
         isLoading={false}
         hasMore={false}
         onSearchChange={onSearchChange}
+        error={null}
       />
     </MemoryRouter>,
   );

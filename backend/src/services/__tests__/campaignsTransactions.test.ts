@@ -13,7 +13,15 @@
 
 import fs from 'fs';
 import path from 'path';
-import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  buildCampaignInput,
+  buildFutureDeadline,
+  freezeClock,
+  type Clock,
+  WALLETS,
+} from '../../../tests/fixtures';
 
 const TEST_DB_PATH = path.join(
   '/tmp',
@@ -33,23 +41,24 @@ let getCampaign: CampaignStoreModule['getCampaign'];
 let listCampaigns: CampaignStoreModule['listCampaigns'];
 let softDeleteCampaign: CampaignStoreModule['softDeleteCampaign'];
 let restoreCampaign: CampaignStoreModule['restoreCampaign'];
+let addPledge: CampaignStoreModule['addPledge'];
+let getPledges: CampaignStoreModule['getPledges'];
+let setCurrentTime: CampaignStoreModule['setCurrentTime'];
+let resetTime: CampaignStoreModule['resetTime'];
 let getDb: DbModule['getDb'];
 let getCampaignHistory: EventHistoryModule['getCampaignHistory'];
-
-const CREATOR = `G${'A'.repeat(55)}`;
-const future = (offsetSeconds = 86400) => Math.floor(Date.now() / 1000) + offsetSeconds;
+let clock: Clock;
 
 function campaignBase(
   overrides: Partial<{ title: string; targetAmount: number; deadline: number }> = {},
 ) {
-  return {
-    creator: CREATOR,
+  return buildCampaignInput({
+    creator: WALLETS.creator,
     title: overrides.title ?? 'Test Campaign',
     description: 'Campaigns persistence transaction test',
-    assetCode: 'USDC',
     targetAmount: overrides.targetAmount ?? 500,
-    deadline: overrides.deadline ?? future(),
-  };
+    deadline: overrides.deadline ?? buildFutureDeadline(),
+  });
 }
 
 beforeAll(async () => {
@@ -62,6 +71,10 @@ beforeAll(async () => {
     listCampaigns,
     softDeleteCampaign,
     restoreCampaign,
+    addPledge,
+    getPledges,
+    setCurrentTime,
+    resetTime,
   } = await import('../campaignStore'));
   ({ getDb } = await import('../db'));
   ({ getCampaignHistory } = await import('../eventHistory'));
@@ -70,16 +83,25 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  getDb().close();
   fs.rmSync(TEST_DB_PATH, { force: true });
 });
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  clock = freezeClock(undefined, {
+    setStoreTime: setCurrentTime,
+    resetStoreTime: resetTime,
+  });
   const db = getDb();
   db.prepare('DELETE FROM notifications').run();
   db.prepare('DELETE FROM campaign_events').run();
   db.prepare('DELETE FROM pledges').run();
   db.prepare('DELETE FROM campaigns').run();
+});
+
+afterEach(() => {
+  clock.restore();
 });
 
 describe('createCampaign – transaction rollback (#870)', () => {
@@ -124,7 +146,7 @@ describe('createCampaign – transaction rollback (#870)', () => {
     const history = getCampaignHistory(campaign.id);
     expect(history).toHaveLength(1);
     expect(history[0].eventType).toBe('created');
-    expect(history[0].actor).toBe(CREATOR);
+    expect(history[0].actor).toBe(WALLETS.creator);
   });
 });
 
@@ -201,5 +223,23 @@ describe('restoreCampaign – transaction rollback (#870)', () => {
 
     const { campaigns } = listCampaigns({});
     expect(campaigns.some((c) => c.id === campaign.id)).toBe(true);
+  });
+});
+
+describe('addPledge – accounting transaction rollback (#891)', () => {
+  it('rolls back the pledge row and campaign total when event persistence fails', async () => {
+    const campaign = createCampaign(campaignBase({ targetAmount: 500 }));
+    const eventHistoryModule = await import('../eventHistory');
+    vi.spyOn(eventHistoryModule, 'recordEvent').mockImplementationOnce(() => {
+      throw new Error('Simulated pledge event failure');
+    });
+
+    expect(() => addPledge(campaign.id, { contributor: WALLETS.alice, amount: 125 })).toThrow(
+      'Simulated pledge event failure',
+    );
+
+    expect(getPledges(campaign.id)).toHaveLength(0);
+    expect(getCampaign(campaign.id)?.pledgedAmount).toBe(0);
+    expect(getCampaignHistory(campaign.id).filter((event) => event.eventType === 'pledged')).toHaveLength(0);
   });
 });
