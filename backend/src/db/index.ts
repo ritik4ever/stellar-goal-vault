@@ -6,3 +6,5 @@
  */
 
 export * from '../services/db';
+export * from './migrator';
+export { LEGACY_BASELINE_VERSION } from './legacySchema';

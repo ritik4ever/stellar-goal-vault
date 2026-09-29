@@ -1,6 +1,17 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import {
+  applyPendingMigrations,
+  getAppliedMigrations,
+  loadMigrations,
+  markMigrationsApplied,
+} from '../db/migrator';
+import {
+  isLegacyDatabase,
+  LEGACY_BASELINE_VERSION,
+  upgradeLegacySchema,
+} from '../db/legacySchema';
 
 export type SQLiteDatabase = ReturnType<typeof Database>;
 
@@ -213,200 +224,33 @@ export function migrate(database: SQLiteDatabase = getDb()): void {
 }
 
 export function runMigrations(database: SQLiteDatabase): void {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS campaigns (
-      id                    TEXT PRIMARY KEY,
-      creator               TEXT NOT NULL CHECK(length(trim(creator)) > 0),
-      title                 TEXT NOT NULL CHECK(length(trim(title)) > 0),
-      description           TEXT NOT NULL CHECK(length(trim(description)) > 0),
-      accepted_tokens_json  TEXT NOT NULL CHECK(length(trim(accepted_tokens_json)) > 0),
-      target_amount         REAL NOT NULL CHECK(target_amount > 0),
-      pledged_amount        REAL NOT NULL DEFAULT 0 CHECK(pledged_amount >= 0),
-      deadline              INTEGER NOT NULL CHECK(deadline > 0),
-      created_at            INTEGER NOT NULL CHECK(created_at > 0),
-      claimed_at            INTEGER,
-      failed_at             INTEGER,
-      deleted_at            INTEGER,
-      metadata_json         TEXT,
-      max_per_contributor   INTEGER CHECK(max_per_contributor IS NULL OR max_per_contributor >= 0),
-      CHECK(claimed_at IS NULL OR failed_at IS NULL)
+  const migrations = loadMigrations();
+
+  // Databases created before versioned migrations have tables but no history.
+  // Bring them to the baseline schema once, then record 001..baseline as applied.
+  if (getAppliedMigrations(database).length === 0 && isLegacyDatabase(database)) {
+    upgradeLegacySchema(database);
+    markMigrationsApplied(
+      database,
+      migrations.filter((migration) => migration.version <= LEGACY_BASELINE_VERSION),
     );
-
-    CREATE INDEX IF NOT EXISTS idx_campaigns_creator ON campaigns(creator);
-    CREATE INDEX IF NOT EXISTS idx_campaigns_deadline ON campaigns(deadline);
-
-    -- 🌟 1. Create our new cheat-sheet search index table
-    CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
-      id UNINDEXED,
-      title,
-      description
-    );
-
-    -- 🔄 2. Automatically copy new campaigns into the cheat-sheet
-    CREATE TRIGGER IF NOT EXISTS after_campaigns_insert AFTER INSERT ON campaigns BEGIN
-      INSERT INTO campaigns_fts(id, title, description) 
-      VALUES (new.id, new.title, new.description);
-    END;
-
-    -- 🔄 3. Automatically update the cheat-sheet if a campaign changes
-    CREATE TRIGGER IF NOT EXISTS after_campaigns_update AFTER UPDATE ON campaigns BEGIN
-      UPDATE campaigns_fts 
-      SET title = new.title, description = new.description 
-      WHERE id = old.id;
-    END;
-
-    -- 🔄 4. Automatically delete from the cheat-sheet if a campaign is deleted
-    CREATE TRIGGER IF NOT EXISTS after_campaigns_delete AFTER DELETE ON campaigns BEGIN
-      DELETE FROM campaigns_fts WHERE id = old.id;
-    END;
-
-    CREATE TABLE IF NOT EXISTS pledges (
-      id                INTEGER PRIMARY KEY AUTOINCREMENT,
-      campaign_id       TEXT NOT NULL,
-      contributor       TEXT NOT NULL,
-      amount            REAL NOT NULL,
-      asset_code        TEXT NOT NULL,
-      token_id          TEXT,
-      created_at        INTEGER NOT NULL,
-      refunded_at       INTEGER,
-      transaction_hash TEXT,
-      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
-    );
-
-    -- #874 pledges persistence query indexes (concrete read plans only)
-    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_id ON pledges(campaign_id);
-    -- Supports getPledgesByContributor: WHERE contributor ORDER BY created_at DESC, id DESC
-    CREATE INDEX IF NOT EXISTS idx_pledges_contributor ON pledges(contributor, created_at, id);
-
-    CREATE TABLE IF NOT EXISTS campaign_events (
-      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-      campaign_id         TEXT NOT NULL,
-      event_type          TEXT NOT NULL,
-      timestamp           INTEGER NOT NULL,
-      actor               TEXT,
-      amount              REAL,
-      metadata            TEXT,
-      blockchain_metadata TEXT,
-      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign_id ON campaign_events(campaign_id);
-    CREATE INDEX IF NOT EXISTS idx_campaign_events_timestamp ON campaign_events(timestamp);
-
-    CREATE TABLE IF NOT EXISTS webhook_dead_letter_queue (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      event         TEXT NOT NULL,
-      campaign_id   TEXT NOT NULL,
-      payload       TEXT NOT NULL,
-      error_message TEXT,
-      failed_at     INTEGER NOT NULL,
-      attempts      INTEGER NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_webhook_dlq_campaign_id ON webhook_dead_letter_queue(campaign_id);
-
-    CREATE TABLE IF NOT EXISTS campaign_comments (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      campaign_id TEXT NOT NULL,
-      author      TEXT NOT NULL,
-      content     TEXT NOT NULL,
-      created_at  INTEGER NOT NULL,
-      deleted_at  INTEGER,
-      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_campaign_comments_campaign_id ON campaign_comments(campaign_id);
-  `);
-
-  const pledgeColumns = database.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
-    name: string;
-  }>;
-
-  const hasTransactionHash = pledgeColumns.some((column) => column.name === 'transaction_hash');
-  if (!hasTransactionHash) {
-    database.exec(`ALTER TABLE pledges ADD COLUMN transaction_hash TEXT`);
   }
 
-  const hasAssetCode = pledgeColumns.some((column) => column.name === 'asset_code');
-  if (!hasAssetCode) {
-    database.exec(`ALTER TABLE pledges ADD COLUMN asset_code TEXT NOT NULL DEFAULT 'XLM'`);
-  }
+  applyPendingMigrations(database, migrations);
+  applyStartupInvariants(database);
+}
 
-  const hasTokenId = pledgeColumns.some((column) => column.name === 'token_id');
-  if (!hasTokenId) {
-    database.exec(`ALTER TABLE pledges ADD COLUMN token_id TEXT`);
-  }
-
-  // Add failed_at column if not exists
-  const campaignColumns = database.prepare(`PRAGMA table_info(campaigns)`).all() as Array<{
-    name: string;
-  }>;
-  if (!campaignColumns.some((column) => column.name === 'failed_at')) {
-    database.exec(`ALTER TABLE campaigns ADD COLUMN failed_at INTEGER`);
-  }
-
-  database.exec(`
-    CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(claimed_at, failed_at, deleted_at);
-  `);
-
-  // Migration-runner query indexes: backfill, deduplication, and pledged_amount
-  // accounting indexes to ensure concrete read/write plans run fast.
-  // Installed after ensuring required columns exist on legacy databases.
+/**
+ * Data repairs and drift guards run on every startup, after versioned
+ * migrations. Schema changes do not belong here; add a migration file instead.
+ */
+export function applyStartupInvariants(database: SQLiteDatabase): void {
   ensureMigrationRunnerIndexes(database);
 
-  // Backfill token_id for existing pledges where it's still NULL
+  // Backfill token_id for pledges written without one.
   database.exec(`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`);
 
-  // Migrate asset_code to accepted_tokens_json if needed
-  if (
-    campaignColumns.some((column) => column.name === 'asset_code') &&
-    !campaignColumns.some((column) => column.name === 'accepted_tokens_json')
-  ) {
-    // 1. Create the FTS5 virtual table
-    database.exec(`
-  CREATE VIRTUAL TABLE IF NOT EXISTS campaigns_fts USING fts5(
-    id UNINDEXED,
-    title,
-    description
-  );
-`);
-
-    // 2. Add the Triggers to keep data synchronized automatically
-    database.exec(`
-  -- Triggers for handling future changes
-  CREATE TRIGGER IF NOT EXISTS after_campaigns_insert AFTER INSERT ON campaigns BEGIN
-    INSERT INTO campaigns_fts(id, title, description) VALUES (new.id, new.title, new.description);
-  END;
-
-  CREATE TRIGGER IF NOT EXISTS after_campaigns_update AFTER UPDATE ON campaigns BEGIN
-    UPDATE campaigns_fts SET title = new.title, description = new.description WHERE id = old.id;
-  END;
-
-  -- Fixes CodeRabbit: Delete trigger to prevent stale/corrupt terms
-  CREATE TRIGGER IF NOT EXISTS after_campaigns_delete AFTER DELETE ON campaigns BEGIN
-    DELETE FROM campaigns_fts WHERE id = old.id;
-  END;
-`);
-
-    // 3. Fixes CodeRabbit: Backfill any pre-existing campaigns into the FTS table
-    database.exec(`
-  INSERT INTO campaigns_fts (id, title, description)
-  SELECT id, title, description FROM campaigns
-  WHERE id NOT IN (SELECT id FROM campaigns_fts);
-`);
-  }
-
-  database.exec(`
-    DELETE FROM pledges
-    WHERE id NOT IN (
-      SELECT MIN(id)
-      FROM pledges
-      WHERE transaction_hash IS NOT NULL
-      GROUP BY transaction_hash
-    )
-    AND transaction_hash IS NOT NULL;
-  `);
-
+  // pledged_amount is a cache of non-refunded pledges; rebuild it from source.
   database.exec(`
     UPDATE campaigns
     SET pledged_amount = COALESCE(
@@ -420,65 +264,8 @@ export function runMigrations(database: SQLiteDatabase): void {
     );
   `);
 
-  database.exec(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_pledges_transaction_hash
-    ON pledges(transaction_hash)
-    WHERE transaction_hash IS NOT NULL
-  `);
-
-  const campaignEventColumns = database.prepare(`PRAGMA table_info(campaign_events)`).all() as Array<{
-    name: string;
-  }>;
-  if (!campaignEventColumns.some((column) => column.name === 'blockchain_metadata')) {
-    database.exec(`ALTER TABLE campaign_events ADD COLUMN blockchain_metadata TEXT`);
-  }
-
-  const hasMaxPerContributor = campaignColumns.some(
-    (column) => column.name === 'max_per_contributor',
-  );
-  if (!hasMaxPerContributor) {
-    database.exec(`ALTER TABLE campaigns ADD COLUMN max_per_contributor INTEGER`);
-  }
-
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS notifications (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      campaign_id   TEXT NOT NULL,
-      type          TEXT NOT NULL CHECK(type IN ('new_pledge', 'campaign_funded', 'refund_available', 'creator_update')),
-      title         TEXT NOT NULL,
-      body          TEXT NOT NULL,
-      target_wallet TEXT NOT NULL,
-      actor_wallet  TEXT,
-      is_read       INTEGER NOT NULL DEFAULT 0,
-      created_at    INTEGER NOT NULL,
-      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_notifications_target_wallet
-    ON notifications(target_wallet, created_at DESC);
-
-    CREATE INDEX IF NOT EXISTS idx_notifications_unread
-    ON notifications(target_wallet, is_read);
-  `);
-
-  database.exec(`
-    CREATE INDEX IF NOT EXISTS idx_campaign_events_tx_hash
-    ON campaign_events(json_extract(blockchain_metadata, '$.txHash'));
-    CREATE INDEX IF NOT EXISTS idx_campaign_events_ledger
-    ON campaign_events(json_extract(blockchain_metadata, '$.ledgerNumber'));
-  `);
-
-  // Seed-workflow indexes: support FK child discovery during wipe/reseed,
-  // pledged_amount accounting checks, and post-seed listing by created_at.
-  // Only indexes backed by concrete seed + migrate query plans.
   ensureSeedWorkflowIndexes(database);
-
-  // Query-layer indexes: composite plans for contributor/refund lookups,
-  // campaign event history pages, and soft-deleted comment lists.
   ensureQueryLayerIndexes(database);
-
-  // Campaigns persistence integrity: CHECK on fresh tables + triggers for
-  // existing DBs (SQLite cannot ADD CHECK via ALTER TABLE).
   ensureCampaignsIntegrityConstraints(database);
 }
 
@@ -539,5 +326,8 @@ export function ensureQueryLayerIndexes(database: SQLiteDatabase = getDb()): voi
 
     CREATE INDEX IF NOT EXISTS idx_campaign_events_source
       ON campaign_events(json_extract(blockchain_metadata, '$.source'));
+
+    CREATE INDEX IF NOT EXISTS idx_campaigns_status
+      ON campaigns(claimed_at, failed_at, deleted_at);
   `);
 }
