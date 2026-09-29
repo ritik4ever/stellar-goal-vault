@@ -35,5 +35,5 @@ This builds both the backend and frontend Docker images using the multi-stage bu
 ## Code-Splitting / Optimization Strategy
 
 Both services use a multi-stage Docker build process:
-- **Builder Stage**: Installs all dependencies (including `devDependencies`), copies all source files, and builds the code (`npm run build`).
-- **Production Stage**: Starts from a fresh base image, installs only production dependencies (`npm ci --omit=dev`), clears the npm cache, and copies over only the necessary compiled artifacts from the builder stage. This drastically reduces the final image size by excluding the build tools, raw source code, and development modules.
+- **Builder Stage**: Installs dependencies and builds the code (`npm run build`). The backend then prunes `devDependencies` in this already-installed tree so it can be reused by the runtime image without a second full dependency install.
+- **Production Stage**: Starts from a fresh base image and copies only production dependencies and compiled artifacts from the builder. This excludes build tools and raw source code from the final image while avoiding repeated backend dependency installation.
