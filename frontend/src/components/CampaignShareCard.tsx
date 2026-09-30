@@ -14,11 +14,7 @@ function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max - 1) + '…' : text;
 }
 
-function drawCard(
-  ctx: CanvasRenderingContext2D,
-  campaign: Campaign,
-  brandLogoUrl?: string,
-): void {
+function drawCard(ctx: CanvasRenderingContext2D, campaign: Campaign, brandLogoUrl?: string): void {
   const w = CANVAS_W;
   const h = CANVAS_H;
 
@@ -63,8 +59,7 @@ function drawCard(
       ctx.clip();
       ctx.drawImage(img, w - 84, 36, 48, 48);
       ctx.restore();
-    } catch {
-    }
+    } catch {}
   }
 
   ctx.font = '700 52px "Outfit", system-ui, sans-serif';
@@ -121,7 +116,11 @@ function drawCard(
   ctx.font = '700 22px "Outfit", system-ui, sans-serif';
   ctx.fillStyle = '#f8fafc';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(`${fmt(campaign.pledgedAmount)} / ${fmt(campaign.targetAmount)} ${campaign.assetCode}`, barX, 390);
+  ctx.fillText(
+    `${fmt(campaign.pledgedAmount)} / ${fmt(campaign.targetAmount)} ${campaign.assetCode}`,
+    barX,
+    390,
+  );
 
   const deadlineDate = new Date(campaign.deadline * 1000);
   const deadlineStr = deadlineDate.toLocaleDateString('en-US', {
@@ -160,27 +159,36 @@ export function useCampaignShareCard() {
     return canvas;
   }, []);
 
-  const downloadPng = useCallback((campaign: Campaign, brandLogoUrl?: string) => {
-    const canvas = generate(campaign, brandLogoUrl);
-    const link = document.createElement('a');
-    link.download = `campaign_share_${campaign.id}.png`;
-    link.href = canvas.toDataURL('image/png');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [generate]);
+  const downloadPng = useCallback(
+    (campaign: Campaign, brandLogoUrl?: string) => {
+      const canvas = generate(campaign, brandLogoUrl);
+      const link = document.createElement('a');
+      link.download = `campaign_share_${campaign.id}.png`;
+      link.href = canvas.toDataURL('image/png');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    },
+    [generate],
+  );
 
-  const toDataUrl = useCallback((campaign: Campaign, brandLogoUrl?: string): string => {
-    const canvas = generate(campaign, brandLogoUrl);
-    return canvas.toDataURL('image/png');
-  }, [generate]);
+  const toDataUrl = useCallback(
+    (campaign: Campaign, brandLogoUrl?: string): string => {
+      const canvas = generate(campaign, brandLogoUrl);
+      return canvas.toDataURL('image/png');
+    },
+    [generate],
+  );
 
-  const toBlob = useCallback(async (campaign: Campaign, brandLogoUrl?: string): Promise<Blob | null> => {
-    const canvas = generate(campaign, brandLogoUrl);
-    return new Promise((resolve) => {
-      canvas.toBlob((blob) => resolve(blob), 'image/png');
-    });
-  }, [generate]);
+  const toBlob = useCallback(
+    async (campaign: Campaign, brandLogoUrl?: string): Promise<Blob | null> => {
+      const canvas = generate(campaign, brandLogoUrl);
+      return new Promise((resolve) => {
+        canvas.toBlob((blob) => resolve(blob), 'image/png');
+      });
+    },
+    [generate],
+  );
 
   return { generate, downloadPng, toDataUrl, toBlob };
 }

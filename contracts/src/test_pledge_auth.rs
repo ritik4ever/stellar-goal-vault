@@ -68,6 +68,8 @@ fn fixture_with(initialize: bool) -> Fixture {
         &(env.ledger().timestamp() + DURATION),
         &String::from_str(&env, "auth"),
         &0_i128,
+        &soroban_sdk::vec![&env],
+        &0_u32,
     );
 
     Fixture {

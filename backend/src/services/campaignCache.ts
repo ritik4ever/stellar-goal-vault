@@ -43,8 +43,12 @@ let isRedisConnected = false;
 if (config.redisUrl) {
   redisClient = createClient({ url: config.redisUrl });
   redisClient.on('error', (err) => logError(err, { event: 'redis_client_error' }));
-  redisClient.on('connect', () => { isRedisConnected = true; });
-  redisClient.on('disconnect', () => { isRedisConnected = false; });
+  redisClient.on('connect', () => {
+    isRedisConnected = true;
+  });
+  redisClient.on('disconnect', () => {
+    isRedisConnected = false;
+  });
   // Fire and forget connect
   redisClient.connect().catch((err) => logError(err, { event: 'redis_connect_error' }));
 }

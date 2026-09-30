@@ -1,6 +1,5 @@
-import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { WalletWidget } from './WalletWidget';
 
 const PUBLIC_KEY = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA';
@@ -13,41 +12,47 @@ describe('WalletWidget', () => {
       <WalletWidget
         status="checking"
         publicKey={null}
+        walletName={null}
         error={null}
         network={null}
         onConnect={noop}
         onDisconnect={noop}
+        onSwitchWallet={noop}
       />,
     );
     expect(screen.getByText(/Detecting wallet/i)).toBeTruthy();
   });
 
-  it('shows install link when freighter is unavailable', () => {
-    render(
-      <WalletWidget
-        status="unavailable"
-        publicKey={null}
-        error={null}
-        network={null}
-        onConnect={noop}
-        onDisconnect={noop}
-      />,
-    );
-    expect(screen.getByText(/Install Freighter/i)).toBeTruthy();
-  });
-
-  it('shows connect button when available and not connected', () => {
+  it('shows connect button when not connected and wallet is available', () => {
     render(
       <WalletWidget
         status="available"
         publicKey={null}
+        walletName={null}
         error={null}
         network={null}
         onConnect={noop}
         onDisconnect={noop}
+        onSwitchWallet={noop}
       />,
     );
-    expect(screen.getByRole('button', { name: /Connect Freighter/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Connect Freighter wallet/i })).toBeTruthy();
+  });
+
+  it('shows connecting state', () => {
+    render(
+      <WalletWidget
+        status="connecting"
+        publicKey={null}
+        walletName={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.getByText(/Connecting wallet/i)).toBeTruthy();
   });
 
   it('calls onConnect when connect button is clicked', () => {
@@ -56,13 +61,15 @@ describe('WalletWidget', () => {
       <WalletWidget
         status="available"
         publicKey={null}
+        walletName={null}
         error={null}
         network={null}
         onConnect={onConnect}
         onDisconnect={noop}
+        onSwitchWallet={noop}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /Connect Freighter/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Connect Freighter wallet/i }));
     expect(onConnect).toHaveBeenCalledTimes(1);
   });
 
@@ -71,25 +78,29 @@ describe('WalletWidget', () => {
       <WalletWidget
         status="connected"
         publicKey={PUBLIC_KEY}
+        walletName="Freighter"
         error={null}
         network="Testnet"
         onConnect={noop}
         onDisconnect={noop}
+        onSwitchWallet={noop}
       />,
     );
-    expect(screen.getByText('GBBD…LFLA')).toBeTruthy();
+    expect(screen.getByText(/GBBD…LFLA/)).toBeTruthy();
     expect(screen.getByText('Testnet')).toBeTruthy();
   });
 
-  it('renders mainnet badge with mainnet passphrase', () => {
+  it('renders mainnet badge with mainnet styling class', () => {
     render(
       <WalletWidget
         status="connected"
         publicKey={PUBLIC_KEY}
+        walletName="Freighter"
         error={null}
         network="Mainnet"
         onConnect={noop}
         onDisconnect={noop}
+        onSwitchWallet={noop}
       />,
     );
     const badge = screen.getByText('Mainnet');
@@ -101,10 +112,12 @@ describe('WalletWidget', () => {
       <WalletWidget
         status="connected"
         publicKey={PUBLIC_KEY}
+        walletName="Freighter"
         error={null}
         network="Testnet"
         onConnect={noop}
         onDisconnect={noop}
+        onSwitchWallet={noop}
       />,
     );
     const btn = screen.getByRole('button', { name: /Disconnect wallet/i });
@@ -117,10 +130,12 @@ describe('WalletWidget', () => {
       <WalletWidget
         status="connected"
         publicKey={PUBLIC_KEY}
+        walletName="Freighter"
         error={null}
         network="Testnet"
         onConnect={noop}
         onDisconnect={onDisconnect}
+        onSwitchWallet={noop}
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: /Disconnect wallet/i }));
@@ -132,12 +147,159 @@ describe('WalletWidget', () => {
       <WalletWidget
         status="available"
         publicKey={null}
+        walletName={null}
         error="Wallet error occurred"
         network={null}
         onConnect={noop}
         onDisconnect={noop}
+        onSwitchWallet={noop}
       />,
     );
     expect(screen.getByText(/Wallet error occurred/i)).toBeTruthy();
+  });
+
+  it('exposes a status role while checking', () => {
+    render(
+      <WalletWidget
+        status="checking"
+        publicKey={null}
+        walletName={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.getByRole('status')).toBeTruthy();
+  });
+
+  it('exposes an alert role for connection errors', () => {
+    render(
+      <WalletWidget
+        status="available"
+        publicKey={null}
+        walletName={null}
+        error="User rejected the connection request"
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.getByRole('alert')).toBeTruthy();
+  });
+
+  it('labels the connected wallet group and address for screen readers', () => {
+    render(
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        walletName="Freighter"
+        error={null}
+        network="Testnet"
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(
+      screen.getByRole('group', { name: /Wallet status: connected to Freighter on Testnet/i }),
+    ).toBeTruthy();
+    expect(screen.getByText(/Wallet address:/)).toBeTruthy();
+  });
+
+  it('supports keyboard activation of the switch wallet button', () => {
+    const onSwitchWallet = vi.fn();
+    render(
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        walletName="Freighter"
+        error={null}
+        network="Testnet"
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={onSwitchWallet}
+      />,
+    );
+    const btn = screen.getByRole('button', { name: /Switch wallet/i });
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    fireEvent.keyDown(btn, { key: 'Enter', code: 'Enter' });
+    fireEvent.click(btn);
+    expect(onSwitchWallet).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders connected state without network badge when network is null', () => {
+    render(
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        walletName="Freighter"
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.queryByText('Testnet')).not.toBeTruthy();
+    expect(screen.queryByText('Mainnet')).not.toBeTruthy();
+    expect(
+      screen.getByRole('group', { name: /Wallet status: connected to Freighter$/i }),
+    ).toBeTruthy();
+  });
+
+  it('uses "Wallet" as fallback wallet name when walletName is null', () => {
+    render(
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        walletName={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(
+      screen.getByRole('group', { name: /Wallet status: connected to Wallet$/i }),
+    ).toBeTruthy();
+  });
+
+  it('connect button shows Wallet icon with Connect Wallet text', () => {
+    render(
+      <WalletWidget
+        status="available"
+        publicKey={null}
+        walletName={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Connect Freighter wallet/i })).toHaveTextContent(
+      /Connect Wallet/i,
+    );
+  });
+
+  it('renders copy button for connected wallet address', () => {
+    render(
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        walletName="Freighter"
+        error={null}
+        network="Testnet"
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Copy wallet address/i })).toBeTruthy();
   });
 });

@@ -8,6 +8,11 @@ import type { RequestWithId } from './types';
 
 export const REQUEST_ID_HEADER = 'X-Request-Id';
 
+// Request IDs are copied into response headers and structured logs. Restrict
+// caller-supplied values to a log/header-safe token so a proxy cannot inject
+// control characters or an unbounded value into the tracing path.
+const SAFE_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
 // Sensitive headers and query parameters to redact from logs
 const SENSITIVE_HEADERS = new Set([
   'authorization',
@@ -84,7 +89,8 @@ function redactHeaders(headers: Record<string, string>): Record<string, string> 
 
 export function requestIdMiddleware(req: RequestWithId, res: Response, next: NextFunction): void {
   const incoming = req.header(REQUEST_ID_HEADER);
-  const requestId = incoming?.trim() ? incoming.trim() : randomUUID();
+  const candidate = incoming?.trim();
+  const requestId = candidate && SAFE_REQUEST_ID.test(candidate) ? candidate : randomUUID();
   req.requestId = requestId;
   res.setHeader(REQUEST_ID_HEADER, requestId);
 

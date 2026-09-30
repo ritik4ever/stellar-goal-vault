@@ -472,17 +472,17 @@ describe('Secret config — redactSecretConfig and summarizeSecretConfig', () =>
 // E. .env.example discipline — no real secrets in the committed example files
 // ─────────────────────────────────────────────────────────────────────────────
 describe('Secret config — .env.example files must not contain real secrets', () => {
-  const EXAMPLE_FILES = [
-    path.join(ROOT, '.env.example'),
-    path.join(BACKEND, '.env.example'),
-  ];
+  const EXAMPLE_FILES = [path.join(ROOT, '.env.example'), path.join(BACKEND, '.env.example')];
 
   // Patterns that indicate a real secret has been accidentally committed
   const SECRET_PATTERNS: Array<{ label: string; re: RegExp }> = [
     // Stellar secret keys: S + 55 base32 chars
     { label: 'Stellar secret key (S...)', re: /^[^#]*=\s*S[A-Z2-7]{55}/m },
     // Generic high-entropy assignment that looks like a real key/token (≥32 chars after =)
-    { label: 'high-entropy secret assignment', re: /^[^#]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY)\s*=\s*[A-Za-z0-9+/=_-]{32,}/m },
+    {
+      label: 'high-entropy secret assignment',
+      re: /^[^#]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY)\s*=\s*[A-Za-z0-9+/=_-]{32,}/m,
+    },
     // Password embedded in a URL (redis://:password@host)
     { label: 'credential-bearing URL', re: /redis:\/\/:[^@\s]{4,}@/ },
     // GitHub tokens
@@ -500,7 +500,7 @@ describe('Secret config — .env.example files must not contain real secrets', (
         expect(
           re.test(content),
           `Found pattern "${label}" in ${path.relative(ROOT, filePath)} — ` +
-          'real secrets must never be committed even in example files',
+            'real secrets must never be committed even in example files',
         ).toBe(false);
       });
     }
@@ -512,7 +512,10 @@ describe('Secret config — .env.example files must not contain real secrets', (
     expect(content).toMatch(/CONTRACT_ID\s*=/);
     const match = content.match(/^CONTRACT_ID\s*=\s*(.*)$/m);
     const value = (match?.[1] ?? '').trim();
-    expect(value, 'CONTRACT_ID in .env.example should be empty — do not commit a real contract ID').toBe('');
+    expect(
+      value,
+      'CONTRACT_ID in .env.example should be empty — do not commit a real contract ID',
+    ).toBe('');
   });
 
   it('backend .env.example has SERVER_PRIVATE_KEY absent or empty', () => {
@@ -520,10 +523,7 @@ describe('Secret config — .env.example files must not contain real secrets', (
     const match = content.match(/^[^#\n]*SERVER_PRIVATE_KEY\s*=\s*(.*)$/m);
     if (match) {
       const value = match[1].trim();
-      expect(
-        value,
-        'SERVER_PRIVATE_KEY in .env.example must not have a real value',
-      ).toBe('');
+      expect(value, 'SERVER_PRIVATE_KEY in .env.example must not have a real value').toBe('');
     }
     // If there's no assignment at all that's fine
   });
@@ -533,10 +533,7 @@ describe('Secret config — .env.example files must not contain real secrets', (
     const match = content.match(/^[^#\n]*SERVER_PRIVATE_KEY\s*=\s*(.*)$/m);
     if (match) {
       const value = match[1].trim();
-      expect(
-        value,
-        'SERVER_PRIVATE_KEY in root .env.example must not have a real value',
-      ).toBe('');
+      expect(value, 'SERVER_PRIVATE_KEY in root .env.example must not have a real value').toBe('');
     }
   });
 });
@@ -640,7 +637,8 @@ describe('Secret config — canary self-verification', () => {
   });
 
   it('high-entropy secret pattern does not flag commented-out lines', () => {
-    const pattern = /^[^#]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY)\s*=\s*[A-Za-z0-9+/=_-]{32,}/m;
+    const pattern =
+      /^[^#]*(?:API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY)\s*=\s*[A-Za-z0-9+/=_-]{32,}/m;
     const commented = '# API_KEY=abcdefghijklmnopqrstuvwxyz12345678';
     expect(pattern.test(commented)).toBe(false);
     const uncommented = 'API_KEY=abcdefghijklmnopqrstuvwxyz12345678';
@@ -1143,7 +1141,8 @@ describe('Secret config — Gitleaks allowlist scope validation', () => {
   it('fixture API key strings in the test suite use hyphens (exempt from generic-api-key regex)', () => {
     // gitleaks generic-api-key rule: [a-z0-9]{16,128} (no hyphens)
     // Keys like "prod-key-alpha" contain hyphens → won't match → safe to use in tests
-    const genericKeyRe = /(?:api_key|apikey|secret|password|private_key|token)[-|_|=|\s|:]{1,4}([a-z0-9]{16,128})/i;
+    const genericKeyRe =
+      /(?:api_key|apikey|secret|password|private_key|token)[-|_|=|\s|:]{1,4}([a-z0-9]{16,128})/i;
     const fixtureKeys = ['prod-key-alpha', 'prod-key-beta', 'real-prod-key', 'key-one', 'key-two'];
     for (const key of fixtureKeys) {
       // These are used as values, not as inline assignments — they won't trigger the rule
@@ -1172,7 +1171,8 @@ describe('Secret config — Gitleaks allowlist scope validation', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('Secret config — additional canary self-verification', () => {
   it('SENSITIVE_KEY_RE matches x-api-key case-insensitively', () => {
-    const re = /^(authorization|cookie|set-cookie|x-api-key|api[_-]?keys?|secret|password|passwd|private[_-]?key|seed|mnemonic|token|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|secret[_-]?key|server[_-]?private[_-]?key|redis[_-]?url|database[_-]?url|db[_-]?url|connection[_-]?string)$/i;
+    const re =
+      /^(authorization|cookie|set-cookie|x-api-key|api[_-]?keys?|secret|password|passwd|private[_-]?key|seed|mnemonic|token|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|secret[_-]?key|server[_-]?private[_-]?key|redis[_-]?url|database[_-]?url|db[_-]?url|connection[_-]?string)$/i;
     expect(re.test('x-api-key')).toBe(true);
     expect(re.test('X-API-KEY')).toBe(true);
     expect(re.test('set-cookie')).toBe(true);
@@ -1188,7 +1188,10 @@ describe('Secret config — additional canary self-verification', () => {
   it('CORS alias resolution: ALLOWED_ORIGINS || CORS_ALLOWED_ORIGINS means alias is checked', () => {
     // Demonstrates that if ALLOWED_ORIGINS is falsy, CORS_ALLOWED_ORIGINS feeds the check
     const originsStr = '' || '*' || '';
-    const originList = originsStr.split(',').map((o: string) => o.trim()).filter(Boolean);
+    const originList = originsStr
+      .split(',')
+      .map((o: string) => o.trim())
+      .filter(Boolean);
     // '*' in list → should be rejected in production
     expect(originList).toContain('*');
   });
@@ -1198,7 +1201,12 @@ describe('Secret config — additional canary self-verification', () => {
     //   const useDevelopmentDefaults = !isProduction && !configuredRpcUrl && !configuredNetworkPassphrase;
     //   const hasSorobanNetworkProfile = Boolean(useDevelopmentDefaults || (configuredRpcUrl && configuredNetworkPassphrase));
     //   walletIntegrationReady = Boolean(contractId && rpcUrl && passphrase && hasSorobanNetworkProfile);
-    function computeReady(contractId: string, rpcUrl: string, passphrase: string, isProduction: boolean): boolean {
+    function computeReady(
+      contractId: string,
+      rpcUrl: string,
+      passphrase: string,
+      isProduction: boolean,
+    ): boolean {
       const useDevelopmentDefaults = !isProduction && !rpcUrl && !passphrase;
       const hasSorobanNetworkProfile = Boolean(useDevelopmentDefaults || (rpcUrl && passphrase));
       return Boolean(contractId && rpcUrl && passphrase && hasSorobanNetworkProfile);

@@ -33,9 +33,7 @@ const baseCampaign: Campaign = {
 };
 
 function renderCard(campaign: Campaign) {
-  return render(
-    <CampaignCard campaign={campaign} selectedCampaignId={null} onSelect={() => {}} />,
-  );
+  return render(<CampaignCard campaign={campaign} selectedCampaignId={null} onSelect={() => {}} />);
 }
 
 function getFillElement() {
@@ -60,9 +58,7 @@ describe('CampaignCard progress bar animation', () => {
       pledgedAmount: 750,
       progress: { ...baseCampaign.progress, percentFunded: 75 },
     };
-    rerender(
-      <CampaignCard campaign={updated} selectedCampaignId={null} onSelect={() => {}} />,
-    );
+    rerender(<CampaignCard campaign={updated} selectedCampaignId={null} onSelect={() => {}} />);
 
     const fill = getFillElement();
     expect(fill).toHaveClass('progress-bar-fill');

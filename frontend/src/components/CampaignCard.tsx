@@ -180,7 +180,9 @@ function CampaignCardInner({ campaign, selectedCampaignId, onSelect }: CampaignC
           <span className={`badge badge-${campaign.progress.status}`}>
             {campaign.progress.status}
           </span>
-          <div className="muted"><Countdown deadline={campaign.deadline} /></div>
+          <div className="muted">
+            <Countdown deadline={campaign.deadline} />
+          </div>
         </div>
       </div>
 

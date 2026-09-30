@@ -1,7 +1,5 @@
 #![no_std]
 
-
-
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token::Client as TokenClient, Address, Env,
     String, Vec,
@@ -34,10 +32,7 @@ const MAX_METADATA_LEN: u32 = 500;
 /// implement the token interface) produces a stable, deterministic panic at
 /// creation time instead of a cryptic error at first pledge time (issue #895).
 fn require_valid_token(env: &Env, token: &Address) {
-    if TokenClient::new(env, token)
-        .try_decimals()
-        .is_err()
-    {
+    if TokenClient::new(env, token).try_decimals().is_err() {
         panic!("accepted_tokens must contain valid token contract addresses");
     }
 }
@@ -72,6 +67,12 @@ pub struct Campaign {
     pub metadata: String,
     pub contributor_count: u32,
     pub created_at: u64,
+    /// Co-creators who must approve the campaign before it goes live.
+    /// Empty for single-creator campaigns (backward compatible).
+    pub co_creators: Vec<Address>,
+    /// Number of co-creator approvals required (M-of-N).
+    /// 0 means no approval required (single-creator campaign).
+    pub approval_threshold: u32,
 }
 
 #[contracttype]
@@ -84,7 +85,7 @@ pub enum DataKey {
     CampaignTokenBalance(u64, Address),  // (campaign_id, token)
     /// Maximum total contribution any single contributor may make to a
     /// campaign across all tokens. Absent (or zero) means no cap.
-    ContributorCap(u64),               // campaign_id → i128
+    ContributorCap(u64), // campaign_id → i128
     Admin,
     Paused,
     MinContribution,
@@ -101,6 +102,14 @@ pub enum DataKey {
     /// Address that receives platform fees on campaign claims. When absent no
     /// fee is deducted regardless of [`PlatformFeeBps`].
     FeeRecipient,
+    /// Co-creators who must approve the campaign (multi-sig governance).
+    CoCreators(u64), // campaign_id → Vec<Address>
+    /// Approval threshold (M-of-N) for multi-sig campaigns.
+    ApprovalThreshold(u64), // campaign_id → u32
+    /// Number of approvals received for a campaign.
+    CampaignApproval(u64), // campaign_id → u32
+    /// Tracks whether a specific co-creator has approved.
+    CampaignApprover(u64, Address), // (campaign_id, approver) → bool
 }
 
 #[contracttype]
@@ -108,17 +117,6 @@ pub enum DataKey {
 pub struct DeployInfo {
     pub version: String,
     pub deployed_at: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CampaignCreated {
-    pub campaign_id: u64,
-    pub creator: Address,
-    pub token: Address,
-    pub target_amount: i128,
-    pub deadline: u64,
-    pub metadata: String,
 }
 
 #[contracttype]
@@ -205,6 +203,60 @@ pub struct FeeCollected {
     pub fee_recipient: Address,
 }
 
+/// Emitted when a campaign is created (supports multi-sig co-creators).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignCreated {
+    pub campaign_id: u64,
+    pub creator: Address,
+    pub co_creators: Vec<Address>,
+    pub approval_threshold: u32,
+    pub token: Address,
+    pub target_amount: i128,
+    pub deadline: u64,
+    pub metadata: String,
+}
+
+/// Emitted when a campaign is created, with stable fields for off-chain
+/// indexers. Mirrors [`CampaignCreated`] but exposes the full accepted-token
+/// list and the per-contributor cap so indexers can reconstruct campaign
+/// state without additional reads. Sensitive data (none exists here) is not
+/// duplicated.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignCreatedEvent {
+    pub campaign_id: u64,
+    pub creator: Address,
+    pub accepted_tokens: Vec<Address>,
+    pub target_amount: i128,
+    pub deadline: u64,
+    pub metadata: String,
+    pub max_per_contributor: i128,
+    pub co_creators: Vec<Address>,
+    pub approval_threshold: u32,
+    pub created_at: u64,
+}
+
+/// Emitted when a campaign receives its final required approval and goes live.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignApproved {
+    pub campaign_id: u64,
+    pub approver: Address,
+    pub approval_count: u32,
+    pub threshold: u32,
+}
+
+/// Emitted when a co-creator adds an approval (but threshold not yet met).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignApprovalAdded {
+    pub campaign_id: u64,
+    pub approver: Address,
+    pub approval_count: u32,
+    pub threshold: u32,
+}
+
 #[contract]
 pub struct StellarGoalVaultContract;
 
@@ -217,6 +269,9 @@ mod test;
 // signer each privileged entry point requires, and that calls without it fail.
 #[cfg(test)]
 mod test_pledge_auth;
+
+// Governance module for multi-sig campaign approval
+mod governance;
 
 // The crate is `#![no_std]` for WASM, but the test suite (e.g.
 // `std::panic::catch_unwind` in `test.rs`) runs on the host and needs `std`.
@@ -239,7 +294,9 @@ impl StellarGoalVaultContract {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.storage().instance().set(&DataKey::MinContribution, &min_contribution);
+        env.storage()
+            .instance()
+            .set(&DataKey::MinContribution, &min_contribution);
     }
 
     /// Returns the current minimum contribution threshold in stroops.
@@ -267,18 +324,25 @@ impl StellarGoalVaultContract {
         if paused {
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Pause")),
-                ContractPaused { contract_version: version },
+                ContractPaused {
+                    contract_version: version,
+                },
             );
         } else {
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Unpause")),
-                ContractUnpaused { contract_version: version },
+                ContractUnpaused {
+                    contract_version: version,
+                },
             );
         }
     }
 
     pub fn get_paused(env: Env) -> bool {
-        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -357,7 +421,10 @@ impl StellarGoalVaultContract {
             .set(&DataKey::Campaign(campaign_id), &campaign);
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("Cancel")),
-            CampaignCanceled { campaign_id, creator },
+            CampaignCanceled {
+                campaign_id,
+                creator,
+            },
         );
     }
 
@@ -369,6 +436,8 @@ impl StellarGoalVaultContract {
         deadline: u64,
         metadata: String,
         max_per_contributor: i128,
+        co_creators: Vec<Address>,
+        approval_threshold: u32,
     ) -> u64 {
         // Privileged state transition: contract must not be paused, and the
         // declared creator must authorize the call (issue #893).
@@ -423,6 +492,37 @@ impl StellarGoalVaultContract {
             i += 1;
         }
 
+        // ── co-creators validation ───────────────────────────────────────
+        // If co_creators is provided, threshold must be > 0 and <= co_creators.len()
+        // If threshold is 0, co_creators must be empty (backward compatible)
+        if co_creators.len() > 0 {
+            if approval_threshold == 0 {
+                panic!("approval_threshold must be > 0 when co_creators provided");
+            }
+            if approval_threshold > co_creators.len() {
+                panic!("approval_threshold cannot exceed number of co_creators");
+            }
+            // Check for duplicate co-creators
+            let mut i = 0;
+            while i < co_creators.len() {
+                let addr = co_creators.get(i).unwrap();
+                // Creator cannot be a co-creator
+                if addr == creator {
+                    panic!("creator cannot be a co-creator");
+                }
+                let mut j = i + 1;
+                while j < co_creators.len() {
+                    if addr == co_creators.get(j).unwrap() {
+                        panic!("duplicate co-creator addresses");
+                    }
+                    j += 1;
+                }
+                i += 1;
+            }
+        } else if approval_threshold > 0 {
+            panic!("co_creators must not be empty when approval_threshold > 0");
+        }
+
         // ── metadata: bounded before it can enter storage ─────────────────
         require_valid_metadata(&metadata);
 
@@ -446,6 +546,8 @@ impl StellarGoalVaultContract {
             metadata: metadata.clone(),
             contributor_count: 0,
             created_at,
+            co_creators: co_creators.clone(),
+            approval_threshold,
         };
 
         env.storage()
@@ -463,16 +565,49 @@ impl StellarGoalVaultContract {
                 .set(&DataKey::ContributorCap(next_id), &max_per_contributor);
         }
 
+        // Store co-creators and approval threshold for multi-sig campaigns
+        if co_creators.len() > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::CoCreators(next_id), &co_creators);
+            env.storage()
+                .persistent()
+                .set(&DataKey::ApprovalThreshold(next_id), &approval_threshold);
+        }
+
         // For backward compatibility, publish the first token in the event
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("Create")),
             CampaignCreated {
                 campaign_id: next_id,
                 creator,
+                co_creators,
+                approval_threshold,
                 token: accepted_tokens.get(0).unwrap(),
                 target_amount,
                 deadline,
                 metadata,
+            },
+        );
+
+        // Structured creation event for off-chain indexers. Emitted only after
+        // all storage writes succeed, so a failed transaction never produces a
+        // misleading success event. Uses a distinct topic ("Created") so
+        // indexers can subscribe without ambiguity with the legacy "Create"
+        // event above.
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Created")),
+            CampaignCreatedEvent {
+                campaign_id: next_id,
+                creator: campaign.creator.clone(),
+                accepted_tokens: campaign.accepted_tokens.clone(),
+                target_amount: campaign.target_amount,
+                deadline: campaign.deadline,
+                metadata: campaign.metadata.clone(),
+                max_per_contributor,
+                co_creators: campaign.co_creators.clone(),
+                approval_threshold: campaign.approval_threshold,
+                created_at: campaign.created_at,
             },
         );
 
@@ -487,7 +622,13 @@ impl StellarGoalVaultContract {
     /// contributor — a self-transfer would raise `pledged_amount` without
     /// moving any funds — and that check runs before auth or any storage read
     /// so it fails the same way every time.
-    pub fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, amount: i128) {
+    pub fn contribute(
+        env: Env,
+        campaign_id: u64,
+        contributor: Address,
+        token: Address,
+        amount: i128,
+    ) {
         require_not_paused(&env);
         if contributor == env.current_contract_address() {
             panic!("contributor cannot be the vault contract");
@@ -509,6 +650,17 @@ impl StellarGoalVaultContract {
         }
         if campaign.canceled {
             panic!("campaign canceled");
+        }
+        // Campaign must be approved before accepting contributions
+        if campaign.approval_threshold > 0 {
+            let approval_count: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::CampaignApproval(campaign_id))
+                .unwrap_or(0);
+            if approval_count < campaign.approval_threshold {
+                panic!("campaign not approved");
+            }
         }
         if env.ledger().timestamp() >= campaign.deadline {
             panic!("campaign deadline reached");
@@ -552,18 +704,26 @@ impl StellarGoalVaultContract {
 
         // Only increment contributor_count on first-time pledge
         let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
-        let has_contributed: bool = env.storage().persistent().get(&has_contributed_key).unwrap_or(false);
+        let has_contributed: bool = env
+            .storage()
+            .persistent()
+            .get(&has_contributed_key)
+            .unwrap_or(false);
         if !has_contributed {
             campaign.contributor_count += 1;
             env.storage().persistent().set(&has_contributed_key, &true);
             // Track contributor for refund_all
             let contributors_key = DataKey::Contributors(campaign_id);
-            let mut contributors: Vec<Address> = env.storage().persistent().get(&contributors_key).unwrap_or_else(|| Vec::new(&env));
+            let mut contributors: Vec<Address> = env
+                .storage()
+                .persistent()
+                .get(&contributors_key)
+                .unwrap_or_else(|| Vec::new(&env));
             contributors.push_back(contributor.clone());
-            env.storage().persistent().set(&contributors_key, &contributors);
+            env.storage()
+                .persistent()
+                .set(&contributors_key, &contributors);
         }
-
-
 
         // Write updated campaign back to storage
         env.storage()
@@ -576,8 +736,13 @@ impl StellarGoalVaultContract {
             .persistent()
             .set(&balance_key, &(current_balance + amount));
 
-        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-        let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+        let contribution_key =
+            DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+        let current_contribution: i128 = env
+            .storage()
+            .persistent()
+            .get(&contribution_key)
+            .unwrap_or(0);
         env.storage()
             .persistent()
             .set(&contribution_key, &(current_contribution + amount));
@@ -729,7 +894,8 @@ impl StellarGoalVaultContract {
         request.approval_count += 1;
 
         // Majority threshold: approval_count * 2 > contributor_count
-        if campaign.contributor_count > 0 && request.approval_count * 2 > campaign.contributor_count {
+        if campaign.contributor_count > 0 && request.approval_count * 2 > campaign.contributor_count
+        {
             campaign.deadline = request.new_deadline;
             env.storage()
                 .persistent()
@@ -760,6 +926,17 @@ impl StellarGoalVaultContract {
         }
         if campaign.canceled {
             panic!("campaign canceled");
+        }
+        // Campaign must be approved before claiming
+        if campaign.approval_threshold > 0 {
+            let approval_count: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::CampaignApproval(campaign_id))
+                .unwrap_or(0);
+            if approval_count < campaign.approval_threshold {
+                panic!("campaign not approved");
+            }
         }
         if env.ledger().timestamp() < campaign.deadline {
             panic!("campaign is still active");
@@ -913,7 +1090,12 @@ impl StellarGoalVaultContract {
         read_campaign(&env, campaign_id)
     }
 
-    pub fn get_contribution(env: Env, campaign_id: u64, contributor: Address, token: Address) -> i128 {
+    pub fn get_contribution(
+        env: Env,
+        campaign_id: u64,
+        contributor: Address,
+        token: Address,
+    ) -> i128 {
         env.storage()
             .persistent()
             .get(&DataKey::Contribution(campaign_id, contributor, token))
@@ -1027,7 +1209,9 @@ impl StellarGoalVaultContract {
             Some(ts) => ts,
             None => {
                 let ts = env.ledger().timestamp();
-                env.storage().instance().set(&DataKey::DeploymentTimestamp, &ts);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::DeploymentTimestamp, &ts);
                 ts
             }
         };
@@ -1035,6 +1219,88 @@ impl StellarGoalVaultContract {
             version,
             deployed_at,
         }
+    }
+
+    /// Approves a campaign as a co-creator. When the approval threshold is
+    /// reached, the campaign transitions from pending to active state.
+    pub fn approve_campaign(env: Env, campaign_id: u64, approver: Address) {
+        approver.require_auth();
+        require_not_paused(&env);
+
+        let mut campaign = read_campaign(&env, campaign_id);
+
+        // Campaign must be in pending state (not yet approved)
+        if campaign.claimed || campaign.canceled {
+            panic!("campaign already finalized");
+        }
+
+        // Check if campaign requires approval (has co-creators)
+        let threshold = governance::get_approval_threshold(&env, campaign_id);
+        if threshold == 0 {
+            panic!("campaign does not require approval");
+        }
+
+        // Approver must be a co-creator
+        if !governance::is_co_creator(&env, campaign_id, &approver) {
+            panic!("approver is not a co-creator");
+        }
+
+        // Approver must not have already approved
+        if governance::has_approved(&env, campaign_id, &approver) {
+            panic!("already approved");
+        }
+
+        // Record the approval
+        governance::mark_approved(&env, campaign_id, &approver);
+        let approval_count = governance::record_approval(&env, campaign_id);
+
+        // Check if threshold is met
+        if approval_count >= threshold {
+            // Campaign is now approved - emit event
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Approved")),
+                CampaignApproved {
+                    campaign_id,
+                    approver: approver.clone(),
+                    approval_count,
+                    threshold,
+                },
+            );
+        } else {
+            // Emit partial approval event
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("ApprAdd")),
+                CampaignApprovalAdded {
+                    campaign_id,
+                    approver: approver.clone(),
+                    approval_count,
+                    threshold,
+                },
+            );
+        }
+    }
+
+    /// Returns the list of co-creators for a campaign.
+    pub fn get_co_creators(env: Env, campaign_id: u64) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CoCreators(campaign_id))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Returns the number of approvals received for a campaign.
+    pub fn get_campaign_approvals(env: Env, campaign_id: u64) -> u32 {
+        governance::get_approval_count(&env, campaign_id)
+    }
+
+    /// Checks if a campaign has met its approval threshold.
+    pub fn is_campaign_approved(env: Env, campaign_id: u64) -> bool {
+        let threshold = governance::get_approval_threshold(&env, campaign_id);
+        if threshold == 0 {
+            return true; // No threshold means auto-approved (backward compatible)
+        }
+        let count = governance::get_approval_count(&env, campaign_id);
+        count >= threshold
     }
 }
 
@@ -1067,7 +1333,11 @@ fn refund_contributor(
     for token in campaign.accepted_tokens.iter() {
         let contribution_key =
             DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-        let amount: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+        let amount: i128 = env
+            .storage()
+            .persistent()
+            .get(&contribution_key)
+            .unwrap_or(0);
         if amount > 0 {
             let token_client = TokenClient::new(env, &token);
             token_client.transfer(&contract_address, contributor, &amount);
@@ -1092,4 +1362,3 @@ fn refund_contributor(
     }
     total_refunded
 }
-

@@ -64,9 +64,7 @@ describe('CORS — baseline (allowed origin)', () => {
   });
 
   it('echoes the second allowed origin correctly', async () => {
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'https://staging.example.com');
+    const res = await request(app).get(PROBE).set('Origin', 'https://staging.example.com');
 
     expect(res.status).toBe(200);
     expect(res.headers['access-control-allow-origin']).toBe('https://staging.example.com');
@@ -94,11 +92,11 @@ describe('CORS — bypass attempts (unlisted origins)', () => {
   const blockedOrigins = [
     'https://evil.com',
     'https://attacker.io',
-    'http://evil.com',                      // http variant of a blocked origin
-    'null',                                 // sandboxed iframe / data-URI origin string
+    'http://evil.com', // http variant of a blocked origin
+    'null', // sandboxed iframe / data-URI origin string
 
-    'https://notexample.com',               // looks similar but is not allowed
-    'https://app.example.com.evil.com',     // subdomain confusion
+    'https://notexample.com', // looks similar but is not allowed
+    'https://app.example.com.evil.com', // subdomain confusion
   ];
 
   for (const origin of blockedOrigins) {
@@ -121,9 +119,7 @@ describe('CORS — bypass attempts (unlisted origins)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('CORS — prefix/suffix manipulation', () => {
   it('rejects an extra subdomain prepended to an allowed origin', async () => {
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'https://sub.app.example.com');
+    const res = await request(app).get(PROBE).set('Origin', 'https://sub.app.example.com');
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
@@ -139,9 +135,7 @@ describe('CORS — prefix/suffix manipulation', () => {
   });
 
   it('rejects an allowed origin with a port appended', async () => {
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'https://app.example.com:8443');
+    const res = await request(app).get(PROBE).set('Origin', 'https://app.example.com:8443');
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
@@ -149,9 +143,7 @@ describe('CORS — prefix/suffix manipulation', () => {
 
   it('rejects an allowed origin with a path component appended', async () => {
     // Origins must be scheme+host+optional-port only; paths are not allowed.
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'https://app.example.com/extra-path');
+    const res = await request(app).get(PROBE).set('Origin', 'https://app.example.com/extra-path');
 
     expect(res.status).toBe(403);
   });
@@ -162,18 +154,14 @@ describe('CORS — prefix/suffix manipulation', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('CORS — protocol downgrade', () => {
   it('rejects an allowed host over plain http (not https)', async () => {
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'http://app.example.com');
+    const res = await request(app).get(PROBE).set('Origin', 'http://app.example.com');
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
   });
 
   it('rejects an allowed host over ws://', async () => {
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'ws://app.example.com');
+    const res = await request(app).get(PROBE).set('Origin', 'ws://app.example.com');
 
     expect(res.status).toBe(403);
   });
@@ -280,10 +268,7 @@ describe('CORS — wildcard guard (configuration regression)', () => {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    expect(entries).toEqual([
-      'https://app.example.com',
-      'https://staging.example.com',
-    ]);
+    expect(entries).toEqual(['https://app.example.com', 'https://staging.example.com']);
   });
 });
 
@@ -294,9 +279,7 @@ describe('CORS — wildcard guard (configuration regression)', () => {
 describe('CORS — case-sensitivity of origin matching', () => {
   it('rejects an origin that uppercases the scheme', async () => {
     // 'HTTPS://app.example.com' !== 'https://app.example.com'
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'HTTPS://app.example.com');
+    const res = await request(app).get(PROBE).set('Origin', 'HTTPS://app.example.com');
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
@@ -304,9 +287,7 @@ describe('CORS — case-sensitivity of origin matching', () => {
   });
 
   it('rejects an origin that uppercases the hostname', async () => {
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'https://APP.EXAMPLE.COM');
+    const res = await request(app).get(PROBE).set('Origin', 'https://APP.EXAMPLE.COM');
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
@@ -314,9 +295,7 @@ describe('CORS — case-sensitivity of origin matching', () => {
   });
 
   it('rejects a mixed-case variant of an allowed origin', async () => {
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'Https://App.Example.Com');
+    const res = await request(app).get(PROBE).set('Origin', 'Https://App.Example.Com');
 
     expect(res.status).toBe(403);
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
@@ -332,9 +311,7 @@ describe('CORS — unicode and homograph bypass attempts', () => {
   it('rejects an origin using a Cyrillic lookalike for "a" (U+0430)', async () => {
     // U+0430 CYRILLIC SMALL LETTER A looks identical to U+0061 LATIN SMALL LETTER A
     // 'аpp' here starts with the Cyrillic character.
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'https://\u0430pp.example.com');
+    const res = await request(app).get(PROBE).set('Origin', 'https://\u0430pp.example.com');
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
@@ -344,9 +321,7 @@ describe('CORS — unicode and homograph bypass attempts', () => {
   it('rejects a punycode-encoded form of an allowed hostname', async () => {
     // xn--pp-fja.example.com is one possible punycode for аpp.example.com;
     // any punycode that is NOT byte-identical to 'app.example.com' must fail.
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'https://xn--pp-fja.example.com');
+    const res = await request(app).get(PROBE).set('Origin', 'https://xn--pp-fja.example.com');
 
     expect(res.status).toBe(403);
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
@@ -403,9 +378,7 @@ describe('CORS — wildcard-in-allowlist does not grant subdomain access', () =>
 
     try {
       const { app: isolatedApp } = await import('./index');
-      const res = await request(isolatedApp)
-        .get(PROBE)
-        .set('Origin', 'https://sub.example.com');
+      const res = await request(isolatedApp).get(PROBE).set('Origin', 'https://sub.example.com');
 
       // '*.example.com' is not the literal string '*', so includes('*') is false.
       // 'https://sub.example.com' !== '*.example.com', so includes(origin) is false.
@@ -428,9 +401,7 @@ describe('CORS — wildcard-in-allowlist does not grant subdomain access', () =>
 
     try {
       const { app: isolatedApp } = await import('./index');
-      const res = await request(isolatedApp)
-        .get(PROBE)
-        .set('Origin', 'https://example.com');
+      const res = await request(isolatedApp).get(PROBE).set('Origin', 'https://example.com');
 
       expect(res.status).toBe(403);
       expect(res.headers['access-control-allow-origin']).toBeUndefined();
@@ -450,18 +421,14 @@ describe('CORS — wildcard-in-allowlist does not grant subdomain access', () =>
 describe('CORS — bare OPTIONS (non-preflight)', () => {
   it('handles bare OPTIONS from an allowed origin without leaking CORS headers for disallowed origins', async () => {
     // Allowed origin: normal response expected.
-    const allowed = await request(app)
-      .options(PROBE)
-      .set('Origin', ALLOWED_ORIGIN);
+    const allowed = await request(app).options(PROBE).set('Origin', ALLOWED_ORIGIN);
 
     // Must not be a 403 for the allowed origin.
     expect(allowed.status).not.toBe(403);
   });
 
   it('blocks bare OPTIONS from a disallowed origin', async () => {
-    const res = await request(app)
-      .options(PROBE)
-      .set('Origin', 'https://evil.com');
+    const res = await request(app).options(PROBE).set('Origin', 'https://evil.com');
     // No Access-Control-Request-Method — this is NOT a CORS preflight.
 
     expect(res.status).toBe(403);
@@ -478,9 +445,9 @@ describe('CORS — bare OPTIONS (non-preflight)', () => {
 describe('CORS — credentials header absent on blocked origins', () => {
   const credentialSensitiveOrigins = [
     'https://evil.com',
-    'https://app.example.com.evil.com',  // subdomain confusion
-    'http://app.example.com',            // downgraded protocol
-    'https://sub.app.example.com',       // extra subdomain
+    'https://app.example.com.evil.com', // subdomain confusion
+    'http://app.example.com', // downgraded protocol
+    'https://sub.app.example.com', // extra subdomain
   ];
 
   for (const origin of credentialSensitiveOrigins) {

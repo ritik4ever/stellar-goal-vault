@@ -149,9 +149,9 @@ describe('Campaigns persistence integrity constraints (#868)', () => {
         ),
     ).toThrow(/title/);
 
-    expect(() => db.prepare(`UPDATE campaigns SET pledged_amount = -1 WHERE id = ?`).run('3')).toThrow(
-      /pledged_amount/,
-    );
+    expect(() =>
+      db.prepare(`UPDATE campaigns SET pledged_amount = -1 WHERE id = ?`).run('3'),
+    ).toThrow(/pledged_amount/);
   });
 
   it('rejects mutually exclusive claimed_at and failed_at', async () => {

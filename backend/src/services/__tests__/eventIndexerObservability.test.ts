@@ -38,8 +38,7 @@ describe('eventIndexer observability', () => {
   });
 
   it('emits structured fields when the indexer starts', async () => {
-    const { startEventIndexer, stopEventIndexer } =
-      await import('../eventIndexer');
+    const { startEventIndexer, stopEventIndexer } = await import('../eventIndexer');
 
     startEventIndexer();
 
@@ -81,9 +80,7 @@ describe('eventIndexer observability', () => {
 
     const axios = await import('axios');
 
-    vi.spyOn(axios.default, 'post').mockRejectedValue(
-      new Error('RPC unavailable'),
-    );
+    vi.spyOn(axios.default, 'post').mockRejectedValue(new Error('RPC unavailable'));
 
     const { startEventIndexer, stopEventIndexer, getIndexerStatus } =
       await import('../eventIndexer');
@@ -138,22 +135,22 @@ describe('eventIndexer observability', () => {
   });
 });
 
-  it('classifies freshness: failing / never / fresh / idle / stale', async () => {
-    const { classifyIndexerFreshness } = await import('../eventIndexer');
+it('classifies freshness: failing / never / fresh / idle / stale', async () => {
+  const { classifyIndexerFreshness } = await import('../eventIndexer');
 
-    expect(
-      classifyIndexerFreshness({ consecutiveFailures: 2, lagMs: 1000, running: true }),
-    ).toBe('failing');
-    expect(
-      classifyIndexerFreshness({ consecutiveFailures: 0, lagMs: null, running: false }),
-    ).toBe('never');
-    expect(
-      classifyIndexerFreshness({ consecutiveFailures: 0, lagMs: 1_000, running: true }),
-    ).toBe('fresh');
-    expect(
-      classifyIndexerFreshness({ consecutiveFailures: 0, lagMs: 60_000, running: true }),
-    ).toBe('idle');
-    expect(
-      classifyIndexerFreshness({ consecutiveFailures: 0, lagMs: 10 * 60_000, running: true }),
-    ).toBe('stale');
-  });
+  expect(classifyIndexerFreshness({ consecutiveFailures: 2, lagMs: 1000, running: true })).toBe(
+    'failing',
+  );
+  expect(classifyIndexerFreshness({ consecutiveFailures: 0, lagMs: null, running: false })).toBe(
+    'never',
+  );
+  expect(classifyIndexerFreshness({ consecutiveFailures: 0, lagMs: 1_000, running: true })).toBe(
+    'fresh',
+  );
+  expect(classifyIndexerFreshness({ consecutiveFailures: 0, lagMs: 60_000, running: true })).toBe(
+    'idle',
+  );
+  expect(
+    classifyIndexerFreshness({ consecutiveFailures: 0, lagMs: 10 * 60_000, running: true }),
+  ).toBe('stale');
+});

@@ -55,7 +55,7 @@ export const createMockUser = (overrides: Partial<User> = {}): User => ({
 export const createMockCampaign = (overrides: Partial<Campaign> = {}): Campaign => {
   const startDate = overrides.createdAt || createFixedDate(0);
   const endDate = overrides.endDate || createFixedDate(30);
-  
+
   let status: CampaignStatus = 'draft';
   if (startDate < FIXED_NOW && endDate > FIXED_NOW) {
     status = 'active';
@@ -89,23 +89,25 @@ export const createMockPledge = (overrides: Partial<Pledge> = {}): Pledge => ({
 });
 
 // Helper to create a full lifecycle state
-export const createCampaignState = (overrides: {
-  user?: User;
-  campaign?: Partial<Campaign>;
-  pledges?: Partial<Pledge>[];
-} = {}) => {
+export const createCampaignState = (
+  overrides: {
+    user?: User;
+    campaign?: Partial<Campaign>;
+    pledges?: Partial<Pledge>[];
+  } = {},
+) => {
   const user = overrides.user || createMockUser();
   const campaign = createMockCampaign({
     ...overrides.campaign,
     ownerId: user.id,
   });
-  
-  const pledges = (overrides.pledges || []).map(p => 
+
+  const pledges = (overrides.pledges || []).map((p) =>
     createMockPledge({
       ...p,
       campaignId: campaign.id,
       userId: p.userId || user.id,
-    })
+    }),
   );
 
   return {

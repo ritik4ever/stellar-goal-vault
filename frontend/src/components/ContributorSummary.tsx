@@ -108,7 +108,9 @@ export function ContributorSummary({
     setVisibleCount(CONTRIBUTOR_INCREMENT);
   }, [campaignId]);
 
-  const showSkeleton = useMinDisplayTime(externalLoading || (isLoading && contributors.length === 0));
+  const showSkeleton = useMinDisplayTime(
+    externalLoading || (isLoading && contributors.length === 0),
+  );
   if (showSkeleton) {
     return (
       <section
@@ -126,23 +128,38 @@ export function ContributorSummary({
                 className="skeleton skeleton-line"
                 style={{ width: 60, height: 20, marginTop: 8 }}
               />
-              <div className="skeleton skeleton-line" style={{ width: 140, height: 10, marginTop: 6 }} />
+              <div
+                className="skeleton skeleton-line"
+                style={{ width: 140, height: 10, marginTop: 6 }}
+              />
             </article>
           ))}
         </div>
         <div className="contributor-table-wrap" aria-hidden="true">
           <div className="contributor-table contributor-table-head">
             <div className="contributor-table-row">
-              <span><div className="skeleton skeleton-line" style={{ width: 80 }} /></span>
-              <span><div className="skeleton skeleton-line" style={{ width: 80 }} /></span>
-              <span><div className="skeleton skeleton-line" style={{ width: 80 }} /></span>
+              <span>
+                <div className="skeleton skeleton-line" style={{ width: 80 }} />
+              </span>
+              <span>
+                <div className="skeleton skeleton-line" style={{ width: 80 }} />
+              </span>
+              <span>
+                <div className="skeleton skeleton-line" style={{ width: 80 }} />
+              </span>
             </div>
           </div>
           <div className="contributor-table contributor-table-body">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="contributor-table-row">
-                <div className="contributor-address" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div className="skeleton" style={{ width: 24, height: 24, borderRadius: '50%' }} />
+                <div
+                  className="contributor-address"
+                  style={{ display: 'flex', alignItems: 'center', gap: 10 }}
+                >
+                  <div
+                    className="skeleton"
+                    style={{ width: 24, height: 24, borderRadius: '50%' }}
+                  />
                   <div className="skeleton skeleton-line" style={{ width: 120 }} />
                 </div>
                 <div className="contributor-amounts">
@@ -161,7 +178,11 @@ export function ContributorSummary({
 
   if (error) {
     return (
-      <section ref={containerRef as any} className="contributor-summary" aria-label="Contributor summary">
+      <section
+        ref={containerRef as any}
+        className="contributor-summary"
+        aria-label="Contributor summary"
+      >
         <div className="contributor-summary-heading">
           <h3 className="contributor-summary-title">Contributor summary</h3>
         </div>
@@ -174,7 +195,11 @@ export function ContributorSummary({
 
   if (contributors.length === 0) {
     return (
-      <section ref={containerRef as any} className="contributor-summary" aria-label="Contributor summary">
+      <section
+        ref={containerRef as any}
+        className="contributor-summary"
+        aria-label="Contributor summary"
+      >
         <div className="contributor-summary-heading">
           <h3 className="contributor-summary-title">Contributor summary</h3>
         </div>
@@ -207,7 +232,11 @@ export function ContributorSummary({
   const hasMore = contributors.length > visibleCount;
 
   return (
-    <section ref={containerRef as any} className="contributor-summary" aria-label="Contributor summary">
+    <section
+      ref={containerRef as any}
+      className="contributor-summary"
+      aria-label="Contributor summary"
+    >
       <div className="contributor-summary-heading">
         <h3 className="contributor-summary-title">Contributor summary</h3>
         <button
@@ -316,7 +345,8 @@ export function ContributorSummary({
             className="btn-ghost"
             onClick={() => setVisibleCount((c) => c + CONTRIBUTOR_INCREMENT)}
           >
-            Show {Math.min(CONTRIBUTOR_INCREMENT, contributors.length - visibleCount)} more ({visibleCount}/{contributors.length})
+            Show {Math.min(CONTRIBUTOR_INCREMENT, contributors.length - visibleCount)} more (
+            {visibleCount}/{contributors.length})
           </button>
         </div>
       ) : null}

@@ -1,8 +1,9 @@
 # SQLite Schema Contract
 
-`db.ts` is the authoritative migration runner. `initDb()` applies its
-idempotent schema changes to the configured SQLite database on every startup.
-Migrations must preserve existing rows and remain safe to run more than once.
+The schema is defined by versioned SQL migrations in `backend/migrations/`.
+`initDb()` runs `migrate()`, which applies any pending migrations in version
+order and records each one in the `schema_migrations` table. Already-applied
+migrations are skipped. Migrations must preserve existing rows.
 
 The deterministic seed workflow in `seedDeterministic.ts` is a development
 reset, not a migration. It atomically clears campaign-owned notifications,
@@ -42,8 +43,8 @@ rows cannot be persisted even if application validation is bypassed:
 | Lifecycle | `claimed_at` and `failed_at` are mutually exclusive |
 | Cap | `max_per_contributor` is null or `>= 0` |
 
-Fresh databases receive these as `CHECK` constraints on `CREATE TABLE`. Existing
-databases receive equivalent `BEFORE INSERT/UPDATE` triggers
+Fresh databases receive these as `CHECK` constraints (migrations 001 and 002).
+All databases also receive equivalent `BEFORE INSERT/UPDATE` triggers
 (`campaigns_persistence_integrity_*`) because SQLite cannot add `CHECK` via
 `ALTER TABLE`. The migration runner invokes the guard after schema upgrades so
 legacy datasets are cleaned only where the invariant is safe to repair, while
@@ -52,19 +53,55 @@ migrate, negative `pledged_amount` values are soft-cleaned to `0` so valid
 accounting updates continue; other historical rows are left unchanged. Invalid
 inserts/updates are aborted.
 
-## Migration expectations
+## Migrations
 
-Use `CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS` for new objects and guarded
-`ALTER TABLE` changes for existing objects, following the patterns in
-`db.ts`. Additive changes must account for databases created by older
-versions, backfill only when the existing data has a clear default, and avoid
-rewriting lifecycle or accounting history. Update the focused database test
-when a schema object or invariant changes.
+Each migration is a pair of files:
+
+- `NNN_name.sql` — the up script, applied once.
+- `NNN_name.down.sql` — the rollback script, which must restore the schema of
+  version `NNN - 1`.
+
+Versions are contiguous from `001`. The runner (`src/db/migrator.ts`) refuses
+to start if a version is missing, duplicated, or lacks a rollback script, or if
+an applied migration's file has been edited since it ran (its checksum is
+stored in `schema_migrations`). To change the schema, add a new migration; never
+edit one that has shipped.
+
+`migrate()` runs everything in one SQLite transaction, with each migration in
+its own savepoint, so a failure leaves the database at its previous version.
+Column additions must precede dependent partial and composite indexes.
+Backfill only when the existing data has a clear default, and avoid rewriting
+lifecycle or accounting history.
+
+To roll back, call `rollbackMigrations(db, targetVersion)`. It runs the down
+scripts newest first and removes their `schema_migrations` rows.
+
+### Databases created before versioned migrations
+
+Databases created before the runner existed have tables but no
+`schema_migrations` rows. On first startup, `upgradeLegacySchema()`
+(`src/db/legacySchema.ts`) idempotently brings them to the schema of
+`LEGACY_BASELINE_VERSION` (004). It adds missing columns, derives
+`accepted_tokens_json` from a legacy `asset_code`, removes duplicate
+transaction hashes, and backfills `campaigns_fts`. Migrations 001–004 are then
+recorded as applied. That module is frozen, so new schema work goes in
+migration files.
+
+### Startup invariants
+
+After migrations, `applyStartupInvariants()` runs on every startup. It
+backfills `pledges.token_id` and rebuilds the cached `campaigns.pledged_amount`.
+It also re-asserts the query-plan indexes and campaign integrity triggers with
+`IF NOT EXISTS`. It does not change the schema.
+
+Update the focused database tests (`src/db/versionedMigrations.test.ts`) when a
+schema object or invariant changes.
 
 ## Index Strategy
 
 Indexes are added based on concrete query plans for common read/write patterns.
-All indexes use `CREATE INDEX IF NOT EXISTS` to ensure idempotence.
+Indexes are created by migrations 001, 003, and 004. The startup invariants
+re-assert them with `CREATE INDEX IF NOT EXISTS`.
 
 ### Campaign indexes
 
@@ -116,7 +153,7 @@ Installed by `ensureQueryLayerIndexes()` for concrete application read plans:
 
 ### Migration-runner query indexes
 
-Installed by `ensureMigrationRunnerIndexes()` / `runMigrations` to accelerate backfill, deduplication, and cached accounting query plans during schema upgrades:
+Created by migration 004 and re-asserted by `ensureMigrationRunnerIndexes()` to accelerate backfill, deduplication, and cached accounting query plans during schema upgrades:
 
 - `idx_pledges_token_id_null` partial index on `pledges(token_id)` where `token_id IS NULL` — speeds legacy `token_id` backfill (`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`).
 - `idx_pledges_campaign_refunded` covering index on `pledges(campaign_id, refunded_at)` — accelerates campaign `pledged_amount` recomputation (`UPDATE campaigns SET pledged_amount = ...`).

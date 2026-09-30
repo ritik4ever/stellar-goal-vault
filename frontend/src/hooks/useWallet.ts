@@ -1,5 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
-import { WalletType, WalletAdapter, getAdapter, getLastUsedWallet, setLastUsedWallet, clearLastUsedWallet, WALLET_INFO } from '../lib/wallet';
+import {
+  WalletType,
+  WalletAdapter,
+  getAdapter,
+  getLastUsedWallet,
+  setLastUsedWallet,
+  clearLastUsedWallet,
+  WALLET_INFO,
+} from '../lib/wallet';
 import { WalletConnection } from '../types/campaign';
 
 export type WalletStatus = 'checking' | 'unavailable' | 'available' | 'connected' | 'connecting';
@@ -42,35 +50,40 @@ export function useWallet(): UseWalletResult {
     setStatus('available');
   }, []);
 
-  const connect = useCallback(async (selectedWalletType: WalletType, expectedNetworkPassphrase: string) => {
-    setError(null);
-    setStatus('connecting');
-    
-    try {
-      // Disconnect current wallet if different
-      if (adapter && walletType && walletType !== selectedWalletType) {
-        await adapter.disconnect();
+  const connect = useCallback(
+    async (selectedWalletType: WalletType, expectedNetworkPassphrase: string) => {
+      setError(null);
+      setStatus('connecting');
+
+      try {
+        // Disconnect current wallet if different
+        if (adapter && walletType && walletType !== selectedWalletType) {
+          await adapter.disconnect();
+        }
+
+        const newAdapter = getAdapter(selectedWalletType);
+        const connection: WalletConnection = await newAdapter.connect(expectedNetworkPassphrase);
+
+        setPublicKey(connection.publicKey);
+        setNetworkPassphrase(connection.networkPassphrase || expectedNetworkPassphrase);
+        setSorobanRpcUrl(connection.sorobanRpcUrl || null);
+        setWalletType(selectedWalletType);
+        setAdapter(newAdapter);
+        setLastUsedWallet(selectedWalletType);
+        setStatus('connected');
+        setIsPickerOpen(false);
+        // Return the connection: state updates are async, so callers reading
+        // hook state right after connect() still see the pre-connect values.
+        return connection;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to connect wallet.';
+        setError(message);
+        setStatus('available');
+        return null;
       }
-
-      const newAdapter = getAdapter(selectedWalletType);
-      const connection: WalletConnection = await newAdapter.connect(expectedNetworkPassphrase);
-
-      setPublicKey(connection.publicKey);
-      setNetworkPassphrase(connection.networkPassphrase || expectedNetworkPassphrase);
-      setSorobanRpcUrl(connection.sorobanRpcUrl || null);
-      setWalletType(selectedWalletType);
-      setAdapter(newAdapter);
-      setLastUsedWallet(selectedWalletType);
-      setStatus('connected');
-      setIsPickerOpen(false);
-      return connection;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to connect wallet.';
-      setError(message);
-      setStatus('available');
-      return null;
-    }
-  }, [adapter, walletType]);
+    },
+    [adapter, walletType],
+  );
 
   const disconnect = useCallback(() => {
     if (adapter) {
@@ -81,7 +94,7 @@ export function useWallet(): UseWalletResult {
         });
       }
     }
-    
+
     setPublicKey(null);
     setNetworkPassphrase(null);
     setSorobanRpcUrl(null);

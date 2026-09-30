@@ -4,9 +4,9 @@ import { rpc, TransactionBuilder, Networks, Address, xdr } from '@stellar/stella
 describe('Transaction Preparation Benchmark', () => {
   const transaction = new TransactionBuilder(
     new rpc.Server('https://soroban-testnet.stellar.org').getAccount('GBTEST...'),
-    { fee: '100', networkPassphrase: Networks.TESTNET }
+    { fee: '100', networkPassphrase: Networks.TESTNET },
   ).build();
-  
+
   const mockSimulation = {
     results: [],
     latestLedger: 123456,

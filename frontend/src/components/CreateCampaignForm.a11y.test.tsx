@@ -5,10 +5,7 @@ import { CreateCampaignForm } from './CreateCampaignForm';
 import { runAxeAudit, THEMES, type ThemeMode } from '../test/a11yTestUtils';
 
 async function fillBasicsAndAdvance(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(
-    screen.getByPlaceholderText(/G\.\.\. creator public key/i),
-    'G' + 'A'.repeat(55),
-  );
+  await user.type(screen.getByPlaceholderText(/G\.\.\. creator public key/i), 'G' + 'A'.repeat(55));
   await user.type(
     screen.getByPlaceholderText(/Stellar community design sprint/i),
     'My Test Campaign',
