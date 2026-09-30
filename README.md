@@ -1,5 +1,7 @@
 # Stellar Goal Vault
 
+Read this README in: [English](./README.md) | [Español](./docs/README.es.md) | [Português](./docs/README.pt.md)
+
 Stellar Goal Vault is a lightweight crowdfunding MVP for the Stellar ecosystem.
 
 It includes:
@@ -602,6 +604,7 @@ Please see [SECURITY.md](./SECURITY.md) for our responsible disclosure policy, s
 ## Contributing
 
 Please see the [Contributing Guide](./CONTRIBUTING.md) for setup and contribution guidelines.
+Translation credits are listed in [CONTRIBUTORS.md](./CONTRIBUTORS.md).
 See also [CHANGELOG.md](./CHANGELOG.md) for a full history of notable changes across releases.
 
 ## Known limitations

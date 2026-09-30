@@ -132,6 +132,23 @@ describe('redactSensitive (issue #965)', () => {
     expect((redacted.nested as Record<string, unknown>).privateKey).toBe('[REDACTED]');
     expect((redacted.nested as Record<string, unknown>).path).toBe('/deps');
   });
+
+  it('redacts bearer headers and wallet query params in write-route payload strings', async () => {
+    const { redactSensitive } = await import('./logger');
+    const result = redactSensitive({
+      authorization: 'Bearer super-secret-write-token',
+      url: 'https://example.com/callback?walletSecret=abc123&token=xyz',
+      signature: 'deadbeef',
+      safe: 'kept',
+    }) as Record<string, unknown>;
+
+    expect(result.authorization).toBe('[REDACTED]');
+    expect(result.url).toContain('[REDACTED]');
+    expect(result.url).not.toContain('abc123');
+    expect(result.url).not.toContain('xyz');
+    expect(result.signature).toBe('[REDACTED]');
+    expect(result.safe).toBe('kept');
+  });
 });
 
 describe('redactSecretConfig (issue #955)', () => {

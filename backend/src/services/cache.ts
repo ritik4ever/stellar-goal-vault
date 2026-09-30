@@ -1,4 +1,6 @@
 import { createClient, RedisClientType } from 'redis';
+import { config } from '../config';
+import { logError, logInfo } from '../logger';
 
 type RedisClient = RedisClientType;
 

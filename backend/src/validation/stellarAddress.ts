@@ -13,7 +13,7 @@
  */
 
 // Base32 alphabet used by Stellar (RFC 4648, uppercase, no padding required here)
-const BASE32_ALPHABECT = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 // Lookup table for Base32 decoding (256 entries, 255 = invalid character)
 const BASE32_LOOKUP = (() => {
@@ -36,14 +36,14 @@ function base32Decode(input: string): Uint8Array | null {
   const output = new Uint8Array(outputLength);
 
   let buffer = 0;
-  let biusLeft = 0;
+  let bitsLeft = 0;
   let outIdx = 0;
 
   for (let i = 0; i < s.length; i++) {
     const val = BASE32_LOOKUP[s.charCodeAt(i)];
     if (val === 255) return null; // invalid character
     buffer = (buffer << 5) | val;
-    biusLeft += 5;
+    bitsLeft += 5;
     if (bitsLeft >= 8) {
       bitsLeft -= 8;
       output[outIdx++] = (buffer >> bitsLeft) & 0xff;

@@ -1409,6 +1409,7 @@ tbody tr:hover td {
   gap: 10px;
   font-size: 0.875rem;
   color: var(--text-muted);
+  max-width: 100%;
 }
 
 .wallet-widget--checking {
@@ -1447,9 +1448,9 @@ tbody tr:hover td {
   color: var(--badge-failed-text);
   font-size: 0.8rem;
   max-width: 240px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .wallet-widget__btn {
@@ -1464,12 +1465,31 @@ tbody tr:hover td {
   border-radius: 999px;
   border: 1px solid var(--border-glass);
   background: var(--bg-glass);
-  gap: 8px;
+  gap: 12px;
   position: relative;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.wallet-widget__info {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.wallet-widget__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .wallet-widget__address {
   font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wallet-widget__network-badge {
@@ -1481,6 +1501,7 @@ tbody tr:hover td {
   background: rgba(20, 184, 166, 0.15);
   color: #2dd4bf;
   border: 1px solid rgba(20, 184, 166, 0.3);
+  flex-shrink: 0;
 }
 
 .wallet-widget__network-badge--mainnet {
@@ -1489,11 +1510,18 @@ tbody tr:hover td {
   border-color: rgba(244, 63, 94, 0.3);
 }
 
+.wallet-widget__switch {
+  padding: 6px 8px;
+  margin-left: 4px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
 .wallet-widget__disconnect {
   min-height: 28px;
   padding: 0 10px;
   font-size: 0.75rem;
-  opacity: 0;
+  opacity: 0.85;
   transition: opacity 0.15s ease;
 }
 
@@ -1509,6 +1537,86 @@ tbody tr:hover td {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 16px;
+}
+
+/* Mobile-specific improvements for pledge flow */
+@media (max-width: 640px) {
+  .form-grid {
+    gap: 16px;
+  }
+
+  .form-field input,
+  .form-field textarea,
+  .form-field select {
+    min-height: 48px;
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+
+  .form-actions button {
+    min-height: 48px;
+    width: 100%;
+    font-size: 1rem;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .wallet-status {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .wallet-connected {
+    align-items: stretch;
+  }
+
+  .wallet-connected button {
+    width: 100%;
+  }
+
+  .campaign-detail-banner {
+    width: calc(100% + 2.5rem);
+    margin: -40px -20px 1.5rem;
+    height: 200px;
+  }
+
+  .card {
+    padding: 20px;
+  }
+
+  .detail-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .detail-actions button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .form-field label {
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .form-field small {
+    font-size: 0.8rem;
+  }
+
+  .section-heading h2 {
+    font-size: 1.3rem;
+  }
+
+  .detail-stat {
+    padding: 14px;
+  }
+}: 16px;
   margin-bottom: 60px;
 }
 
@@ -1930,6 +2038,56 @@ tbody tr:hover td {
 
   .wallet-address-value {
     flex: 1;
+  }
+
+  .wallet-widget {
+    width: 100%;
+  }
+
+  .wallet-widget--pill {
+    border-radius: var(--radius-md);
+    padding: 12px;
+    gap: 12px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wallet-widget__info {
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .wallet-widget__actions {
+    justify-content: stretch;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .wallet-widget__actions > * {
+    flex: 1 1 auto;
+  }
+
+  .wallet-widget__switch,
+  .wallet-widget__disconnect {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .wallet-widget__disconnect {
+    opacity: 1;
+  }
+
+  .wallet-widget__btn {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .wallet-widget__address {
+    font-size: 0.85rem;
+  }
+
+  .wallet-widget__error {
+    max-width: 100%;
   }
 
   .campaign-detail-actions {

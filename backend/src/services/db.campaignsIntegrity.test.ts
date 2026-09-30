@@ -186,10 +186,29 @@ describe('Campaigns persistence integrity constraints (#868)', () => {
     const { getDb, resetDbForTests, initDb, ensureCampaignsIntegrityConstraints } = await boot();
     const db = getDb();
 
-    // Bypass triggers temporarily to seed a corrupt cached total, then re-run
-    // the integrity installer (as migrate would) and confirm soft-clean.
+    // Recreate unconstrained legacy table structure to simulate a pre-#868 DB,
+    // then re-run integrity installer (as migrate would) and confirm soft-clean.
     db.exec(`DROP TRIGGER IF EXISTS campaigns_persistence_integrity_insert`);
     db.exec(`DROP TRIGGER IF EXISTS campaigns_persistence_integrity_update`);
+    db.exec(`DROP TABLE campaigns`);
+    db.exec(`
+      CREATE TABLE campaigns (
+        id TEXT PRIMARY KEY,
+        creator TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        accepted_tokens_json TEXT NOT NULL,
+        target_amount REAL NOT NULL,
+        pledged_amount REAL NOT NULL,
+        deadline INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        claimed_at INTEGER,
+        failed_at INTEGER,
+        deleted_at INTEGER,
+        metadata_json TEXT,
+        max_per_contributor INTEGER
+      );
+    `);
     db.prepare(
       `INSERT INTO campaigns (
         id, creator, title, description, accepted_tokens_json,

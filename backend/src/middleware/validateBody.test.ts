@@ -29,12 +29,10 @@ function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFun
       },
     });
   }
-  return res
-    .status(500)
-    .json({
-      success: false,
-      error: { code: 'INTERNAL_SERVER_ERROR', message: 'Unexpected error' },
-    });
+  return res.status(500).json({
+    success: false,
+    error: { code: 'INTERNAL_SERVER_ERROR', message: 'Unexpected error' },
+  });
 }
 
 function buildApp() {

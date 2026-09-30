@@ -31,8 +31,6 @@ import {
   CampaignStatus,
   claimCampaign,
   createCampaign,
-  createComment,
-  deleteComment,
   getCampaign,
   getCampaignWithProgress,
   getContributorSummary,
@@ -43,7 +41,6 @@ import {
   listCampaignPledges,
   listCampaigns,
   listContributorPledges,
-  listComments,
   type ListCampaignsOptions,
   reconcileOnChainPledge,
   refundContributor,
@@ -66,12 +63,8 @@ import { AppError, ApiErrorResponse } from './types/errors';
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
-  commentIdSchema,
   createCampaignPayloadSchema,
-  createCommentPayloadSchema,
   createPledgePayloadSchema,
-  deleteCommentPayloadSchema,
-  parseCommentListPaginationQuery,
   parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
   parseTimelineQuery,
@@ -81,6 +74,7 @@ import {
   zodIssuesToValidationIssues,
   parseCampaignListQuery,
   normalizeQueryValue,
+  parseContributorPledgesQuery,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
 import { logError, logInfo, logger, summarizeSecretConfig } from './logger';
@@ -403,18 +397,6 @@ app.get('/api/health', (_req: Request, res: Response) => {
     memory,
   });
 });
-app.get('/api/contributors/:address/pledges', async (req: Request, res: Response) => {
-  const { address } = req.params;
-  const pagination = parsePledgeListPaginationQuery(req.query);
-  const result = await listContributorPledges(address, pagination);
-  res.setHeader('X-Total-Count', String(result.total));
-  res.json({
-    pledges: result.pledges,
-    page: pagination.page,
-    limit: pagination.limit,
-    total: result.total,
-  });
-});
 
 app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Response) => {
   const start = process.hrtime();
@@ -530,12 +512,16 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
 
     const cached = await getCampaignCacheEntry(cacheKey);
     if (cached) {
-      const cachedData = JSON.parse(cached);
+      const cachedData = JSON.parse(cached) as {
+        data: CampaignListItem[];
+        pagination: { total: number; page: number; limit: number; totalPages: number };
+      };
       res.setHeader('Cache-Control', 'max-age=30');
       res.setHeader('X-Cache', 'HIT');
       res.setHeader('X-Total-Count', String(cachedData.pagination.total));
       res.setHeader('Content-Type', 'application/json');
-      res.send(cached);
+      // The cached payload is shared, but correlation IDs are per request.
+      res.send(JSON.stringify({ ...cachedData, requestId: (req as RequestWithId).requestId }));
       return;
     }
 
@@ -545,7 +531,7 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
       status: params.status,
       includeDeleted: params.includeDeleted,
       sort: params.sort,
-      order: params.order,
+      sortOrder: params.order,
       createdAfter: params.createdAfter,
       createdBefore: params.createdBefore,
     };
@@ -585,7 +571,13 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
     res.setHeader('X-Cache', 'MISS');
     res.setHeader('X-Total-Count', String(totalCount));
     res.setHeader('Content-Type', 'application/json');
-    res.send(responseBody);
+    res.send(
+      JSON.stringify({
+        data,
+        pagination: { total: totalCount, page, limit, totalPages },
+        requestId: (req as RequestWithId).requestId,
+      }),
+    );
   } catch (error) {
     next(error);
   }
@@ -867,18 +859,18 @@ app.get('/api/campaigns/:id/contributors', (req: Request, res: Response) => {
 });
 
 app.get('/api/contributors/:address/pledges', (req: Request, res: Response) => {
-  const { address } = req.params;
-  const paginationResult = parsePledgeListPaginationQuery({
+  const query = parseContributorPledgesQuery({
+    address: req.params.address,
     page: req.query.page,
     limit: req.query.limit,
   });
-  if (!paginationResult.ok) {
-    sendValidationError(paginationResult.issues);
+  if (!query.ok) {
+    sendValidationError(query.issues);
   }
 
-  const { pledges, totalCount } = listContributorPledges(address, {
-    page: paginationResult.page,
-    limit: paginationResult.limit,
+  const { pledges, totalCount } = listContributorPledges(query.address, {
+    page: query.page,
+    limit: query.limit,
   });
 
   res.setHeader('X-Total-Count', String(totalCount));
@@ -886,9 +878,9 @@ app.get('/api/contributors/:address/pledges', (req: Request, res: Response) => {
     data: pledges,
     pagination: {
       total: totalCount,
-      page: paginationResult.page,
-      limit: paginationResult.limit,
-      totalPages: Math.max(1, Math.ceil(totalCount / paginationResult.limit)),
+      page: query.page,
+      limit: query.limit,
+      totalPages: Math.max(1, Math.ceil(totalCount / query.limit)),
     },
   });
 });
