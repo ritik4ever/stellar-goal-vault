@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    environment: 'jsdom',
+    environment: 'jsdm',
     globals: true,
     setupFiles: './src/test-setup.ts',
     // Forked workers get independent jsdom, storage, timers, and module state.
