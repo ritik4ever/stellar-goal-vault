@@ -25,9 +25,10 @@ export class DashboardPage {
     this.deadlineHoursInput = page.locator('label:has-text("Deadline in hours") >> input');
     this.createButton = page.locator('button:has-text("Create campaign")');
     this.connectWalletButton = page.locator('.wallet-widget button:has-text("Connect Wallet")');
-    this.pledgeAmountInput = page.locator('label:has-text("Pledge amount") >> input');
-    this.addPledgeButton = page.locator('button:has-text("Add pledge")');
-    this.claimVaultButton = page.locator('button:has-text("Claim vault")');
+    this.pledgeAmountInput = page.locator('#pledge-amount');
+    // Upstream renamed the buttons and gave the form a stable aria-label.
+    this.addPledgeButton = page.locator('form[aria-label="Pledge form"] button[type="submit"]');
+    this.claimVaultButton = page.locator('button:has-text("Claim funds")');
     this.campaignsTable = page.locator('.campaigns-table');
   }
 
@@ -104,7 +105,9 @@ export class DashboardPage {
     await this.page.locator('.wallet-option:has-text("Freighter")').click();
     await expect(this.page.locator('.wallet-widget--connected')).toBeVisible();
     if (expectedAddress) {
-      await expect(this.page.locator('.wallet-widget__address')).toHaveText(
+      // The address span embeds an sr-only "Wallet address: " label, which
+      // counts toward textContent — assert containment, not exact equality.
+      await expect(this.page.locator('.wallet-widget__address')).toContainText(
         `${expectedAddress.slice(0, 4)}…${expectedAddress.slice(-4)}`,
       );
     }

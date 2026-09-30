@@ -60,10 +60,12 @@ test.describe('Freighter wallet integration', () => {
       await page.locator('.wallet-option:has-text("Freighter")').click();
 
       await expect(page.locator('.wallet-widget--connected')).toBeVisible();
-      await expect(page.locator('.wallet-widget__address')).toHaveText(
+      // sr-only labels inside these spans count toward textContent, so
+      // assert containment rather than exact text.
+      await expect(page.locator('.wallet-widget__address')).toContainText(
         `${CONTRIBUTOR.slice(0, 4)}…${CONTRIBUTOR.slice(-4)}`,
       );
-      await expect(page.locator('.wallet-widget__network-badge')).toHaveText('Testnet');
+      await expect(page.locator('.wallet-widget__network-badge')).toContainText('Testnet');
     });
 
     test('shows a visible error when access is denied', async ({ page }) => {
@@ -114,7 +116,7 @@ test.describe('Freighter wallet integration', () => {
       await expect(page.locator('.wallet-status')).toContainText('Connected to Stellar Testnet');
 
       // Pledge button becomes enabled once a wallet is connected.
-      await expect(page.locator('button:has-text("Add pledge")')).toBeEnabled();
+      await expect(page.locator('form[aria-label="Pledge form"] button[type="submit"]')).toBeEnabled();
 
       await dashboard.pledge('25');
 
@@ -255,7 +257,7 @@ test.describe('Freighter wallet integration', () => {
       expect(refreshed.progress.status).toBe('claimed');
     });
 
-    test('disables the claim action for non-creators', async ({ page, campaign, sorobanRpc }) => {
+    test('rejects the claim action for non-creators', async ({ page, campaign, sorobanRpc }) => {
       test.setTimeout(120_000);
       await interceptConfig(page, sorobanRpc.url);
       await mockFreighter(page, CONTRIBUTOR, { sorobanRpcUrl: sorobanRpc.url });
@@ -278,7 +280,14 @@ test.describe('Freighter wallet integration', () => {
       await selectCampaign(page, claimable.title, claimable.id);
       await dashboard.connectWallet();
 
-      await expect(page.locator('button:has-text("Claim vault")')).toBeDisabled();
+      // The claim button stays enabled for everyone; the creator guard lives
+      // in App.handleClaim and surfaces as an error toast instead. No preview
+      // modal and no envelope submission may happen for non-creators.
+      await dashboard.claim();
+      await expect(page.locator('.toast-container')).toContainText(
+        /only the campaign creator can claim funds/i,
+      );
+      expect(sorobanRpc.envelopes).toHaveLength(0);
     });
   });
 });
