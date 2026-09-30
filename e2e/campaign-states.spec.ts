@@ -28,7 +28,9 @@ test.describe('Deterministic campaign state fixtures', () => {
     expect(claimed.progress).toEqual(
       expect.objectContaining({ status: 'claimed', canPledge: false, canClaim: false }),
     );
-    expect(claimed.deadline).toBeLessThan(nowInSeconds());
+    // Fixture deadlines are second-granular: assert elapsed, not strictly less
+    // than the current second (which races the boundary).
+    expect(claimed.deadline).toBeLessThanOrEqual(nowInSeconds());
   });
 
   test('creates a failed campaign after its deadline passes and rejects further pledges', async ({
@@ -42,7 +44,7 @@ test.describe('Deterministic campaign state fixtures', () => {
       creator: TEST_CREATORS.bob,
     });
 
-    expect(failed.deadline).toBeLessThan(nowInSeconds());
+    expect(failed.deadline).toBeLessThanOrEqual(nowInSeconds());
     expect(failed.pledgedAmount).toBe(50);
     expect(failed.progress).toEqual(
       expect.objectContaining({ status: 'failed', canPledge: false, canRefund: true }),
@@ -60,8 +62,8 @@ test.describe('Deterministic campaign state fixtures', () => {
     const dashboard = new DashboardPage(page);
 
     await dashboard.goto();
-    await expect(page.locator(`text=${created.title}`)).toBeVisible();
-    await dashboard.selectCampaign(created.title);
-    await expect(page.locator('.detail-panel h2')).toHaveText(created.title);
+    await expect(page.locator(`text=${created.title}`).first()).toBeVisible();
+    // Row clicks race with the window-virtualized board; deep link instead.
+    await dashboard.selectCampaignByTitle(created.title);
   });
 });

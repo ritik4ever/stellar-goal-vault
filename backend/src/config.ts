@@ -51,7 +51,9 @@ export const config = {
   webhookSecret: process.env.WEBHOOK_SECRET ?? '',
   assetAddresses: (
     process.env.ASSET_ADDRESSES ??
-    'XLM:CDLZFC3SYJYDZT7K3SSTH3YCUY6AFMCO3Y6S3G7FEYZNVNREK7Y6CYN5,USDC:CA6WSTPZ7RRCUC6H37CQFODG763XG2HXP2G6F367VCOGGVDP32P7665E'
+    // Defaults must be valid contract strkeys: the frontend passes them
+    // straight into Address.fromString, which rejects bad strkey checksums.
+    'XLM:CDLZFC3SYJYDZT7K3SSTH3YCUY6AFMCO3Y6S3G7FEYZNVNREK7Y6DZSV,USDC:CA6WSTPZ7RRCUC6H37CQFODG763XG2HXP2G6F367VCOGGVDP32P77BBF'
   )
     .split(',')
     .reduce(

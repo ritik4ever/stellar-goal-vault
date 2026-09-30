@@ -135,6 +135,18 @@ export async function submitRefundTransaction(
 export const executeSorobanRefund = submitRefundTransaction;
 
 /**
- * Typed contract client instance for interacting with the Soroban GoalVaultContract
+ * Typed contract client for interacting with the Soroban GoalVaultContract.
+ *
+ * Constructed lazily: the constructor validates its contract id via
+ * `new Contract(...)`, which throws when CONTRACT_ID is not configured. An
+ * eager module-level singleton made any page importing this module (App does,
+ * for refunds) crash at boot on unconfigured deployments instead of only the
+ * refund path failing at call time.
  */
-export const contractClient = new GoalVaultContract();
+let contractClientInstance: GoalVaultContract | null = null;
+export function getContractClient(): GoalVaultContract {
+  if (!contractClientInstance) {
+    contractClientInstance = new GoalVaultContract();
+  }
+  return contractClientInstance;
+}

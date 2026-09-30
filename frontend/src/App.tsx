@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FundedConfetti } from "./components/FundedConfetti";
 import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
@@ -160,6 +161,7 @@ function App() {
   const { id: paramId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const wallet = useWallet();
+  const { t } = useTranslation();
   const { toasts, addToast, dismiss } = useToast();
   const connectedWallet = wallet.publicKey;
 
@@ -168,7 +170,10 @@ function App() {
   const [hasMoreCampaigns, setHasMoreCampaigns] = useState(false);
   const [isLoadingMoreCampaigns, setIsLoadingMoreCampaigns] = useState(false);
   const activeSearchRef = useRef('');
-  const activeSortRef = useRef<string>('newest');
+  // Backend accepts only createdAt|deadline|pledgedAmount|targetAmount; the
+  // previous 'newest' default made every board load fail validation with a
+  // 400, leaving the campaigns table permanently empty.
+  const activeSortRef = useRef<string>('createdAt');
   const activeOrderRef = useRef<string>('desc');
   const [searchParams] = useSearchParams();
   const campaignParam = searchParams.get('campaign');
@@ -547,12 +552,23 @@ function App() {
     }
   }
 
-  async function handleConnectWallet(walletType: string) {
+  async function handleConnectWallet(walletType?: string) {
+    // CampaignDetailPanel's connect button has no wallet type: route it to the
+    // picker. WalletPickerModal calls back with the chosen wallet's type.
+    if (!walletType) {
+      wallet.openPicker();
+      return;
+    }
     const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
     setIsConnectingWallet(true);
     try {
-      await wallet.connect(walletType as any, networkPassphrase);
-      addToast(`Wallet connected: ${wallet.publicKey?.slice(0, 16)}...`, "success");
+      // Read the connection from the return value: state updates are async, so
+      // wallet.publicKey is still null on the current render here.
+      const connection = await wallet.connect(walletType as any, networkPassphrase);
+      addToast(
+        `Wallet connected: ${connection?.publicKey?.slice(0, 16) ?? 'unknown'}...`,
+        "success",
+      );
     } finally {
       setIsConnectingWallet(false);
     }

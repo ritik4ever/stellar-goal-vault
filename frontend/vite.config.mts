@@ -131,6 +131,22 @@ export default defineConfig(async () => {
   }
 
   return {
+    define: {
+      // `src/generated/index.ts` (auto-generated bindings) reads Node-style
+      // `process.env.NEXT_PUBLIC_*` values. In the browser `process` is
+      // undefined, which crashed the React tree on boot and broke every
+      // UI-touching Playwright spec. Define static fallbacks so the module
+      // resolves without shipping a full process shim.
+      'process.env.NEXT_PUBLIC_CONTRACT_ID': JSON.stringify(
+        process.env.NEXT_PUBLIC_CONTRACT_ID ?? '',
+      ),
+      'process.env.NEXT_PUBLIC_RPC_URL': JSON.stringify(
+        process.env.NEXT_PUBLIC_RPC_URL ?? 'https://soroban-testnet.stellar.org',
+      ),
+      'process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE': JSON.stringify(
+        process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015',
+      ),
+    },
     plugins,
     build: {
       chunkSizeWarningLimit: 600, // Recommend keeping chunks under 600KB unminified/uncompressed

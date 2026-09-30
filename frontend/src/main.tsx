@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import "./index.css";
+import "./i18n/config";
 
 const App = lazy(() => import("./App"));
 const ContributorProfile = lazy(() =>

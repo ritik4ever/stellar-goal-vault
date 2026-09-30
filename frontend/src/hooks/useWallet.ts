@@ -13,7 +13,10 @@ export interface UseWalletResult {
   networkPassphrase: string | null;
   sorobanRpcUrl: string | null;
   error: string | null;
-  connect: (walletType: WalletType, expectedNetworkPassphrase: string) => Promise<void>;
+  connect: (
+    walletType: WalletType,
+    expectedNetworkPassphrase: string,
+  ) => Promise<WalletConnection | null>;
   disconnect: () => void;
   openPicker: () => void;
   isPickerOpen: boolean;
@@ -51,7 +54,7 @@ export function useWallet(): UseWalletResult {
 
       const newAdapter = getAdapter(selectedWalletType);
       const connection: WalletConnection = await newAdapter.connect(expectedNetworkPassphrase);
-      
+
       setPublicKey(connection.publicKey);
       setNetworkPassphrase(connection.networkPassphrase || expectedNetworkPassphrase);
       setSorobanRpcUrl(connection.sorobanRpcUrl || null);
@@ -60,10 +63,12 @@ export function useWallet(): UseWalletResult {
       setLastUsedWallet(selectedWalletType);
       setStatus('connected');
       setIsPickerOpen(false);
+      return connection;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect wallet.';
       setError(message);
       setStatus('available');
+      return null;
     }
   }, [adapter, walletType]);
 
