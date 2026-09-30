@@ -520,6 +520,17 @@ impl StellarGoalVaultContract {
             panic!("token not accepted by this campaign");
         }
 
+        // Read the contributor's existing balance for the pledged token ONCE.
+        // This value is reused both in the per-contributor cap check below and
+        // in the write step at the end of this function, eliminating a second
+        // ledger read that previously occurred unconditionally (issue #1004).
+        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+        let current_contribution: i128 = env
+            .storage()
+            .persistent()
+            .get(&contribution_key)
+            .unwrap_or(0);
+
         // Enforce the per-contributor cap recorded at creation time. Before
         // this check the cap was written but never read (issue #895).
         let cap: i128 = env
@@ -528,14 +539,21 @@ impl StellarGoalVaultContract {
             .get(&DataKey::ContributorCap(campaign_id))
             .unwrap_or(0);
         if cap > 0 {
+            // Sum contributions across all accepted tokens. For the token
+            // being pledged now we already have `current_contribution` in a
+            // local — reuse it instead of issuing another storage read.
             let already: i128 = campaign
                 .accepted_tokens
                 .iter()
                 .map(|t| {
-                    env.storage()
-                        .persistent()
-                        .get(&DataKey::Contribution(campaign_id, contributor.clone(), t))
-                        .unwrap_or(0)
+                    if t == token {
+                        current_contribution
+                    } else {
+                        env.storage()
+                            .persistent()
+                            .get(&DataKey::Contribution(campaign_id, contributor.clone(), t))
+                            .unwrap_or(0)
+                    }
                 })
                 .sum();
             if already + amount > cap {
@@ -563,8 +581,6 @@ impl StellarGoalVaultContract {
             env.storage().persistent().set(&contributors_key, &contributors);
         }
 
-
-
         // Write updated campaign back to storage
         env.storage()
             .persistent()
@@ -576,8 +592,8 @@ impl StellarGoalVaultContract {
             .persistent()
             .set(&balance_key, &(current_balance + amount));
 
-        let contribution_key = DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-        let current_contribution: i128 = env.storage().persistent().get(&contribution_key).unwrap_or(0);
+        // Write updated contribution — uses the local `current_contribution`
+        // captured above; no second storage read needed (issue #1004).
         env.storage()
             .persistent()
             .set(&contribution_key, &(current_contribution + amount));

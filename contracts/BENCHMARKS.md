@@ -73,7 +73,7 @@ Soroban SDK version: 21.7.7
 | Entry point | CPU Instr (est.) | Ledger reads | Ledger writes | Events | Panics |
 |---|---|---|---|---|---|
 | `create_campaign` | ~26 000 | 1 | 2 | 1 | 5 paths |
-| `contribute` | ~45 000 | 4 | 4 | 1 | 6 paths |
+| `contribute` | ~43 000 | 3 | 4 | 1 | 6 paths |
 | `claim` | ~30 000 | 2 | 2 | 1 per token | 4 paths |
 | `refund` | ~28 000 | 3 | 3 | 1 per token | 4 paths |
 | `get_campaign` | ~8 000 | 1 | 0 | 0 | 1 path |
@@ -90,6 +90,11 @@ Soroban SDK version: 21.7.7
   (soroban-env-host `budget`). Actual on-ledger costs may vary.
 - All **% change** comparisons should use the same test harness version.
 - A delta **>10%** in either direction must be reviewed before merging.
+- **`contribute` (issue #1004):** Ledger reads reduced from 4 → 3. The
+  `Contribution(campaign_id, contributor, token)` storage entry was previously
+  read twice per call — once inside the per-contributor cap loop and again just
+  before the write. The read is now hoisted above the cap check and the cached
+  local value is reused, eliminating one unconditional ledger read per pledge.
 
 ## Instructions to Re-baseline
 

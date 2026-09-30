@@ -2104,5 +2104,146 @@ use soroban_sdk::{
         client.set_fee(&admin, &(-1_i128));
     }
 
+    // ---- #1004: pledge write-path performance refactor regression -----------
+    // The `contribute` function was refactored to read
+    // `Contribution(campaign_id, contributor, token)` exactly once (hoisted
+    // before the cap check) and reuse the cached value for the write. These
+    // tests assert that the accounting remains correct after that change.
+
+    #[test]
+    fn test_contribute_accounting_correct_after_hoisted_read() {
+        // Scenario: single token, no cap, first-time pledge.
+        // Verifies pledged_amount, per-token balance, and contribution record
+        // all reflect the correct value when current_contribution starts at 0.
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "hoisted read test"),
+            &0_i128, // no cap
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &300);
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.pledged_amount, 300, "pledged_amount mismatch after first pledge");
+        assert_eq!(campaign.contributor_count, 1, "contributor_count should be 1");
+
+        let contribution = client.get_contribution(&campaign_id, &contributor, &token);
+        assert_eq!(contribution, 300, "per-token contribution mismatch after first pledge");
+
+        let balance = client.get_campaign_token_balance(&campaign_id, &token);
+        assert_eq!(balance, 300, "campaign token balance mismatch after first pledge");
+    }
+
+    #[test]
+    fn test_contribute_repeat_pledge_accumulates_correctly() {
+        // Scenario: same contributor pledges twice. The hoisted `current_contribution`
+        // must reflect the already-stored value on the second call (not a stale 0).
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "repeat pledge hoisted"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &200);
+        client.contribute(&campaign_id, &contributor, &token, &150);
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.pledged_amount, 350, "pledged_amount should sum both pledges");
+        // contributor_count must stay 1 — repeat pledge must not double-count
+        assert_eq!(campaign.contributor_count, 1, "contributor_count must not double-count repeat pledge");
+
+        let contribution = client.get_contribution(&campaign_id, &contributor, &token);
+        assert_eq!(contribution, 350, "contribution record must accumulate across pledges");
+    }
+
+    #[test]
+    fn test_contribute_cap_check_correct_with_hoisted_read_and_multi_token() {
+        // Scenario: two accepted tokens, per-contributor cap set.
+        // The hoisted read covers only the pledged token; the loop reads the
+        // other token from storage. Verifies the cap is enforced correctly and
+        // that the cached value for the pledged token is used in the sum.
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token1 = deploy_token(&env, &admin, &contributor, 1_000);
+        let token2 = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        // Cap of 500 across both tokens combined.
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token1.clone(), token2.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "multi-token cap hoisted"),
+            &500_i128,
+        );
+
+        // First pledge with token1: 300 — within cap.
+        client.contribute(&campaign_id, &contributor, &token1, &300);
+
+        // Second pledge with token2: 200 — total = 500, exactly at cap.
+        client.contribute(&campaign_id, &contributor, &token2, &200);
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.pledged_amount, 500);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token1), 300);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token2), 200);
+    }
+
+    #[test]
+    #[should_panic(expected = "per-contributor cap exceeded")]
+    fn test_contribute_cap_still_enforced_after_hoisted_read() {
+        // Verifies the cap check correctly rejects a pledge that would exceed the
+        // cap even after the hoisted-read refactor (issue #1004).
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "cap enforced hoisted"),
+            &400_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &300);
+        // 300 already pledged + 200 = 500 > cap of 400 → must panic
+        client.contribute(&campaign_id, &contributor, &token, &200);
+    }
 
 }
