@@ -3,7 +3,7 @@
 ## Overview
 This document describes the implementation of campaign image upload functionality across the Stellar Goal Vault application, allowing users to either upload images directly (converted to base64) or provide HTTPS URLs.
 
-## Implementation Summary
+##Implementation Summary
 
 ### 1. Frontend Changes
 
