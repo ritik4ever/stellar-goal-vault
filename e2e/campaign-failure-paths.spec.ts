@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { deadlineInHours, expect, nowInSeconds, test } from './fixtures';
 
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR = `G${'B'.repeat(55)}`;
@@ -33,7 +33,7 @@ test.describe('Campaign failure paths', () => {
 
     const invalidFields = await request.post('/api/campaigns', {
       data: {
-        ...campaignPayload(`Invalid campaign ${Date.now()}`, Math.floor(Date.now() / 1000) + 60),
+        ...campaignPayload(`Invalid campaign ${nowInSeconds()}`, deadlineInHours(1)),
         creator: 'not-a-stellar-account',
         targetAmount: 0,
       },
@@ -52,9 +52,10 @@ test.describe('Campaign failure paths', () => {
 
   test('rejects unauthorized and duplicate claim actions without creating a second claim', async ({
     request,
+    clock,
   }) => {
     const createResponse = await request.post('/api/campaigns', {
-      data: campaignPayload(`Claim failure path ${Date.now()}`, Math.floor(Date.now() / 1000) + 2),
+      data: campaignPayload(`Claim failure path ${clock.now()}`, deadlineInHours(1)),
     });
     expect(createResponse.status()).toBe(201);
     const campaignId = (await createResponse.json()).data.id as string;
@@ -68,6 +69,10 @@ test.describe('Campaign failure paths', () => {
     });
     expect(pledgeResponse.status()).toBe(201);
 
+    // Move the virtual clock past the deadline instead of polling wall-clock
+    // seconds away (the campaign was created with a one-hour deadline).
+    await clock.advance(3601);
+
     await expect
       .poll(async () => {
         const response = await request.get(`/api/campaigns/${campaignId}`);
@@ -79,7 +84,7 @@ test.describe('Campaign failure paths', () => {
       data: {
         creator: UNAUTHORIZED_CREATOR,
         transactionHash: 'a'.repeat(64),
-        confirmedAt: Math.floor(Date.now() / 1000),
+        confirmedAt: nowInSeconds(),
       },
     });
     expect(unauthorizedClaim.status()).toBe(403);
@@ -89,7 +94,7 @@ test.describe('Campaign failure paths', () => {
       data: {
         creator: CREATOR,
         transactionHash: 'b'.repeat(64),
-        confirmedAt: Math.floor(Date.now() / 1000),
+        confirmedAt: nowInSeconds(),
       },
     });
     expect(claim.status()).toBe(200);
@@ -98,7 +103,7 @@ test.describe('Campaign failure paths', () => {
       data: {
         creator: CREATOR,
         transactionHash: 'c'.repeat(64),
-        confirmedAt: Math.floor(Date.now() / 1000),
+        confirmedAt: nowInSeconds(),
       },
     });
     expect(duplicateClaim.status()).toBe(409);

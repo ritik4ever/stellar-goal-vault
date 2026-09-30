@@ -47,6 +47,9 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       stdout: 'pipe',
       stderr: 'pipe',
+      // Mounts the test-only /api/e2e/time endpoint so the E2E suite can freeze
+      // and advance the backend clock. See e2e/fixtures/time.ts.
+      env: { E2E_TIME_CONTROL: '1' },
     },
     {
       command: 'npm run dev:frontend',
