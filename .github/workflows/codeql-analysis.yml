@@ -8,6 +8,12 @@ on:
     branches:
       - main
 
+# Cancel superseded runs for the same PR or branch. Runs on main get a
+# unique group, so they are never cancelled or queued. See docs/CI.md.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && format('run-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze:
     name: CodeQL Analysis
