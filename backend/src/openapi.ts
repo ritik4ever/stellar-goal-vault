@@ -287,13 +287,16 @@ const campaignHistoryResponseSchema = z
   })
   .openapi('CampaignHistoryResponse');
 
-const healthResponseSchema = z
+// Exported so the health contract tests (healthContract.test.ts) validate live
+// responses against the published schema.
+export const healthResponseSchema = z
   .object({
     service: z.string(),
     status: z.enum(['ok', 'degraded']),
     timestamp: z.string().datetime(),
     uptimeSeconds: z.number(),
     database: z.object({
+      status: z.enum(['up', 'down']),
       reachable: z.boolean(),
       error: z.string().optional(),
     }),
@@ -307,7 +310,16 @@ const healthResponseSchema = z
   })
   .openapi('HealthResponse');
 
-const deepHealthResponseSchema = z
+export const deepHealthErrorResponseSchema = z
+  .object({
+    overall: z.literal('down'),
+    timestamp: z.string().datetime(),
+    error: z.string(),
+    message: z.string(),
+  })
+  .openapi('DeepHealthErrorResponse');
+
+export const deepHealthResponseSchema = z
   .object({
     overall: z.enum(['up', 'down']),
     timestamp: z.string().datetime(),
@@ -462,6 +474,7 @@ const registeredSchemas = {
   ),
   HealthResponse: registry.register('HealthResponse', healthResponseSchema),
   DeepHealthResponse: registry.register('DeepHealthResponse', deepHealthResponseSchema),
+  DeepHealthErrorResponse: registry.register('DeepHealthErrorResponse', deepHealthErrorResponseSchema),
   ConfigResponse: registry.register('ConfigResponse', configResponseSchema),
   StatsResponse: registry.register('StatsResponse', statsResponseSchema),
   LeaderboardResponse: registry.register('LeaderboardResponse', leaderboardResponseSchema),
@@ -518,8 +531,13 @@ registry.registerPath({
       content: { 'application/json': { schema: registeredSchemas.DeepHealthResponse } },
     },
     503: {
-      description: 'One or more components are unhealthy',
-      content: { 'application/json': { schema: registeredSchemas.DeepHealthResponse } },
+      description:
+        'One or more components are unhealthy (DeepHealthResponse), or the check itself failed (DeepHealthErrorResponse)',
+      content: {
+        'application/json': {
+          schema: z.union([registeredSchemas.DeepHealthResponse, registeredSchemas.DeepHealthErrorResponse]),
+        },
+      },
     },
   },
 });
