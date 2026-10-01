@@ -30,6 +30,8 @@ export function validateBody<TSchema extends ZodType>(schema: TSchema): RequestH
     const parsed = await schema.safeParseAsync(req.body);
     if (!parsed.success) {
       const zodError = parsed.error as ZodError;
+      // Surfaced as `errorCode` in the structured request log.
+      _res.locals.errorCode = 'VALIDATION_ERROR';
       next(
         new AppError(
           zodIssuesToErrorMessage(zodError.issues),

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { logger, logError, logRequest, normalizeLogLevel } from './logger';
+import { logger, logError, logRequest, normalizeLogLevel, requestOutcome } from './logger';
 
 describe('logger', () => {
   afterEach(() => {
@@ -70,6 +70,45 @@ describe('logger', () => {
     });
   });
 
+  it('adds machine-readable operation, route, campaign, outcome, and error fields', () => {
+    const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
+
+    logRequest(
+      {
+        requestId: 'req-456',
+        method: 'POST',
+        path: '/api/campaigns/42/pledges',
+        status: 400,
+        durationMs: 3.2,
+        route: '/api/campaigns/:id/pledges',
+        operation: 'POST /api/campaigns/:id/pledges',
+        campaignId: '42',
+        errorCode: 'VALIDATION_ERROR',
+      },
+      'info',
+    );
+
+    expect(infoSpy.mock.calls[0][0]).toMatchObject({
+      event: 'http_request',
+      requestId: 'req-456',
+      operation: 'POST /api/campaigns/:id/pledges',
+      route: '/api/campaigns/:id/pledges',
+      campaignId: '42',
+      status: 400,
+      outcome: 'client_error',
+      errorCode: 'VALIDATION_ERROR',
+      duration_ms: 3.2,
+    });
+  });
+
+  it('marks requests that matched no route as unmatched', () => {
+    const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
+
+    logRequest({ method: 'GET', path: '/nope', status: 404, durationMs: 1 }, 'info');
+
+    expect(infoSpy.mock.calls[0][0]).toMatchObject({ operation: 'unmatched', outcome: 'client_error' });
+  });
+
   it('logs 5xx requests via logger.info (status field carries severity)', () => {
     const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
 
@@ -95,6 +134,14 @@ describe('logger', () => {
       status: 500,
       duration_ms: 12.35,
     });
+  });
+
+  it('classifies request outcomes', () => {
+    expect(requestOutcome(200)).toBe('success');
+    expect(requestOutcome(304)).toBe('success');
+    expect(requestOutcome(404)).toBe('client_error');
+    expect(requestOutcome(503)).toBe('server_error');
+    expect(requestOutcome(200, true)).toBe('aborted');
   });
 
   it('logs errors with the message and stack', () => {
