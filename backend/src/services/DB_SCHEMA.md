@@ -29,6 +29,24 @@ and must not be used against production data.
   rebuilt from `campaigns` and is never the source of truth.
 
 
+## Pledges persistence integrity constraints (#873)
+
+`pledges` is the source of truth for individual contributions. A safe subset of
+application invariants is enforced at the database layer so invalid rows cannot
+be persisted even if application validation is bypassed:
+
+| Constraint | Rule |
+| --- | --- |
+| Amount | `amount > 0` |
+| Identity fields | non-empty `contributor` and `asset_code` (after trim) |
+| Timestamps | positive `created_at`; `refunded_at > 0` when NOT NULL |
+
+Fresh databases receive these as `BEFORE INSERT / BEFORE UPDATE` triggers
+(`pledges_persistence_integrity_*`, migration 005). Legacy databases receive the
+same triggers via `ensurePledgesIntegrityConstraints()` on every startup.
+No historical data repair is needed because all valid data already satisfies
+these rules — the triggers only block future invalid inserts or updates.
+
 ## Campaigns persistence integrity constraints (#868)
 
 `campaigns` is the source of truth for lifecycle and cached accounting. A safe

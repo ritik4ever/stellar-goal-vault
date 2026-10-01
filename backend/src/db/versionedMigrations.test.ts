@@ -81,6 +81,7 @@ describe('Versioned SQL migrations', () => {
         '002_add_accepted_tokens',
         '003_add_notifications',
         '004_add_query_plan_indexes',
+        '005_add_pledges_integrity_constraints',
       ]);
       for (const migration of migrations) {
         expect(migration.up.trim()).not.toBe('');
@@ -193,7 +194,7 @@ describe('Versioned SQL migrations', () => {
     it('is correct after a fresh init', () => {
       migrate(db);
 
-      expect(getSchemaVersion(db)).toBe(4);
+      expect(getSchemaVersion(db)).toBe(5);
 
       const schema = snapshotSchema(db);
       expect(Object.keys(schema.tables).sort()).toEqual([
@@ -242,6 +243,8 @@ describe('Versioned SQL migrations', () => {
         'after_campaigns_update',
         'campaigns_persistence_integrity_insert',
         'campaigns_persistence_integrity_update',
+        'pledges_persistence_integrity_insert',
+        'pledges_persistence_integrity_update',
       ]);
       expect(schema.indexes).toEqual(
         expect.arrayContaining([
@@ -275,7 +278,7 @@ describe('Versioned SQL migrations', () => {
 
         migrate(db);
 
-        expect(getAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4]);
+        expect(getAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5]);
         expect(snapshotSchema(db)).toEqual(expected);
 
         const campaign = db
@@ -328,7 +331,7 @@ describe('Versioned SQL migrations', () => {
       migrate(db);
       const expected = snapshotSchema(db);
 
-      expect(rollbackMigrations(db, 0)).toEqual([4, 3, 2, 1]);
+      expect(rollbackMigrations(db, 0)).toEqual([5, 4, 3, 2, 1]);
       expect(getAppliedMigrations(db)).toEqual([]);
 
       migrate(db);
@@ -338,7 +341,7 @@ describe('Versioned SQL migrations', () => {
     it('rolls back to a target version, leaving older migrations applied', () => {
       migrate(db);
 
-      expect(rollbackMigrations(db, 2)).toEqual([4, 3]);
+      expect(rollbackMigrations(db, 2)).toEqual([5, 4, 3]);
       expect(getAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2]);
       expect(snapshotSchema(db).tables.notifications).toBeUndefined();
       expect(snapshotSchema(db).tables.campaigns).toContain('accepted_tokens_json');
@@ -384,7 +387,7 @@ describe('Versioned SQL migrations', () => {
         migrate(db);
 
         expect(getAppliedMigrations(db).map((m) => m.version)).toEqual(
-          Array.from({ length: LEGACY_BASELINE_VERSION }, (_, i) => i + 1),
+          [...Array.from({ length: LEGACY_BASELINE_VERSION }, (_, i) => i + 1), 5],
         );
         expect(snapshotSchema(db)).toEqual(expected);
 

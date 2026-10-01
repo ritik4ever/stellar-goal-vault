@@ -260,6 +260,7 @@ export function applyStartupInvariants(database: SQLiteDatabase): void {
   ensureSeedWorkflowIndexes(database);
   ensureQueryLayerIndexes(database);
   ensureCampaignsIntegrityConstraints(database);
+  ensurePledgesIntegrityConstraints(database);
 }
 
 /**
@@ -322,5 +323,60 @@ export function ensureQueryLayerIndexes(database: SQLiteDatabase = getDb()): voi
 
     CREATE INDEX IF NOT EXISTS idx_campaigns_status
       ON campaigns(claimed_at, failed_at, deleted_at);
+  `);
+}
+
+/**
+ * Install pledges-persistence integrity enforcement for existing databases.
+ *
+ * SQLite cannot ADD CHECK via ALTER TABLE, so these BEFORE INSERT / BEFORE UPDATE
+ * triggers mirror the safe invariant subset that migration 005 adds for fresh
+ * databases. They are installed with IF NOT EXISTS so the call is idempotent
+ * and safe to repeat on every startup.
+ *
+ * Invariants enforced (#873):
+ *   amount        > 0
+ *   contributor   non-empty after trim
+ *   asset_code    non-empty after trim
+ *   created_at    > 0
+ *   refunded_at   > 0 when NOT NULL
+ */
+export function ensurePledgesIntegrityConstraints(database: SQLiteDatabase = getDb()): void {
+  database.exec(`
+    CREATE TRIGGER IF NOT EXISTS pledges_persistence_integrity_insert
+    BEFORE INSERT ON pledges
+    FOR EACH ROW
+    BEGIN
+      SELECT CASE
+        WHEN NEW.amount IS NULL OR NEW.amount <= 0
+          THEN RAISE(ABORT, 'pledges.amount must be > 0')
+        WHEN NEW.contributor IS NULL OR length(trim(NEW.contributor)) = 0
+          THEN RAISE(ABORT, 'pledges.contributor must be non-empty')
+        WHEN NEW.asset_code IS NULL OR length(trim(NEW.asset_code)) = 0
+          THEN RAISE(ABORT, 'pledges.asset_code must be non-empty')
+        WHEN NEW.created_at IS NULL OR NEW.created_at <= 0
+          THEN RAISE(ABORT, 'pledges.created_at must be > 0')
+        WHEN NEW.refunded_at IS NOT NULL AND NEW.refunded_at <= 0
+          THEN RAISE(ABORT, 'pledges.refunded_at must be > 0 when set')
+      END;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS pledges_persistence_integrity_update
+    BEFORE UPDATE ON pledges
+    FOR EACH ROW
+    BEGIN
+      SELECT CASE
+        WHEN NEW.amount IS NULL OR NEW.amount <= 0
+          THEN RAISE(ABORT, 'pledges.amount must be > 0')
+        WHEN NEW.contributor IS NULL OR length(trim(NEW.contributor)) = 0
+          THEN RAISE(ABORT, 'pledges.contributor must be non-empty')
+        WHEN NEW.asset_code IS NULL OR length(trim(NEW.asset_code)) = 0
+          THEN RAISE(ABORT, 'pledges.asset_code must be non-empty')
+        WHEN NEW.created_at IS NULL OR NEW.created_at <= 0
+          THEN RAISE(ABORT, 'pledges.created_at must be > 0')
+        WHEN NEW.refunded_at IS NOT NULL AND NEW.refunded_at <= 0
+          THEN RAISE(ABORT, 'pledges.refunded_at must be > 0 when set')
+      END;
+    END;
   `);
 }

@@ -218,6 +218,119 @@ describe('pledges persistence — DB-level constraints (#876)', () => {
     ).n;
     expect(count).toBe(2);
   });
+
+  // ---------------------------------------------------------------------------
+  // Trigger-based invariants added by migration 005 (#873)
+  // ---------------------------------------------------------------------------
+
+  it('rejects a pledge with an empty string asset_code (pledges.asset_code must be non-empty)', () => {
+    const db = getDb();
+    seedCampaign(db);
+    const now = Math.floor(Date.now() / 1000);
+
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at)
+           VALUES ('c1', 'GCONTRIB', 10, '', ?)`,
+        )
+        .run(now),
+    ).toThrow(/pledges\.asset_code must be non-empty/i);
+  });
+
+  it('rejects a pledge with a whitespace-only asset_code (pledges.asset_code must be non-empty)', () => {
+    const db = getDb();
+    seedCampaign(db);
+    const now = Math.floor(Date.now() / 1000);
+
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at)
+           VALUES ('c1', 'GCONTRIB', 10, '   ', ?)`,
+        )
+        .run(now),
+    ).toThrow(/pledges\.asset_code must be non-empty/i);
+  });
+
+  it('rejects a pledge with a zero created_at (pledges.created_at must be > 0)', () => {
+    const db = getDb();
+    seedCampaign(db);
+
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at)
+           VALUES ('c1', 'GCONTRIB', 10, 'XLM', 0)`,
+        )
+        .run(),
+    ).toThrow(/pledges\.created_at must be > 0/i);
+  });
+
+  it('rejects a pledge with a negative created_at (pledges.created_at must be > 0)', () => {
+    const db = getDb();
+    seedCampaign(db);
+
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at)
+           VALUES ('c1', 'GCONTRIB', 10, 'XLM', -1)`,
+        )
+        .run(),
+    ).toThrow(/pledges\.created_at must be > 0/i);
+  });
+
+  it('rejects setting refunded_at to zero (pledges.refunded_at must be > 0 when set)', () => {
+    const db = getDb();
+    seedCampaign(db);
+    const now = Math.floor(Date.now() / 1000);
+
+    insertPledge(db, { amount: 50, createdAt: now });
+    const pledgeId = (
+      db.prepare(`SELECT id FROM pledges WHERE campaign_id = 'c1' LIMIT 1`).get() as { id: number }
+    ).id;
+
+    expect(() =>
+      db.prepare(`UPDATE pledges SET refunded_at = 0 WHERE id = ?`).run(pledgeId),
+    ).toThrow(/pledges\.refunded_at must be > 0 when set/i);
+  });
+
+  it('allows setting refunded_at to NULL (removing a refund marker)', () => {
+    const db = getDb();
+    seedCampaign(db);
+    const now = Math.floor(Date.now() / 1000);
+
+    insertPledge(db, { amount: 50, createdAt: now });
+    const pledgeId = (
+      db.prepare(`SELECT id FROM pledges WHERE campaign_id = 'c1' LIMIT 1`).get() as { id: number }
+    ).id;
+
+    // Setting to a valid positive timestamp must succeed
+    expect(() =>
+      db.prepare(`UPDATE pledges SET refunded_at = ? WHERE id = ?`).run(now, pledgeId),
+    ).not.toThrow();
+
+    // Clearing back to NULL must also succeed
+    expect(() =>
+      db.prepare(`UPDATE pledges SET refunded_at = NULL WHERE id = ?`).run(pledgeId),
+    ).not.toThrow();
+  });
+
+  it('allows a valid positive refunded_at on UPDATE', () => {
+    const db = getDb();
+    seedCampaign(db);
+    const now = Math.floor(Date.now() / 1000);
+
+    insertPledge(db, { amount: 50, createdAt: now });
+    const pledgeId = (
+      db.prepare(`SELECT id FROM pledges WHERE campaign_id = 'c1' LIMIT 1`).get() as { id: number }
+    ).id;
+
+    expect(() =>
+      db.prepare(`UPDATE pledges SET refunded_at = ? WHERE id = ?`).run(now + 10, pledgeId),
+    ).not.toThrow();
+  });
 });
 
 // ===========================================================================
@@ -484,15 +597,17 @@ describe('pledges persistence — edge-case data (#876)', () => {
    * silently persist and corrupt campaign totals.  These tests document the
    * current raw schema behaviour.
    */
-  it('stores a zero amount at the DB level (schema has no > 0 CHECK on pledges.amount)', () => {
-    // This test documents that pledges.amount has NO positive CHECK constraint
-    // at the DDL level — validation is enforced by the application layer.
-    // If a CHECK were added, this test would catch it.
+  /**
+   * #873: pledges.amount now has a DB-level > 0 guard via a BEFORE INSERT
+   * trigger (migration 005 / ensurePledgesIntegrityConstraints). Previously
+   * this was only enforced by the application layer, allowing bypassed
+   * inserts to silently corrupt campaign totals.
+   */
+  it('rejects a zero amount at the DB level (pledges.amount must be > 0)', () => {
     const db = getDb();
     seedCampaign(db);
     const now = Math.floor(Date.now() / 1000);
 
-    // Zero amount goes in without error (application layer is the guard)
     expect(() =>
       db
         .prepare(
@@ -500,15 +615,10 @@ describe('pledges persistence — edge-case data (#876)', () => {
            VALUES ('c1', 'GCONTRIB', 0, 'XLM', ?)`,
         )
         .run(now),
-    ).not.toThrow();
-
-    const stored = db.prepare(`SELECT amount FROM pledges WHERE campaign_id = 'c1'`).get() as {
-      amount: number;
-    };
-    expect(stored.amount).toBe(0);
+    ).toThrow(/pledges\.amount must be > 0/i);
   });
 
-  it('stores a negative amount at the DB level (no CHECK in schema — app layer guards this)', () => {
+  it('rejects a negative amount at the DB level (pledges.amount must be > 0)', () => {
     const db = getDb();
     seedCampaign(db);
     const now = Math.floor(Date.now() / 1000);
@@ -520,12 +630,7 @@ describe('pledges persistence — edge-case data (#876)', () => {
            VALUES ('c1', 'GCONTRIB', -50, 'XLM', ?)`,
         )
         .run(now),
-    ).not.toThrow();
-
-    const stored = db.prepare(`SELECT amount FROM pledges WHERE campaign_id = 'c1'`).get() as {
-      amount: number;
-    };
-    expect(stored.amount).toBe(-50);
+    ).toThrow(/pledges\.amount must be > 0/i);
   });
 
   it('stores a high-precision fractional amount without loss', () => {
@@ -575,9 +680,13 @@ describe('pledges persistence — edge-case data (#876)', () => {
     expect(row.asset_code).toBe(unicodeAsset);
   });
 
-  it('stores an empty string contributor (no length CHECK at DB level)', () => {
-    // Documents that contributor has no non-empty CHECK in the pledges DDL
-    // (the campaigns table has one, but pledges does not).
+  /**
+   * #873: pledges.contributor now has a DB-level non-empty guard via a BEFORE
+   * INSERT trigger (migration 005 / ensurePledgesIntegrityConstraints).
+   * Previously only the HTTP validation schema enforced this, allowing
+   * bypassed inserts with empty contributor addresses.
+   */
+  it('rejects an empty string contributor at the DB level (pledges.contributor must be non-empty)', () => {
     const db = getDb();
     seedCampaign(db);
     const now = Math.floor(Date.now() / 1000);
@@ -589,12 +698,7 @@ describe('pledges persistence — edge-case data (#876)', () => {
            VALUES ('c1', '', 10, 'XLM', ?)`,
         )
         .run(now),
-    ).not.toThrow();
-
-    const stored = db.prepare(`SELECT contributor FROM pledges WHERE campaign_id = 'c1'`).get() as {
-      contributor: string;
-    };
-    expect(stored.contributor).toBe('');
+    ).toThrow(/pledges\.contributor must be non-empty/i);
   });
 
   it('stores a very large amount without overflow (SQLite REAL range)', () => {
