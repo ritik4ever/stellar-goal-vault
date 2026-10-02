@@ -140,6 +140,38 @@ refund(contributor, campaign) is_allowed_if:
 
 ---
 
+### Invariant 6: Campaign Creation Invariants & Non-Mutation on Invalid Inputs
+**Test:** `prop_campaign_creation_valid_invariants`, `prop_campaign_creation_invalid_inputs_preserve_state`, `test_campaign_creation_table_driven_boundary_and_invariants`
+
+**Description:** Valid campaign creation must correctly initialize all campaign attributes and accounting state (0 pledged amount, 0 contributor count, sequential campaign ID increment), while invalid creation requests (e.g. non-positive target, past/current deadline, deadline exceeding 180 days, duplicate tokens, empty tokens list, negative contributor cap) must be rejected without mutating contract state or accounting invariants.
+
+**Why it matters:**
+- Prevents creation of invalid campaigns that could deadlock or break accounting.
+- Guarantees no value is created or destroyed upon creation.
+- Ensures total campaign count and campaign IDs remain strictly sequential and immutable on failed creations.
+
+**Mathematical property:**
+```
+valid_creation:
+  next_id == previous_next_id + 1
+  campaign_count == previous_count + 1
+  campaign.pledged_amount == 0
+  campaign.contributor_count == 0
+  get_campaign_token_balance(id, token) == 0 for all accepted_tokens
+
+invalid_creation:
+  operation panics
+  campaign_count == previous_count
+  next_id == previous_next_id
+```
+
+**Coverage:**
+- Generates 64+ proptest inputs across valid targets (1 to 1,000,000,000), valid deadlines (1 sec to 180 days), token array sizes (1 to 10), and contributor caps.
+- Tests generated invalid targets, past/excessive deadlines, and negative contributor caps ensuring zero state mutation.
+- Table-driven boundary coverage for minimum valid parameters, maximum duration (180 days), `i128::MAX` target/cap, duplicate tokens, and empty token vectors.
+
+---
+
 ## Test Harness Architecture
 
 ### Operation Generation
