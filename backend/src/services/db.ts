@@ -11,8 +11,6 @@ import { isLegacyDatabase, LEGACY_BASELINE_VERSION, upgradeLegacySchema } from '
 
 export type SQLiteDatabase = ReturnType<typeof Database>;
 
-// Module-level singleton for production use only.
-// Tests should use initDb(path) with an isolated path or :memory:.
 let db: SQLiteDatabase | null = null;
 
 function resolveDbPath(): string {
@@ -29,34 +27,28 @@ export function getDb(): SQLiteDatabase {
   return db;
 }
 
-export function initDb(customPath?: string): void {
+export function initDb(): void {
   if (db) {
     return;
   }
 
-  const dbPath = customPath || resolveDbPath();
+  const dbPath = resolveDbPath();
   const dir = path.dirname(dbPath);
 
   if (dbPath !== ':memory:' && !fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  const database = new Database(dbPath);
+  db = new Database(dbPath);
 
-  try {
-    // Enable Write-Ahead Logging (WAL) mode.
-    // This is the chosen journal mode to prevent unnecessary lock contention,
-    // allowing reads and writes to occur concurrently without blocking each other.
-    database.pragma('journal_mode = WAL');
-    database.pragma('synchronous = NORMAL');
-    database.pragma('foreign_keys = ON');
+  // Enable Write-Ahead Logging (WAL) mode.
+  // This is the chosen journal mode to prevent unnecessary lock contention,
+  // allowing reads and writes to occur concurrently without blocking each other.
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('foreign_keys = ON');
 
-    migrate(database);
-    db = database;
-  } catch (error) {
-    database.close();
-    throw error;
-  }
+  migrate(db);
 }
 
 export function resetDbForTests(): void {
@@ -110,8 +102,7 @@ export function getPledgesByContributor(
   const offset = Math.max((page - 1) * limit, 0);
   const rows = database
     .prepare(
-      `
-      SELECT
+      `      SELECT
         p.id,
         p.campaign_id AS campaignId,
         c.title AS campaignName,

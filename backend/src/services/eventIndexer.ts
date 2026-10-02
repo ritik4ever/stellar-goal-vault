@@ -391,47 +391,14 @@ let pollerTimer: ReturnType<typeof setTimeout> | null = null;
 let consecutiveFailures = 0;
 let lastSuccessfulPollTime: number | null = null;
 let lastKnownLedger: number | null = null;
-let lastErrorReason: string | null = null;
-
-export type IndexerFreshness = 'fresh' | 'idle' | 'stale' | 'failing' | 'never';
-
-/**
- * Classify indexer freshness so operators can tell healthy-but-idle from
- * stale or failing behavior (issue #1024).
- */
-export function classifyIndexerFreshness(input: {
-  consecutiveFailures: number;
-  lagMs: number | null;
-  running: boolean;
-}): IndexerFreshness {
-  if (input.consecutiveFailures > 0) return 'failing';
-  if (input.lagMs == null) return 'never';
-  if (input.lagMs >= STALE_LAG_MS) return 'stale';
-  if (input.lagMs <= FRESH_LAG_MS) return 'fresh';
-  return 'idle';
-}
 
 export function getIndexerStatus() {
-  const lagMs = lastSuccessfulPollTime ? Date.now() - lastSuccessfulPollTime : null;
-  const running = pollerTimer !== null;
-  const freshness = classifyIndexerFreshness({
-    consecutiveFailures,
-    lagMs,
-    running,
-  });
-  // Failure or unbounded lag → not healthy. Idle/fresh with a running poller is OK.
-  const isHealthy =
-    consecutiveFailures === 0 && running && freshness !== 'stale' && freshness !== 'never';
-
   return {
     lastSuccessfulPollTime,
     lastKnownLedger: lastKnownLedger ?? getLastProcessedLedger(),
-    isHealthy,
+    isHealthy: consecutiveFailures === 0 && pollerTimer !== null,
     consecutiveFailures,
-    lagMs,
-    freshness,
-    staleLagMs: STALE_LAG_MS,
-    freshLagMs: FRESH_LAG_MS,
+    lagMs: lastSuccessfulPollTime ? Date.now() - lastSuccessfulPollTime : null,
   };
 }
 
@@ -454,7 +421,6 @@ function scheduleNextPoll(delayMs: number): void {
       }
 
       consecutiveFailures = 0;
-      lastErrorReason = null;
       lastSuccessfulPollTime = Date.now();
       scheduleNextPoll(POLL_INTERVAL_MS);
     } catch (err) {
@@ -473,7 +439,6 @@ function scheduleNextPoll(delayMs: number): void {
           event: 'soroban_event_index_error',
           consecutiveFailures,
           nextRetryMs: backoffMs,
-          reason,
         },
         config.logLevel,
       );

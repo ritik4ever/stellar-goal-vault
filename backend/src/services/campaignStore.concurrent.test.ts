@@ -140,7 +140,7 @@ describe('Concurrent Pledge Race Condition Tests', () => {
     expect(campaign?.pledgedAmount).toBe(300);
   });
 
-  it('should enforce per-contributor limits with concurrent pledges', async () => {
+  it('should enforce per-contributor limits with concurrent pledges', () => {
     // Create a campaign with max 200 per contributor
     const { id: campaignId } = createCampaign({
       creator: CREATOR,
@@ -291,7 +291,7 @@ describe('Concurrent Pledge Race Condition Tests', () => {
     expect(campaign?.pledgedAmount).toBe(500); // Late pledge is rejected after claim eligibility.
   });
 
-  it('should detect and handle duplicate concurrent pledges from same contributor', async () => {
+  it('should detect and handle duplicate concurrent pledges from same contributor', () => {
     const { id: campaignId } = createCampaign({
       creator: CREATOR,
       title: 'Duplicate Pledge Test',
