@@ -387,6 +387,16 @@ app.get('/api/health', (_req: Request, res: Response) => {
     external: memUsage.external,
   };
 
+  const duration_ms = Number(process.hrtime.bigint() - start) / 1_000_000;
+  
+  logInfo('health_check', {
+    operation: 'health_check',
+    outcome: healthy ? 'success' : 'failure',
+    duration_ms,
+    database: database.status,
+    indexer: indexer.isHealthy ? 'up' : 'down',
+  });
+
   res.status(healthy ? 200 : 503).json({
     service: 'stellar-goal-vault-backend',
     status: healthy ? 'ok' : 'degraded',
@@ -449,6 +459,18 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
       heapTotal: memUsage.heapTotal,
       external: memUsage.external,
     };
+
+    const duration_ms = Number(process.hrtime.bigint() - start) / 1_000_000;
+    
+    logInfo('health_check', {
+      operation: 'health_check_deep',
+      outcome: allHealthy ? 'success' : 'failure',
+      duration_ms,
+      database: database.status,
+      soroban: sorobanHealthy ? 'up' : 'down',
+      contract: hasContractId ? 'up' : 'down',
+      indexer: indexer.isHealthy ? 'up' : 'down',
+    });
 
     res.status(allHealthy ? 200 : 503).json({
       overall: allHealthy ? 'up' : 'down',
