@@ -5,6 +5,8 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
+  /* Visual regression has its own config/workflow */
+  testIgnore: ['**/*.visual.spec.ts'],
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -14,7 +16,18 @@ export default defineConfig({
   /* Opt out of parallel tests on CI. */
   workers: process.env.CI ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: 'html',
+  reporter: process.env.CI
+    ? [
+        ['list'],
+        ['html', { open: 'never', outputFolder: 'playwright-report' }],
+        ['json', { outputFile: 'test-results/e2e-results.json' }],
+        ['github'],
+      ]
+    : [
+        ['list'],
+        ['html', { open: 'on-failure', outputFolder: 'playwright-report' }],
+        ['json', { outputFile: 'test-results/e2e-results.json' }],
+      ],
   expect: {
     toHaveScreenshot: {
       pathTemplate: '{testDir}/screenshots/{testFilePath}/{arg}{ext}',

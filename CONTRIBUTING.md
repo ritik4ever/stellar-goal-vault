@@ -136,6 +136,10 @@ See the [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for a comprehensive l
 - Backend: `cd backend && npm test`
 - Contract: `cd contracts && cargo test`
 - E2E: `npm run test:e2e`
+- E2E with coverage (Chromium V8, focused app scripts, 80% lines threshold): `npm run test:e2e:coverage`
+- E2E coverage tool tests: `npm run test:e2e:coverage:tools`
+
+Focused Playwright coverage reports are written to `coverage/e2e/` (`coverage-summary.json`, `coverage.txt`, `lcov.info`). The lines threshold in `e2e/coverage-threshold.json` matches the repository Vitest standard (80) and must not be weakened.
 
 ## Code style
 
