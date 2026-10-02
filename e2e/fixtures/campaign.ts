@@ -98,6 +98,27 @@ export class CampaignBuilder {
     return this.refresh(campaignId);
   }
 
+  /** Waits until a UI-created campaign (matched by title) reaches a status. */
+  async waitForStatusByTitle(
+    title: string,
+    status: CampaignStatus,
+    timeoutMs?: number,
+  ): Promise<Campaign> {
+    let found: Campaign | undefined;
+    await expect
+      .poll(
+        async () => {
+          const campaigns = await createApi(this.request).listCampaigns(title);
+          found = campaigns.find((campaign) => campaign.title === title);
+          return found?.progress.status;
+        },
+        { timeout: timeoutMs ?? 30_000 },
+      )
+      .toBe(status);
+    expect(found, `campaign "${title}" reached status ${status}`).toBeDefined();
+    return found!;
+  }
+
   /** Waits until a UI-created campaign (matched by title) becomes claimable. */
   async waitForClaimableByTitle(title: string, timeoutMs?: number): Promise<Campaign> {
     let found: Campaign | undefined;

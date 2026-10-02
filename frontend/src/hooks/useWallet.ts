@@ -21,7 +21,10 @@ export interface UseWalletResult {
   networkPassphrase: string | null;
   sorobanRpcUrl: string | null;
   error: string | null;
-  connect: (walletType: WalletType, expectedNetworkPassphrase: string) => Promise<void>;
+  connect: (
+    walletType: WalletType,
+    expectedNetworkPassphrase: string,
+  ) => Promise<WalletConnection | null>;
   disconnect: () => void;
   openPicker: () => void;
   isPickerOpen: boolean;
@@ -69,10 +72,14 @@ export function useWallet(): UseWalletResult {
         setLastUsedWallet(selectedWalletType);
         setStatus('connected');
         setIsPickerOpen(false);
+        // Return the connection: state updates are async, so callers reading
+        // hook state right after connect() still see the pre-connect values.
+        return connection;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to connect wallet.';
         setError(message);
         setStatus('available');
+        return null;
       }
     },
     [adapter, walletType],
