@@ -1,0 +1,74 @@
+name: Docker Build Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_context:
+        description: 'Build context directory (default: .)'
+        required: false
+        default: '.'
+        type: string
+  schedule:
+    # Run weekly on Monday at 00:00 UTC to track performance trends
+    - cron: '0 0 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Docker Build Benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run Docker Build Benchmark
+        id: benchmark
+        run: |
+          chmod +x ./scripts/bench-docker-build.sh
+          ./scripts/bench-docker-build.sh "${{ github.event.inputs.build_context || '.' }}" > benchmark-output.txt
+
+      - name: Parse benchmark results
+        id: parse
+        run: |
+          # Extract metrics from the benchmark output
+          BUILD_TIME=$(grep '^build_time_seconds=' benchmark-output.txt | cut -d'=' -f2)
+          IMAGE_SIZE=$(grep '^image_size_mb=' benchmark-output.txt | cut -d'=' -f2)
+          LAYER_COUNT=$(grep '^layer_count=' benchmark-output.txt | cut -d'=' -f2)
+          IMAGE_ID=$(grep '^image_id=' benchmark-output.txt | cut -d'=' -f2)
+
+          echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
+          echo "image_size=${IMAGE_SIZE}" >> $GITHUB_OUTPUT
+          echo "layer_count=${LAYER_COUNT}" >> $GITHUB_OUTPUT
+          echo "image_id=${IMAGE_ID}" >> $GITHUB_OUTPUT
+
+          echo "Build Time: ${BUILD_TIME}s"
+          echo "Image Size: ${IMAGE_SIZE} MB"
+          echo "Layer Count: ${LAYER_COUNT}"
+          echo "Image ID: ${IMAGE_ID}"
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: |
+            benchmark-output.txt
+          retention-days: 30
+
+      - name: Post benchmark summary
+        if: always()
+        run: |
+          echo "## Docker Build Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Time | ${{ steps.parse.outputs.build_time }}s |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Size | ${{ steps.parse.outputs.image_size }} MB |" >> $GITHUB_STEP_SUMMARY
+          echo "| Layer Count | ${{ steps.parse.outputs.layer_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image ID | ${{ steps.parse.outputs.image_id }} |" >> $GITHUB_STEP_SUMMARY
