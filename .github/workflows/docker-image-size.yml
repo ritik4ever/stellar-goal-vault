@@ -1,0 +1,33 @@
+name: Docker Image Size Regression
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "backend/Dockerfile"
+      - "frontend/Dockerfile"
+      - "docker-compose.yml"
+      - "docker-compose.override.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image-size:
+    name: Docker image size regression
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build images and check size regression
+        run: bash scripts/docker-size-regression.sh
+        env:
+          TOLERANCE_PCT: "10"

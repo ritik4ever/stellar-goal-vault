@@ -37,3 +37,19 @@ This builds both the backend and frontend Docker images using the multi-stage bu
 Both services use a multi-stage Docker build process:
 - **Builder Stage**: Installs all dependencies (including `devDependencies`), copies all source files, and builds the code (`npm run build`).
 - **Production Stage**: Starts from a fresh base image, installs only production dependencies (`npm ci --omit=dev`), clears the npm cache, and copies over only the necessary compiled artifacts from the builder stage. This drastically reduces the final image size by excluding the build tools, raw source code, and development modules.
+
+## Regression Coverage (CI)
+
+`./scripts/docker-size-regression.sh` builds both production images and checks their size against the recorded baseline in `scripts/docker-size-baseline.json`:
+
+```bash
+./scripts/docker-size-regression.sh            # build both images and check
+./scripts/docker-size-regression.sh --no-build # measure already-built images
+```
+
+- **Signal:** production image size in bytes. Image size is a stable signal, so the check never relies on flaky micro-timing assertions.
+- **Baseline:** `scripts/docker-size-baseline.json` (`baselineBytes` per service).
+- **Limits:** the recommended ceilings above are enforced as `maxBytes`; exceeding one fails the check.
+- **Warning:** growth beyond `TOLERANCE_PCT` (default 10%) is reported without failing the run.
+
+The `Docker Image Size Regression` GitHub Actions workflow runs this check on pull requests that touch a `Dockerfile` or `docker-compose*.yml` and publishes the size table to the job summary.
