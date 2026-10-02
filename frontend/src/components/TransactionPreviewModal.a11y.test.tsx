@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TransactionPreviewModal } from './TransactionPreviewModal';
 import { runAxeAudit, THEMES, type ThemeMode } from '../test/a11yTestUtils';
 
@@ -59,7 +59,7 @@ describe.each(THEMES)('TransactionPreviewModal Accessibility (%s theme)', (theme
   });
 
   it('supports keyboard activation of the confirm action', () => {
-    const onConfirm = vi.vitest.fn();
+    const onConfirm = vi.fn();
     render(
       <TransactionPreviewModal
         preview={previewWithFee}

@@ -2,19 +2,19 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { AppConfig, Campaign } from '../types/campaign';
 import { CampaignDetailPanel } from './CampaignDetailPanel';
-import { runAxeAudit, THEMES, type ThemeMode } from '../test/a1yTestUtils';
+import { runAxeAudit, THEMES, type ThemeMode } from '../test/a11yTestUtils';
 
 const mockConfig: AppConfig = {
   allowedAssets: ['USDC', 'XLM'],
   soroban: {
     enabled: true,
     contractId: 'C123',
-    networkPassphrase: 'Test DF Network ; September 2015',
+    networkPassphrase: 'Test SDF Network ; September 2015',
     rpcUrl: 'https://example.com',
   },
   sorobanRpcUrl: 'https://example.com',
   contractId: 'C123',
-  networkPassphrase: 'Test DF Network ; September 2015',
+  networkPassphrase: 'Test SDF Network ; September 2015',
   contractAmountDecimals: 2,
   walletIntegrationReady: true,
   assetAddresses: {},
@@ -75,7 +75,7 @@ describe.each(THEMES)('CampaignDetailPanel Accessibility (%s theme)', (theme: Th
     expect(results).toHaveNoViolations();
   });
 
-  it('exposes an accessible name for the campaign detail region', async () => {
+  it('exposes an accessible name for the campaign detail region', () => {
     render(
       <CampaignDetailPanel
         campaign={mockCampaign}
@@ -84,13 +84,10 @@ describe.each(THEMES)('CampaignDetailPanel Accessibility (%s theme)', (theme: Th
       />,
     );
 
-    const region = screen.getByRole('region', {
-      name: /Test Campaign details?/i,
-    });
-    expect(region).toBeDefined();
+    expect(screen.getByRole('region', { name: mockCampaign.title })).toBeInTheDocument();
   });
 
-  it('exposes a control with an accessible name for the primary pledge action', async () => {
+  it('exposes a named control for the primary pledge action', () => {
     render(
       <CampaignDetailPanel
         campaign={mockCampaign}
@@ -99,12 +96,6 @@ describe.each(THEMES)('CampaignDetailPanel Accessibility (%s theme)', (theme: Th
       />,
     );
 
-    const controls = screen.getAllByRole('button');
-    expect(controls.length).greaterThan(0);
-    const named = controls.some((control) => {
-      const name = control.getAttribute('aria-label') ?? control.textContent ?? '';
-      return name.trim().length > 0;
-    });
-    expect(named).toBe(true);
+    expect(screen.getByRole('button', { name: 'Add pledge' })).toBeInTheDocument();
   });
 });

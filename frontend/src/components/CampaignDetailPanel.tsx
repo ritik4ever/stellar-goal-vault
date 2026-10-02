@@ -1,7 +1,10 @@
+
+
 import { FormEvent, useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { MousePointer2, Download, Link as LinkIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Campaign, AppConfig } from '../types/campaign';
+import { classifyPledgeError, type PledgeFailure } from '../lib/pledgeErrors';
 import CopyButton from './CopyButton';
 import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
@@ -27,28 +30,18 @@ interface CampaignDetailPanelProps {
   onConnectWallet?: () => Promise<void>;
   onDisconnectWallet?: () => void;
   onPledge?: (campaignId: string, amount: number, assetCode: string) => Promise<void>;
+  /** Re-sync a pledge that was confirmed on-chain but failed to reconcile. */
+  onRetryPledgeSync?: (campaignId: string) => Promise<void>;
   onClaim?: (campaign: Campaign) => Promise<void>;
   onSoftDelete?: (campaignId: string) => Promise<void>;
   onRefund?: (campaignId: string, contributor: string) => Promise<void>;
   onClose?: () => void;
 }
 
-const FEE_ESTIMATION_ERROR_CODES = new Set([
-  'SIMULATION_FAILED',
-  'SIMULATION_PREPARE_FAILED',
-  'SOURCE_ACCOUNT_LOAD_FAILED',
-  'STATE_RESTORE_REQUIRED',
-]);
-
-function describePledgeError(error: unknown): string {
-  const code = (error as { code?: string } | null)?.code;
-  if (code && FEE_ESTIMATION_ERROR_CODES.has(code)) {
-    return 'Could not estimate fee. Check your connection and retry.';
-  }
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-  return 'The pledge could not be completed. Please try again.';
+/** A classified pledge failure, scoped to the campaign it happened on. */
+interface ScopedPledgeFailure {
+  campaignId: string;
+  failure: PledgeFailure;
 }
 
 function networkName(config: AppConfig | null | undefined): string {
@@ -78,6 +71,7 @@ export function CampaignDetailPanel({
   onConnectWallet = async () => {},
   onDisconnectWallet = () => {},
   onPledge = async () => {},
+  onRetryPledgeSync = async () => {},
   onClaim = async () => {},
   onRefund = async () => {},
 }: CampaignDetailPanelProps) {
@@ -85,15 +79,14 @@ export function CampaignDetailPanel({
   const [pledgeToken, setPledgeToken] = useState('');
   const [refundContributor, setRefundContributor] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [pledgeError, setPledgeError] = useState<string | null>(null);
+  const [pledgeError, setPledgeError] = useState<ScopedPledgeFailure | null>(null);
+  const pledgeAmountRef = useRef<HTMLInputElement | null>(null);
   const [pledgeSuccess, setPledgeSuccess] = useState(false);
   const pledgeSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bannerImageError, setBannerImageError] = useState(false);
   const walletReady = appConfig?.walletIntegrationReady ?? false;
   const { downloadPng, toDataUrl } = useCampaignShareCard();
   const { addToast } = useToast();
-  const pledgeErrorRef = useRef<HTMLDivElement | null>(null);
-  const pledgeSuccessRef = useRef<HTMLDivElement | null>(null);
 
   const handleDownloadPng = useCallback(() => {
     if (!campaign) return;
@@ -129,18 +122,7 @@ export function CampaignDetailPanel({
     };
   }, []);
 
-  // Announce pledge errors and successes to screen readers without moving focus.
-  useEffect(() => {
-    if (pledgeError && pledgeErrorRef.current) {
-      pledgeErrorRef.current.focus();
-    }
-  }, [pledgeError]);
 
-  useEffect(() => {
-    if (pledgeSuccess && pledgeSuccessRef.current) {
-      pledgeSuccessRef.current.focus();
-    }
-  }, [pledgeSuccess]);
 
   const showSkeleton = useMinDisplayTime(isLoading);
   if (showSkeleton) {
@@ -203,8 +185,11 @@ export function CampaignDetailPanel({
   // opens. If that simulation fails, surface a retry-able error next to the
   // pledge button instead of only relying on the toast.
   const selectedToken = pledgeToken || activeCampaign.assetCode;
+  // Errors belong to the campaign they happened on; never show (or act on) them for another one.
+  const visiblePledgeError =
+    pledgeError && pledgeError.campaignId === activeCampaign.id ? pledgeError.failure : null;
 
-  async function submitPledge() {
+  function startAttempt() {
     setPledgeError(null);
     setPledgeSuccess(false);
     if (pledgeSuccessTimerRef.current !== null) {
@@ -212,19 +197,92 @@ export function CampaignDetailPanel({
       pledgeSuccessTimerRef.current = null;
     }
     setIsSubmitting(true);
+  }
+
+  function finishWithSuccess() {
+    setPledgeAmount('25');
+    setPledgeToken('');
+    setPledgeSuccess(true);
+    pledgeSuccessTimerRef.current = setTimeout(() => {
+      setPledgeSuccess(false);
+      pledgeSuccessTimerRef.current = null;
+    }, 4000);
+  }
+
+  async function submitPledge() {
+    const campaignId = activeCampaign.id;
+    startAttempt();
     try {
-      await onPledge(activeCampaign.id, Number(pledgeAmount), selectedToken);
-      setPledgeAmount('25');
-      setPledgeToken('');
-      setPledgeSuccess(true);
-      pledgeSuccessTimerRef.current = setTimeout(() => {
-        setPledgeSuccess(false);
-        pledgeSuccessTimerRef.current = null;
-      }, 4000);
+      await onPledge(campaignId, Number(pledgeAmount), selectedToken);
+      finishWithSuccess();
     } catch (error) {
-      setPledgeError(describePledgeError(error));
+      // Keep the entered amount and token so the user can recover without retyping.
+      setPledgeError({ campaignId, failure: classifyPledgeError(error) });
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function retryPledgeSync(campaignId: string) {
+    startAttempt();
+    try {
+      await onRetryPledgeSync(campaignId);
+      finishWithSuccess();
+    } catch (error) {
+      setPledgeError({ campaignId, failure: classifyPledgeError(error) });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function renderRecoveryAction(failure: PledgeFailure) {
+    const busy = isSubmitting || isPledgePending;
+    switch (failure.recovery) {
+      case 'retry':
+        return (
+          <button className="btn-ghost" type="button" disabled={busy} onClick={() => void submitPledge()}>
+            Retry
+          </button>
+        );
+      case 'retry-sync':
+        return (
+          <button
+            className="btn-ghost"
+            type="button"
+            disabled={busy}
+            onClick={() => void retryPledgeSync(activeCampaign.id)}
+          >
+            Retry sync
+          </button>
+        );
+      case 'connect-wallet':
+        return (
+          <button
+            className="btn-ghost"
+            type="button"
+            disabled={busy || isConnectingWallet}
+            onClick={() => {
+              void onConnectWallet().then(() => setPledgeError(null), () => undefined);
+            }}
+          >
+            Connect wallet
+          </button>
+        );
+      case 'fix-input':
+        return (
+          <button
+            className="btn-ghost"
+            type="button"
+            onClick={() => {
+              pledgeAmountRef.current?.focus();
+              pledgeAmountRef.current?.select();
+            }}
+          >
+            Edit amount
+          </button>
+        );
+      default:
+        return null;
     }
   }
 
@@ -378,40 +436,46 @@ export function CampaignDetailPanel({
         <div className="form-field">
           <label htmlFor="pledge-amount">Amount</label>
           <input
-            id="pledge-amount"
+            ref={pledgeAmountRef}
             type="number"
-            min="1"
-            step="1"
+            min="0.01"
+            step="0.01"
             value={pledgeAmount}
-            onChange={(e) => setPledgeAmount(e.target.value)}
-            aria-description="pledge-amount-help"
+            onChange={(event) => setPledgeAmount(event.target.value)}
             required
+            disabled={isSubmitting || isPledgePending}
           />
-          <small id="pledge-amount-help" className="muted">
-            Enter the amount you want to pledge.
-          </small>
-        </div>
+        </label>
 
-        <div className="form-field">
-          <label htmlFor="pledge-token">Asset</label>
-          <select
-            id="pledge-token"
-            value={pledgeToken}
-            onChange={(e) => setPledgeToken(e.target.value)}
-          >
-            <option value="">{`Default (${activeCampaign.assetCode})`}</option>
-            <option value={activeCampaign.assetCode}>{activeCampaign.assetCode}</option>
-          </select>
-        </div>
-
-        <div className="form-actions">
+        <div className="action-row campaign-detail-actions">
           <button
             className="btn-primary"
             type="submit"
-            disabled={isSubmitting || isPledgePending || !walletReady}
-            aria-busy={isSubmitting || isPledgePending}
+            disabled={
+              isSubmitting ||
+              isPledgePending ||
+              !activeCampaign.progress.canPledge ||
+              !connectedWallet
+            }
           >
-            {isSubmitting || isPledgePending ? 'Submitting...' : 'Pledge'}
+            {isSubmitting || isPledgePending ? 'Submitting...' : 'Add pledge'}
+          </button>
+
+          <button
+            className="btn-ghost"
+            type="button"
+            disabled={
+              isSubmitting ||
+              !activeCampaign.progress.canClaim ||
+              !connectedWallet ||
+              connectedWallet !== activeCampaign.creator ||
+              !walletReady
+            }
+            onClick={() => {
+              void handleClaim();
+            }}
+          >
+            Claim vault
           </button>
         </div>
 
@@ -422,66 +486,90 @@ export function CampaignDetailPanel({
         ) : null}
 
         {pledgeSuccess ? (
-          <div
-            ref={pledgeSuccessRef}
-            className="form-success"
-            role="status"
-            aria-live="polite"
-            tabIndex={-1}
-          >
-            Your pledge was submitted successfully.
-          </div>
+          <p className="form-success" role="status" aria-live="polite">
+            Pledge submitted successfully.
+          </p>
+        ) : null}
+
+        {!activeCampaign.progress.canPledge && !isSubmitting && !isPledgePending ? (
+          <p className="muted" style={{ fontSize: '0.875rem', marginTop: 4 }}>
+            {activeCampaign.progress.status === 'funded'
+              ? 'This campaign has reached its goal and is no longer accepting pledges.'
+              : activeCampaign.progress.status === 'claimed'
+                ? 'The creator has already claimed this campaign.'
+                : activeCampaign.progress.status === 'failed'
+                  ? 'This campaign did not reach its goal before the deadline.'
+                  : 'Pledging is not available for this campaign.'}
+          </p>
         ) : null}
       </form>
 
-      <div className="form-grid">
-        <div className="form-field">
-          <label htmlFor="refund-contributor">Contributor address</label>
+      <div
+        className="form-grid"
+        style={{ marginTop: 16 }}
+        role="group"
+        aria-label="Refund contributor"
+      >
+        <label className="field-group">
+          <span>Refund contributor</span>
           <input
-            id="refund-contributor"
             type="text"
             value={refundContributor}
             onChange={(e) => setRefundContributor(e.target.value)}
             placeholder="G..."
             aria-description="refund-contributor-help"
           />
-          <small id="refund-contributor-help" className="muted">
-            Enter the contributor address to refund.
-          </small>
-        </div>
+        </label>
 
-        <div className="form-actions">
+        <div className="action-row campaign-detail-actions">
           <button
             className="btn-ghost"
             type="button"
-            onClick={handleRefund}
-            disabled={isSubmitting || !walletReady}
+            disabled={
+              isSubmitting ||
+              !activeCampaign.progress.canRefund ||
+              refundContributor.trim().length === 0
+            }
+            onClick={() => {
+              void handleRefund();
+            }}
           >
-            Refund
+            Refund contributor
           </button>
         </div>
       </div>
 
-      <div className="form-actions">
-        <button
-          className="btn-primary"
-          type="button"
-          onClick={handleClaim}
-          disabled={isSubmitting || !walletReady}
-        >
-          Claim funds
-        </button>
-      </div>
+      {isPledgePending ? (
+        <p className="pending-note" role="status" aria-live="polite">
+          The pledge transaction is in flight. Campaign state will refresh after the backend
+          reconciles the result.
+        </p>
+      ) : null}
 
-      <div className="detail-actions">
+      {activeCampaign.metadata?.externalLink ? (
+        <div className="external-link-container">
+          <a
+            href={activeCampaign.metadata.externalLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-ghost"
+          >
+            Visit project website
+          </a>
+        </div>
+      ) : null}
+
+      <div className="share-actions" role="group" aria-label="Campaign actions">
         <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
-          <Download size={16} aria-hidden="true" /> Download card
+          <Download size={16} />
+          Download PNG
         </button>
         <button className="btn-ghost" type="button" onClick={handleCopyLink}>
-          <LinkIcon size={16} aria-hidden="true" /> Copy link
+          <LinkIcon size={16} />
+          Copy link
         </button>
-        <ShareButtons campaign={activeCampaign} />
       </div>
+      <ShareButtons campaign={activeCampaign} />
     </section>
   );
 }

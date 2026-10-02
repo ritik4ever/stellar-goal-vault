@@ -195,6 +195,24 @@ Or the simulation step shows a fee error before Freighter even opens.
 
 ---
 
+### When a Pledge Fails
+
+A failed pledge never clears the form: the amount and token you entered are kept, and the error below the **Add pledge** button offers the matching recovery action.
+
+| Message | Recovery action | What to do |
+|---------|-----------------|------------|
+| *Pledge cancelled. Your amount and token are kept…* | **Retry** | You closed the preview. Retry when ready. |
+| *Could not estimate fee. Check your connection and retry.* | **Retry** | Simulation failed before signing; nothing was sent. |
+| *Connect your wallet to pledge…* / Freighter not detected | **Connect wallet** | Unlock or connect Freighter, then pledge again. |
+| *Amount must use no more than N decimal places.* | **Edit amount** | Focuses the amount field so you can correct it. |
+| *The network did not confirm the pledge in time…* | **Retry** | The transaction may still land. Check Freighter's activity first so you do not pledge twice. |
+| *Your pledge was confirmed on-chain (tx …) but the campaign could not be updated…* | **Retry sync** | The pledge **succeeded on-chain**; only the backend sync failed. **Retry sync** re-sends the same transaction hash (the backend deduplicates it), so you are never charged again. Do not submit a new pledge. |
+| *Pledging is not configured correctly right now…* | none | Backend configuration problem; see [Contract ID Not Set](TROUBLESHOOTING.md). |
+
+Errors are tied to the campaign they happened on, so switching to another campaign does not show (or act on) them. If the pledge is recorded but the campaign totals fail to refresh, a warning toast asks you to reload; the pledge itself is not affected.
+
+---
+
 ## What Happens Under the Hood
 
 For contributors curious about the implementation:
