@@ -105,6 +105,7 @@ describe('eventIndexer observability', () => {
       expect.objectContaining({
         message: expect.stringContaining('RPC failure'),
         backoffMs: expect.any(Number),
+        reason: 'RPC unavailable',
       }),
       expect.any(String),
     );
@@ -127,6 +128,38 @@ describe('eventIndexer observability', () => {
         retryCount: expect.any(Number),
         outcome: 'success',
         lastErrorReason: expect.any(String),
+      }),
+      expect.any(String),
+    );
+
+    stopEventIndexer();
+  });
+
+  it('logs recovery when an RPC poll succeeds after failures', async () => {
+    vi.useFakeTimers();
+
+    const axios = await import('axios');
+
+    const postSpy = vi.spyOn(axios.default, 'post');
+    postSpy.mockRejectedValueOnce(new Error('RPC unavailable'));
+    postSpy.mockResolvedValueOnce({
+      data: { result: { latestLedger: 100, events: [] } },
+    });
+
+    const { startEventIndexer, stopEventIndexer } = await import('../eventIndexer');
+
+    startEventIndexer(); // First poll fails
+    await vi.runOnlyPendingTimersAsync();
+    
+    // Now advance timers to trigger next poll which succeeds
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'soroban_indexer_recovered',
+      expect.objectContaining({
+        message: expect.stringContaining('Indexer recovered after 1 failures'),
+        retryCount: 1,
+        outcome: 'success',
       }),
       expect.any(String),
     );
