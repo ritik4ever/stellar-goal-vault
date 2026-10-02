@@ -1677,13 +1677,6 @@ export function refundContributor(
     refundedPledgeCount: refundablePledges.length,
     refundedAt,
   });
-  createNotification({
-    campaignId,
-    type: 'refund_available',
-    title: `Refund processed for "${campaign.title}"`,
-    body: `${refundedAmount} ${campaign.assetCode} has been refunded to your wallet`,
-    targetWallet: contributor,
-  });
 
   return {
     campaign: getCampaign(campaignId)!,
