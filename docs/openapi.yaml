@@ -820,6 +820,74 @@ components:
         - page
         - pageSize
         - hasMore
+    JobHealth:
+      type: object
+      properties:
+        name:
+          type: string
+        state:
+          type: string
+          enum:
+            - healthy
+            - idle
+            - stale
+            - failing
+            - starting
+            - disabled
+        last_success_timestamp_seconds:
+          type:
+            - integer
+            - "null"
+        last_attempt_timestamp_seconds:
+          type:
+            - integer
+            - "null"
+        last_failure_timestamp_seconds:
+          type:
+            - integer
+            - "null"
+        freshness_lag_seconds:
+          type:
+            - integer
+            - "null"
+        stale_after_seconds:
+          type:
+            - integer
+            - "null"
+        consecutive_failures:
+          type: integer
+        total_failures:
+          type: integer
+        total_successes:
+          type: integer
+        last_error:
+          type:
+            - string
+            - "null"
+        last_run_processed:
+          type:
+            - integer
+            - "null"
+        details:
+          type: object
+          additionalProperties:
+            type:
+              - number
+              - "null"
+      required:
+        - name
+        - state
+        - last_success_timestamp_seconds
+        - last_attempt_timestamp_seconds
+        - last_failure_timestamp_seconds
+        - freshness_lag_seconds
+        - stale_after_seconds
+        - consecutive_failures
+        - total_failures
+        - total_successes
+        - last_error
+        - last_run_processed
+        - details
     HealthResponse:
       type: object
       properties:
@@ -844,12 +912,17 @@ components:
               type: string
           required:
             - reachable
+        jobs:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/JobHealth"
       required:
         - service
         - status
         - timestamp
         - uptimeSeconds
         - database
+        - jobs
     DeepHealthResponse:
       type: object
       properties:

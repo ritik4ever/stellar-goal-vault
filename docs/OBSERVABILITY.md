@@ -28,6 +28,12 @@ The tests check presence and type only, never exact timestamps, durations or ids
 ## Health: `GET /api/health`
 
 `service` (string), `status` (`ok` or `degraded`), `timestamp` (ISO string), `uptimeSeconds`
+(number), `database` (object: `status`, `reachable`, optional `error`). Returns 503 when the
+database is unreachable.
+
+## Structured logs
+
+Every request emits one `http_request` line when the response finishes, success or failure:
 (number), `database` (object: `status`, `reachable`, optional `error`), `indexer` (object —
 Soroban event indexer lag/freshness). Returns 503 when the database is unreachable or the
 indexer is failing/stale.
@@ -63,6 +69,9 @@ operators can filter by `event == "http_request"` in one stream without cross-co
 | --- | --- | --- |
 | `event` | string | Always `http_request` |
 | `message` | string | `"<METHOD> <path> <status> <ms>ms"` |
+| `requestId` | string | Echoed in the `X-Request-ID` header and in error bodies |
+| `method`, `path` | string | Request method and original URL |
+| `status` | number | HTTP status code |
 | `requestId` | string | Returned in the `X-Request-Id` response header and error bodies; generated per request when no inbound ID is supplied |
 | `method`, `path` | string | Request method and original URL |
 | `status` | number | HTTP status code (use this to determine severity) |
@@ -78,6 +87,9 @@ handler in `backend/src/index.ts`:
 | `status` | number | Status returned to the client |
 | `code` | string | Machine code, e.g. `NOT_FOUND`, `VALIDATION_ERROR` |
 | `err.message`, `err.name`, `err.stack` | string | Serialized error |
+
+Failing API responses carry the matching envelope: `{ success: false, error: { code, message,
+requestId, details? } }`, so a `requestId` from a client report can be found in the logs.
 | `indexer` | object | Background indexer freshness state (see `GET /api/health`) |
 
 Failing API responses carry the matching envelope:

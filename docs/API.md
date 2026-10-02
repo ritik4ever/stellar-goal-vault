@@ -54,6 +54,15 @@ Basic liveness check. Returns service status and a lightweight database reachabi
     "status": "up",
     "reachable": true
   },
+  "jobs": {
+    "event_indexer": {
+      "name": "event_indexer",
+      "state": "idle",
+      "last_success_timestamp_seconds": 1774647000,
+      "freshness_lag_seconds": 12,
+      "consecutive_failures": 0,
+      "details": { "ledger_lag": 0 }
+    }
   "indexer": {
     "lastSuccessfulPollTime": 1779500000000,
     "lastKnownLedger": 123456,
@@ -68,6 +77,9 @@ Basic liveness check. Returns service status and a lightweight database reachabi
 - `database.status` is `"up"` or `"down"` based on a lightweight SQLite reachability check.
 - `indexer` exposes the last successful update and freshness/lag for the background event indexer.
 - Returns `503` when the service is degraded.
+- `jobs` reports freshness for background work (`event_indexer`, `webhook_delivery`). It is
+  informational and never changes `status` or the HTTP code. The example above is abridged;
+  see [JOB_HEALTH.md](JOB_HEALTH.md) for every field and how to read the states.
 
 ---
 

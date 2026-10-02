@@ -50,6 +50,8 @@ import {
 } from './services/campaignStore';
 import { checkDbHealth } from './services/db';
 import { getCampaignTimeline, listCampaignHistory } from './services/eventHistory';
+import { startEventIndexer } from './services/eventIndexer';
+import { getJobHealthSnapshots } from './services/jobHealth';
 import { startEventIndexer, getIndexerStatus } from './services/eventIndexer';
 import { listNotifications, getUnreadCount, markAllRead } from './services/notificationService';
 import {
@@ -393,6 +395,21 @@ app.get('/api/health', (_req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
     uptimeSeconds: Number(process.uptime().toFixed(3)),
     database,
+    // Background-job freshness. Informational: it does not change `status` or the HTTP
+    // code, so a flaky RPC cannot make orchestrators restart an otherwise healthy API.
+    jobs: getJobHealthSnapshots(),
+  });
+});
+app.get('/api/contributors/:address/pledges', async (req: Request, res: Response) => {
+  const { address } = req.params;
+  const pagination = parsePledgeListPaginationQuery(req.query);
+  const result = await listContributorPledges(address, pagination);
+  res.setHeader('X-Total-Count', String(result.total));
+  res.json({
+    pledges: result.pledges,
+    page: pagination.page,
+    limit: pagination.limit,
+    total: result.total,
     indexer,
     memory,
   });
