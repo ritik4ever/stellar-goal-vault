@@ -30,7 +30,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:openapi": "npm run build:openapi && git diff --exit-code -- ../docs/openapi.yaml",
-    "validate:openapi": "swagger-cli validate ../docs/openapi.yaml"
+    "validate:openapi": "swagger-cli validate ../docs/openapi.yaml",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:unit": "vitest run --config vitest.config.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

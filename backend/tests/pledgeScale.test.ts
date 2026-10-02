@@ -15,14 +15,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * Deterministic, in-process, no network or external mutable data.
  */
 
+const WORKER_ID = process.env.VITEST_WORKER_ID ?? process.env.VITEST_POOL_ID ?? '0';
 const TEST_DB_PATH = path.join(
   os.tmpdir(),
-  `stellar-goal-vault-pledge-scale-${process.pid}-${Date.now()}.db`,
+  `stellar-goal-vault-pledge-scale-${process.pid}-w${WORKER_ID}-${Date.now()}.db`,
 );
 
+// Always own the DB path for this fork — ignore any shared CI DB_PATH.
 process.env.DB_PATH = TEST_DB_PATH;
 process.env.CONTRACT_ID = '';
 process.env.NODE_ENV = 'test';
+delete process.env.REDIS_URL;
 
 const CREATOR = `G${'A'.repeat(55)}`;
 const PLEDGE_COUNT = 1_000;

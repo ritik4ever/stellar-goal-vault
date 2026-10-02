@@ -36,27 +36,38 @@ vi.mock('../src/services/sorobanRpc', () => ({
   }),
 }));
 
+/**
+ * Per-fork / per-worker SQLite path. Avoids the shared CI `DB_PATH` trap and
+ * keeps file-parallel vitest forks from colliding on one database file.
+ */
+const WORKER_ID = process.env.VITEST_WORKER_ID ?? process.env.VITEST_POOL_ID ?? '0';
 const TEST_DB_PATH = path.join(
   os.tmpdir(),
-  `stellar-goal-vault-integration-${process.pid}-${Date.now()}.db`,
+  `stellar-goal-vault-integration-${process.pid}-w${WORKER_ID}-${Date.now()}.db`,
 );
 
+// Always own the DB path for this fork — ignore any shared CI DB_PATH.
 process.env.DB_PATH = TEST_DB_PATH;
 process.env.CONTRACT_ID = 'mock-contract';
 process.env.NODE_ENV = 'test';
+// Integration suite must not talk to Redis (shared mutable cache across jobs).
+delete process.env.REDIS_URL;
 
 let app: Express;
 let initCampaignStore: (typeof import('../src/services/campaignStore'))['initCampaignStore'];
 let getCampaignWithProgress: (typeof import('../src/services/campaignStore'))['getCampaignWithProgress'];
 let getDb: (typeof import('../src/services/db'))['getDb'];
 let resetDbForTests: (typeof import('../src/services/db'))['resetDbForTests'];
+let invalidateCampaignCache: (typeof import('../src/services/campaignCache'))['invalidateCampaignCache'];
+let clearRateLimitCache: (typeof import('../src/index'))['clearRateLimitCache'];
 let clock: Clock;
 
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
-  ({ app } = await import('../src/index'));
+  ({ app, clearRateLimitCache } = await import('../src/index'));
   ({ initCampaignStore, getCampaignWithProgress } = await import('../src/services/campaignStore'));
   ({ getDb, resetDbForTests } = await import('../src/services/db'));
+  ({ invalidateCampaignCache } = await import('../src/services/campaignCache'));
   initCampaignStore();
 });
 
@@ -64,13 +75,17 @@ afterAll(() => {
   resetDbForTests();
   try {
     fs.rmSync(TEST_DB_PATH, { force: true });
+    fs.rmSync(`${TEST_DB_PATH}-shm`, { force: true });
+    fs.rmSync(`${TEST_DB_PATH}-wal`, { force: true });
   } catch {
     // Windows can briefly hold the SQLite file handle; leaving a temp file is harmless.
   }
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   clock = freezeClock();
+  clearRateLimitCache();
+  await invalidateCampaignCache();
   const db = getDb();
   db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM campaign_events`).run();

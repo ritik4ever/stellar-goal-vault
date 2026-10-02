@@ -14,12 +14,19 @@ on:
 jobs:
   integration-tests:
     runs-on: ubuntu-latest
-    name: Integration Tests
+    name: API Integration Suite (${{ matrix.node-version }})
 
     strategy:
       matrix:
         node-version: [18.x, 20.x]
       fail-fast: false
+
+    env:
+      CI: true
+      NODE_ENV: test
+      # Do not set a shared DB_PATH — each fork allocates an isolated temp database.
+      VITEST_INTEGRATION_MAX_FORKS: "2"
+      VITEST_INTEGRATION_COVERAGE_DIR: coverage-integration-${{ matrix.node-version }}
 
     steps:
       - name: Checkout code
@@ -33,36 +40,33 @@ jobs:
           cache-dependency-path: "backend/package-lock.json"
 
       - name: Install dependencies
-        run: |
-          cd backend
-          npm ci
+        working-directory: backend
+        run: npm ci
 
-      - name: Run integration tests (with coverage)
-        run: |
-          cd backend
-          npm test -- --coverage
-        env:
-          NODE_ENV: test
-          DB_PATH: /tmp/stellar-goal-vault-test.db
-      - name: Upload backend coverage HTML
+      - name: Run API integration suite (parallel-safe forks)
+        working-directory: backend
+        run: npm run test:integration -- --coverage
+
+      - name: Upload integration coverage HTML
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-coverage-html
-          path: backend/coverage
+          name: backend-integration-coverage-${{ matrix.node-version }}
+          path: backend/coverage-integration-${{ matrix.node-version }}
+          if-no-files-found: ignore
 
       - name: Upload coverage to Codecov
+        if: always()
         uses: codecov/codecov-action@v3
         with:
-          files: ./backend/coverage/coverage-final.json
-          flags: backend
-          name: backend-coverage
-        if: always()
+          files: ./backend/coverage-integration-${{ matrix.node-version }}/coverage-final.json
+          flags: backend-integration
+          name: backend-integration-coverage-${{ matrix.node-version }}
 
       - name: Clean up test databases
-        run: |
-          rm -f /tmp/stellar-goal-vault-*.db
         if: always()
+        run: |
+          rm -f /tmp/stellar-goal-vault-*.db /tmp/stellar-goal-vault-*.db-shm /tmp/stellar-goal-vault-*.db-wal
 
   test-results:
     runs-on: ubuntu-latest
@@ -74,9 +78,9 @@ jobs:
       - name: Test Status
         run: |
           if [ "${{ needs.integration-tests.result }}" == "success" ]; then
-            echo "✅ All integration tests passed"
+            echo "All API integration tests passed"
             exit 0
           else
-            echo "❌ Integration tests failed"
+            echo "API integration tests failed"
             exit 1
           fi
