@@ -14,8 +14,11 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      // text + text-summary keep CI logs readable; lcov/html/json are uploaded as artifacts
+      reporter: ['text', 'text-summary', 'json', 'html', 'lcov'],
+      reportsDirectory: './coverage',
       exclude: ['node_modules/', 'tests/', 'dist/'],
+      // Preserve the repository's existing line-coverage gate (do not weaken).
       thresholds: {
         lines: 80,
       },
