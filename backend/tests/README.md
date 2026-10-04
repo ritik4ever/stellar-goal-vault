@@ -64,10 +64,16 @@ Tests will re-run whenever files change.
 ### Run Tests with Coverage
 
 ```bash
-npm test -- --coverage
+npm run test:coverage
 ```
 
-Generates coverage reports in HTML format (view in `coverage/index.html`).
+Equivalent to `vitest run --coverage`. This:
+
+1. Prints a focused text + text-summary coverage report in CI logs (regressions are visible)
+2. Writes `coverage/` artifacts (`html`, `lcov.info`, `coverage-final.json`) for download
+3. **Enforces the repository line-coverage threshold of 80%** (configured in `vitest.config.ts` — do not weaken)
+
+View the HTML report locally at `coverage/index.html`.
 
 ### Debug Tests
 
