@@ -1,0 +1,4 @@
+{
+  "lines": 80,
+  "description": "Matches the repository frontend/backend Vitest lines threshold. Do not weaken."
+}
