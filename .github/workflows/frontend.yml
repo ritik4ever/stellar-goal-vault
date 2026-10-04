@@ -39,7 +39,7 @@ jobs:
         run: npm run lint
 
       - name: Run tests with coverage
-        run: npm test -- --run --coverage --coverage.provider=v8 --coverage.reporter=lcov --coverage.reporter=text
+        run: npm test -- --run --coverage --coverage.provider=v8 --coverage.reporter=lcov --coverage.reporter=text --coverage.threshold=100
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -47,6 +47,11 @@ jobs:
           name: frontend-coverage
           path: frontend/coverage/
           retention-days: 7
+      - name: Enforce coverage threshold
+        run: |
+          if [ -f frontend/coverage/lcov.info ]; then
+            npx nyc report --reporter=text-summary --reporter=lcov
+          fi
 
       - name: Build
         run: npm run build
