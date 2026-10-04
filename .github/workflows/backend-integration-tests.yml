@@ -40,10 +40,15 @@ jobs:
       - name: Run integration tests (with coverage)
         run: |
           cd backend
-          npm test -- --coverage
+          npm run test:coverage
         env:
           NODE_ENV: test
           DB_PATH: /tmp/stellar-goal-vault-test.db
+      - name: Publish coverage summary
+        if: always()
+        working-directory: backend
+        run: node scripts/coverage-summary.mjs
+
       - name: Upload backend coverage HTML
         if: always()
         uses: actions/upload-artifact@v4
@@ -54,7 +59,7 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
-          files: ./backend/coverage/coverage-final.json
+          files: ./backend/coverage/coverage-final.json,./backend/coverage/lcov.info
           flags: backend
           name: backend-coverage
         if: always()
