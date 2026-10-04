@@ -13,6 +13,12 @@ jobs:
     name: Playwright E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CI: true
+      PLAYWRIGHT_WORKERS: "2"
+      PLAYWRIGHT_FRONTEND_PORT: "3000"
+      PLAYWRIGHT_BACKEND_PORT: "3001"
+      PLAYWRIGHT_OUTPUT_DIR: test-results
 
     services:
       # Redis service for backend caching
