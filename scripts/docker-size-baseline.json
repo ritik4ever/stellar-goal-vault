@@ -1,0 +1,18 @@
+{
+  "//": "Stable performance signal for Docker image builds. Sizes are byte counts; 1 MB = 1048576 bytes. baselineBytes is the recorded reference size, maxBytes is the hard ceiling (from DOCKER_PERFORMANCE.md recommended limits). The regression check fails only when an image exceeds maxBytes, so the signal is stable and never timing-dependent.",
+  "tolerancePct": 10,
+  "images": [
+    {
+      "service": "backend",
+      "context": "./backend",
+      "baselineBytes": 195035136,
+      "maxBytes": 262144000
+    },
+    {
+      "service": "frontend",
+      "context": "./frontend",
+      "baselineBytes": 49283072,
+      "maxBytes": 62914560
+    }
+  ]
+}
