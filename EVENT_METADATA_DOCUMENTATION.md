@@ -28,6 +28,8 @@ interface BlockchainMetadata {
 - **contractId**: The Soroban smart contract that emitted this event. Helps filter events by contract.
 - **source**: Indicates whether the event originated locally ('local') or from blockchain sync ('soroban').
 
+### Campaign Creation Event Topics and Payload
+
 ## Database Schema Changes
 
 The `campaign_events` table now includes a `blockchain_metadata` column:
@@ -68,6 +70,8 @@ Event objects in API responses now include the optional `blockchainMetadata` fie
 
 ## Event Sources
 
+### Campaign Creation Event Emission
+
 ### Local Events
 Events created by local API operations (create campaign, add pledge, etc.) are marked with `source: 'local'` and contain no blockchain-specific fields until the operations are synchronized to the blockchain.
 
@@ -76,12 +80,16 @@ Events synchronized from the Soroban network contain full blockchain metadata in
 
 ## Backward Compatibility
 
+### Campaign Creation Event Guarantees
+
 - Existing events without blockchain metadata continue to work normally
 - The `blockchainMetadata` field is optional in all interfaces
 - Local event flows remain unchanged
 - API responses include the new field only when metadata is available
 
 ## New Query Functions
+
+### Campaign Creation Event Indexing
 
 Additional helper functions are available for querying events by blockchain metadata:
 

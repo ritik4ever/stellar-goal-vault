@@ -49,7 +49,12 @@ describe('webhookService', () => {
 
   describe('dispatchWebhook', () => {
     it('returns false immediately if no webhook URL is configured', async () => {
-      const result = await dispatchWebhook('campaign_funded', '101', { amount: 100 }, { webhookUrl: '' });
+      const result = await dispatchWebhook(
+        'campaign_funded',
+        '101',
+        { amount: 100 },
+        { webhookUrl: '' },
+      );
       expect(result).toBe(false);
       expect(axios.post).not.toHaveBeenCalled();
     });
@@ -106,9 +111,7 @@ describe('webhookService', () => {
     it('retries on timeout-style connection aborts and records the final timeout in the DLQ', async () => {
       const timeoutError = new Error('timeout of 4000ms exceeded');
       (timeoutError as Error & { code?: string }).code = 'ECONNABORTED';
-      vi.mocked(axios.post)
-        .mockRejectedValueOnce(timeoutError)
-        .mockRejectedValueOnce(timeoutError);
+      vi.mocked(axios.post).mockRejectedValueOnce(timeoutError).mockRejectedValueOnce(timeoutError);
 
       const result = await dispatchWebhook(
         'campaign_failed',
@@ -157,7 +160,12 @@ describe('webhookService', () => {
 
       // Populate again and test clear
       vi.mocked(axios.post).mockRejectedValueOnce(new Error('500 Error'));
-      await dispatchWebhook('campaign_failed', '104', {}, { webhookUrl: 'https://example.com/webhook', maxRetries: 0 });
+      await dispatchWebhook(
+        'campaign_failed',
+        '104',
+        {},
+        { webhookUrl: 'https://example.com/webhook', maxRetries: 0 },
+      );
       expect(getDeadLetterQueue()).toHaveLength(1);
 
       clearDeadLetterQueue();

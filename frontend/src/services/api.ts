@@ -182,7 +182,10 @@ export async function getCampaignHistoryPage(
 
 export async function getCampaignHistory(campaignId: string): Promise<CampaignEvent[]> {
   // Bounded initial fetch for legacy callers; preserves ordering via getCampaignHistoryPage
-  const { data } = await getCampaignHistoryPage(campaignId, { page: 1, pageSize: HISTORY_DEFAULT_PAGE_SIZE });
+  const { data } = await getCampaignHistoryPage(campaignId, {
+    page: 1,
+    pageSize: HISTORY_DEFAULT_PAGE_SIZE,
+  });
   return data;
 }
 
@@ -202,9 +205,13 @@ export async function getDistinctAssetCodes(): Promise<string[]> {
   return body.data;
 }
 
-export async function listNotifications(wallet: string, options?: {
-  limit?: number; offset?: number;
-}): Promise<{ data: NotificationItem[]; total: number; unreadCount: number }> {
+export async function listNotifications(
+  wallet: string,
+  options?: {
+    limit?: number;
+    offset?: number;
+  },
+): Promise<{ data: NotificationItem[]; total: number; unreadCount: number }> {
   const params = new URLSearchParams({ wallet });
   if (options?.limit) params.set('limit', String(options.limit));
   if (options?.offset) params.set('offset', String(options.offset));
@@ -333,7 +340,11 @@ export async function getContributorProfile(address: string): Promise<Contributo
       // All pledges in the array belong to the same campaign, so metadata is consistent
       const firstPledge = campaignPledges[0];
       const title = firstPledge.campaignName || 'Unknown Campaign';
-      const status = firstPledge.claimedAt ? 'claimed' : firstPledge.pledgedAmount >= firstPledge.targetAmount ? 'funded' : 'open';
+      const status = firstPledge.claimedAt
+        ? 'claimed'
+        : firstPledge.pledgedAmount >= firstPledge.targetAmount
+          ? 'funded'
+          : 'open';
       const assetCode = firstPledge.assetCode || 'USDC';
 
       for (const pledge of campaignPledges) {

@@ -96,7 +96,9 @@ export function loadMigrations(dir: string = resolveMigrationsDir()): Migration[
 
     const down = downs.get(version);
     if (!down || down.name !== up.name) {
-      throw new Error(`Migration ${up.file} is missing its rollback ${version.toString().padStart(3, '0')}_${up.name}.down.sql`);
+      throw new Error(
+        `Migration ${up.file} is missing its rollback ${version.toString().padStart(3, '0')}_${up.name}.down.sql`,
+      );
     }
 
     const upSql = fs.readFileSync(path.join(dir, up.file), 'utf8');
@@ -170,10 +172,7 @@ function assertAppliedMatch(applied: AppliedMigration[], migrations: Migration[]
  * Records migrations as applied without executing them. Used to adopt
  * databases whose schema was already brought to that state by other means.
  */
-export function markMigrationsApplied(
-  database: MigrationDatabase,
-  migrations: Migration[],
-): void {
+export function markMigrationsApplied(database: MigrationDatabase, migrations: Migration[]): void {
   ensureMigrationsTable(database);
   database.transaction(() => {
     for (const migration of migrations) {

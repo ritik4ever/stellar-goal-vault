@@ -54,22 +54,13 @@ describe('HISTORY_PAGE_SIZE', () => {
 
 describe('sortHistoryEvents', () => {
   it('orders events ascending by timestamp, then by id', () => {
-    const events = [
-      makeEvent(9, 300),
-      makeEvent(4, 100),
-      makeEvent(3, 100),
-      makeEvent(7, 200),
-    ];
+    const events = [makeEvent(9, 300), makeEvent(4, 100), makeEvent(3, 100), makeEvent(7, 200)];
 
     expect(sortHistoryEvents(events).map((event) => event.id)).toEqual([3, 4, 7, 9]);
   });
 
   it('uses id to break timestamp ties so the order is total, not arbitrary', () => {
-    const events = [
-      makeEvent(12, 500),
-      makeEvent(2, 500),
-      makeEvent(8, 500),
-    ];
+    const events = [makeEvent(12, 500), makeEvent(2, 500), makeEvent(8, 500)];
 
     expect(sortHistoryEvents(events).map((event) => event.id)).toEqual([2, 8, 12]);
   });
@@ -166,7 +157,16 @@ describe('mergeCampaignDetail', () => {
   it('adopts the detail pledges by reference and the detail metadata', () => {
     const summary = makeCampaign(CAMPAIGN_ID, 50);
     const detail = makeCampaign(CAMPAIGN_ID, 50);
-    detail.pledges = [{ id: 1, campaignId: CAMPAIGN_ID, contributor: 'GABC', amount: 10, assetCode: 'USDC', createdAt: 1 }];
+    detail.pledges = [
+      {
+        id: 1,
+        campaignId: CAMPAIGN_ID,
+        contributor: 'GABC',
+        amount: 10,
+        assetCode: 'USDC',
+        createdAt: 1,
+      },
+    ];
     detail.metadata = { imageUrl: 'https://example.test/banner.png' };
 
     const merged = mergeCampaignDetail(summary, detail);

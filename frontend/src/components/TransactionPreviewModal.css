@@ -14,6 +14,13 @@
   padding: 20px;
 }
 
+@media (max-width: 640px) {
+  .modal-overlay {
+    padding: 12px;
+    align-items: flex-start;
+  }
+}
+
 .modal-content {
   width: 100%;
   max-width: 600px;
@@ -21,6 +28,13 @@
   overflow-y: auto;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
   border: 1px solid var(--border-glass-bright);
+}
+
+@media (max-width: 640px) {
+  .modal-content {
+    max-height: calc(100vh - 24px);
+    max-width: 100%;
+  }
 }
 
 .xdr-section {
@@ -40,6 +54,8 @@
   font-weight: 500;
   font-size: 0.9rem;
   user-select: none;
+  min-height: 44px;
+  padding: 4px 0;
 }
 
 .xdr-toggle input {
@@ -47,6 +63,9 @@
   width: 16px;
   height: 16px;
   accent-color: var(--primary);
+  flex-shrink: 0;
+  min-width: 16px;
+  min-height: 16px;
 }
 
 .xdr-toggle:hover {
@@ -65,4 +84,27 @@
   white-space: pre-wrap;
   max-height: 200px;
   overflow-y: auto;
+}
+
+/* Mobile-friendly button layout */
+@media (max-width: 640px) {
+  .modal-content .action-row {
+    flex-direction: column-reverse;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .modal-content .action-row button {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  .xdr-content {
+    font-size: 0.75rem;
+    max-height: 150px;
+  }
+
+  .xdr-section {
+    padding: 12px;
+  }
 }

@@ -157,6 +157,8 @@ fn create_campaign(
 
 **Emits:** `CampaignCreated` (with the first token from the accepted list)
 
+**Indexer note:** The `CampaignCreated` event is emitted exactly once per successful `create_campaign` call, after all validation and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Create")` and use `campaign_id` as the primary dedup key.
+
 **Gas estimate:** base 25,000 + 3,000 per accepted token + 5,000 per storage write ≈ 45,000 units + 20% headroom = **54,000**
 
 ---
@@ -681,6 +683,8 @@ All events use the topic prefix `(symbol_short!("Goal"), ...)`.
 | `metadata` | `String` | Campaign metadata |
 
 **Emitted by:** `create_campaign`
+
+**Stability contract:** Topic symbols `"Goal"` and `"Create"` are frozen for the lifetime of this contract version. Payload fields are append-only; existing field order and types must not change without a major version bump. `metadata` is the creator-supplied string and may contain arbitrary UTF-8 — indexers should treat it as untrusted display data, not as a key.
 
 ---
 

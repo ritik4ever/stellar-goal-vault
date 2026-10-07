@@ -152,10 +152,10 @@ describe('Dependency policy — no local file: overrides', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('Dependency policy — security-critical packages present', () => {
   const REQUIRED_BACKEND_DEPS = [
-    'helmet',    // HTTP security headers (tested by security.test.ts)
-    'cors',      // CORS policy enforcement (tested by cors-security.test.ts)
-    'express',   // The HTTP framework — removing it would collapse everything
-    'zod',       // Input validation schema library used by validateBody middleware
+    'helmet', // HTTP security headers (tested by security.test.ts)
+    'cors', // CORS policy enforcement (tested by cors-security.test.ts)
+    'express', // The HTTP framework — removing it would collapse everything
+    'zod', // Input validation schema library used by validateBody middleware
   ];
 
   for (const pkg of REQUIRED_BACKEND_DEPS) {
@@ -214,10 +214,9 @@ describe('Dependency policy — Dependabot configuration', () => {
     const raw = readText(path.join(GITHUB, 'dependabot.yml'));
     // Ensure it's not set to 0 for both entries combined
     const zeroMatches = [...raw.matchAll(/open-pull-requests-limit:\s*0/g)];
-    expect(
-      zeroMatches.length,
-      'open-pull-requests-limit: 0 disables Dependabot PRs entirely',
-    ).toBe(0);
+    expect(zeroMatches.length, 'open-pull-requests-limit: 0 disables Dependabot PRs entirely').toBe(
+      0,
+    );
   });
 });
 
@@ -253,10 +252,7 @@ describe('Dependency policy — CI audit enforcement', () => {
     const auditStepIdx = raw.indexOf('npm audit --audit-level');
     expect(auditStepIdx).toBeGreaterThan(-1);
     // The 300 chars after the audit command should not contain continue-on-error: true
-    const auditContext = raw.slice(
-      Math.max(0, auditStepIdx - 200),
-      auditStepIdx + 300,
-    );
+    const auditContext = raw.slice(Math.max(0, auditStepIdx - 200), auditStepIdx + 300);
     expect(auditContext).not.toContain('continue-on-error: true');
   });
 
@@ -308,10 +304,7 @@ describe('Dependency policy — no dangerous install flags in scripts', () => {
 // 8. devDependencies must not duplicate production dependencies
 // ─────────────────────────────────────────────────────────────────────────────
 describe('Dependency policy — no cross-listed packages', () => {
-  function findDuplicates(
-    deps: Record<string, string>,
-    devDeps: Record<string, string>,
-  ): string[] {
+  function findDuplicates(deps: Record<string, string>, devDeps: Record<string, string>): string[] {
     return Object.keys(deps).filter((name) => name in devDeps);
   }
 
@@ -320,10 +313,7 @@ describe('Dependency policy — no cross-listed packages', () => {
     const deps = (pkg.dependencies ?? {}) as Record<string, string>;
     const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>;
     const dupes = findDuplicates(deps, devDeps);
-    expect(
-      dupes,
-      `Packages in both deps and devDeps: ${dupes.join(', ')}`,
-    ).toHaveLength(0);
+    expect(dupes, `Packages in both deps and devDeps: ${dupes.join(', ')}`).toHaveLength(0);
   });
 
   it('frontend has no package listed in both dependencies and devDependencies', () => {
@@ -331,10 +321,7 @@ describe('Dependency policy — no cross-listed packages', () => {
     const deps = (pkg.dependencies ?? {}) as Record<string, string>;
     const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>;
     const dupes = findDuplicates(deps, devDeps);
-    expect(
-      dupes,
-      `Packages in both deps and devDeps: ${dupes.join(', ')}`,
-    ).toHaveLength(0);
+    expect(dupes, `Packages in both deps and devDeps: ${dupes.join(', ')}`).toHaveLength(0);
   });
 });
 
@@ -401,18 +388,16 @@ describe('Dependency policy — canary / self-verification', () => {
 describe('Dependency policy — no VCS protocol specifiers', () => {
   // Prefixes that indicate a VCS source rather than the npm registry.
   const VCS_PREFIXES = [
-    'git+',        // git+https:// or git+ssh://
-    'git://',      // bare git protocol
-    'github:',     // github:owner/repo shorthand
-    'bitbucket:',  // bitbucket:owner/repo shorthand
-    'gitlab:',     // gitlab:owner/repo shorthand
+    'git+', // git+https:// or git+ssh://
+    'git://', // bare git protocol
+    'github:', // github:owner/repo shorthand
+    'bitbucket:', // bitbucket:owner/repo shorthand
+    'gitlab:', // gitlab:owner/repo shorthand
   ];
 
   function findVcsDeps(deps: Record<string, string>): string[] {
     return Object.entries(deps)
-      .filter(([, version]) =>
-        VCS_PREFIXES.some((prefix) => String(version).startsWith(prefix)),
-      )
+      .filter(([, version]) => VCS_PREFIXES.some((prefix) => String(version).startsWith(prefix)))
       .map(([name]) => name);
   }
 
@@ -661,7 +646,9 @@ describe('Dependency policy — no npm: protocol alias overrides', () => {
     const overrides = (pkg.overrides ?? {}) as Record<string, unknown>;
     const resolutions = (pkg.resolutions ?? {}) as Record<string, unknown>;
     const bad = [...findNpmAliasOverrides(overrides), ...findNpmAliasOverrides(resolutions)];
-    expect(bad, `npm: alias overrides found (supply-chain risk): ${bad.join(', ')}`).toHaveLength(0);
+    expect(bad, `npm: alias overrides found (supply-chain risk): ${bad.join(', ')}`).toHaveLength(
+      0,
+    );
   });
 
   it('frontend package.json overrides have no npm: alias redirects', () => {
@@ -714,10 +701,9 @@ describe('Dependency policy — lockfile integrity hash presence', () => {
     const withIntegrity = entries.filter(
       ([key, meta]) => key !== '' && typeof meta === 'object' && 'integrity' in meta,
     );
-    expect(
-      withIntegrity.length,
-      'No package entries with integrity hashes found',
-    ).toBeGreaterThan(0);
+    expect(withIntegrity.length, 'No package entries with integrity hashes found').toBeGreaterThan(
+      0,
+    );
   });
 
   it('backend lockfile integrity hashes use sha512 (strongest algorithm)', () => {

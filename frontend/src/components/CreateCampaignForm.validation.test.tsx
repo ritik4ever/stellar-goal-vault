@@ -180,9 +180,7 @@ describe('CreateCampaignForm Validation', () => {
       const maxPerContributorInput = screen.getByLabelText(/max per contributor/i);
       fireEvent.blur(maxPerContributorInput);
 
-      expect(
-        screen.queryByText(/Max per contributor must be/i),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/Max per contributor must be/i)).not.toBeInTheDocument();
     });
   });
 });

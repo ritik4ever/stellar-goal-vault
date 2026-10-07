@@ -1,5 +1,7 @@
 # Stellar Goal Vault
 
+Read this README in: [English](./README.md) | [Español](./docs/README.es.md) | [Português](./docs/README.pt.md)
+
 Stellar Goal Vault is a lightweight crowdfunding MVP for the Stellar ecosystem.
 
 It includes:
@@ -279,6 +281,9 @@ Base URL:
 ### `GET /api/campaigns`
 
 - Returns all campaigns with computed progress
+- Optional `page` and `limit` parameters enable pagination; provide both, with `limit` from 1 to 100. Invalid values or only one parameter return `400`.
+- Omitting both parameters preserves the default and returns the full filtered campaign list.
+- Paginated responses include total pages and `hasPreviousPage` / `hasNextPage` navigation flags.
 - Query parameters:
   - `q` (optional): Search query to filter campaigns by title, creator, or campaign ID (case-insensitive)
   - `asset` (optional): Filter campaigns by asset code (e.g., USDC, XLM)
@@ -602,6 +607,7 @@ Please see [SECURITY.md](./SECURITY.md) for our responsible disclosure policy, s
 ## Contributing
 
 Please see the [Contributing Guide](./CONTRIBUTING.md) for setup and contribution guidelines.
+Translation credits are listed in [CONTRIBUTORS.md](./CONTRIBUTORS.md).
 See also [CHANGELOG.md](./CHANGELOG.md) for a full history of notable changes across releases.
 
 ## Known limitations

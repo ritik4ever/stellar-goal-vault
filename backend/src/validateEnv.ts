@@ -150,7 +150,10 @@ export const envSchema = z
         });
       }
 
-      const apiKeys = (data.API_KEYS || '').split(',').filter(Boolean);
+      const apiKeys = (data.API_KEYS || '')
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean);
       if (apiKeys.length === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

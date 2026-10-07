@@ -8,10 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
  * and migration write/read behavior remains correct.
  */
 
-const TEST_DB = path.join(
-  '/tmp',
-  `sgv-migration-runner-indexes-${process.pid}-${Date.now()}.db`,
-);
+const TEST_DB = path.join('/tmp', `sgv-migration-runner-indexes-${process.pid}-${Date.now()}.db`);
 
 const MIGRATION_RUNNER_INDEXES = [
   'idx_pledges_token_id_null',

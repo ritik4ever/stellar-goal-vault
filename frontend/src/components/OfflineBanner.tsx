@@ -11,15 +11,13 @@ export function OfflineBanner() {
   if (!isOffline) return null;
 
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      aria-label="You are offline"
-      className="offline-banner"
-    >
-      <span className="offline-banner__icon" aria-hidden="true">⚡</span>
+    <div role="status" aria-live="polite" aria-label="You are offline" className="offline-banner">
+      <span className="offline-banner__icon" aria-hidden="true">
+        ⚡
+      </span>
       <span className="offline-banner__message">
-        You&apos;re offline — showing cached data. Some features are unavailable until you reconnect.
+        You&apos;re offline — showing cached data. Some features are unavailable until you
+        reconnect.
       </span>
     </div>
   );

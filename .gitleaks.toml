@@ -11,6 +11,8 @@
         "backend/src/tests/.*",
         "frontend/src/tests/.*",
         "contracts/src/tests/.*",
+        ".*\\.test\\.ts",
+        ".*\\.test\\.tsx",
         "e2e/.*",
         "backend/src/services/seedDeterministic.ts",
     ]

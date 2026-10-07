@@ -46,7 +46,12 @@ describe.each(THEMES)('CampaignsTable Accessibility (%s theme)', (theme: ThemeMo
   it('has no accessibility violations with campaign data', async () => {
     const { container } = render(
       <MemoryRouter>
-        <CampaignsTable campaigns={[mockCampaign]} selectedCampaignId={null} onSelect={() => {}} error={null} />
+        <CampaignsTable
+          campaigns={[mockCampaign]}
+          selectedCampaignId={null}
+          onSelect={() => {}}
+          error={null}
+        />
       </MemoryRouter>,
     );
 

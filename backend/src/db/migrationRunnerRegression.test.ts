@@ -138,9 +138,9 @@ describe('Migration runner database regression tests (#881)', () => {
         migrate(db);
 
         // Verify columns were added in correct order before indexes
-        const pledgeCols = (db.prepare('PRAGMA table_info(pledges)').all() as Array<{ name: string }>).map(
-          (c) => c.name,
-        );
+        const pledgeCols = (
+          db.prepare('PRAGMA table_info(pledges)').all() as Array<{ name: string }>
+        ).map((c) => c.name);
         expect(pledgeCols).toContain('transaction_hash');
         expect(pledgeCols).toContain('asset_code');
         expect(pledgeCols).toContain('token_id');
@@ -226,9 +226,7 @@ describe('Migration runner database regression tests (#881)', () => {
       db.prepare('DELETE FROM campaigns WHERE id = ?').run('c-search-sync');
 
       // Verify FTS entry is purged via after_campaigns_delete
-      const ftsAfter = db
-        .prepare('SELECT id FROM campaigns_fts WHERE id = ?')
-        .get('c-search-sync');
+      const ftsAfter = db.prepare('SELECT id FROM campaigns_fts WHERE id = ?').get('c-search-sync');
       expect(ftsAfter).toBeUndefined();
     });
   });
@@ -661,7 +659,15 @@ describe('Migration runner database regression tests (#881)', () => {
         // Pledge 1: NULL token_id with asset_code USDC
         insertPledge.run('c-tokens', 'GAA', 50, 'USDC', null, 1001, 'tx-t1');
         // Pledge 2: already has explicit canonical token_id
-        insertPledge.run('c-tokens', 'GBB', 100, 'USDC', 'USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5', 1002, 'tx-t2');
+        insertPledge.run(
+          'c-tokens',
+          'GBB',
+          100,
+          'USDC',
+          'USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+          1002,
+          'tx-t2',
+        );
 
         migrate(db);
 
@@ -749,8 +755,11 @@ describe('Migration runner database regression tests (#881)', () => {
       migrate(db);
       migrate(db);
 
-      const campaignCount = (db.prepare('SELECT COUNT(*) AS c FROM campaigns').get() as { c: number }).c;
-      const pledgeCount = (db.prepare('SELECT COUNT(*) AS c FROM pledges').get() as { c: number }).c;
+      const campaignCount = (
+        db.prepare('SELECT COUNT(*) AS c FROM campaigns').get() as { c: number }
+      ).c;
+      const pledgeCount = (db.prepare('SELECT COUNT(*) AS c FROM pledges').get() as { c: number })
+        .c;
       expect(campaignCount).toBe(1);
       expect(pledgeCount).toBe(1);
 

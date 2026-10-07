@@ -1,39 +1,39 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { FundedConfetti } from "./components/FundedConfetti";
-import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
-import { lazy, Suspense } from "react";
-import { CampaignsTable } from "./components/CampaignsTable";
-import { CampaignTimeline } from "./components/CampaignTimeline";
-import { NotificationBell } from "./components/NotificationBell";
-import { IssueBacklog } from "./components/IssueBacklog";
-import { SkeletonAnalytics } from "./components/SkeletonAnalytics";
-import { SkeletonCard } from "./components/SkeletonCard";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { FundedConfetti } from './components/FundedConfetti';
+import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
+import { lazy, Suspense } from 'react';
+import { CampaignsTable } from './components/CampaignsTable';
+import { CampaignTimeline } from './components/CampaignTimeline';
+import { NotificationBell } from './components/NotificationBell';
+import { IssueBacklog } from './components/IssueBacklog';
+import { SkeletonAnalytics } from './components/SkeletonAnalytics';
+import { SkeletonCard } from './components/SkeletonCard';
 
 // Heavy panel components are lazy-loaded so they do not block the initial
 // render of the campaign board and metrics. Each has a lightweight skeleton
 // fallback that matches its visual footprint.
 const CampaignDetailPanel = lazy(() =>
-  import("./components/CampaignDetailPanel").then((m) => ({ default: m.CampaignDetailPanel })),
+  import('./components/CampaignDetailPanel').then((m) => ({ default: m.CampaignDetailPanel })),
 );
 
 const CreateCampaignForm = lazy(() =>
-  import("./components/CreateCampaignForm").then((m) => ({ default: m.CreateCampaignForm })),
+  import('./components/CreateCampaignForm').then((m) => ({ default: m.CreateCampaignForm })),
 );
 
 const CreatorAnalytics = lazy(() =>
-  import("./components/CreatorAnalytics").then((m) => ({ default: m.CreatorAnalytics })),
+  import('./components/CreatorAnalytics').then((m) => ({ default: m.CreatorAnalytics })),
 );
-import { InstallPrompt } from "./components/InstallPrompt";
-import { OfflineBanner } from "./components/OfflineBanner";
+import { InstallPrompt } from './components/InstallPrompt';
+import { OfflineBanner } from './components/OfflineBanner';
 import {
   TransactionPreviewModal,
   TransactionPreviewData,
-} from "./components/TransactionPreviewModal";
-import { ToastContainer } from "./components/ToastContainer";
-import { WalletWidget } from "./components/WalletWidget";
-import { WalletPickerModal } from "./components/WalletPickerModal";
+} from './components/TransactionPreviewModal';
+import { ToastContainer } from './components/ToastContainer';
+import { WalletWidget } from './components/WalletWidget';
+import { WalletPickerModal } from './components/WalletPickerModal';
 import {
   claimCampaign,
   createCampaign,
@@ -46,36 +46,24 @@ import {
   refundCampaign,
   softDeleteCampaign,
 } from './services/api';
-import {
-  submitFreighterClaim,
-  submitFreighterPledge,
-} from "./services/freighter";
-import { submitRefundTransaction } from "./services/soroban";
-import { useWallet } from "./hooks/useWallet";
-import { useLocalStorage } from "./hooks/useLocalStorage";
-import { useToast } from "./hooks/useToast";
-import { useOpenGraph } from "./hooks/useOpenGraph";
-import { useCampaignShareCard } from "./components/CampaignShareCard";
-import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
-import { appendUniqueCampaigns } from "./lib/campaignListPagination";
-import {
-  mergeCampaignDetail,
-  mergeHistoryPages,
-} from "./lib/campaignDetailLoading";
-import {
-  ApiError,
-  AppConfig,
-  Campaign,
-  CampaignEvent,
-  OpenIssue,
-} from "./types/campaign";
+import { submitFreighterClaim, submitFreighterPledge } from './services/freighter';
+import { submitRefundTransaction } from './services/soroban';
+import { useWallet } from './hooks/useWallet';
+import { useLocalStorage } from './hooks/useLocalStorage';
+import { useToast } from './hooks/useToast';
+import { useOpenGraph } from './hooks/useOpenGraph';
+import { useCampaignShareCard } from './components/CampaignShareCard';
+import { didCampaignBecomeFunded } from './lib/fundingCelebration';
+import { appendUniqueCampaigns } from './lib/campaignListPagination';
+import { mergeCampaignDetail, mergeHistoryPages } from './lib/campaignDetailLoading';
+import { ApiError, AppConfig, Campaign, CampaignEvent, OpenIssue } from './types/campaign';
 
-const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
-const MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
-const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
-const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
-const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
-const LIST_STATE_KEY = "sgv-list-state";
+const DEFAULT_NETWORK_PASSPHRASE = 'Test SDF Network ; September 2015';
+const MAINNET_PASSPHRASE = 'Public Global Stellar Network ; September 2015';
+const THEME_STORAGE_KEY = 'stellar-goal-vault-theme';
+const SORT_ORDER_KEY = 'stellar-goal-vault-sort-order';
+const FILTER_STATE_KEY = 'stellar-goal-vault-filter-state';
+const LIST_STATE_KEY = 'sgv-list-state';
 const CAMPAIGN_PAGE_SIZE = 20;
 
 type SavedListState = {
@@ -196,7 +184,10 @@ function App() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
-  const [campaignsError, setCampaignsError] = useState<{ message: string; isRecoverable: boolean } | null>(null);
+  const [campaignsError, setCampaignsError] = useState<{
+    message: string;
+    isRecoverable: boolean;
+  } | null>(null);
   const [transactionPreview, setTransactionPreview] = useState<TransactionPreviewState | null>(
     null,
   );
@@ -432,10 +423,7 @@ function App() {
         if (restoredState && !requestedCampaignId) {
           // Bounded initial work: cap restored pages to 3 to avoid unbounded fetch from tampered storage
           const boundedPages = Math.min(Math.max(1, restoredState.pages), 3);
-          data = await loadInitialCampaignPages(
-            restoredState.search,
-            boundedPages,
-          );
+          data = await loadInitialCampaignPages(restoredState.search, boundedPages);
           requestAnimationFrame(() => {
             window.scrollTo(0, restoredState?.scrollY ?? 0);
           });
@@ -552,7 +540,7 @@ function App() {
     setIsConnectingWallet(true);
     try {
       await wallet.connect(walletType as any, networkPassphrase);
-      addToast(`Wallet connected: ${wallet.publicKey?.slice(0, 16)}...`, "success");
+      addToast(`Wallet connected: ${wallet.publicKey?.slice(0, 16)}...`, 'success');
     } finally {
       setIsConnectingWallet(false);
     }
@@ -560,7 +548,7 @@ function App() {
 
   function handleDisconnectWallet() {
     wallet.disconnect();
-    addToast("Wallet disconnected.", "success");
+    addToast('Wallet disconnected.', 'success');
   }
 
   // Account watching is handled by individual wallet adapters
@@ -614,7 +602,7 @@ function App() {
       await refreshSelectedData(campaignId);
       addToast(
         `Pledged ${amount} ${assetCode}. Tx: ${transactionResult.transactionHash.slice(0, 12)}…`,
-        "success",
+        'success',
         {
           href: stellarExpertTxUrl(transactionResult.transactionHash, appConfig?.networkPassphrase),
           label: 'View on Stellar Expert',
@@ -821,7 +809,11 @@ function App() {
         <ErrorBoundary componentName="CreateCampaignForm">
           <Suspense
             fallback={
-              <section className="card wizard-card" aria-busy="true" aria-label="Loading create campaign form">
+              <section
+                className="card wizard-card"
+                aria-busy="true"
+                aria-label="Loading create campaign form"
+              >
                 <div className="section-heading">
                   <div className="skeleton skeleton-line" style={{ width: 180, height: 24 }} />
                 </div>
@@ -841,16 +833,26 @@ function App() {
         <ErrorBoundary componentName="CampaignDetailPanel">
           <Suspense
             fallback={
-              <section className="card detail-panel" aria-busy="true" aria-label="Loading campaign details">
+              <section
+                className="card detail-panel"
+                aria-busy="true"
+                aria-label="Loading campaign details"
+              >
                 <div className="section-heading">
                   <div className="skeleton skeleton-line" style={{ width: 220, height: 24 }} />
-                  <div className="skeleton skeleton-line" style={{ width: 320, height: 14, marginTop: 8 }} />
+                  <div
+                    className="skeleton skeleton-line"
+                    style={{ width: 320, height: 14, marginTop: 8 }}
+                  />
                 </div>
                 <div className="detail-grid">
                   {Array.from({ length: 5 }).map((_, i) => (
                     <article key={i} className="detail-stat">
                       <div className="skeleton skeleton-line" style={{ width: 120 }} />
-                      <div className="skeleton skeleton-line" style={{ width: 80, height: 18, marginTop: 8 }} />
+                      <div
+                        className="skeleton skeleton-line"
+                        style={{ width: 80, height: 18, marginTop: 8 }}
+                      />
                     </article>
                   ))}
                 </div>
@@ -897,11 +899,15 @@ function App() {
             isLoadingMore={isLoadingMoreCampaigns}
             isLoading={isCampaignsLoading || initialLoad}
             invalidUrlCampaignId={invalidUrlCampaignId}
-            error={campaignsError ? {
-              message: campaignsError.message,
-              onRetry: handleRetryCampaignsLoad,
-              isRecoverable: campaignsError.isRecoverable,
-            } : null}
+            error={
+              campaignsError
+                ? {
+                    message: campaignsError.message,
+                    onRetry: handleRetryCampaignsLoad,
+                    isRecoverable: campaignsError.isRecoverable,
+                  }
+                : null
+            }
           />
         </ErrorBoundary>
 

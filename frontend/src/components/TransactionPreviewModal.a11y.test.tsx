@@ -48,8 +48,7 @@ describe.each(THEMES)('TransactionPreviewModal Accessibility (%s theme)', (theme
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
   });
-
-  it('exposes accessible names for confirm and cancel actions', () => {
+it('exposes accessible names for confirm and cancel actions', () => {
     render(
       <TransactionPreviewModal preview={previewWithFee} onConfirm={() => {}} onCancel={() => {}} />,
     );

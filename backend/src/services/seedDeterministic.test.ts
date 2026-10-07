@@ -64,7 +64,9 @@ describe('seed workflow database regression', () => {
     expect(ids).toEqual(['1', '2', '3', '4', '5']);
 
     const db = getDb();
-    const rows = db.prepare(`SELECT id FROM campaigns ORDER BY CAST(id AS INTEGER) ASC`).all() as Array<{
+    const rows = db
+      .prepare(`SELECT id FROM campaigns ORDER BY CAST(id AS INTEGER) ASC`)
+      .all() as Array<{
       id: string;
     }>;
     expect(rows.map((r) => r.id)).toEqual(ids);
@@ -91,7 +93,18 @@ describe('seed workflow database regression', () => {
             id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         )
-        .run('1', `G${'A'.repeat(55)}`, 'dup', 'dup', '["USDC"]', 1, 0, 1_750_000_000, 1_750_000_000, null),
+        .run(
+          '1',
+          `G${'A'.repeat(55)}`,
+          'dup',
+          'dup',
+          '["USDC"]',
+          1,
+          0,
+          1_750_000_000,
+          1_750_000_000,
+          null,
+        ),
     ).toThrow(/UNIQUE|constraint/i);
   });
 
@@ -100,7 +113,8 @@ describe('seed workflow database regression', () => {
     const beforeCampaigns = (
       db.prepare(`SELECT COUNT(*) AS n FROM campaigns`).get() as { n: number }
     ).n;
-    const beforePledges = (db.prepare(`SELECT COUNT(*) AS n FROM pledges`).get() as { n: number }).n;
+    const beforePledges = (db.prepare(`SELECT COUNT(*) AS n FROM pledges`).get() as { n: number })
+      .n;
 
     expect(() =>
       db.transaction(() => {
@@ -157,14 +171,23 @@ describe('seed workflow database regression', () => {
     const ids = seedDeterministicState(3);
     expect(ids).toEqual(['1', '2', '3']);
 
-    expect((db.prepare(`SELECT COUNT(*) AS n FROM notifications`).get() as { n: number }).n).toBe(0);
-    expect((db.prepare(`SELECT COUNT(*) AS n FROM campaign_comments`).get() as { n: number }).n).toBe(0);
-    expect((db.prepare(`SELECT COUNT(*) AS n FROM campaign_events`).get() as { n: number }).n).toBe(0);
-    expect((db.prepare(`SELECT COUNT(*) AS n FROM campaigns_fts`).get() as { n: number }).n).toBe(3);
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM notifications`).get() as { n: number }).n).toBe(
+      0,
+    );
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM campaign_comments`).get() as { n: number }).n,
+    ).toBe(0);
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM campaign_events`).get() as { n: number }).n).toBe(
+      0,
+    );
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM campaigns_fts`).get() as { n: number }).n).toBe(
+      3,
+    );
 
-    const fts = db
-      .prepare(`SELECT id, title FROM campaigns_fts WHERE id = '1'`)
-      .get() as { id: string; title: string };
+    const fts = db.prepare(`SELECT id, title FROM campaigns_fts WHERE id = '1'`).get() as {
+      id: string;
+      title: string;
+    };
     expect(fts.title).toBe('Open deterministic campaign');
   });
 
@@ -187,7 +210,9 @@ describe('seed workflow database regression', () => {
 
   it('handles edge-case counts and parseCountArg validation', () => {
     expect(seedDeterministicState(1)).toEqual(['1']);
-    expect((getDb().prepare(`SELECT COUNT(*) AS n FROM campaigns`).get() as { n: number }).n).toBe(1);
+    expect((getDb().prepare(`SELECT COUNT(*) AS n FROM campaigns`).get() as { n: number }).n).toBe(
+      1,
+    );
     expect((getDb().prepare(`SELECT COUNT(*) AS n FROM pledges`).get() as { n: number }).n).toBe(1);
 
     expect(seedDeterministicState(7)).toEqual(['1', '2', '3', '4', '5', '6', '7']);

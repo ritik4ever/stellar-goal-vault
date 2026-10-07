@@ -56,12 +56,8 @@ describe('CampaignDetailPanel', () => {
   it('renders loading state', () => {
     render(
       <BrowserRouter>
-        <CampaignDetailPanel
-          campaign={null}
-          appConfig={mockConfig}
-          isLoading={true}
-        />
-      </BrowserRouter>
+        <CampaignDetailPanel campaign={null} appConfig={mockConfig} isLoading={true} />
+      </BrowserRouter>,
     );
     expect(screen.getByRole('region')).toBeInTheDocument();
   });
@@ -69,12 +65,8 @@ describe('CampaignDetailPanel', () => {
   it('renders not found state when notFoundCampaignId is provided', () => {
     render(
       <BrowserRouter>
-        <CampaignDetailPanel
-          campaign={null}
-          appConfig={mockConfig}
-          notFoundCampaignId="999"
-        />
-      </BrowserRouter>
+        <CampaignDetailPanel campaign={null} appConfig={mockConfig} notFoundCampaignId="999" />
+      </BrowserRouter>,
     );
     expect(screen.getByText('Campaign not found')).toBeInTheDocument();
     expect(screen.getByText(/does not exist or may have been removed/i)).toHaveTextContent(
@@ -86,12 +78,8 @@ describe('CampaignDetailPanel', () => {
   it('renders empty state when no campaign is selected', () => {
     render(
       <BrowserRouter>
-        <CampaignDetailPanel
-          campaign={null}
-          appConfig={mockConfig}
-          isLoading={false}
-        />
-      </BrowserRouter>
+        <CampaignDetailPanel campaign={null} appConfig={mockConfig} isLoading={false} />
+      </BrowserRouter>,
     );
     expect(screen.getByText('Campaign actions')).toBeInTheDocument();
   });
@@ -105,7 +93,7 @@ describe('CampaignDetailPanel', () => {
           connectedWallet={mockCampaign.creator}
           isLoading={false}
         />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
     expect(screen.getByText('Test Campaign')).toBeInTheDocument();
     expect(container.querySelector('.campaign-detail-banner')).toBeInTheDocument();
@@ -133,7 +121,9 @@ describe('CampaignDetailPanel', () => {
     expect(screen.getByRole('form', { name: 'Pledge campaign' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Refund contributor' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Campaign actions' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Connect Wallet' })).toHaveAccessibleName('Connect Wallet');
+    expect(screen.getByRole('button', { name: 'Connect Wallet' })).toHaveAccessibleName(
+      'Connect Wallet',
+    );
 
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Connect Wallet' }));
@@ -145,12 +135,8 @@ describe('CampaignDetailPanel', () => {
     it('handles missing data gracefully when campaign is null', () => {
       render(
         <BrowserRouter>
-          <CampaignDetailPanel
-            campaign={null}
-            appConfig={mockConfig}
-            isLoading={false}
-          />
-        </BrowserRouter>
+          <CampaignDetailPanel campaign={null} appConfig={mockConfig} isLoading={false} />
+        </BrowserRouter>,
       );
       // Should not crash, should show empty state or loading
       expect(screen.queryByText('Test Campaign')).not.toBeInTheDocument();
@@ -165,7 +151,7 @@ describe('CampaignDetailPanel', () => {
             appConfig={mockConfig}
             isLoading={false}
           />
-        </BrowserRouter>
+        </BrowserRouter>,
       );
       // Should not crash on invalid ID
       expect(screen.getByRole('region')).toBeInTheDocument();
@@ -173,7 +159,6 @@ describe('CampaignDetailPanel', () => {
 
     // Submission, duplicate prevention and retry failures are exercised through
     // the real onPledge callback in CampaignDetailPanel.pledge.test.tsx.
-
   });
 });
 
@@ -193,7 +178,11 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     } = {},
   ) {
     const campaign: Campaign = { ...mockCampaign, ...campaignOverrides };
-    const { onPledge, isPledgePending = false, connectedWallet: wallet = connectedWallet } = extraProps;
+    const {
+      onPledge,
+      isPledgePending = false,
+      connectedWallet: wallet = connectedWallet,
+    } = extraProps;
     return render(
       <BrowserRouter>
         <CampaignDetailPanel
@@ -355,7 +344,8 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
 
   it('retry button re-submits the pledge', async () => {
     const user = userEvent.setup();
-    const onPledge = vi.fn()
+    const onPledge = vi
+      .fn()
       .mockRejectedValueOnce(new Error('Timeout'))
       .mockResolvedValueOnce(undefined);
     renderWithCampaign({}, { onPledge });
@@ -387,7 +377,12 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
   it('disables the amount input while a pledge is submitting', async () => {
     const user = userEvent.setup();
     let resolveOnPledge!: () => void;
-    const onPledge = vi.fn(() => new Promise<void>((resolve) => { resolveOnPledge = resolve; }));
+    const onPledge = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveOnPledge = resolve;
+        }),
+    );
     renderWithCampaign({}, { onPledge });
 
     const amountInput = screen.getByRole('spinbutton');
@@ -402,7 +397,12 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
   it('shows Submitting... on the button while isSubmitting is true', async () => {
     const user = userEvent.setup();
     let resolveOnPledge!: () => void;
-    const onPledge = vi.fn(() => new Promise<void>((resolve) => { resolveOnPledge = resolve; }));
+    const onPledge = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveOnPledge = resolve;
+        }),
+    );
     renderWithCampaign({}, { onPledge });
 
     const submitBtn = screen.getByRole('button', { name: /add pledge/i });

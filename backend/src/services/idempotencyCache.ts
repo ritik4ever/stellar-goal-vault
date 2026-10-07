@@ -24,9 +24,7 @@ export function buildIdempotencyCacheKey(
   return `idempotency:${apiKey}:${campaignId}:${idempotencyKey}`;
 }
 
-export async function getIdempotencyCacheEntry(
-  key: string,
-): Promise<IdempotencyCacheEntry | null> {
+export async function getIdempotencyCacheEntry(key: string): Promise<IdempotencyCacheEntry | null> {
   if (isCacheAvailable()) {
     const cached = await getCacheValue(key);
     if (cached) {

@@ -226,3 +226,58 @@ journalctl -u stellar-goal-vault-indexer --since "30 minutes ago" | tail -n 200
 4.  **Validate the fix:** Re-run the health endpoints and confirm that `status` returns `ok` or the `overall` status returns `up` before returning traffic to normal.
 
 This guide should be used with the service-level alarms already defined in the deployment stack: sustained `503` responses, rising `p99` latency, and degraded component checks are all actionable signals and should trigger an immediate operator review.
+
+---
+
+## 6. Request Logging Troubleshooting
+
+### Symptoms
+
+- Request logs are missing from central observability platforms.
+- Sensitive data (PII, credentials, API keys) is leaking into plain text logs.
+- Request tracing is broken because `X-Request-Id` is missing or mismatched.
+- Log payloads contain malformed JSON that fails to parse downstream.
+
+### Normal Signals
+
+- Every HTTP request handled by the backend emits an `http_request` event.
+- The `requestId` in the log payload exactly matches the `X-Request-Id` response header.
+- Sensitive query parameters (e.g., `?token=...`) and headers (e.g., `Authorization: Bearer ...`) are redacted as `[REDACTED]`.
+- The `http_request` event is always emitted at the `info` level regardless of response status, with the HTTP status code available in the `status` field.
+
+### Common Failure Signatures and First Actions
+
+| Signal | What it usually means | First diagnostic action | Recovery action |
+|---|---|---|---|
+| `http_request` logs are missing | The backend is not receiving traffic, or the log shipper has stalled. | Check `journalctl -u stellar-goal-vault-backend --since "5 minutes ago" \| grep http_request`. | If traffic is reaching the instance but no logs exist, restart the backend. If journalctl has logs but the aggregator does not, restart the log shipper agent. |
+| Sensitive data in `http_request` | A new parameter or header was introduced without being added to the redaction list. | Query the logging system for the leaked parameter name to find the scope of the leak. | Rotate the leaked credentials immediately, update `SENSITIVE_HEADERS` or `SENSITIVE_QUERY_PARAMS` in `backend/src/middleware/requestId.ts`, and purge the exposed logs from the aggregator. |
+| `requestId` is missing or mismatched | The `requestIdMiddleware` is bypassing a route, or an upstream proxy is stripping the header. | Check if the missing route is registered before the `requestIdMiddleware` in `index.ts`. | Move the route registration after the middleware, or configure the upstream proxy to pass `X-Request-Id`. |
+| Log JSON is malformed | A downstream parser expects a different schema, or Pino is failing to stringify a circular object. | Run `journalctl -u stellar-goal-vault-backend -n 100` and inspect the raw JSON output. | Update the downstream parser schema, or fix the object formatting in the application logger. |
+
+### Diagnosis Commands
+
+Check recent HTTP request logs:
+
+```bash
+journalctl -u stellar-goal-vault-backend --since "10 minutes ago" | grep "http_request"
+```
+
+Test redaction of sensitive headers and parameters locally:
+
+```bash
+curl -i -H "Authorization: Bearer test-token" "http://localhost:8080/api/health?api_key=secret"
+journalctl -u stellar-goal-vault-backend -n 20 | grep http_request | jq
+```
+
+Check the log shipper status (e.g., Vector or FluentBit):
+
+```bash
+systemctl status vector
+```
+
+### Remediation Steps
+
+1. **Verify Log Shipper:** If logs are missing from the aggregator but present on the machine, the issue is with the log shipper. Restart the log shipper service.
+2. **Rotate and Purge:** If credentials leak into logs, consider them compromised. Rotate them in the vault, restart the services using them, and purge the leaked logs from the aggregation system.
+3. **Patch Redaction Lists:** If a new feature introduces sensitive data, update the `SENSITIVE_HEADERS` and `SENSITIVE_QUERY_PARAMS` sets in `backend/src/middleware/requestId.ts` and deploy a hotfix.
+4. **Fix Route Order:** Ensure that no application routes or body parsers are placed before `requestIdMiddleware` in `index.ts`, as they could short-circuit and miss logging.

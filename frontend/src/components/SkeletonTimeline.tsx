@@ -11,7 +11,10 @@ export function SkeletonTimeline() {
       <div className="timeline">
         {Array.from({ length: 4 }).map((_, i) => (
           <article key={i} className="timeline-item" aria-hidden="true">
-            <div className="timeline-dot skeleton" style={{ width: 12, height: 12, borderRadius: '50%' }} />
+            <div
+              className="timeline-dot skeleton"
+              style={{ width: 12, height: 12, borderRadius: '50%' }}
+            />
             <div className="timeline-copy">
               <div className="skeleton skeleton-line" style={{ width: 160 }} />
               <div className="skeleton skeleton-line" style={{ width: 200, marginTop: 4 }} />

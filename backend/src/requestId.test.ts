@@ -54,12 +54,8 @@ describe('request id middleware', () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    expect(firstId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-    );
-    expect(secondId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-    );
+    expect(firstId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(secondId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     expect(firstId).not.toBe(secondId);
   });
 
@@ -98,9 +94,7 @@ describe('request id middleware', () => {
     await vi.waitFor(() => {
       const payload = infoSpy.mock.calls
         .map(([p]) => p as Record<string, unknown>)
-        .find(
-          (p) => p?.event === 'http_request' && p.requestId === 'log-context-request-id',
-        );
+        .find((p) => p?.event === 'http_request' && p.requestId === 'log-context-request-id');
       expect(payload, 'no http_request log found for log-context-request-id').toBeDefined();
     });
   });
@@ -131,9 +125,7 @@ describe('request id middleware', () => {
   });
 
   it('replaces unsafe incoming IDs with a generated correlation ID', async () => {
-    const response = await request(app)
-      .get('/api/campaigns')
-      .set(REQUEST_ID_HEADER, 'bad id');
+    const response = await request(app).get('/api/campaigns').set(REQUEST_ID_HEADER, 'bad id');
 
     expect(response.status).toBe(200);
     expect(response.headers[REQUEST_ID_HEADER.toLowerCase()]).toMatch(
@@ -141,5 +133,4 @@ describe('request id middleware', () => {
     );
     expect(response.body.requestId).toBe(response.headers[REQUEST_ID_HEADER.toLowerCase()]);
   });
-
 });

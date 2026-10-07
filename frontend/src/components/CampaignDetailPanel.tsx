@@ -1,1 +1,546 @@
-aW1wb3J0IHsgRm9ybUV2ZW50LCB1c2VTdGF0ZSwgdXNlRWZmZWN0LCB1c2VSZWYsIHVzZUNhbGxiYWNrLCBsYXp5LCBTdXNwZW5zZSB9IGZyb20gJ3JlYWN0JzsKaW1wb3J0IHsgTW91c2VQb2ludGVyMiwgRG93bmxvYWQsIExpbmsgYXMgTGlua0ljb24gfSBmcm9tICdsdWNpZGUtcmVhY3QnOwppbXBvcnQgeyBMaW5rIH0gZnJvbSAncmVhY3Qtcm91dGVyLWRvbSc7CmltcG9ydCB7IENhbXBhaWduLCBBcHBDb25maWcgfSBmcm9tICcuLi90eXBlcy9jYW1wYWlnbic7CmltcG9ydCBDb3B5QnV0dG9uIGZyb20gJy4vQ29weUJ1dHRvbic7CmltcG9ydCB7IEFkZHJlc3NBdmF0YXIgfSBmcm9tICcuL0FkZHJlc3NBdmF0YXInOwppbXBvcnQgeyBFbXB0eVN0YXRlIH0gZnJvbSAnLi9FbXB0eVN0YXRlJzsKaW1wb3J0IHsgQ2FtcGFpZ25JbWFnZSB9IGZyb20gJy4vQ2FtcGFpZ25JbWFnZSc7Cgpjb25zdCBDb250cmlidXRvclN1bW1hcnkgPSBsYXp5KCgpID0+CiAgaW1wb3J0KCcuL0NvbnRyaWJ1dG9yU3VtbWFyeScpLnRoZW4oKG0pID0+ICh7IGRlZmF1bHQ6IG0uQ29udHJpYnV0b3JTdW1tYXJ5IH0pKSwKKTsKaW1wb3J0IHsgQ291bnRkb3duIH0gZnJvbSAnLi9Db3VudGRvd24nOwppbXBvcnQgeyB1c2VDYW1wYWlnblNoYXJlQ2FyZCB9IGZyb20gJy4vQ2FtcGFpZ25TaGFyZUNhcmQnOwppbXBvcnQgeyB1c2VUb2FzdCB9IGZyb20gJy4uL2hvb2tzL3VzZVRvYXN0JzsKaW1wb3J0IHsgU2hhcmVCdXR0b25zIH0gZnJvbSAnLi9TaGFyZUJ1dHRvbnMnOwppbXBvcnQgeyB1c2VNaW5EaXNwbGF5VGltZSB9IGZyb20gJy4uL2hvb2tzL3VzZU1pbkRpc3BsYXlUaW1lJzsKCmludGVyZmFjZSBDYW1wYWlnbkRldGFpbFBhbmVsUHJvcHMgewogIGNhbXBhaWduOiBDYW1wYWlnbiB8IG51bGw7CiAgYXBwQ29uZmlnPzogQXBwQ29uZmlnIHwgbnVsbDsKICBjb25uZWN0ZWRXYWxsZXQ/OiBzdHJpbmcgfCBudWxsOwogIGlzQ29ubmVjdGluZ1dhbGxldD86IGJvb2xlYW47CiAgaXNMb2FkaW5nPzogYm9vbGVhbjsKICBpc1BsZWRnZVBlbmRpbmc/OiBib29sZWFuOwogIG5vdEZvdW5kQ2FtcGFpZ25JZD86IHN0cmluZyB8IG51bGw7CiAgb25Db25uZWN0V2FsbGV0PzogKCkgPT4gUHJvbWlzZTx2b2lkPjsKICBvbkRpc2Nvbm5lY3RXYWxsZXQ/OiAoKSA9PiB2b2lkOwogIG9uUGxlZGdlPzogKGNhbXBhaWduSWQ6IHN0cmluZywgYW1vdW50OiBudW1iZXIsIGFzc2V0Q29kZTogc3RyaW5nKSA9PiBQcm9taXNlPHZvaWQ+OwogIG9uQ2xhaW0/OiAoY2FtcGFpZ246IENhbXBhaWduKSA9PiBQcm9taXNlPHZvaWQ+OwogIG9uU29mdERlbGV0ZT86IChjYW1wYWlnbklkOiBzdHJpbmcpID0+IFByb21pc2U8dm9pZD47CiAgb25SZWZ1bmQ/OiAoY2FtcGFpZ25JZDogc3RyaW5nLCBjb250cmlidXRvcjogc3RyaW5nKSA9PiBQcm9taXNlPHZvaWQ+OwogIG9uQ2xvc2U/OiAoKSA9PiB2b2lkOwp9Cgpjb25zdCBGRUVfRVNUSU1BVElPTl9FUlJPUl9DT0RFUyA9IG5ldyBTZXQoWwogICdTSU1VTEFUSU9OX0ZBSUxFRCcsCiAgJ1NJT VVQQVRJT05fUFJFUEFSRV9GQUlMRUQnLAogICdTT1VSQ0VfQUNDT1VOVF9MT0FEX0ZBSUxFRCcsCiAgJ1NUQVRFX1JFU1RPUkVfUkVRVUlSRUQnLApdKTsKCmZ1bmN0aW9uIGRlc2NyaWJlUGxlZGdlRXJyb3IoZXJyb3I6IHVua25vd24pOiBzdHJpbmcgewogIGNvbnN0IGNvZGUgPSAoZXJyb3IgYXMgeyBjb2RlPzogc3RyaW5nIH0gfCBudWxsKT8uY29kZTsKICBpZiAoY29kZSAmJiBGRUVfRVNUSU1BVElPTl9FUlJPUl9DT0RFUy5oYXMoY29kZSkpIHsKICAgIHJldHVybiAnQ291bGQgbm90IGVzdGltYXRlIGZlZS4gQ2hlY2sgeW91ciBjb25uZWN0aW9uIGFuZCByZXRyeS4nOwogIH0KICBpZiAoZXJyb3IgaW5zdGFuY2VvZiBFcnJvciAmJiBlcnJvci5tZXNzYWdlLnRyaW0oKS5sZW5ndGggPiAwKSB7CiAgICByZXR1cm4gZXJyb3IubWVzc2FnZTsKICB9CiAgcmV0dXJuICdUaGUgcGxlZGdlIGNvdWxkIG5vdCBiZSBjb21wbGV0ZWQuIFBsZWFzZSB0cnkgYWdhaW4uJzsKfQoKZnVuY3Rpb24gbmV0d29ya05hbWUoY29uZmlnOiBBcHBDb25maWcgfCBudWxsIHwgdW5kZWZpbmVkKTogc3RyaW5nIHsKICBjb25zdCBwYXNzcGhyYXNlID0gY29uZmlnPy5uZXR3b3JrUGFzc3BocmFzZSA/PyBjb25maWc/LnNvcm9iYW4/Lm5ldHdvcmtQYXNzcGhyYXNlOwoKICBpZiAoIXBhc3NwaHJhc2UpIHsKICAgIHJldHVybiAnQ29uZmlndXJlZCBuZXR3b3JrJzsKICB9CiAgaWYgKHBhc3NwaHJhc2UgPT09ICdUZXN0IFNERiBOZXR3b3JrIDsgU2VwdGVtYmVyIDIwMTUnKSB7CiAgICByZXR1cm4gJ1N0ZWxsYXIgVGVzdG5ldCc7CiAgfQogIGlmIChwYXNzcGhyYXNlID09PSAnUHVibGljIEdsb2JhbCBTdGVsbGFyIE5ldHdvcmsgOyBTZXB0ZW1iZXIgMjAxNScpIHsKICAgIHJldHVybiAnU3RlbGxhciBNYWlubmV0JzsKICB9CgogIHJldHVybiAnQ29uZmlndXJlZCBuZXR3b3JrJzsKfQoKZXhwb3J0IGZ1bmN0aW9uIENhbXBhaWduRGV0YWlsUGFuZWwoewogIGNhbXBhaWduLAogIGFwcENvbmZpZywKICBjb25uZWN0ZWRXYWxsZXQgPSBudWxsLAogIGlzQ29ubmVjdGluZ1dhbGxldCA9IGZhbHNlLAogIGlzTG9hZGluZyA9IGZhbHNlLAogIGlzUGxlZGdlUGVuZGluZyA9IGZhbHNlLAogIG5vdEZvdW5kQ2FtcGFpZ25JZCA9IG51bGwsCiAgb25Db25uZWN0V2FsbGV0ID0gYXN5bmMgKCkgPT4ge30sCiAgb25EaXNjb25uZWN0V2FsbGV0ID0gKCkgPT4ge30sCiAgb25QbGVkZ2UgPSBhc3luYyAoKSA9PiB7fSwKICBvbkNsYWltID0gYXN5bmMgKCkgPT4ge30sCiAgb25SZWZ1bmQgPSBhc3luYyAoKSA9PiB7fSwKfTogQ2FtcGFpZ25EZXRhaWxQYW5lbFByb3BzKSB7CiAgY29uc3QgW3BsZWRnZUFtb3VudCwgc2V0UGxlZGdlQW1vdW50XSA9IHVzZVN0YXRlKCcyNScpOwogIGNvbnN0IFtwbGVkZ2VUb2tlbiwgc2V0UGxlZGdlVG9rZW5dID0gdXNlU3RhdGUoJycpOwogIGNvbnN0IFtyZWZ1bmRDb250cmlidXRvciwgc2V0UmVmdW5kQ29udHJpYnV0b3JdID0gdXNlU3RhdGUoJycpOwogIGNvbnN0IFtpc1N1Ym1pdHRpbmcsIHNldElzU3VibWl0dGluZ10gPSB1c2VTdGF0ZShmYWxzZSk7CiAgY29uc3QgW3BsZWRnZUVycm9yLCBzZXRQbGVkZ2VFcnJvcl0gPSB1c2VTdGF0ZTxzdHJpbmcgfCBudWxsPihudWxsKTsKICBjb25zdCBbcGxlZGdlU3VjY2Vzcywgc2V0UGxlZGdlU3VjY2Vzc10gPSB1c2VTdGF0ZShmYWxzZSk7CiAgY29uc3QgcGxlZGdlU3VjY2Vzc1RpbWVyUmVmID0gdXNlUmVmPFJldHVyblR5cGU8dHlwZW9mIHNldFRpbWVvdXQ+IHwgbnVsbD4obnVsbCk7CiAgY29uc3QgW2Jhbm5lckltYWdlRXJyb3IsIHNldEJhbm5lckltYWdlRXJyb3JdID0gdXNlU3RhdGUoZmFsc2UpOwogIGNvbnN0IHdhbGxldFJlYWR5ID0gYXBwQ29uZmlnPy53YWxsZXRJbnRlZ3JhdGlvblJlYWR5ID8/IGZhbHNlOwogIGNvbnN0IHsgZG93bmxvYWRQbmcsIHRvRGF0YVVybCB9ID0gdXNlQ2FtcGFpZ25TaGFyZUNhcmQoKTsKICBjb25zdCB7IGFkZFRvYXN0IH0gPSB1c2VUb2FzdCgpOwogIGNvbnN0IHBsZWRnZUVycm9yUmVmID0gdXNlUmVmPEhUTUxEaXZFbGVtZW50IHwgbnVsbD4obnVsbCk7CiAgY29uc3QgcGxlZGdlU3VjY2Vzc1JlZiA9IHVzZVJlZjxIVE1MRGl2RWxlbWVudCB8IG51bGw+KG51bGwpOwoKICBjb25zdCBoYW5kbGVEb3dubG9hZFBuZyA9IHVzZUNhbGxiYWNrKCgpID0+IHsKICAgIGlmICghY2FtcGFpZ24pIHJldHVybjsKICAgIGRvd25sb2FkUG5nKGNhbXBhaWduLCBjYW1wYWlnbi5tZXRhZGF0YT8uaW1hZ2VVcmwpOwogICAgYWRkVG9hc3QoJ0NhbXBhaWduIGNhcmQgZG93bmxvYWRlZCBhcyBQTkcuJywgJ3N1Y2Nlc3MnKTsKICB9LCBbY2FtcGFpZ24sIGRvd25sb2FkUG5nLCBhZGRUb2FzdF0pOwoKICBjb25zdCBoYW5kbGVDb3B5TGluayA9IHVzZUNhbGxiYWNrKCgpID0+IHsKICAgIGlmICghY2FtcGFpZ24pIHJldHVybjsKICAgIGNvbnN0IHVybCA9IGAke3dpbmRvdy5sb2NhdGlvbi5vcmlnaW59L2NhbXBhaWducy8ke2NhbXBhaWduLmlkfWA7CiAgICBuYXZpZ2F0b3IuY2xpcGJvYXJkLndyaXRlVGV4dCh1cmwpLnRoZW4oKCkgPT4gewogICAgICBhZGRUb2FzdCgnQ2FtcGFpZ24gbGluayBjb3BpZWQgdG8gY2xpcGJvYXJkLicsICdzdWNjZXNzJywgeyBocmVmOiB1cmwsIGxhYmVsOiB1cmwuc2xpY2UoMCwgNDApICsgJ+KApid9KTsKICAgIH0pLmNhdGNoKCgpID0+IHsKICAgICAgYWRkVG9hc3QoJ0ZhaWxlZCB0byBjb3B5IGxpbmsuJywgJ2Vycm9yJyk7CiAgICB9KTsKICB9LCBbY2FtcGFpZ24sIGFkZFRvYXN0XSk7CgogIHVzZUVmZmVjdCgoKSA9PiB7CiAgICBzZXRCYW5uZXJJbWFnZUVycm9yKGZhbHNlKTsKICB9LCBbY2FtcGFpZ24/LmlkLCBjb25uZWN0ZWRXYWxsZXRdKTsKCiAgdXNlRWZmZWN0KCgpID0+IHsKICAgIHJldHVybiAoKSA9PiB7CiAgICAgIGlmIChwbGVkZ2VTdWNjZXNzVGltZXJSZWYuY3VycmVudCAhPT0gbnVsbCkgewogICAgICAgIGNsZWFyVGltZW91dChwbGVkZ2VTdWNjZXNzVGltZXJSZWYuY3VycmVudCk7CiAgICAgIH0KICAgIH07CiAgfSwgW10pOwoKICAvLyBBbm5vdW5jZSBwbGVkZ2UgZXJyb3JzIGFuZCBzdWNjZXNzZXMgdG8gc2NyZWVuIHJlYWRlcnMgd2l0aG91dCBtb3ZpbmcgZm9jdXMuCiAgdXNlRWZmZWN0KCgpID0+IHsKICAgIGlmIChwbGVkZ2VFcnJvciAmJiBwbGVkZ2VFcnJvclJlZi5jdXJyZW50KSB7CiAgICAgIHBsZWRnZUVycm9yUmVmLmN1cnJlbnQuZm9jdXMoKTsKICAgIH0KICB9LCBbcGxlZGdlRXJyb3JdKTsKCiAgdXNlRWZmZWN0KCgpID0+IHsKICAgIGlmIChwbGVkZ2VTdWNjZXNzICYmIHBsZWRnZVN1Y2Nlc3NSZWYuY3VycmVudCkgewogICAgICBwbGVkZ2VTdWNjZXNzUmVmLmN1cnJlbnQuZm9jdXMoKTsKICAgIH0KICB9LCBbcGxlZGdlU3VjY2Vzc10pOwoKICBjb25zdCBzaG93U2tlbGV0b24gPSB1c2VNaW5EaXNwbGF5VGltZShpc0xvYWRpbmcpOwogIGlmIChzaG93U2tlbGV0b24pIHsKICAgIHJldHVybiAoCiAgICAgIDxzZWN0aW9uIGNsYXNzTmFtZT0iY2FyZCBkZXRhaWwtcGFuZWwiIGFyaWEtYnVzeT0idHJ1ZSIgYXJpYS1sYWJlbD0iTG9hZGluZyBjYW1wYWlnbiBkZXRhaWxzIj4KICAgICAgICA8ZGl2IGNsYXNzTmFtZT0ic2VjdGlvbi1oZWFkaW5nIj4KICAgICAgICAgIDxoMj4KICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9InNrZWxldG9uIHNrZWxldG9uLWxpbmUiIHN0eWxlPXt7IHdpZHRoOiAyMjAgfX0gLz4KICAgICAgICAgIDwvaDI+CiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0ic2tlbGV0b24gc2tlbGV0b24tbGluZSIgc3R5bGU9e3sgd2lkdGg6IDMyMCwgaGVpZ2h0OiAxNCB9fSAvPgogICAgICAgIDwvZGl2PgogICAgICAgIDxkaXYgY2xhc3NOYW1lPSJkZXRhaWwtZ3JpZCI+CiAgICAgICAgICB7QXJyYXkuZnJvbSh7IGxlbmd0aDogNSB9KS5tYXAoKF8sIGluZGV4KSA9PiAoCiAgICAgICAgICAgIDxhcnRpY2xlIGtleT17aW5kZXh9IGNsYXNzTmFtZT0iZGV0YWlsLXN0YXQiPgogICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJza2VsZXRvbiBza2VsZXRvbi1saW5lIiBzdHlsZT17eyB3aWR0aDogMTIwIH19IC8+CiAgICAgICAgICAgICAgPGRpdgogICAgICAgICAgICAgICAgY2xhc3NOYW1lPSJza2VsZXRvbiBza2VsZXRvbi1saW5lIgogICAgICAgICAgICAgICAgc3R5bGU9e3sgd2lkdGg6IDgwLCBoZWlnaHQ6IDE4LCBtYXJnaW5Ub3A6IDggfX0KICAgICAgICAgICAgICAvPgogICAgICAgICAgICA8L2FydGljbGU+CiAgICAgICAgICApKX0KICAgICAgICA8L2Rpdj4KICAgICAgPC9zZWN0aW9uPgogICAgKTsKICB9CgogIGlmIChub3RGb3VuZENhbXBhaWduSWQpIHsKICAgIHJldHVybiAoCiAgICAgIDxzZWN0aW9uIGNsYXNzTmFtZT0iY2FyZCBkZXRhaWwtcGFuZWwiPgogICAgICAgIDxkaXYgY2xhc3NOYW1lPSJzZWN0aW9uLWhlYWRpbmciPgogICAgICAgICAgPGgyPkNhbXBhaWduIG5vdCBmb3VuZDwvaDI+CiAgICAgICAgICA8cCBjbGFzc05hbWU9Im11dGVkIj4KICAgICAgICAgICAgVGhlIGNhbXBhaWduIDxjb2RlPiMke25vdEZvdW5kQ2FtcGFpZ25JZH08L2NvZGU+IGRvZXMgbm90IGV4aXN0IG9yIG1heSBoYXZlIGJlZW4gcmVtb3ZlZC4KICAgICAgICAgIDwvcD4KICAgICAgICA8L2Rpdj4KICAgICAgICA8ZGl2IHN0eWxlPXt7IG1hcmdpblRvcDogMjQgfX0+CiAgICAgICAgICA8TGluayB0bz0iLyIgY2xhc3NOYW1lPSJidG4tZ2hvc3QiPgogICAgICAgICAgICBCYWNrIHRvIGNhbXBhaWducwogICAgICAgICAgPC9MaW5rPgogICAgICAgIDwvZGl2PgogICAgICA8L3NlY3Rpb24+CiAgICApOwogIH0KCiAgaWYgKCFjYW1wYWlnbikgewogICAgcmV0dXJuICgKICAgICAgPEVtcHR5U3RhdGUKICAgICAgICB2YXJpYW50PSJjYXJkIgogICAgICAgIGljb249e01vdXNlUG9pbnRlcjJ9CiAgICAgICAgdGl0bGU9IkNhbXBhaWduIGFjdGlvbnMiCiAgICAgICAgbWVzc2FnZT0iUGljayBhIGNhbXBhaWduIGZyb20gdGhlIGJvYXJkIHRvIG1hbmFnZSBpdC4iCiAgICAgIC8+CiAgICApOwogIH0KCiAgY29uc3QgYWN0aXZlQ2FtcGFpZ24gPSBjYW1wYWlnbjsKCiAgLy8gU2ltdWxhdGlvbiBpcyBydW4gKGFuZCB0aGUgbmV0d29yayBmZWUgZXN0aW1hdGVkKSBiZWZvcmUgdGhlIHByZXZpZXcgbW9kYWwKICAvLyBvcGVucy4gSWYgdGhhdCBzaW11bGF0aW9uIGZhaWxzLCBzdXJmYWNlIGEgcmV0cnktYWJsZSBlcnJvciBuZXh0IHRvIHRoZQogIC8vIHBsZWRnZSBidXR0b24gaW5zdGVhZCBvZiBvbmx5IHJlbHlpbmcgb24gdGhlIHRvYXN0LgogIGNvbnN0IHNlbGVjdGVkVG9rZW4gPSBwbGVkZ2VUb2tlbiB8fCBhY3RpdmVDYW1wYWlnbi5hc3NldENvZGU7CgogIGFzeW5jIGZ1bmN0aW9uIHN1Ym1pdFBsZWRnZSgpIHsKICAgIHNldFBsZWRnZUVycm9yKG51bGwpOwogICAgc2V0UGxlZGdlU3VjY2VzcyhmYWxzZSk7CiAgICBpZiAocGxlZGdlU3VjY2Vzc1RpbWVyUmVmLmN1cnJlbnQgIT09IG51bGwpIHsKICAgICAgY2xlYXJUaW1lb3V0KHBsZWRnZVN1Y2Nlc3NUaW1lclJlZi5jdXJyZW50KTsKICAgICAgcGxlZGdlU3VjY2Vzc1RpbWVyUmVmLmN1cnJlbnQgPSBudWxsOwogICAgfQogICAgc2V0SXNTdWJtaXR0aW5nKHRydWUpOwogICAgdHJ5IHsKICAgICAgYXdhaXQgb25QbGVkZ2UoYWN0aXZlQ2FtcGFpZ24uaWQsIE51bWJlcihwbGVkZ2VBbW91bnQpLCBzZWxlY3RlZFRva2VuKTsKICAgICAgc2V0UGxlZGdlQW1vdW50KCcyNScpOwogICAgICBzZXRQbGVkZ2VUb2tlbignJyk7CiAgICAgIHNldFBsZWRnZVN1Y2Nlc3ModHJ1ZSk7CiAgICAgIHBsZWRnZVN1Y2Nlc3NUaW1lclJlZi5jdXJyZW50ID0gc2V0VGltZW91dCgoKSA9PiB7CiAgICAgICAgc2V0UGxlZGdlU3VjY2VzcyhmYWxzZSk7CiAgICAgICAgcGxlZGdlU3VjY2Vzc1RpbWVyUmVmLmN1cnJlbnQgPSBudWxsOwogICAgICB9LCA0MDAwKTsKICAgIH0gY2F0Y2ggKGVycm9yKSB7CiAgICAgIHNldFBsZWRnZUVycm9yKGRlc2NyaWJlUGxlZGdlRXJyb3IoZXJyb3IpKTsKICAgIH0gZmluYWxseSB7CiAgICAgIHNldElzU3VibWl0dGluZyhmYWxzZSk7CiAgICB9CiAgfQoKICBmdW5jdGlvbiBoYW5kbGVQbGVkZ2UoZXZlbnQ6IEZvcm1FdmVudDxIVE1MRm9ybUVsZW1lbnQ+KSB7CiAgICBldmVudC5wcmV2ZW50RGVmYXVsdCgpOwogICAgdm9pZCBzdWJtaXRQbGVkZ2UoKTsKICB9CgogIGFzeW5jIGZ1bmN0aW9uIGhhbmRsZVJlZnVuZCgpIHsKICAgIHNldElzU3VibWl0dGluZyh0cnVlKTsKICAgIHRyeSB7CiAgICAgIGF3YWl0IG9uUmVmdW5kKGFjdGl2ZUNhbXBhaWduLmlkLCByZWZ1bmRDb250cmlidXRvci50cmltKCkpOwogICAgfSBmaW5hbGx5IHsKICAgICAgc2V0SXNTdWJtaXR0aW5nKGZhbHNlKTsKICAgIH0KICB9CgogIGFzeW5jIGZ1bmN0aW9uIGhhbmRsZUNsYWltKCkgewogICAgc2V0SXNTdWJtaXR0aW5nKHRydWUpOwogICAgdHJ5IHsKICAgICAgYXdhaXQgb25DbGFpbShhY3RpdmVDYW1wYWlnbik7CiAgICB9IGZpbmFsbHkgewogICAgICBzZXRJc1N1Ym1pdHRpbmcoZmFsc2UpOwogICAgfQogIH0KCiAgcmV0dXJuICgKICAgIDxzZWN0aW9uIGNsYXNzTmFtZT0iY2FyZCBkZXRhaWwtcGFuZWwiIGFyaWEtbGFiZWxsZWRieT0iY2FtcGFpZ24tZGV0YWlsLXRpdGxlIj4KICAgICAgey8qIEZ1bGwtd2lkdGggQ2FtcGFpZ24gQmFubmVyICovfQogICAgICA8ZGl2CiAgICAgICAgY2xhc3NOYW1lPSJjYW1wYWlnbi1kZXRhaWwtYmFubmVyIgogICAgICA+CiAgICAgICAge2FjdGl2ZUNhbXBhaWduLm1ldGFkYXRhPy5pbWFnZVVybCAmJiAhYmFubmVySW1hZ2VFcnJvciA/ICgKICAgICAgICAgIDxpbWcKICAgICAgICAgICAgc3JjPXthY3RpdmVDYW1wYWlnbi5tZXRhZGF0YS5pbWFnZVVybH0KICAgICAgICAgICAgYWx0PXthY3RpdmVDYW1wYWlnbi50aXRsZX0KICAgICAgICAgICAgb25FcnJvcj17KCkgPT4gc2V0QmFubmVySW1hZ2VFcnJvcih0cnVlKX0KICAgICAgICAgICAgY2xhc3NOYW1lPSJjYW1wYWlnbi1kZXRhaWwtYmFubmVyLWltYWdlIgogICAgICAgICAgLz4KICAgICAgICApIDogbnVsbH0KICAgICAgPC9kaXY+CgogICAgICA8ZGl2IGNsYXNzTmFtZT0ic2VjdGlvbi1oZWFkaW5nIj4KICAgICAgICA8aDIgaWQ9ImNhbXBhaWduLWRldGFpbC10aXRsZSI+e2FjdGl2ZUNhbXBhaWduLnRpdGxlfTwvaDI+CiAgICAgICAgPHAgY2xhc3NOYW1lPSJtdXRlZCI+e2FjdGl2ZUNhbXBhaWduLmRlc2NyaXB0aW9ufTwvcD4KICAgICAgPC9kaXY+CgogICAgICA8ZGl2IGNsYXNzTmFtZT0id2FsbGV0LXN0YXR1cyIgcm9sZT0iZ3JvdXAiIGFyaWEtbGFiZWxsZWRieT0id2FsbGV0LXN0YXR1cy10aXRsZSI+CiAgICAgICAgPGRpdj4KICAgICAgICAgIDxoMyBpZD0id2FsbGV0LXN0YXR1cy10aXRsZSIgY2xhc3NOYW1lPSJ3YWxsZXQtc3RhdHVzLXRpdGxlIj5XYWxsZXQgc3RhdHVzPC9oMz4KICAgICAgICAgIDxwIGNsYXNzTmFtZT0ibXV0ZWQiPgogICAgICAgICAgICB7Y29ubmVjdGVkV2FsbGV0CiAgICAgICAgICAgICAgPyBgQ29ubmVjdGVkIHRvICR7bmV0d29ya05hbWUoYXBwQ29uZmlnKX1gCiAgICAgICAgICAgICAgOiBgTm90IGNvbm5lY3RlZCDigJQgY29ubmVjdCBhIHdhbGxldCB0byB0YWtlIGFjdGlvbnNgfQogICAgICAgICAgPC9wPgogICAgICAgIDwvZGl2PgogICAgICAgIDxkaXYgY2xhc3NOYW1lPSJ3YWxsZXQtY29ubmVjdGVkIj4KICAgICAgICAgIHtjb25uZWN0ZWRXYWxsZXQgPyAoCiAgICAgICAgICAgIDw+CiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9IndhbGxldC1hZGRyZXNzLXJvdyI+CiAgICAgICAgICAgICAgICA8QWRkcmVzc0F2YXRhciBhZGRyZXNzPXtjb25uZWN0ZWRXYWxsZXR9IHNpemU9ezI4fSAvPgogICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9IndhbGxldC1hZGRyZXNzLXZhbHVlIj4KICAgICAgICAgICAgICAgICAgPHN0cm9uZyBjbGFzc05hbWU9Im1vbm8iPntjb25uZWN0ZWRXYWxsZXQuc2xpY2UoMCwgMTYpfS4uLjwvc3Ryb25nPgogICAgICAgICAgICAgICAgICA8Q29weUJ1dHRvbiB2YWx1ZT17Y29ubmVjdGVkV2FsbGV0fSBhcmlhTGFiZWw9IkNvcHkgY29ubmVjdGVkIHdhbGxldCBhZGRyZXNzIiAvPgogICAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICAgPGJ1dHRvbgogICAgICAgICAgICAgICAgY2xhc3NOYW1lPSJidG4tZ2hvc3QiCiAgICAgICAgICAgICAgICB0eXBlPSJidXR0b24iCiAgICAgICAgICAgICAgICBvbkNsaWNrPXtvbkRpc2Nvbm5lY3RXYWxsZXR9CiAgICAgICAgICAgICAgICBkaXNhYmxlZD17aXNTdWJtaXR0aW5nfQogICAgICAgICAgICAgID4KICAgICAgICAgICAgICAgIERpc2Nvbm5lY3QKICAgICAgICAgICAgICA8L2J1dHRvbj4KICAgICAgICAgICAgPC8+CiAgICAgICAgICApIDogKAogICAgICAgICAgICA8YnV0dG9uCiAgICAgICAgICAgICAgY2xhc3NOYW1lPSJidG4tZ2hvc3QiCiAgICAgICAgICAgICAgdHlwZT0iYnV0dG9uIgogICAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IHsKICAgICAgICAgICAgICAgIHZvaWQgb25Db25uZWN0V2FsbGV0KCk7CiAgICAgICAgICAgICAgfX0KICAgICAgICAgICAgICBkaXNhYmxlZD17aXNTdWJtaXR0aW5nIHx8IGlzQ29ubmVjdGluZ1dhbGxldH0KICAgICAgICAgICAgPgogICAgICAgICAgICAgIHtpc0Nvbm5lY3RpbmdXYWxsZXQgPyAnQ29ubmVjdGluZy4uLicgOiAnQ29ubmVjdCBXYWxsZXQnfQogICAgICAgICAgICA8L2J1dHRvbj4KICAgICAgICAgICl9CiAgICAgICAgPC9kaXY+CiAgICAgIDwvZGl2PgoKICAgICAgPGRpdiBjbGFzc05hbWU9ImRldGFpbC1ncmlkIiByb2xlPSJncm91cCIgYXJpYS1sYWJlbD0iQ2FtcGFpZ24gc3VtbWFyeSI+CiAgICAgICAgPGFydGljbGUgY2xhc3NOYW1lPSJkZXRhaWwtc3RhdCI+CiAgICAgICAgICA8c3Bhbj5DYW1wYWlnbiBJRDwvc3Bhbj4KICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJkZXRhaWwtc3RhdC12YWx1ZSI+CiAgICAgICAgICAgIDxzdHJvbmcgY2xhc3NOYW1lPSJtb25vIj57YWN0aXZlQ2FtcGFpZ24uaWR9PC9zdHJvbmc+CiAgICAgICAgICAgIDxDb3B5QnV0dG9uIHZhbHVlPXthY3RpdmVDYW1wYWlnbi5pZH0gYXJpYUxhYmVsPSJDb3B5IGNhbXBhaWduIElEIiAvPgogICAgICAgICAgPC9kaXY+CiAgICAgICAgPC9hcnRpY2xlPgogICAgICAgIDxhcnRpY2xlIGNsYXNzTmFtZT0iZGV0YWlsLXN0YXQiPgogICAgICAgICAgPHNwYW4+Q3JlYXRvcjwvc3Bhbj4KICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJkZXRhaWwtc3RhdC12YWx1ZSI+CiAgICAgICAgICAgIDxBZGRyZXNzQXZhdGFyIGFkZHJlc3M9e2FjdGl2ZUNhbXBhaWduLmNyZWF0b3J9IHNpemU9ezI4fSAvPgogICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0id2FsbGV0LWFkZHJlc3MtdmFsdWUiPgogICAgICAgICAgICAgIDxzdHJvbmcgY2xhc3NOYW1lPSJtb25vIj57YWN0aXZlQ2FtcGFpZ24uY3JlYXRvci5zbGljZSgwLCAxNil9Li4uPC9zdHJvbmc+CiAgICAgICAgICAgICAgPENvcHlCdXR0b24gdmFsdWU9e2FjdGl2ZUNhbXBhaWduLmNyZWF0b3J9IGFyaWFMYWJlbD0iQ29weSBjcmVhdG9yIGFkZHJlc3MiIC8+CiAgICAgICAgICAgIDwvZGl2PgogICAgICAgICAgPC9kaXY+CiAgICAgICAgPC9hcnRpY2xlPgogICAgICAgIDxhcnRpY2xlIGNsYXNzTmFtZT0iZGV0YWlsLXN0YXQiPgogICAgICAgICAgPHNwYW4+QXNzZXQ8L3NwYW4+CiAgICAgICAgICA8c3Ryb25nPnthY3RpdmVDYW1wYWlnbi5hc3NldENvZGV9PC9zdHJvbmc+CiAgICAgICAgPC9hcnRpY2xlPgogICAgICAgIDxhcnRpY2xlIGNsYXNzTmFtZT0iZGV0YWlsLXN0YXQiPgogICAgICAgICAgPHNwYW4+UmVtYWluaW5nPC9zcGFuPgogICAgICAgICAgPHN0cm9uZz57YWN0aXZlQ2FtcGFpZ24ucHJvZ3Jlc3MucmVtYWluaW5nQW1vdW50fTwvc3Ryb25nPgogICAgICAgIDwvYXJ0aWNsZT4KICAgICAgICA8YXJ0aWNsZSBjbGFzc05hbWU9ImRldGFpbC1zdGF0Ij4KICAgICAgICAgIDxzcGFuPkFjdGl2ZSBwbGVkZ2VzPC9zcGFuPgogICAgICAgICAgPHN0cm9uZz57YWN0aXZlQ2FtcGFpZ24ucHJvZ3Jlc3MucGxlZGdlQ291bnR9PC9zdHJvbmc+CiAgICAgICAgPC9hcnRpY2xlPgogICAgICAgIDxhcnRpY2xlIGNsYXNzTmFtZT0iZGV0YWlsLXN0YXQiPgogICAgICAgICAgPHNwYW4+VGltZSBsZWZ0PC9zcGFuPgogICAgICAgICAgPHN0cm9uZz48Q291bnRkb3duIGRlYWRsaW5lPXthY3RpdmVDYW1wYWlnbi5kZWFkbGluZX0gLz48L3N0cm9uZz4KICAgICAgICA8L2FydGljbGU+CiAgICAgIDwvZGl2PgoKICAgICAgPFN1c3BlbnNlIGZhbGxiYWNrPXs8ZGl2IGNsYXNzTmFtZT0iY29udHJpYnV0b3Itc3VtbWFyeSIgYXJpYS1idXN5PSJ0cnVlIj5Mb2FkaW5nIGNvbnRyaWJ1dG9ycyDigKY8L2Rpdj59PgogICAgICAgIDxDb250cmlidXRvclN1bW1hcnkgY2FtcGFpZ249e2FjdGl2ZUNhbXBhaWdufSAvPgogICAgICA8L1N1c3BlbnNlPgoKICAgICAgPGRpdiBjbGFzc05hbWU9ImFjdGlvbi1yb3ciIHN0eWxlPXt7IG1hcmdpblRvcDogMjQgfX0+CiAgICAgICAgPFNoYXJlQnV0dG9ucyBjYW1wYWlnbj17YWN0aXZlQ2FtcGFpZ259IC8+CiAgICAgICAgPGJ1dHRvbiBjbGFzc05hbWU9ImJ0bi1naG9zdCIgdHlwZT0iYnV0dG9uIiBvbkNsaWNrPXtoYW5kbGVEb3dubG9hZFBuZ30+CiAgICAgICAgICA8RG93bmxvYWQgc2l6ZT17MTZ9IGFyaWEtaGlkZGVuPSJ0cnVlIiAvPgogICAgICAgICAgRG93bmxvYWQgY2FyZAogICAgICAgIDwvYnV0dG9uPgogICAgICAgIDxidXR0b24gY2xhc3NOYW1lPSJidG4tZ2hvc3QiIHR5cGU9ImJ1dHRvbiIgb25DbGljaz17aGFuZGxlQ29weUxpbmt9PgogICAgICAgICAgPExpbmtJY29uIHNpemU9ezE2fSBhcmlhLWhpZGRlbj0idHJ1ZSIgLz4KICAgICAgICAgIENvcHkgbGluawogICAgICAgIDwvYnV0dG9uPgogICAgICA8L2Rpdj4KCiAgICAgIDxmb3JtCiAgICAgICAgY2xhc3NOYW1lPSJwbGVkZ2UtZm9ybSIKICAgICAgICBvblN1Ym1pdD17aGFuZGxlUGxlZGdlfQogICAgICAgIGFyaWEtbGFiZWw9IlBsZWRnZSBjYW1wYWlnbiIKICAgICAgICBhcmlhLWJ1c3k9e2lzU3VibWl0dGluZyB8fCBpc1BsZWRnZVBlbmRpbmcgPyAndHJ1ZScgOiAnZmFsc2UnfQogICAgICAgIGFyaWEtZGVzY3JpYmVkYnk9e3BsZWRnZUVycm9yID8gJ3BsZWRnZS1lcnJvci1tZXNzYWdlJyA6IHVuZGVmaW5lZH0KICAgICAgPgogICAgICAgIDxoMyBpZD0icGxlZGdlLWZvcm0tdGl0bGUiPkFkZCBhIHBsZWRnZTwvaDM+CiAgICAgICAge2lzUGxlZGdlUGVuZGluZyA/ICgKICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJwbGVkZ2UtcGVuZGluZy1ub3RpY2UiIHJvbGU9InN0YXR1cyI+CiAgICAgICAgICAgIFRoZSBwbGVkZ2UgdHJhbnNhY3Rpb24gaXMgaW4gZmxpZ2h0LiBQbGVhc2Ugd2FpdCBmb3IgY29uZmlybWF0aW9uLgogICAgICAgICAgPC9kaXY+CiAgICAgICAgKSA6IG51bGx9CiAgICAgICAgPGRpdiBjbGFzcz5OYW1lPSJmb3JtLXJvdyI+CiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0iZm9ybS1maWVsZCI+CiAgICAgICAgICAgIDxsYWJlbCBodG1sRm9yPSJwbGVkZ2UtYW1vdW50Ij5QbGVkZ2UgYW1vdW50PC9sYWJlbD4KICAgICAgICAgICAgPGlucHV0CiAgICAgICAgICAgICAgaWQ9InBsZWRnZS1hbW91bnQiCiAgICAgICAgICAgICAgdHlwZT0ibnVtYmVyIgogICAgICAgICAgICAgIG1pbj0iMC4wMSIKICAgICAgICAgICAgICBzdGVwPSIwLjAxIgogICAgICAgICAgICAgIHZhbHVlPXtwbGVkZ2VBbW91bnR9CiAgICAgICAgICAgICAgb25DaGFuZ2U9eyhlKSA9PiBzZXRQbGVkZ2VBbW91bnQoZS50YXJnZXQudmFsdWUpfQogICAgICAgICAgICAgIGRpc2FibGVkPXtpc1N1Ym1pdHRpbmcgfHwgaXNQbGVkZ2VQZW5kaW5nfQogICAgICAgICAgICAgIHJlcXVpcmVkCiAgICAgICAgICAgIC8+CiAgICAgICAgICA8L2Rpdj4KICAgICAgICAgIHthY3RpdmVDYW1wYWlnbi5hY2NlcHRlZFRva2Vucy5sZW5ndGggPiAxID8gKAogICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0iZm9ybS1maWVsZCI+CiAgICAgICAgICAgICAgPGxhYmVsIGh0bWxGb3I9InBsZWRnZS10b2tlbiI+VG9rZW48L2xhYmVsPgogICAgICAgICAgICAgIDxzZWxlY3QKICAgICAgICAgICAgICAgIGlkPSJwbGVkZ2UtdG9rZW4iCiAgICAgICAgICAgICAgICB2YWx1ZT17c2VsZWN0ZWRUb2tlbn0KICAgICAgICAgICAgICAgIG9uQ2hhbmdlPXsoZSkgPT4gc2V0UGxlZGdlVG9rZW4oZS50YXJnZXQudmFsdWUpfQogICAgICAgICAgICAgICAgZGlzYWJsZWQ9e2lzU3VibWl0dGluZyB8fCBpc1BsZWRnZVBlbmRpbmd9CiAgICAgICAgICAgICAgPgogICAgICAgICAgICAgICAge2FjdGl2ZUNhbXBhaWduLmFjY2VwdGVkVG9rZW5zLm1hcCgodG9rZW4pID0+ICgKICAgICAgICAgICAgICAgICAgPG9wdGlvbiBrZXk9e3Rva2VufSB2YWx1ZT17dG9rZW59PgogICAgICAgICAgICAgICAgICAgIHt0b2tlbn0KICAgICAgICAgICAgICAgICAgPC9vcHRpb24+CiAgICAgICAgICAgICAgICApKX0KICAgICAgICAgICAgICA8L3NlbGVjdD4KICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICApIDogbnVsbH0KICAgICAgICA8L2Rpdj4KICAgICAgICA8ZGl2IGNsYXNzTmFtZT0iZm9ybS1hY3Rpb25zIj4KICAgICAgICAgIDxidXR0b24KICAgICAgICAgICAgY2xhc3NOYW1lPSJidG4tcHJpbWFyeSIKICAgICAgICAgICAgdHlwZT0ic3VibWl0IgogICAgICAgICAgICBkaXNhYmxlZD17IWJvb2xlYW4oY29ubmVjdGVkV2FsbGV0KSB8fCBpc1N1Ym1pdHRpbmcgfHwgaXNQbGVkZ2VQZW5kaW5nIHx8ICFhY3RpdmVDYW1wYWlnbi5wcm9ncmVzcy5jYW5QbGVkZ2V9CiAgICAgICAgICA+CiAgICAgICAgICAgIHtpc1N1Ym1pdHRpbmcgfHwgaXNQbGVkZ2VQZW5kaW5nID8gJ1N1Ym1pdHRpbmcuLi4nIDogJ0FkZCBwbGVkZ2UnfQogICAgICAgICAgPC9idXR0b24+CiAgICAgICAgPC9kaXY+CiAgICAgICAge3BsZWRnZUVycm9yID8gKAogICAgICAgICAgPGRpdgogICAgICAgICAgICBjbGFzc05hbWU9InBsZWRnZS1lcnJvciIKICAgICAgICAgICAgcm9sZT0iYWxlcnQiCiAgICAgICAgICAgIGlkPSJwbGVkZ2UtZXJyb3ItbWVzc2FnZSIKICAgICAgICAgICAgcmVmPXtwbGVkZ2VFcnJvclJlZn0KICAgICAgICAgICAgdGFiSW5kZXg9ey0xfQogICAgICAgICAgPgogICAgICAgICAgICA8c3Bhbj57cGxlZGdlRXJyb3J9PC9zcGFuPgogICAgICAgICAgICA8YnV0dG9uIHR5cGU9ImJ1dHRvbiIgb25DbGljaz17KCkgPT4gdm9pZCBzdWJtaXRQbGVkZ2UoKX0+UmV0cnk8L2J1dHRvbj4KICAgICAgICAgIDwvZGl2PgogICAgICAgICkgOiBudWxsfQogICAgICAgIHtwbGVkZ2VTdWNjZXNzID8gKAogICAgICAgICAgPGRpdgogICAgICAgICAgICBjbGFzc05hbWU9InBsZWRnZS1zdWNjZXNzIgogICAgICAgICAgICByb2xlPSJzdGF0dXMiCiAgICAgICAgICAgIHJlZj17cGxlZGdlU3VjY2Vzc1JlZn0KICAgICAgICAgICAgdGFiSW5kZXg9ey0xfQogICAgICAgICAgPgogICAgICAgICAgICBQbGVkZ2Ugc3VibWl0dGVkIHN1Y2Nlc3NmdWxseS4KICAgICAgICAgIDwvZGl2PgogICAgICAgICkgOiBudWxsfQogICAgICA8L2Zvcm0+CgogICAgICB7YWN0aXZlQ2FtcGFpZ24ucHJvZ3Jlc3MuY2FuQ2xhaW0gPyAoCiAgICAgICAgPGRpdiBjbGFzcz5OYW1lPSJjYW1wYWlnbi1hY3Rpb25zIj4KICAgICAgICAgIDxidXR0b24KICAgICAgICAgICAgY2xhc3NOYW1lPSJidG4tcHJpbWFyeSIKICAgICAgICAgICAgdHlwZT0iYnV0dG9uIgogICAgICAgICAgICBvbkNsaWNrPXtoYW5kbGVDbGFpbX0KICAgICAgICAgICAgZGlzYWJsZWQ9e2lzU3VibWl0dGluZ30KICAgICAgICAgID4KICAgICAgICAgICAgQ2xhaW0gZnVuZHMKICAgICAgICAgIDwvYnV0dG9uPgogICAgICAgIDwvZGl2PgogICAgICApIDogbnVsbH0KCiAgICAgIHthY3RpdmVDYW1wYWlnbi5wcm9ncmVzcy5jYW5SZWZ1bmQgPyAoCiAgICAgICAgPGRpdiBjbGFzc05hbWU9ImNhbmNlbC1mb3JtIj4KICAgICAgICAgIDxsYWJlbCBodG1sRm9yPSJyZWZ1bmQtY29udHJpYnV0b3IiPlJlZnVuZCBjb250cmlidXRvcjwvbGFiZWw+CiAgICAgICAgICA8aW5wdXQKICAgICAgICAgICAgaWQ9InJlZnVuZC1jb250cmlidXRvciIKICAgICAgICAgICAgdHlwZT0idGV4dCIKICAgICAgICAgICAgdmFsdWU9e3JlZnVuZENvbnRyaWJ1dG9yfQogICAgICAgICAgICBvbkNoYW5nZT17KGUpID0+IHNldFJlZnVuZENvbnRyaWJ1dG9yKGUudGFyZ2V0LnZhbHVlKX0KICAgICAgICAgICAgZGlzYWJsZWQ9e2lzU3VibWl0dGluZ30KICAgICAgICAgIC8+CiAgICAgICAgICA8YnV0dG9uCiAgICAgICAgICAgIGNsYXNzTmFtZT0iYnRuLWdob3N0IgogICAgICAgICAgICB0eXBlPSJidXR0b24iCiAgICAgICAgICAgIG9uQ2xpY2s9e2hhbmRsZVJlZnVuZH0KICAgICAgICAgICAgZGlzYWJsZWQ9e2lzU3VibWl0dGluZyB8fCByZWZ1bmRDb250cmlidXRvci50cmltKCkubGVuZ3RoID09PSAwfQogICAgICAgICAgPgogICAgICAgICAgICBSZWZ1bmQKICAgICAgICAgIDwvYnV0dG9uPgogICAgICAgIDwvZGl2PgogICAgICApIDogbnVsbH0KICAgIDwvc2VjdGlvbj4KICApOwp9Cg==
+import { FormEvent, useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { MousePointer2, Download, Link as LinkIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Campaign, AppConfig } from '../types/campaign';
+import CopyButton from './CopyButton';
+import { AddressAvatar } from './AddressAvatar';
+import { EmptyState } from './EmptyState';
+import { CampaignImage } from './CampaignImage';
+
+const ContributorSummary = lazy(() =>
+  import('./ContributorSummary').then((m) => ({ default: m.ContributorSummary })),
+);
+import { Countdown } from './Countdown';
+import { useCampaignShareCard } from './CampaignShareCard';
+import { useToast } from '../hooks/useToast';
+import { ShareButtons } from './ShareButtons';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
+
+interface CampaignDetailPanelProps {
+  campaign: Campaign | null;
+  appConfig?: AppConfig | null;
+  connectedWallet?: string | null;
+  isConnectingWallet?: boolean;
+  isLoading?: boolean;
+  isPledgePending?: boolean;
+  notFoundCampaignId?: string | null;
+  onConnectWallet?: () => Promise<void>;
+  onDisconnectWallet?: () => void;
+  onPledge?: (campaignId: string, amount: number, assetCode: string) => Promise<void>;
+  onClaim?: (campaign: Campaign) => Promise<void>;
+  onSoftDelete?: (campaignId: string) => Promise<void>;
+  onRefund?: (campaignId: string, contributor: string) => Promise<void>;
+  onClose?: () => void;
+}
+
+const FEE_ESTIMATION_ERROR_CODES = new Set([
+  'SIMULATION_FAILED',
+  'SIMUPATION_PREPARE_FAILED',
+  'SOURCE_ACCOUNT_LOAD_FAILED',
+  'STATE_RESTORE_REQUIRED',
+]);
+
+function describePledgeError(error: unknown): string {
+  const code = (error as { code?: string } | null)?.code;
+  if (code && FEE_ESTIMATION_ERROR_CODES.has(code)) {
+    return 'Could not estimate fee. Check your connection and retry.';
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return 'The pledge could not be completed. Please try again.';
+}
+
+function networkName(config: AppConfig | null | undefined): string {
+  const passphrase = config?.networkPassphrase ?? config?.soroban?.networkPassphrase;
+
+  if (!passphrase) {
+    return 'Configured network';
+  }
+  if (passphrase === 'Test SDF Network ; September 2015') {
+    return 'Stellar Testnet';
+  }
+  if (passphrase === 'Public Global Stellar Network ; September 2015') {
+    return 'Stellar Mainnet';
+  }
+
+  return 'Configured network';
+}
+
+export function CampaignDetailPanel({
+  campaign,
+  appConfig,
+  connectedWallet = null,
+  isConnectingWallet = false,
+  isLoading = false,
+  isPledgePending = false,
+  notFoundCampaignId = null,
+  onConnectWallet = async () => {},
+  onDisconnectWallet = () => {},
+  onPledge = async () => {},
+  onClaim = async () => {},
+  onRefund = async () => {},
+}: CampaignDetailPanelProps) {
+  const [pledgeAmount, setPledgeAmount] = useState('25');
+  const [pledgeToken, setPledgeToken] = useState('');
+  const [refundContributor, setRefundContributor] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pledgeError, setPledgeError] = useState<string | null>(null);
+  const [pledgeSuccess, setPledgeSuccess] = useState(false);
+  const pledgeSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [bannerImageError, setBannerImageError] = useState(false);
+  const walletReady = appConfig?.walletIntegrationReady ?? false;
+  const { downloadPng, toDataUrl } = useCampaignShareCard();
+  const { addToast } = useToast();
+  const pledgeErrorRef = useRef<HTMLDivElement | null>(null);
+  const pledgeSuccessRef = useRef<HTMLDivElement | null>(null);
+
+  const handleDownloadPng = useCallback(() => {
+    if (!campaign) return;
+    downloadPng(campaign, campaign.metadata?.imageUrl);
+    addToast('Campaign card downloaded as PNG.', 'success');
+  }, [campaign, downloadPng, addToast]);
+
+  const handleCopyLink = useCallback(() => {
+    if (!campaign) return;
+    const url = `${window.location.origin}/campaigns/${campaign.id}`;
+navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        addToast('Campaign link copied to clipboard.', 'success', {
+          href: url,
+          label: url.slice(0, 40) + '…',
+        });
+      })
+      .catch(() => {
+        addToast('Failed to copy link.', 'error');
+      });
+  }, [campaign, addToast]);
+
+  useEffect(() => {
+    setBannerImageError(false);
+  }, [campaign?.id, connectedWallet]);
+
+  useEffect(() => {
+    return () => {
+      if (pledgeSuccessTimerRef.current !== null) {
+        clearTimeout(pledgeSuccessTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Announce pledge errors and successes to screen readers without moving focus.
+  useEffect(() => {
+    if (pledgeError && pledgeErrorRef.current) {
+      pledgeErrorRef.current.focus();
+    }
+  }, [pledgeError]);
+
+  useEffect(() => {
+    if (pledgeSuccess && pledgeSuccessRef.current) {
+      pledgeSuccessRef.current.focus();
+    }
+  }, [pledgeSuccess]);
+
+  const showSkeleton = useMinDisplayTime(isLoading);
+  if (showSkeleton) {
+    return (
+      <section className="card detail-panel" aria-busy="true" aria-label="Loading campaign details">
+        <div className="section-heading">
+          <h2>
+            <div className="skeleton skeleton-line" style={{ width: 220 }} />
+          </h2>
+          <div className="skeleton skeleton-line" style={{ width: 320, height: 14 }} />
+        </div>
+        <div className="detail-grid">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <article key={index} className="detail-stat">
+              <div className="skeleton skeleton-line" style={{ width: 120 }} />
+              <div
+                className="skeleton skeleton-line"
+                style={{ width: 80, height: 18, marginTop: 8 }}
+              />
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (notFoundCampaignId) {
+    return (
+      <section className="card detail-panel">
+        <div className="section-heading">
+          <h2>Campaign not found</h2>
+          <p className="muted">
+The campaign <code>#${notFoundCampaignId}</code> does not exist or may have been
+            removed.
+          </p>
+        </div>
+        <div style={{ marginTop: 24 }}>
+          <Link to="/" className="btn-ghost">
+            Back to campaigns
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (!campaign) {
+    return (
+      <EmptyState
+        variant="card"
+        icon={MousePointer2}
+        title="Campaign actions"
+        message="Pick a campaign from the board to manage it."
+      />
+    );
+  }
+
+  const activeCampaign = campaign;
+
+  // Simulation is run (and the network fee estimated) before the preview modal
+  // opens. If that simulation fails, surface a retry-able error next to the
+  // pledge button instead of only relying on the toast.
+  const selectedToken = pledgeToken || activeCampaign.assetCode;
+
+  async function submitPledge() {
+    setPledgeError(null);
+    setPledgeSuccess(false);
+    if (pledgeSuccessTimerRef.current !== null) {
+      clearTimeout(pledgeSuccessTimerRef.current);
+      pledgeSuccessTimerRef.current = null;
+    }
+    setIsSubmitting(true);
+    try {
+      await onPledge(activeCampaign.id, Number(pledgeAmount), selectedToken);
+      setPledgeAmount('25');
+      setPledgeToken('');
+      setPledgeSuccess(true);
+      pledgeSuccessTimerRef.current = setTimeout(() => {
+        setPledgeSuccess(false);
+        pledgeSuccessTimerRef.current = null;
+      }, 4000);
+    } catch (error) {
+      setPledgeError(describePledgeError(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handlePledge(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void submitPledge();
+  }
+
+  async function handleRefund() {
+    setIsSubmitting(true);
+    try {
+      await onRefund(activeCampaign.id, refundContributor.trim());
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleClaim() {
+    setIsSubmitting(true);
+    try {
+      await onClaim(activeCampaign);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="card detail-panel" aria-labelledby="campaign-detail-title">
+      {/* Full-width Campaign Banner */}
+      <div className="campaign-detail-banner">
+        {activeCampaign.metadata?.imageUrl && !bannerImageError ? (
+          <img
+            src={activeCampaign.metadata.imageUrl}
+            alt={activeCampaign.title}
+            onError={() => setBannerImageError(true)}
+            className="campaign-detail-banner-image"
+          />
+        ) : null}
+      </div>
+
+      <div className="section-heading">
+        <h2 id="campaign-detail-title">{activeCampaign.title}</h2>
+        <p className="muted">{activeCampaign.description}</p>
+      </div>
+
+      <div className="wallet-status" role="group" aria-labelledby="wallet-status-title">
+        <div>
+          <h3 id="wallet-status-title" className="wallet-status-title">
+            Wallet status
+          </h3>
+          <p className="muted">
+            {connectedWallet
+              ? `Connected to ${networkName(appConfig)}`
+              : `Not connected — connect a wallet to take actions`}
+          </p>
+        </div>
+        <div className="wallet-connected">
+          {connectedWallet ? (
+            <>
+              <div className="wallet-address-row">
+                <AddressAvatar address={connectedWallet} size={28} />
+                <div className="wallet-address-value">
+                  <strong className="mono">{connectedWallet.slice(0, 16)}...</strong>
+                  <CopyButton value={connectedWallet} ariaLabel="Copy connected wallet address" />
+                </div>
+              </div>
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={onDisconnectWallet}
+                disabled={isSubmitting}
+              >
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <button
+              className="btn-ghost"
+              type="button"
+              onClick={() => {
+                void onConnectWallet();
+              }}
+              disabled={isSubmitting || isConnectingWallet}
+            >
+              {isConnectingWallet ? 'Connecting...' : 'Connect Wallet'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="detail-grid" role="group" aria-label="Campaign summary">
+        <article className="detail-stat">
+          <span>Campaign ID</span>
+          <div className="detail-stat-value">
+            <strong className="mono">{activeCampaign.id}</strong>
+            <CopyButton value={activeCampaign.id} ariaLabel="Copy campaign ID" />
+          </div>
+        </article>
+        <article className="detail-stat">
+          <span>Creator</span>
+          <div className="detail-stat-value">
+            <AddressAvatar address={activeCampaign.creator} size={28} />
+            <div className="wallet-address-value">
+              <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
+              <CopyButton value={activeCampaign.creator} ariaLabel="Copy creator address" />
+            </div>
+          </div>
+        </article>
+        <article className="detail-stat">
+          <span>Asset</span>
+          <strong>{activeCampaign.assetCode}</strong>
+        </article>
+        <article className="detail-stat">
+          <span>Remaining</span>
+          <strong>{activeCampaign.progress.remainingAmount}</strong>
+        </article>
+        <article className="detail-stat">
+          <span>Active pledges</span>
+          <strong>{activeCampaign.progress.pledgeCount}</strong>
+        </article>
+        <article className="detail-stat">
+          <span>Time left</span>
+          <strong>
+            <Countdown deadline={activeCampaign.deadline} />
+          </strong>
+        </article>
+      </div>
+
+<Suspense
+        fallback={
+          <div className="contributor-summary" aria-busy="true">
+            Loading contributors …
+          </div>
+        }
+      >
+        <ContributorSummary campaign={activeCampaign} />
+      </Suspense>
+
+      <div className="action-row" style={{ marginTop: 24 }}>
+        <ShareButtons campaign={activeCampaign} />
+        <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
+          <Download size={16} aria-hidden="true" />
+          Download card
+        </button>
+        <button className="btn-ghost" type="button" onClick={handleCopyLink}>
+          <LinkIcon size={16} aria-hidden="true" />
+          Copy link
+        </button>
+      </div>
+
+<form
+        className="pledge-form"
+        onSubmit={handlePledge}
+        aria-label="Pledge campaign"
+        aria-busy={isSubmitting || isPledgePending ? 'true' : 'false'}
+        aria-describedby={pledgeError ? 'pledge-error-message' : undefined}
+      >
+        <h3 id="pledge-form-title">Add a pledge</h3>
+        {isPledgePending ? (
+          <div className="pledge-pending-notice" role="status">
+            The pledge transaction is in flight. Please wait for confirmation.
+          </div>
+        ) : null}
+        <div className="form-row">
+          <div className="form-field">
+            <label htmlFor="pledge-amount">Pledge amount</label>
+            <input
+              id="pledge-amount"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={pledgeAmount}
+              onChange={(e) => setPledgeAmount(e.target.value)}
+              disabled={isSubmitting || isPledgePending}
+              aria-describedby="pledge-amount-help"
+              required
+            />
+            <small id="pledge-amount-help" className="muted">
+              Enter the amount you want to pledge.
+            </small>
+          </div>
+          {activeCampaign.acceptedTokens?.length > 1 ? (
+            <div className="form-field">
+              <label htmlFor="pledge-token">Token</label>
+              <select
+                id="pledge-token"
+                value={selectedToken}
+                onChange={(e) => setPledgeToken(e.target.value)}
+                disabled={isSubmitting || isPledgePending}
+              >
+                {activeCampaign.acceptedTokens.map((token) => (
+                  <option key={token} value={token}>
+                    {token}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+        </div>
+        <div className="form-actions">
+          <button
+            className="btn-primary"
+            type="submit"
+            disabled={!connectedWallet || isSubmitting || isPledgePending || !activeCampaign.progress.canPledge}
+          >
+<option value="">{`Default (${activeCampaign.assetCode})`}</option>
+            <option value={activeCampaign.assetCode}>{activeCampaign.assetCode}</option>
+          </select>
+        </div>
+
+        <div className="form-actions">
+          <button
+            className="btn-primary"
+            type="submit"
+            disabled={isSubmitting || isPledgePending || !walletReady}
+            aria-busy={isSubmitting || isPledgePending}
+          >
+            {isSubmitting || isPledgePending ? 'Submitting...' : 'Pledge'}
+          </button>
+        </div>
+        {pledgeError ? (
+<div
+            ref={pledgeErrorRef}
+            className="form-error"
+            role="alert"
+            id="pledge-error-message"
+            tabIndex={-1}
+          >
+            <span>{pledgeError}</span>
+            <button type="button" onClick={() => void submitPledge()}>Retry</button>
+          </div>
+          </div>
+        ) : null}
+        {pledgeSuccess ? (
+<div
+            className="pledge-success"
+            role="status"
+            ref={pledgeSuccessRef}
+            aria-live="polite"
+            tabIndex={-1}
+          >
+            Pledge submitted successfully.
+          </div>
+        ) : null}
+      </form>
+
+{activeCampaign.progress.canClaim ? (
+        <div className="campaign-actions">
+          <div className="form-field">
+            <label htmlFor="refund-contributor">Contributor address</label>
+            <input
+              id="refund-contributor"
+              type="text"
+              value={refundContributor}
+              onChange={(e) => setRefundContributor(e.target.value)}
+              placeholder="G..."
+              aria-description="refund-contributor-help"
+            />
+            <small id="refund-contributor-help" className="muted">
+              Enter the contributor address to refund.
+            </small>
+          </div>
+
+          <div className="form-actions">
+          <button
+            className="btn-primary"
+            type="button"
+onClick={handleClaim}
+            disabled={isSubmitting || !walletReady}
+          >
+Claim funds
+          </button>
+        </div>
+) : null}
+
+      {activeCampaign.progress.canRefund ? (
+        <div className="cancel-form">
+          <label htmlFor="refund-contributor">Refund contributor</label>
+          <input
+            id="refund-contributor"
+            type="text"
+            value={refundContributor}
+            onChange={(e) => setRefundContributor(e.target.value)}
+            disabled={isSubmitting}
+          />
+          <button
+            className="btn-ghost"
+            type="button"
+            onClick={handleRefund}
+            disabled={isSubmitting || refundContributor.trim().length === 0}
+          >
+            Refund
+          </button>
+        </div>
+      ) : null}
+
+      <div className="form-actions">
+        <button
+          className="btn-primary"
+          type="button"
+          onClick={handleClaim}
+          disabled={isSubmitting || !walletReady}
+        >
+          Claim funds
+        </button>
+      </div>
+
+      <div className="detail-actions">
+        <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
+          <Download size={16} aria-hidden="true" /> Download card
+        </button>
+        <button className="btn-ghost" type="button" onClick={handleCopyLink}>
+          <LinkIcon size={16} aria-hidden="true" /> Copy link
+        </button>
+        <ShareButtons campaign={activeCampaign} />
+      </div>
+    </section>
+  );
+}

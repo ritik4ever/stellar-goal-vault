@@ -112,6 +112,10 @@ Returns all campaigns with computed progress. Supports filtering, sorting, and p
 
 **Query parameters:**
 
+Omit both `page` and `limit` to preserve the existing behavior and return the full filtered
+campaign list. To page through results, provide both parameters; `limit` is bounded from 1 to 100.
+Invalid values, or providing only one of the pair, return `400 Bad Request`.
+
 | Parameter      | Type     | Description                                                             |
 |----------------|----------|-------------------------------------------------------------------------|
 | `q`            | string   | Search query — filters by title, creator address, or campaign ID.       |
@@ -128,6 +132,9 @@ Returns all campaigns with computed progress. Supports filtering, sorting, and p
 > `id` in the same `order` direction. That tie-breaker makes consecutive `page` requests
 > form stable, non-overlapping chunks even when many campaigns share the same sort value,
 > so loading later chunks never repeats or skips a campaign.
+
+The `pagination` object includes `total`, `page`, `limit`, and `totalPages`, plus
+`hasPreviousPage` and `hasNextPage` so clients can enable navigation controls directly.
 
 **Response `200 OK`:**
 
@@ -162,7 +169,9 @@ Returns all campaigns with computed progress. Supports filtering, sorting, and p
     "total": 1,
     "page": 1,
     "limit": 20,
-    "totalPages": 1
+    "totalPages": 1,
+    "hasPreviousPage": false,
+    "hasNextPage": false
   }
 }
 ```

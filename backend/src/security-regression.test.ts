@@ -65,7 +65,9 @@ describe('Security regression — request input handling', () => {
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     const messages = res.body.error.details.map((d: any) => String(d.message).toLowerCase());
-    expect(messages.some((m: string) => m.includes('private') || m.includes('loopback'))).toBe(true);
+    expect(messages.some((m: string) => m.includes('private') || m.includes('loopback'))).toBe(
+      true,
+    );
   });
 
   it('returns 413 Payload Too Large for oversized request bodies', async () => {
@@ -78,5 +80,44 @@ describe('Security regression — request input handling', () => {
     expect(res.status).toBe(413);
     expect(res.body).toHaveProperty('error');
     expect(res.body.error).toHaveProperty('code', 'PAYLOAD_TOO_LARGE');
+  it('returns 400 for malformed JSON input', async () => {
+    const raw = '{"title": "test", '; // Unterminated JSON
+
+    const res = await request(app)
+      .post('/api/campaigns')
+      .set('Content-Type', 'application/json')
+      .send(raw);
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    // express.json() throws a SyntaxError with status 400 which is mapped
+    // to a generic format by the error handler, but it should definitely be 400.
+  });
+
+  it('rejects JSON array instead of object (type coercion bypass)', async () => {
+    const payload = [validCampaignPayload()];
+    const raw = JSON.stringify(payload);
+
+    const res = await request(app)
+      .post('/api/campaigns')
+      .set('Content-Type', 'application/json')
+      .send(raw);
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects urlencoded body when JSON is expected', async () => {
+    const res = await request(app)
+      .post('/api/campaigns')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .send('title=test&targetAmount=100');
+
+    // express.json() ignores non-JSON, so req.body is undefined or empty.
+    // validateBody will fail because required fields are missing.
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 });

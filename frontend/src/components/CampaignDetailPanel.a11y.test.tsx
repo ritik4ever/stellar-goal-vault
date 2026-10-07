@@ -76,8 +76,7 @@ describe.each(THEMES)
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
   });
-
-  it('exposes an accessible name for the campaign detail region', async () => {
+it('exposes an accessible name for the campaign detail region', async () => {
     render(
       <CampaignDetailPanel
         campaign={mockCampaign}

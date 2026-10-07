@@ -163,7 +163,9 @@ export function CreateCampaignForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionSucceeded, setSubmissionSucceeded] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
-  const [lastSubmittedPayload, setLastSubmittedPayload] = useState<CreateCampaignPayload | null>(null);
+  const [lastSubmittedPayload, setLastSubmittedPayload] = useState<CreateCampaignPayload | null>(
+    null,
+  );
   const [currentStep, setCurrentStep] = useState(0);
   const [maxStepReached, setMaxStepReached] = useState(0);
   const nextTierId = useRef(0);
@@ -226,7 +228,11 @@ export function CreateCampaignForm({
     }));
   }
 
-  function updateRewardTier(id: string, field: 'title' | 'minAmount' | 'description', value: string) {
+  function updateRewardTier(
+    id: string,
+    field: 'title' | 'minAmount' | 'description',
+    value: string,
+  ) {
     setValues((current) => ({
       ...current,
       rewardTiers: current.rewardTiers.map((tier) =>
@@ -366,7 +372,7 @@ export function CreateCampaignForm({
           <p className="muted">
             Campaign creation will be available when an accepted asset is configured.
           </p>
-          {(onRetry || lastSubmittedPayload) ? (
+          {onRetry || lastSubmittedPayload ? (
             <button type="button" className="btn-ghost" onClick={handleRetry}>
               Retry
             </button>
@@ -380,493 +386,509 @@ export function CreateCampaignForm({
         </div>
       ) : null}
 
-      {!isLoading && hasAssetConfig && assetOptions.length > 0 ? <nav className="wizard-stepper" aria-label="Campaign creation steps">
-        <ol>
-          {STEPS.map((step, index) => {
-            const isCurrent = index === currentStep;
-            const isComplete = index < currentStep;
-            const isClickable = index <= maxStepReached;
+      {!isLoading && hasAssetConfig && assetOptions.length > 0 ? (
+        <nav className="wizard-stepper" aria-label="Campaign creation steps">
+          <ol>
+            {STEPS.map((step, index) => {
+              const isCurrent = index === currentStep;
+              const isComplete = index < currentStep;
+              const isClickable = index <= maxStepReached;
 
-            return (
-              <li
-                key={step.key}
-                className={`wizard-step${isCurrent ? ' wizard-step-current' : ''}${
-                  isComplete ? ' wizard-step-complete' : ''
-                }`}
-              >
-                <button
-                  type="button"
-                  className="wizard-step-button"
-                  onClick={() => goToStep(index)}
-                  disabled={!isClickable}
-                  aria-current={isCurrent ? 'step' : undefined}
+              return (
+                <li
+                  key={step.key}
+                  className={`wizard-step${isCurrent ? ' wizard-step-current' : ''}${
+                    isComplete ? ' wizard-step-complete' : ''
+                  }`}
                 >
-                  <span className="wizard-step-index" aria-hidden="true">
-                    {isComplete ? '✓' : index + 1}
-                  </span>
-                  <span className="wizard-step-label">{step.label}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-      </nav> : null}
+                  <button
+                    type="button"
+                    className="wizard-step-button"
+                    onClick={() => goToStep(index)}
+                    disabled={!isClickable}
+                    aria-current={isCurrent ? 'step' : undefined}
+                  >
+                    <span className="wizard-step-index" aria-hidden="true">
+                      {isComplete ? '✓' : index + 1}
+                    </span>
+                    <span className="wizard-step-label">{step.label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+      ) : null}
 
-      {!isLoading && hasAssetConfig && assetOptions.length > 0 ? <form
-        className="form-grid wizard-step-panel"
-        onSubmit={handleSubmit}
-        noValidate
-        aria-labelledby="campaign-step-heading"
-      >
-        <h3
-          id="campaign-step-heading"
-          ref={stepHeadingRef}
-          className="sr-only"
-          tabIndex={-1}
-          aria-live="polite"
+      {!isLoading && hasAssetConfig && assetOptions.length > 0 ? (
+        <form
+          className="form-grid wizard-step-panel"
+          onSubmit={handleSubmit}
+          noValidate
+          aria-labelledby="campaign-step-heading"
         >
-          {STEPS[currentStep].label}
-        </h3>
-        {currentStep === 0 ? (
-          <>
-            <label className="field-group">
-              <span>Creator account</span>
-              <input
-                type="text"
-                value={values.creator}
-                onChange={(event) => update('creator', event.target.value)}
-                onBlur={() => handleFieldBlur('creator')}
-                placeholder="G... creator public key"
-                className={errors.creator && touchedFields.has('creator') ? 'input-error' : ''}
-                aria-invalid={errors.creator && touchedFields.has('creator') ? 'true' : undefined}
-                aria-describedby={
-                  errors.creator && touchedFields.has('creator') ? 'creator-error' : undefined
-                }
-                required
-              />
-              {errors.creator && touchedFields.has('creator') ? (
-                <span id="creator-error" className="field-error" role="alert">
-                  {errors.creator}
-                </span>
-              ) : null}
-            </label>
+          <h3
+            id="campaign-step-heading"
+            ref={stepHeadingRef}
+            className="sr-only"
+            tabIndex={-1}
+            aria-live="polite"
+          >
+            {STEPS[currentStep].label}
+          </h3>
+          {currentStep === 0 ? (
+            <>
+              <label className="field-group">
+                <span>Creator account</span>
+                <input
+                  type="text"
+                  value={values.creator}
+                  onChange={(event) => update('creator', event.target.value)}
+                  onBlur={() => handleFieldBlur('creator')}
+                  placeholder="G... creator public key"
+                  className={errors.creator && touchedFields.has('creator') ? 'input-error' : ''}
+                  aria-invalid={errors.creator && touchedFields.has('creator') ? 'true' : undefined}
+                  aria-describedby={
+                    errors.creator && touchedFields.has('creator') ? 'creator-error' : undefined
+                  }
+                  required
+                />
+                {errors.creator && touchedFields.has('creator') ? (
+                  <span id="creator-error" className="field-error" role="alert">
+                    {errors.creator}
+                  </span>
+                ) : null}
+              </label>
 
-            <label className="field-group">
-              <span>Campaign title</span>
-              <input
-                type="text"
-                value={values.title}
-                onChange={(event) => update('title', event.target.value)}
-                onBlur={() => handleFieldBlur('title')}
-                placeholder="Stellar community design sprint"
-                minLength={4}
-                maxLength={80}
-                className={errors.title && touchedFields.has('title') ? 'input-error' : ''}
-                aria-invalid={errors.title && touchedFields.has('title') ? 'true' : undefined}
-                aria-describedby={
-                  errors.title && touchedFields.has('title') ? 'title-error' : undefined
-                }
-                required
-              />
-              {errors.title && touchedFields.has('title') ? (
-                <span id="title-error" className="field-error" role="alert">
-                  {errors.title}
-                </span>
-              ) : null}
-            </label>
+              <label className="field-group">
+                <span>Campaign title</span>
+                <input
+                  type="text"
+                  value={values.title}
+                  onChange={(event) => update('title', event.target.value)}
+                  onBlur={() => handleFieldBlur('title')}
+                  placeholder="Stellar community design sprint"
+                  minLength={4}
+                  maxLength={80}
+                  className={errors.title && touchedFields.has('title') ? 'input-error' : ''}
+                  aria-invalid={errors.title && touchedFields.has('title') ? 'true' : undefined}
+                  aria-describedby={
+                    errors.title && touchedFields.has('title') ? 'title-error' : undefined
+                  }
+                  required
+                />
+                {errors.title && touchedFields.has('title') ? (
+                  <span id="title-error" className="field-error" role="alert">
+                    {errors.title}
+                  </span>
+                ) : null}
+              </label>
 
-            <label className="field-group">
-              <span>Description</span>
-              <textarea
-                value={values.description}
-                onChange={(event) => update('description', event.target.value)}
-                onBlur={() => handleFieldBlur('description')}
-                placeholder="Describe what the campaign funds, who benefits, and the delivery plan."
-                rows={5}
-                minLength={20}
-                maxLength={500}
-                className={errors.description && touchedFields.has('description') ? 'input-error' : ''}
-                aria-invalid={
-                  errors.description && touchedFields.has('description') ? 'true' : undefined
-                }
-                aria-describedby={
-                  errors.description && touchedFields.has('description')
-                    ? 'description-error'
-                    : undefined
-                }
-                required
-              />
-              {errors.description && touchedFields.has('description') ? (
-                <span id="description-error" className="field-error" role="alert">
-                  {errors.description}
-                </span>
-              ) : null}
-            </label>
+              <label className="field-group">
+                <span>Description</span>
+                <textarea
+                  value={values.description}
+                  onChange={(event) => update('description', event.target.value)}
+                  onBlur={() => handleFieldBlur('description')}
+                  placeholder="Describe what the campaign funds, who benefits, and the delivery plan."
+                  rows={5}
+                  minLength={20}
+                  maxLength={500}
+                  className={
+                    errors.description && touchedFields.has('description') ? 'input-error' : ''
+                  }
+                  aria-invalid={
+                    errors.description && touchedFields.has('description') ? 'true' : undefined
+                  }
+                  aria-describedby={
+                    errors.description && touchedFields.has('description')
+                      ? 'description-error'
+                      : undefined
+                  }
+                  required
+                />
+                {errors.description && touchedFields.has('description') ? (
+                  <span id="description-error" className="field-error" role="alert">
+                    {errors.description}
+                  </span>
+                ) : null}
+              </label>
 
-            <label className="field-group">
-              <span>Category</span>
-              <select
-                value={values.category}
-                onChange={(event) => update('category', event.target.value)}
-                onBlur={() => handleFieldBlur('category')}
-                className={errors.category && touchedFields.has('category') ? 'input-error' : ''}
-                aria-invalid={errors.category && touchedFields.has('category') ? 'true' : undefined}
-                aria-describedby={
-                  errors.category && touchedFields.has('category') ? 'category-error' : undefined
-                }
-                required
-              >
-                <option value="" disabled>
-                  Select a category
-                </option>
-                {CATEGORY_OPTIONS.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
+              <label className="field-group">
+                <span>Category</span>
+                <select
+                  value={values.category}
+                  onChange={(event) => update('category', event.target.value)}
+                  onBlur={() => handleFieldBlur('category')}
+                  className={errors.category && touchedFields.has('category') ? 'input-error' : ''}
+                  aria-invalid={
+                    errors.category && touchedFields.has('category') ? 'true' : undefined
+                  }
+                  aria-describedby={
+                    errors.category && touchedFields.has('category') ? 'category-error' : undefined
+                  }
+                  required
+                >
+                  <option value="" disabled>
+                    Select a category
                   </option>
-                ))}
-              </select>
-              {errors.category && touchedFields.has('category') ? (
-                <span id="category-error" className="field-error" role="alert">
-                  {errors.category}
-                </span>
-              ) : null}
-            </label>
-
-            <div className="row">
-              <label className="field-group">
-                <span>Image URL (optional)</span>
-                <input
-                  type="url"
-                  inputMode="url"
-                  autoComplete="url"
-                  value={values.imageUrl}
-                  onChange={(event) => update('imageUrl', event.target.value)}
-                  placeholder="https://example.com/image.png"
-                />
-              </label>
-
-              <label className="field-group">
-                <span>External Link (optional)</span>
-                <input
-                  type="url"
-                  inputMode="url"
-                  autoComplete="url"
-                  value={values.externalLink}
-                  onChange={(event) => update('externalLink', event.target.value)}
-                  placeholder="https://example.com/project"
-                />
-              </label>
-            </div>
-          </>
-        ) : null}
-
-        {currentStep === 1 ? (
-          <>
-            <fieldset className="field-group token-fieldset">
-              <legend>Accepted tokens</legend>
-              <div className="token-checkboxes">
-                {assetOptions.map((asset) => (
-                  <label key={asset} className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={values.acceptedTokens.includes(asset)}
-                      onChange={() => toggleToken(asset)}
-                      onBlur={() => handleFieldBlur('acceptedTokens')}
-                      aria-invalid={
-                        errors.acceptedTokens && touchedFields.has('acceptedTokens')
-                          ? 'true'
-                          : undefined
-                      }
-                      aria-describedby={
-                        errors.acceptedTokens && touchedFields.has('acceptedTokens')
-                          ? 'accepted-tokens-error'
-                          : undefined
-                      }
-                    />
-                    {asset}
-                  </label>
-                ))}
-              </div>
-              {errors.acceptedTokens && touchedFields.has('acceptedTokens') ? (
-                <span id="accepted-tokens-error" className="field-error" role="alert">
-                  {errors.acceptedTokens}
-                </span>
-              ) : null}
-            </fieldset>
-
-            <label className="field-group">
-              <span>Target amount (cumulative sum of units)</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0.01"
-                step="0.01"
-                value={values.targetAmount}
-                onChange={(event) => update('targetAmount', event.target.value)}
-                onBlur={() => handleFieldBlur('targetAmount')}
-                className={errors.targetAmount && touchedFields.has('targetAmount') ? 'input-error' : ''}
-                required
-              />
-              {errors.targetAmount && touchedFields.has('targetAmount') ? (
-                <span className="field-error">{errors.targetAmount}</span>
-              ) : null}
-            </label>
-
-            <label className="field-group">
-              <span>Deadline in hours</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0.0001"
-                step="0.0001"
-                value={values.deadlineHours}
-                onChange={(event) => update('deadlineHours', event.target.value)}
-                onBlur={() => handleFieldBlur('deadlineHours')}
-                className={errors.deadlineHours && touchedFields.has('deadlineHours') ? 'input-error' : ''}
-                required
-              />
-              {errors.deadlineHours && touchedFields.has('deadlineHours') ? (
-                <span className="field-error">{errors.deadlineHours}</span>
-              ) : null}
-            </label>
-
-            <label className="field-group">
-              <span>Max per contributor (optional)</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min="1"
-                step="1"
-                value={values.maxPerContributor}
-                onChange={(event) => update('maxPerContributor', event.target.value)}
-                onBlur={() => handleFieldBlur('maxPerContributor')}
-                placeholder="No limit"
-                className={
-                  errors.maxPerContributor && touchedFields.has('maxPerContributor')
-                    ? 'input-error'
-                    : ''
-                }
-              />
-              {errors.maxPerContributor && touchedFields.has('maxPerContributor') ? (
-                <span className="field-error">{errors.maxPerContributor}</span>
-              ) : null}
-            </label>
-          </>
-        ) : null}
-
-        {currentStep === 2 ? (
-          <div className="field-group">
-            <span>Reward tiers (optional)</span>
-            <p className="muted wizard-hint">
-              Offer contributors a reward for pledging above a minimum amount. Skip this step if
-              you don&apos;t need tiers.
-            </p>
-
-            {values.rewardTiers.length === 0 ? (
-              <p className="muted">No reward tiers added yet.</p>
-            ) : (
-              <ul className="reward-tier-list">
-                {values.rewardTiers.map((tier, index) => {
-                  const tierErrors = validateRewardTier(tier);
-                  const titleTouched = touchedFields.has(`tier-${tier.id}-title`);
-                  const amountTouched = touchedFields.has(`tier-${tier.id}-minAmount`);
-
-                  return (
-                    <li key={tier.id} className="reward-tier-row">
-                      <div className="reward-tier-row-header">
-                        <span>Tier {index + 1}</span>
-                        <button
-                          type="button"
-                          className="btn-ghost btn-small"
-                          onClick={() => removeRewardTier(tier.id)}
-                          aria-label={`Remove reward tier ${index + 1}`}
-                        >
-                          Remove
-                        </button>
-                      </div>
-
-                      <label className="field-group">
-                        <span>Reward title</span>
-                        <input
-                          type="text"
-                          value={tier.title}
-                          onChange={(event) => updateRewardTier(tier.id, 'title', event.target.value)}
-                          onBlur={() => handleTierFieldBlur(tier.id, 'title')}
-                          placeholder="Early supporter badge"
-                          className={tierErrors.title && titleTouched ? 'input-error' : ''}
-                          aria-invalid={tierErrors.title && titleTouched ? 'true' : undefined}
-                          aria-describedby={
-                            tierErrors.title && titleTouched
-                              ? `tier-${tier.id}-title-error`
-                              : undefined
-                          }
-                        />
-                        {tierErrors.title && titleTouched ? (
-                          <span
-                            id={`tier-${tier.id}-title-error`}
-                            className="field-error"
-                            role="alert"
-                          >
-                            {tierErrors.title}
-                          </span>
-                        ) : null}
-                      </label>
-
-                      <label className="field-group">
-                        <span>Minimum pledge amount</span>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          min="0.01"
-                          step="0.01"
-                          value={tier.minAmount}
-                          onChange={(event) =>
-                            updateRewardTier(tier.id, 'minAmount', event.target.value)
-                          }
-                          onBlur={() => handleTierFieldBlur(tier.id, 'minAmount')}
-                          className={tierErrors.minAmount && amountTouched ? 'input-error' : ''}
-                          aria-invalid={tierErrors.minAmount && amountTouched ? 'true' : undefined}
-                          aria-describedby={
-                            tierErrors.minAmount && amountTouched
-                              ? `tier-${tier.id}-amount-error`
-                              : undefined
-                          }
-                        />
-                        {tierErrors.minAmount && amountTouched ? (
-                          <span
-                            id={`tier-${tier.id}-amount-error`}
-                            className="field-error"
-                            role="alert"
-                          >
-                            {tierErrors.minAmount}
-                          </span>
-                        ) : null}
-                      </label>
-
-                      <label className="field-group">
-                        <span>Description (optional)</span>
-                        <textarea
-                          value={tier.description}
-                          onChange={(event) =>
-                            updateRewardTier(tier.id, 'description', event.target.value)
-                          }
-                          placeholder="What contributors receive at this tier"
-                          rows={3}
-                        />
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-
-            <button type="button" className="btn-ghost" onClick={addRewardTier}>
-              + Add reward tier
-            </button>
-          </div>
-        ) : null}
-
-        {currentStep === 3 ? (
-          <div className="wizard-review">
-            <div className="review-block">
-              <h3>Basics</h3>
-              <dl>
-                <dt>Title</dt>
-                <dd>{values.title || '—'}</dd>
-                <dt>Category</dt>
-                <dd>{values.category || '—'}</dd>
-                <dt>Description</dt>
-                <dd>{values.description || '—'}</dd>
-                <dt>Creator</dt>
-                <dd className="mono">{values.creator || '—'}</dd>
-              </dl>
-              {values.imageUrl ? (
-                <img src={values.imageUrl} alt="Campaign preview" className="review-image" />
-              ) : null}
-              {values.externalLink ? (
-                <a href={values.externalLink} target="_blank" rel="noreferrer">
-                  {values.externalLink}
-                </a>
-              ) : null}
-            </div>
-
-            <div className="review-block">
-              <h3>Funding</h3>
-              <dl>
-                <dt>Accepted tokens</dt>
-                <dd>{values.acceptedTokens.join(', ') || '—'}</dd>
-                <dt>Target amount</dt>
-                <dd>{values.targetAmount || '—'}</dd>
-                <dt>Deadline</dt>
-                <dd>{reviewDeadlineLabel}</dd>
-                <dt>Max per contributor</dt>
-                <dd>{values.maxPerContributor || 'No limit'}</dd>
-              </dl>
-            </div>
-
-            <div className="review-block">
-              <h3>Reward tiers</h3>
-              {values.rewardTiers.length === 0 ? (
-                <p className="muted">No reward tiers.</p>
-              ) : (
-                <ul className="reward-tier-review-list">
-                  {values.rewardTiers.map((tier, index) => (
-                    <li key={tier.id}>
-                      <strong>{tier.title || `Tier ${index + 1}`}</strong> — from{' '}
-                      {tier.minAmount || '0'} {values.acceptedTokens[0] ?? ''}
-                      {tier.description ? <p className="muted">{tier.description}</p> : null}
-                    </li>
+                  {CATEGORY_OPTIONS.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
                   ))}
+                </select>
+                {errors.category && touchedFields.has('category') ? (
+                  <span id="category-error" className="field-error" role="alert">
+                    {errors.category}
+                  </span>
+                ) : null}
+              </label>
+
+              <div className="row">
+                <label className="field-group">
+                  <span>Image URL (optional)</span>
+                  <input
+                    type="url"
+                    inputMode="url"
+                    autoComplete="url"
+                    value={values.imageUrl}
+                    onChange={(event) => update('imageUrl', event.target.value)}
+                    placeholder="https://example.com/image.png"
+                  />
+                </label>
+
+                <label className="field-group">
+                  <span>External Link (optional)</span>
+                  <input
+                    type="url"
+                    inputMode="url"
+                    autoComplete="url"
+                    value={values.externalLink}
+                    onChange={(event) => update('externalLink', event.target.value)}
+                    placeholder="https://example.com/project"
+                  />
+                </label>
+              </div>
+            </>
+          ) : null}
+
+          {currentStep === 1 ? (
+            <>
+              <fieldset className="field-group token-fieldset">
+                <legend>Accepted tokens</legend>
+                <div className="token-checkboxes">
+                  {assetOptions.map((asset) => (
+                    <label key={asset} className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={values.acceptedTokens.includes(asset)}
+                        onChange={() => toggleToken(asset)}
+                        onBlur={() => handleFieldBlur('acceptedTokens')}
+                        aria-invalid={
+                          errors.acceptedTokens && touchedFields.has('acceptedTokens')
+                            ? 'true'
+                            : undefined
+                        }
+                        aria-describedby={
+                          errors.acceptedTokens && touchedFields.has('acceptedTokens')
+                            ? 'accepted-tokens-error'
+                            : undefined
+                        }
+                      />
+                      {asset}
+                    </label>
+                  ))}
+                </div>
+                {errors.acceptedTokens && touchedFields.has('acceptedTokens') ? (
+                  <span id="accepted-tokens-error" className="field-error" role="alert">
+                    {errors.acceptedTokens}
+                  </span>
+                ) : null}
+              </fieldset>
+
+              <label className="field-group">
+                <span>Target amount (cumulative sum of units)</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0.01"
+                  step="0.01"
+                  value={values.targetAmount}
+                  onChange={(event) => update('targetAmount', event.target.value)}
+                  onBlur={() => handleFieldBlur('targetAmount')}
+                  className={
+                    errors.targetAmount && touchedFields.has('targetAmount') ? 'input-error' : ''
+                  }
+                  required
+                />
+                {errors.targetAmount && touchedFields.has('targetAmount') ? (
+                  <span className="field-error">{errors.targetAmount}</span>
+                ) : null}
+              </label>
+
+              <label className="field-group">
+                <span>Deadline in hours</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0.0001"
+                  step="0.0001"
+                  value={values.deadlineHours}
+                  onChange={(event) => update('deadlineHours', event.target.value)}
+                  onBlur={() => handleFieldBlur('deadlineHours')}
+                  className={
+                    errors.deadlineHours && touchedFields.has('deadlineHours') ? 'input-error' : ''
+                  }
+                  required
+                />
+                {errors.deadlineHours && touchedFields.has('deadlineHours') ? (
+                  <span className="field-error">{errors.deadlineHours}</span>
+                ) : null}
+              </label>
+
+              <label className="field-group">
+                <span>Max per contributor (optional)</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="1"
+                  step="1"
+                  value={values.maxPerContributor}
+                  onChange={(event) => update('maxPerContributor', event.target.value)}
+                  onBlur={() => handleFieldBlur('maxPerContributor')}
+                  placeholder="No limit"
+                  className={
+                    errors.maxPerContributor && touchedFields.has('maxPerContributor')
+                      ? 'input-error'
+                      : ''
+                  }
+                />
+                {errors.maxPerContributor && touchedFields.has('maxPerContributor') ? (
+                  <span className="field-error">{errors.maxPerContributor}</span>
+                ) : null}
+              </label>
+            </>
+          ) : null}
+
+          {currentStep === 2 ? (
+            <div className="field-group">
+              <span>Reward tiers (optional)</span>
+              <p className="muted wizard-hint">
+                Offer contributors a reward for pledging above a minimum amount. Skip this step if
+                you don&apos;t need tiers.
+              </p>
+
+              {values.rewardTiers.length === 0 ? (
+                <p className="muted">No reward tiers added yet.</p>
+              ) : (
+                <ul className="reward-tier-list">
+                  {values.rewardTiers.map((tier, index) => {
+                    const tierErrors = validateRewardTier(tier);
+                    const titleTouched = touchedFields.has(`tier-${tier.id}-title`);
+                    const amountTouched = touchedFields.has(`tier-${tier.id}-minAmount`);
+
+                    return (
+                      <li key={tier.id} className="reward-tier-row">
+                        <div className="reward-tier-row-header">
+                          <span>Tier {index + 1}</span>
+                          <button
+                            type="button"
+                            className="btn-ghost btn-small"
+                            onClick={() => removeRewardTier(tier.id)}
+                            aria-label={`Remove reward tier ${index + 1}`}
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <label className="field-group">
+                          <span>Reward title</span>
+                          <input
+                            type="text"
+                            value={tier.title}
+                            onChange={(event) =>
+                              updateRewardTier(tier.id, 'title', event.target.value)
+                            }
+                            onBlur={() => handleTierFieldBlur(tier.id, 'title')}
+                            placeholder="Early supporter badge"
+                            className={tierErrors.title && titleTouched ? 'input-error' : ''}
+                            aria-invalid={tierErrors.title && titleTouched ? 'true' : undefined}
+                            aria-describedby={
+                              tierErrors.title && titleTouched
+                                ? `tier-${tier.id}-title-error`
+                                : undefined
+                            }
+                          />
+                          {tierErrors.title && titleTouched ? (
+                            <span
+                              id={`tier-${tier.id}-title-error`}
+                              className="field-error"
+                              role="alert"
+                            >
+                              {tierErrors.title}
+                            </span>
+                          ) : null}
+                        </label>
+
+                        <label className="field-group">
+                          <span>Minimum pledge amount</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min="0.01"
+                            step="0.01"
+                            value={tier.minAmount}
+                            onChange={(event) =>
+                              updateRewardTier(tier.id, 'minAmount', event.target.value)
+                            }
+                            onBlur={() => handleTierFieldBlur(tier.id, 'minAmount')}
+                            className={tierErrors.minAmount && amountTouched ? 'input-error' : ''}
+                            aria-invalid={
+                              tierErrors.minAmount && amountTouched ? 'true' : undefined
+                            }
+                            aria-describedby={
+                              tierErrors.minAmount && amountTouched
+                                ? `tier-${tier.id}-amount-error`
+                                : undefined
+                            }
+                          />
+                          {tierErrors.minAmount && amountTouched ? (
+                            <span
+                              id={`tier-${tier.id}-amount-error`}
+                              className="field-error"
+                              role="alert"
+                            >
+                              {tierErrors.minAmount}
+                            </span>
+                          ) : null}
+                        </label>
+
+                        <label className="field-group">
+                          <span>Description (optional)</span>
+                          <textarea
+                            value={tier.description}
+                            onChange={(event) =>
+                              updateRewardTier(tier.id, 'description', event.target.value)
+                            }
+                            placeholder="What contributors receive at this tier"
+                            rows={3}
+                          />
+                        </label>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
-            </div>
 
-            {apiError || submissionError ? (
-              <div className="form-error" role="alert" aria-live="assertive">
-                <p>{apiError?.message ?? submissionError}</p>
-                {apiError?.details && apiError.details.length > 0 ? (
-                  <ul className="error-details">
-                    {apiError.details.map((detail, index) => (
-                      <li key={`${detail.field}-${index}`}>
-                        <strong>{detail.field}:</strong> {detail.message}
+              <button type="button" className="btn-ghost" onClick={addRewardTier}>
+                + Add reward tier
+              </button>
+            </div>
+          ) : null}
+
+          {currentStep === 3 ? (
+            <div className="wizard-review">
+              <div className="review-block">
+                <h3>Basics</h3>
+                <dl>
+                  <dt>Title</dt>
+                  <dd>{values.title || '—'}</dd>
+                  <dt>Category</dt>
+                  <dd>{values.category || '—'}</dd>
+                  <dt>Description</dt>
+                  <dd>{values.description || '—'}</dd>
+                  <dt>Creator</dt>
+                  <dd className="mono">{values.creator || '—'}</dd>
+                </dl>
+                {values.imageUrl ? (
+                  <img src={values.imageUrl} alt="Campaign preview" className="review-image" />
+                ) : null}
+                {values.externalLink ? (
+                  <a href={values.externalLink} target="_blank" rel="noreferrer">
+                    {values.externalLink}
+                  </a>
+                ) : null}
+              </div>
+
+              <div className="review-block">
+                <h3>Funding</h3>
+                <dl>
+                  <dt>Accepted tokens</dt>
+                  <dd>{values.acceptedTokens.join(', ') || '—'}</dd>
+                  <dt>Target amount</dt>
+                  <dd>{values.targetAmount || '—'}</dd>
+                  <dt>Deadline</dt>
+                  <dd>{reviewDeadlineLabel}</dd>
+                  <dt>Max per contributor</dt>
+                  <dd>{values.maxPerContributor || 'No limit'}</dd>
+                </dl>
+              </div>
+
+              <div className="review-block">
+                <h3>Reward tiers</h3>
+                {values.rewardTiers.length === 0 ? (
+                  <p className="muted">No reward tiers.</p>
+                ) : (
+                  <ul className="reward-tier-review-list">
+                    {values.rewardTiers.map((tier, index) => (
+                      <li key={tier.id}>
+                        <strong>{tier.title || `Tier ${index + 1}`}</strong> — from{' '}
+                        {tier.minAmount || '0'} {values.acceptedTokens[0] ?? ''}
+                        {tier.description ? <p className="muted">{tier.description}</p> : null}
                       </li>
                     ))}
                   </ul>
-                ) : null}
-                {apiError?.code ? (
-                  <small className="error-meta">
-                    Code: {apiError.code}
-                    {apiError.requestId ? ` | Request ID: ${apiError.requestId}` : ''}
-                  </small>
-                ) : null}
-                <button type="button" className="btn-ghost" onClick={handleRetry}>
-                  Retry
-                </button>
+                )}
               </div>
-            ) : null}
+
+              {apiError || submissionError ? (
+                <div className="form-error" role="alert" aria-live="assertive">
+                  <p>{apiError?.message ?? submissionError}</p>
+                  {apiError?.details && apiError.details.length > 0 ? (
+                    <ul className="error-details">
+                      {apiError.details.map((detail, index) => (
+                        <li key={`${detail.field}-${index}`}>
+                          <strong>{detail.field}:</strong> {detail.message}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {apiError?.code ? (
+                    <small className="error-meta">
+                      Code: {apiError.code}
+                      {apiError.requestId ? ` | Request ID: ${apiError.requestId}` : ''}
+                    </small>
+                  ) : null}
+                  <button type="button" className="btn-ghost" onClick={handleRetry}>
+                    Retry
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="wizard-nav">
+            {currentStep > 0 ? (
+              <button type="button" className="btn-ghost" onClick={goBack}>
+                Back
+              </button>
+            ) : (
+              <span />
+            )}
+
+            {currentStep < STEPS.length - 1 ? (
+              <button type="button" className="btn-primary" onClick={goNext}>
+                Next
+              </button>
+            ) : (
+              <button className="btn-primary" type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Creating...' : 'Create campaign'}
+              </button>
+            )}
           </div>
-        ) : null}
-
-        <div className="wizard-nav">
-          {currentStep > 0 ? (
-            <button type="button" className="btn-ghost" onClick={goBack}>
-              Back
-            </button>
-          ) : (
-            <span />
-          )}
-
-          {currentStep < STEPS.length - 1 ? (
-            <button type="button" className="btn-primary" onClick={goNext}>
-              Next
-            </button>
-          ) : (
-            <button className="btn-primary" type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Creating...' : 'Create campaign'}
-            </button>
-          )}
-        </div>
-      </form> : null}
+        </form>
+      ) : null}
     </section>
   );
 }

@@ -40,9 +40,7 @@ export const HISTORY_PAGE_SIZE = 20;
  * is the only strictly increasing field.
  */
 export function sortHistoryEvents(events: CampaignEvent[]): CampaignEvent[] {
-  return [...events].sort(
-    (left, right) => left.timestamp - right.timestamp || left.id - right.id,
-  );
+  return [...events].sort((left, right) => left.timestamp - right.timestamp || left.id - right.id);
 }
 
 /**

@@ -27,7 +27,7 @@ export function TransactionPreviewModal({
   onCancel,
 }: TransactionPreviewModalProps) {
   const [showXdr, setShowXdr] = useState(false);
-  const modalRef = useRef<HTMLElement>(null);
+const modalRef = useRef<HTMLElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
 
@@ -139,7 +139,7 @@ export function TransactionPreviewModal({
             <span>Show raw XDR</span>
           </label>
 
-          {showXdr && (
+{showXdr && (
             <div
               id="transaction-preview-xdr"
               className="xdr-content mono"
@@ -154,7 +154,7 @@ export function TransactionPreviewModal({
           <button className="btn-ghost" type="button" onClick={onCancel}>
             Cancel
           </button>
-          <button
+<button
             className="btn-primary"
             type="button"
             onClick={onConfirm}

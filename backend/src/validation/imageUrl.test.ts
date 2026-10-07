@@ -40,7 +40,7 @@ describe('imageUrlSchema', () => {
       // Small valid JPEG base64 (1x1 pixel red JPEG)
       const jpegDataUrl =
         'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAA==';
-      
+
       const result = imageUrlSchema.safeParse(jpegDataUrl);
       expect(result.success).toBe(true);
     });
@@ -49,7 +49,7 @@ describe('imageUrlSchema', () => {
       // Small valid PNG base64 (1x1 pixel transparent PNG)
       const pngDataUrl =
         'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-      
+
       const result = imageUrlSchema.safeParse(pngDataUrl);
       expect(result.success).toBe(true);
     });
@@ -73,7 +73,7 @@ describe('imageUrlSchema', () => {
       // For a 2MB limit, the base64 string should be roughly 2.67MB (2MB * 4/3)
       const largeBase64 = 'A'.repeat(3 * 1024 * 1024); // 3MB of base64 data
       const largeDataUrl = `data:image/jpeg;base64,${largeBase64}`;
-      
+
       const result = imageUrlSchema.safeParse(largeDataUrl);
       expect(result.success).toBe(false);
     });

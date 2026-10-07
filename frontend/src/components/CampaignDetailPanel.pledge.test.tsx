@@ -176,10 +176,10 @@ describe('Pledge form behavior', () => {
     expect(amount()).toHaveValue(42.5);
     expect(token()).toHaveValue('XLM');
     expect(submit()).toBeEnabled();
-    expect(screen.queryByText('Pledge submitted successfully.')).not.toBeInDocument();
-    await user.click(within(alert).getBryRole('button', { name: 'Retry' }));
-    expect(onPledge).toHaveBeenNThCalledWith(1, campaign.id, 42.5, 'XLM');
-    expect(onPledge).toHaveBeenNThCalledWith(2, campaign.id, 42.5, 'XLM');
+expect(screen.queryByText('Pledge submitted successfully.')).not.toBeInTheDocument();
+    await user.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(onPledge).toHaveBeenNthCalledWith(1, campaign.id, 42.5, 'XLM');
+    expect(onPledge).toHaveBeenNthCalledWith(2, campaign.id, 42.5, 'XLM');
     expect(onPledge).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('alert')).not.toBeInDocument();
     expect(form()).not.toHaveAttribute('aria-describedby');
@@ -211,10 +211,10 @@ describe('Pledge form behavior', () => {
       const { user } = renderPledge({ onPledge: vi.fn().mockRejectedValue(error) });
       await user.click(submit());
       expect(await screen.findByRole('alert')).toHaveTextContent(
-        'The pledge could not be completed. Please try again.'
+        'The pledge could not be completed. Please try again.',
       );
       expect(submit()).toBeEnabled();
-    }
+    },
   );
 
   it('disables pledging without a wallet and enables it after connecting', async () => {
@@ -253,7 +253,7 @@ describe('Pledge form behavior', () => {
     const { onPledge } = renderPledge({ isLoading: true });
     expect(screen.getByRole('region', { name: 'Loading campaign details' })).toHaveAttribute(
       'aria-busy',
-      'true'
+      'true',
     );
     expect(screen.queryByRole('form', { name: 'Pledge campaign' })).not.toBeInDocument();
     expect(onPledge).not.toHaveBeenCalled();

@@ -53,14 +53,8 @@ const past = (offset = 86400) => Math.floor(Date.now() / 1000) - offset;
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
 
-  ({
-    createCampaign,
-    initCampaignStore,
-    addPledge,
-    getCampaign,
-    getPledges,
-    refundContributor,
-  } = await import('../campaignStore'));
+  ({ createCampaign, initCampaignStore, addPledge, getCampaign, getPledges, refundContributor } =
+    await import('../campaignStore'));
   ({ getDb } = await import('../db'));
   ({ getCampaignHistory } = await import('../eventHistory'));
   eventHistoryModule = await import('../eventHistory');
@@ -196,22 +190,20 @@ describe('refundContributor — transaction atomicity', () => {
     // UPDATE throw after the pledges UPDATE has already executed inside the tx.
     const originalPrepare = db.prepare.bind(db);
     let callCount = 0;
-    const prepareSpy = vi
-      .spyOn(db, 'prepare')
-      .mockImplementation((sql: string) => {
-        const stmt = originalPrepare(sql);
-        if (sql.includes('UPDATE campaigns SET pledged_amount = pledged_amount -')) {
-          callCount++;
-          if (callCount === 1) {
-            // Wrap the real run() to throw once
-            const originalRun = stmt.run.bind(stmt);
-            stmt.run = (...args: Parameters<typeof stmt.run>) => {
-              throw new Error('Simulated campaign balance update failure');
-            };
-          }
+    const prepareSpy = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      const stmt = originalPrepare(sql);
+      if (sql.includes('UPDATE campaigns SET pledged_amount = pledged_amount -')) {
+        callCount++;
+        if (callCount === 1) {
+          // Wrap the real run() to throw once
+          const originalRun = stmt.run.bind(stmt);
+          stmt.run = (...args: Parameters<typeof stmt.run>) => {
+            throw new Error('Simulated campaign balance update failure');
+          };
         }
-        return stmt;
-      });
+      }
+      return stmt;
+    });
 
     expect(() => refundContributor(campaign.id, CONTRIBUTOR)).toThrow(
       'Simulated campaign balance update failure',
@@ -293,6 +285,8 @@ describe('createCampaign — transaction atomicity', () => {
     });
 
     expect(getCampaign(retryCampaign.id)).toBeDefined();
-    expect(getCampaignHistory(retryCampaign.id).find((e) => e.eventType === 'created')).toBeDefined();
+    expect(
+      getCampaignHistory(retryCampaign.id).find((e) => e.eventType === 'created'),
+    ).toBeDefined();
   });
 });
