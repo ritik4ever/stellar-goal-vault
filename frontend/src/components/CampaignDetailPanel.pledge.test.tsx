@@ -36,7 +36,7 @@ const campaign: Campaign = {
 
 type Props = ComponentProps<typeof CampaignDetailPanel>;
 function renderPledge(overrides: Partial<Props> = {}) {
-  const onPledge = vi.fn().mockResolved(undefined);
+  const onPledge = vi.fn().mockResolvedValue(undefined);
   const props: Props = { campaign, connectedWallet: wallet, onPledge, ...overrides };
   const view = render(<CampaignDetailPanel {...props} />, { wrapper: MemoryRouter });
   return {
@@ -161,7 +161,7 @@ describe('Pledge form behavior', () => {
     const retry = deferred();
     const onPledge = vi
       .fn()
-      .mockRejectedOnce(new Error('Wallet rejected the request'))
+      .mockRejectedValueOnce(new Error('Wallet rejected the request'))
       .mockReturnValueOnce(retry.promise);
     const { user } = renderPledge({ onPledge });
     await user.clear(amount());
@@ -176,8 +176,8 @@ describe('Pledge form behavior', () => {
     expect(submit()).toBeEnabled();
     expect(screen.queryByText('Pledge submitted successfully.')).not.toBeInTheDocument();
     await user.click(within(alert).getByRole('button', { name: 'Retry' }));
-    expect(onPledge).toHaveBeenN4hCalledWith(1, campaign.id, 42.5, 'XLM');
-    expect(onPledge).toHaveBeenN4hCalledWith(2, campaign.id, 42.5, 'XLM');
+    expect(onPledge).toHaveBeenNthCalledWith(1, campaign.id, 42.5, 'XLM');
+    expect(onPledge).toHaveBeenNthCalledWith(2, campaign.id, 42.5, 'XLM');
     expect(onPledge).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(form()).not.toHaveAttribute('aria-describedby');
@@ -255,5 +255,140 @@ describe('Pledge form behavior', () => {
     );
     expect(screen.queryByRole('form', { name: 'Pledge campaign' })).not.toBeInTheDocument();
     expect(onPledge).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recoverable error handling (#836)
+// ---------------------------------------------------------------------------
+
+function codedError(code: string, message = 'raw details', extra: Record<string, unknown> = {}) {
+  return Object.assign(new Error(message), { code, ...extra });
+}
+
+async function enterPledge(user: ReturnType<typeof userEvent.setup>) {
+  await user.clear(amount());
+  await user.type(amount(), '42.50');
+  await user.selectOptions(token(), 'XLM');
+}
+
+describe('Pledge flow recoverable errors', () => {
+  it('keeps the input after a cancelled preview and retries the same pledge', async () => {
+    const onPledge = vi
+      .fn()
+      .mockRejectedValueOnce(codedError('USER_CANCELLED'))
+      .mockResolvedValueOnce(undefined);
+    const { user } = renderPledge({ onPledge });
+    await enterPledge(user);
+    await user.click(submit());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/cancelled.*kept/i);
+    expect(screen.queryByText('Pledge submitted successfully.')).not.toBeInTheDocument();
+    expect(amount()).toHaveValue(42.5);
+    expect(token()).toHaveValue('XLM');
+
+    await user.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(onPledge).toHaveBeenNthCalledWith(2, campaign.id, 42.5, 'XLM');
+    expect(await screen.findByText('Pledge submitted successfully.')).toBeInTheDocument();
+  });
+
+  it('offers only "Retry sync" for a pledge confirmed on-chain but not synced', async () => {
+    const hash = 'a'.repeat(64);
+    const onPledge = vi
+      .fn()
+      .mockRejectedValue(codedError('PLEDGE_SYNC_FAILED', 'Network Error', { transactionHash: hash }));
+    const onRetryPledgeSync = vi.fn().mockResolvedValue(undefined);
+    const { user } = renderPledge({ onPledge, onRetryPledgeSync });
+    await enterPledge(user);
+    await user.click(submit());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(`${hash.slice(0, 12)}…`);
+    expect(alert).toHaveTextContent(/will not be charged again/i);
+    expect(within(alert).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+
+    await user.click(within(alert).getByRole('button', { name: 'Retry sync' }));
+    expect(onRetryPledgeSync).toHaveBeenCalledWith(campaign.id);
+    // The pledge itself is never re-submitted by the sync recovery.
+    expect(onPledge).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Pledge submitted successfully.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps the sync recovery available when the sync fails again', async () => {
+    const onPledge = vi.fn().mockRejectedValue(codedError('PLEDGE_SYNC_FAILED'));
+    const onRetryPledgeSync = vi.fn().mockRejectedValue(codedError('PLEDGE_SYNC_FAILED'));
+    const { user } = renderPledge({ onPledge, onRetryPledgeSync });
+    await user.click(submit());
+    await user.click(within(await screen.findByRole('alert')).getByRole('button', { name: 'Retry sync' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByRole('button', { name: 'Retry sync' })).toBeEnabled();
+    expect(onRetryPledgeSync).toHaveBeenCalledTimes(1);
+    expect(onPledge).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks to connect the wallet and clears the error once connected', async () => {
+    const onPledge = vi.fn().mockRejectedValue(codedError('WALLET_NOT_CONNECTED', 'Connect Freighter'));
+    const onConnectWallet = vi.fn().mockResolvedValue(undefined);
+    const { user } = renderPledge({ onPledge, onConnectWallet });
+    await enterPledge(user);
+    await user.click(submit());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/connect your wallet/i);
+    await user.click(within(alert).getByRole('button', { name: 'Connect wallet' }));
+
+    expect(onConnectWallet).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(amount()).toHaveValue(42.5);
+  });
+
+  it('moves focus to the amount for an invalid-amount error', async () => {
+    const onPledge = vi
+      .fn()
+      .mockRejectedValue(codedError('INVALID_AMOUNT_PRECISION', 'Amount must use no more than 2 decimal places.'));
+    const { user } = renderPledge({ onPledge });
+    await user.click(submit());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Amount must use no more than 2 decimal places.');
+    await user.click(within(alert).getByRole('button', { name: 'Edit amount' }));
+    expect(amount()).toHaveFocus();
+  });
+
+  it('shows no retry for a misconfiguration', async () => {
+    const onPledge = vi.fn().mockRejectedValue(codedError('CONFIG_MISSING'));
+    const { user } = renderPledge({ onPledge });
+    await user.click(submit());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/not configured correctly/i);
+    expect(within(alert).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('warns against double pledging after a confirmation timeout', async () => {
+    const onPledge = vi.fn().mockRejectedValue(codedError('TRANSACTION_TIMEOUT'));
+    const { user } = renderPledge({ onPledge });
+    await user.click(submit());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/check your wallet activity before retrying/i);
+  });
+
+  it('scopes an error to its campaign when another campaign is selected', async () => {
+    const onPledge = vi.fn().mockRejectedValue(codedError('PLEDGE_SYNC_FAILED'));
+    const onRetryPledgeSync = vi.fn().mockResolvedValue(undefined);
+    const { user, update } = renderPledge({ onPledge, onRetryPledgeSync });
+    await user.click(submit());
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+
+    update({ campaign: { ...campaign, id: 'other-campaign' }, onPledge, onRetryPledgeSync });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(form()).not.toHaveAttribute('aria-describedby');
+
+    update({ campaign, onPledge, onRetryPledgeSync });
+    await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry sync' }));
+    expect(onRetryPledgeSync).toHaveBeenCalledWith(campaign.id);
   });
 });

@@ -183,6 +183,9 @@ function App() {
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
+  // Pledges confirmed on-chain whose backend sync failed, keyed by campaign ID.
+  // Retrying uses the same payload (and transaction hash) so the contributor is never charged twice.
+  const unsyncedPledgesRef = useRef(new Map<string, ReconcilePledgePayload>());
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
   const [campaignsError, setCampaignsError] = useState<{
     message: string;
@@ -553,20 +556,50 @@ function App() {
 
   // Account watching is handled by individual wallet adapters
 
+  /**
+   * Refresh campaign data after a pledge has been recorded. A refresh failure
+   * does not undo the pledge, so it is reported as a warning, not an error.
+   */
+  async function refreshAfterPledge(campaignId: string, previousCampaign: Campaign | null) {
+    try {
+      const refreshedCampaigns = await refreshCampaigns(campaignId);
+      const refreshedCampaign =
+        refreshedCampaigns.find((campaign) => campaign.id === campaignId) ?? null;
+
+      if (didCampaignBecomeFunded(previousCampaign, refreshedCampaign)) {
+        setConfettiBurst({
+          id: Date.now(),
+          campaignTitle: refreshedCampaign?.title ?? 'Campaign',
+        });
+      }
+
+      await refreshSelectedData(campaignId);
+    } catch {
+      addToast('Pledge recorded, but the campaign view could not refresh. Reload to see the latest totals.', 'warning');
+    }
+  }
+
+  function findCampaign(campaignId: string): Campaign | null {
+    return (
+      campaigns.find((campaign) => campaign.id === campaignId) ??
+      (selectedCampaign?.id === campaignId ? selectedCampaign : null)
+    );
+  }
+
+  /**
+   * Submits a pledge. Failures are thrown (not swallowed) so the pledge form
+   * can keep the user's input and offer the matching recovery action.
+   */
   async function handlePledge(campaignId: string, amount: number, assetCode: string) {
     if (!connectedWallet) {
-      addToast('Connect Freighter before submitting a pledge.', 'error');
-      return;
+      throw new PledgeFlowError('WALLET_NOT_CONNECTED', 'Connect Freighter before submitting a pledge.');
     }
 
     if (!appConfig) {
-      addToast('App configuration is still loading. Try again in a moment.', 'error');
-      return;
+      throw new PledgeFlowError('CONFIG_LOADING', 'App configuration is still loading. Try again in a moment.');
     }
 
-    const previousCampaign =
-      campaigns.find((campaign) => campaign.id === campaignId) ??
-      (selectedCampaign?.id === campaignId ? selectedCampaign : null);
+    const previousCampaign = findCampaign(campaignId);
 
     setPendingPledgeCampaignId(campaignId);
 
@@ -580,26 +613,17 @@ function App() {
         onPreview: handleTransactionPreview,
       });
 
-      await reconcilePledge(campaignId, {
+      // The pledge is on-chain from here on: a failure must never lead to a second pledge.
+      const payload: ReconcilePledgePayload = {
         contributor: connectedWallet,
         amount,
         assetCode,
         transactionHash: transactionResult.transactionHash,
         confirmedAt: transactionResult.confirmedAt,
-      });
+      };
 
-      const refreshedCampaigns = await refreshCampaigns(campaignId);
-      const refreshedCampaign =
-        refreshedCampaigns.find((campaign) => campaign.id === campaignId) ?? null;
-
-      if (didCampaignBecomeFunded(previousCampaign, refreshedCampaign)) {
-        setConfettiBurst({
-          id: Date.now(),
-          campaignTitle: refreshedCampaign?.title ?? 'Campaign',
-        });
-      }
-
-      await refreshSelectedData(campaignId);
+      await syncConfirmedPledge(campaignId, payload, reconcilePledge, unsyncedPledgesRef.current);
+      await refreshAfterPledge(campaignId, previousCampaign);
       addToast(
         `Pledged ${amount} ${assetCode}. Tx: ${transactionResult.transactionHash.slice(0, 12)}…`,
         'success',
@@ -608,15 +632,33 @@ function App() {
           label: 'View on Stellar Expert',
         },
       );
-    } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        (error as { code?: string }).code === 'USER_CANCELLED'
-      ) {
+    } finally {
+      setPendingPledgeCampaignId(null);
+    }
+  }
+
+  /**
+   * Re-sync a pledge that was confirmed on-chain but failed to reconcile.
+   * Reuses the original transaction hash; the backend deduplicates by hash.
+   */
+  async function handleRetryPledgeSync(campaignId: string) {
+    const previousCampaign = findCampaign(campaignId);
+    setPendingPledgeCampaignId(campaignId);
+    try {
+      const payload = await retryUnsyncedPledge(campaignId, reconcilePledge, unsyncedPledgesRef.current);
+      await refreshAfterPledge(campaignId, previousCampaign);
+      if (!payload) {
+        // Nothing was pending (already reconciled); the refresh shows the current state.
         return;
       }
-      addToast(getErrorMessage(error), 'error');
+      addToast(
+        `Pledge synced. Tx: ${payload.transactionHash.slice(0, 12)}…`,
+        "success",
+        {
+          href: stellarExpertTxUrl(payload.transactionHash, appConfig?.networkPassphrase),
+          label: 'View on Stellar Expert',
+        },
+      );
     } finally {
       setPendingPledgeCampaignId(null);
     }
@@ -870,6 +912,7 @@ function App() {
               onConnectWallet={handleConnectWallet}
               onDisconnectWallet={handleDisconnectWallet}
               onPledge={handlePledge}
+              onRetryPledgeSync={handleRetryPledgeSync}
               onClaim={handleClaim}
               onSoftDelete={handleSoftDelete}
               onRefund={handleRefund}
