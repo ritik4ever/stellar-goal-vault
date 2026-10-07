@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   WalletType,
   WalletAdapter,
@@ -35,8 +35,9 @@ export function useWallet(): UseWalletResult {
   const [networkPassphrase, setNetworkPassphrase] = useState<string | null>(null);
   const [sorobanRpcUrl, setSorobanRpcUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [isPickerOpen, setIsPickerOpen] = useState<boolean>(false);
   const [adapter, setAdapter] = useState<WalletAdapter | null>(null);
+  const pickerTriggerRef = useRef<HTMLElement | null>(null);
 
   // Load last used wallet on mount
   useEffect(() => {

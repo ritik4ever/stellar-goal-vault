@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { WalletWidget } from './WalletWidget';
 
-const PUBLIC_KEY = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA';
+const PUBLIC_KEY = 'GBBD47IF6LWK7P7MDEVSCWR7DP-UWV3NY3DTQEVFL4NAT4AQH3ZLLFLA';
 
 function noop() {}
 
@@ -86,7 +86,7 @@ describe('WalletWidget', () => {
         onSwitchWallet={noop}
       />,
     );
-    expect(screen.getByText(/GBBD…LFLA/)).toBeTruthy();
+expect(screen.getByText('GBBD..LFLA')).toBeTruthy();
     expect(screen.getByText('Testnet')).toBeTruthy();
   });
 
@@ -157,18 +157,15 @@ describe('WalletWidget', () => {
     );
     expect(screen.getByText(/Wallet error occurred/i)).toBeTruthy();
   });
-
-  it('exposes a status role while checking', () => {
+it('exposes a status role while checking', () => {
     render(
       <WalletWidget
         status="checking"
         publicKey={null}
-        walletName={null}
         error={null}
         network={null}
         onConnect={noop}
         onDisconnect={noop}
-        onSwitchWallet={noop}
       />,
     );
     expect(screen.getByRole('status')).toBeTruthy();
@@ -179,12 +176,10 @@ describe('WalletWidget', () => {
       <WalletWidget
         status="available"
         publicKey={null}
-        walletName={null}
         error="User rejected the connection request"
         network={null}
         onConnect={noop}
         onDisconnect={noop}
-        onSwitchWallet={noop}
       />,
     );
     expect(screen.getByRole('alert')).toBeTruthy();
@@ -200,12 +195,9 @@ describe('WalletWidget', () => {
         network="Testnet"
         onConnect={noop}
         onDisconnect={noop}
-        onSwitchWallet={noop}
       />,
     );
-    expect(
-      screen.getByRole('group', { name: /Wallet status: connected to Freighter on Testnet/i }),
-    ).toBeTruthy();
+    expect(screen.getByRole('group', { name: /Wallet status: connected to Freighter on Testnet/i })).toBeTruthy();
     expect(screen.getByText(/Wallet address:/)).toBeTruthy();
   });
 
@@ -215,7 +207,6 @@ describe('WalletWidget', () => {
       <WalletWidget
         status="connected"
         publicKey={PUBLIC_KEY}
-        walletName="Freighter"
         error={null}
         network="Testnet"
         onConnect={noop}

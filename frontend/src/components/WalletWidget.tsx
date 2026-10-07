@@ -14,7 +14,7 @@ interface WalletWidgetProps {
 }
 
 function truncateAddress(key: string): string {
-  return `${key.slice(0, 4)}…${key.slice(-4)}`;
+  return `${key.slice(0, 4)}"…`${key.slice(-4)}`;
 }
 
 export function WalletWidget({
@@ -57,7 +57,7 @@ export function WalletWidget({
     const isMainnet = network?.toLowerCase() === 'mainnet';
     const displayWalletName = walletName || 'Wallet';
     return (
-      <div
+<div
         className="wallet-widget wallet-widget--connected wallet-widget--pill"
         role="group"
         aria-label={`Wallet status: connected to ${displayWalletName}${network ? ` on ${network}` : ''}`}
@@ -70,6 +70,13 @@ export function WalletWidget({
             {truncateAddress(publicKey)}
           </span>
           {network && (
+            <span
+              className={`wallet-widget__network-badge${isMainnet ? ' wallet-widget__network-badge--mainnet' : ''}`}
+            >
+              <span className="sr-only">Network: </span>
+              {network}
+          </span>
+{network && (
             <span
               className={`wallet-widget__network-badge${isMainnet ? ' wallet-widget__network-badge--mainnet' : ''}`}
             >
