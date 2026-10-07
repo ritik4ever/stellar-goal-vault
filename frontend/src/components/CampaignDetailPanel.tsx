@@ -35,7 +35,7 @@ interface CampaignDetailPanelProps {
 
 const FEE_ESTIMATION_ERROR_CODES = new Set([
   'SIMULATION_FAILED',
-  'SIMULATION_PREPARE_FAILED',
+  'SIMUPATION_PREPARE_FAILED',
   'SOURCE_ACCOUNT_LOAD_FAILED',
   'STATE_RESTORE_REQUIRED',
 ]);
@@ -104,7 +104,7 @@ export function CampaignDetailPanel({
   const handleCopyLink = useCallback(() => {
     if (!campaign) return;
     const url = `${window.location.origin}/campaigns/${campaign.id}`;
-    navigator.clipboard
+navigator.clipboard
       .writeText(url)
       .then(() => {
         addToast('Campaign link copied to clipboard.', 'success', {
@@ -173,7 +173,7 @@ export function CampaignDetailPanel({
         <div className="section-heading">
           <h2>Campaign not found</h2>
           <p className="muted">
-            The campaign <code>#${notFoundCampaignId}</code> does not exist or may have been
+The campaign <code>#${notFoundCampaignId}</code> does not exist or may have been
             removed.
           </p>
         </div>
@@ -353,53 +353,84 @@ export function CampaignDetailPanel({
         </article>
       </div>
 
-      <Suspense
+<Suspense
         fallback={
           <div className="contributor-summary" aria-busy="true">
             Loading contributors …
           </div>
         }
       >
-        <ContributorSummary
-          campaignId={activeCampaign.id}
-          assetCode={activeCampaign.assetCode}
-          isLoading={isLoading}
-        />
+        <ContributorSummary campaign={activeCampaign} />
       </Suspense>
 
-      {!walletReady ? (
-        <p className="pending-note">
-          Wallet integration is not fully configured yet. Freighter actions that require Soroban
-          contract calls may stay disabled until backend config is set.
-        </p>
-      ) : null}
+      <div className="action-row" style={{ marginTop: 24 }}>
+        <ShareButtons campaign={activeCampaign} />
+        <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
+          <Download size={16} aria-hidden="true" />
+          Download card
+        </button>
+        <button className="btn-ghost" type="button" onClick={handleCopyLink}>
+          <LinkIcon size={16} aria-hidden="true" />
+          Copy link
+        </button>
+      </div>
 
-      <form className="form-grid" aria-label="Pledge form" onSubmit={handlePledge} noValidate>
-        <div className="form-field">
-          <label htmlFor="pledge-amount">Amount</label>
-          <input
-            id="pledge-amount"
-            type="number"
-            min="1"
-            step="1"
-            value={pledgeAmount}
-            onChange={(e) => setPledgeAmount(e.target.value)}
-            aria-description="pledge-amount-help"
-            required
-          />
-          <small id="pledge-amount-help" className="muted">
-            Enter the amount you want to pledge.
-          </small>
+<form
+        className="pledge-form"
+        onSubmit={handlePledge}
+        aria-label="Pledge campaign"
+        aria-busy={isSubmitting || isPledgePending ? 'true' : 'false'}
+        aria-describedby={pledgeError ? 'pledge-error-message' : undefined}
+      >
+        <h3 id="pledge-form-title">Add a pledge</h3>
+        {isPledgePending ? (
+          <div className="pledge-pending-notice" role="status">
+            The pledge transaction is in flight. Please wait for confirmation.
+          </div>
+        ) : null}
+        <div className="form-row">
+          <div className="form-field">
+            <label htmlFor="pledge-amount">Pledge amount</label>
+            <input
+              id="pledge-amount"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={pledgeAmount}
+              onChange={(e) => setPledgeAmount(e.target.value)}
+              disabled={isSubmitting || isPledgePending}
+              aria-describedby="pledge-amount-help"
+              required
+            />
+            <small id="pledge-amount-help" className="muted">
+              Enter the amount you want to pledge.
+            </small>
+          </div>
+          {activeCampaign.acceptedTokens?.length > 1 ? (
+            <div className="form-field">
+              <label htmlFor="pledge-token">Token</label>
+              <select
+                id="pledge-token"
+                value={selectedToken}
+                onChange={(e) => setPledgeToken(e.target.value)}
+                disabled={isSubmitting || isPledgePending}
+              >
+                {activeCampaign.acceptedTokens.map((token) => (
+                  <option key={token} value={token}>
+                    {token}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
         </div>
-
-        <div className="form-field">
-          <label htmlFor="pledge-token">Asset</label>
-          <select
-            id="pledge-token"
-            value={pledgeToken}
-            onChange={(e) => setPledgeToken(e.target.value)}
+        <div className="form-actions">
+          <button
+            className="btn-primary"
+            type="submit"
+            disabled={!connectedWallet || isSubmitting || isPledgePending || !activeCampaign.progress.canPledge}
           >
-            <option value="">{`Default (${activeCampaign.assetCode})`}</option>
+<option value="">{`Default (${activeCampaign.assetCode})`}</option>
             <option value={activeCampaign.assetCode}>{activeCampaign.assetCode}</option>
           </select>
         </div>
@@ -414,53 +445,81 @@ export function CampaignDetailPanel({
             {isSubmitting || isPledgePending ? 'Submitting...' : 'Pledge'}
           </button>
         </div>
-
         {pledgeError ? (
-          <div ref={pledgeErrorRef} className="form-error" role="alert" tabIndex={-1}>
-            {pledgeError}
+<div
+            ref={pledgeErrorRef}
+            className="form-error"
+            role="alert"
+            id="pledge-error-message"
+            tabIndex={-1}
+          >
+            <span>{pledgeError}</span>
+            <button type="button" onClick={() => void submitPledge()}>Retry</button>
+          </div>
           </div>
         ) : null}
-
         {pledgeSuccess ? (
-          <div
-            ref={pledgeSuccessRef}
-            className="form-success"
+<div
+            className="pledge-success"
             role="status"
+            ref={pledgeSuccessRef}
             aria-live="polite"
             tabIndex={-1}
           >
-            Your pledge was submitted successfully.
+            Pledge submitted successfully.
           </div>
         ) : null}
       </form>
 
-      <div className="form-grid">
-        <div className="form-field">
-          <label htmlFor="refund-contributor">Contributor address</label>
+{activeCampaign.progress.canClaim ? (
+        <div className="campaign-actions">
+          <div className="form-field">
+            <label htmlFor="refund-contributor">Contributor address</label>
+            <input
+              id="refund-contributor"
+              type="text"
+              value={refundContributor}
+              onChange={(e) => setRefundContributor(e.target.value)}
+              placeholder="G..."
+              aria-description="refund-contributor-help"
+            />
+            <small id="refund-contributor-help" className="muted">
+              Enter the contributor address to refund.
+            </small>
+          </div>
+
+          <div className="form-actions">
+          <button
+            className="btn-primary"
+            type="button"
+onClick={handleClaim}
+            disabled={isSubmitting || !walletReady}
+          >
+Claim funds
+          </button>
+        </div>
+) : null}
+
+      {activeCampaign.progress.canRefund ? (
+        <div className="cancel-form">
+          <label htmlFor="refund-contributor">Refund contributor</label>
           <input
             id="refund-contributor"
             type="text"
             value={refundContributor}
             onChange={(e) => setRefundContributor(e.target.value)}
-            placeholder="G..."
-            aria-description="refund-contributor-help"
+            disabled={isSubmitting}
           />
-          <small id="refund-contributor-help" className="muted">
-            Enter the contributor address to refund.
-          </small>
-        </div>
-
-        <div className="form-actions">
           <button
             className="btn-ghost"
             type="button"
             onClick={handleRefund}
-            disabled={isSubmitting || !walletReady}
+            disabled={isSubmitting || refundContributor.trim().length === 0}
           >
             Refund
           </button>
         </div>
-      </div>
+      ) : null}
 
       <div className="form-actions">
         <button

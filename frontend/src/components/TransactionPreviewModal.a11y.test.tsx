@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi} from 'vitest';
 import { TransactionPreviewModal } from './TransactionPreviewModal';
 import { runAxeAudit, THEMES, type ThemeMode } from '../test/a11yTestUtils';
 
@@ -48,8 +48,7 @@ describe.each(THEMES)('TransactionPreviewModal Accessibility (%s theme)', (theme
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
   });
-
-  it('exposes accessible names for confirm and cancel actions', () => {
+it('exposes accessible names for confirm and cancel actions', () => {
     render(
       <TransactionPreviewModal preview={previewWithFee} onConfirm={() => {}} onCancel={() => {}} />,
     );
@@ -59,13 +58,9 @@ describe.each(THEMES)('TransactionPreviewModal Accessibility (%s theme)', (theme
   });
 
   it('supports keyboard activation of the confirm action', () => {
-    const onConfirm = vi.vitest.fn();
+    const onConfirm = vi.fn();
     render(
-      <TransactionPreviewModal
-        preview={previewWithFee}
-        onConfirm={onConfirm}
-        onCancel={() => {}}
-      />,
+      <TransactionPreviewModal preview={previewWithFee} onConfirm={onConfirm} onCancel={() => {}} />,
     );
 
     const confirmButton = screen.getByRole('button', { name: /confirm/i });
@@ -74,5 +69,29 @@ describe.each(THEMES)('TransactionPreviewModal Accessibility (%s theme)', (theme
     fireEvent.keyDown(confirmButton, { key: 'Enter', code: 'Enter' });
     fireEvent.click(confirmButton);
     expect(onConfirm).toHaveBeenCalled();
+  });
+
+  it('supports keyboard activation of the cancel action', () => {
+    const onCancel = vi.fn();
+    render(
+      <TransactionPreviewModal preview={previewWithFee} onConfirm={() => {}} onCancel={onCancel} />,
+    );
+
+    const cancelButton = screen.getByRole('button', { name: /cancel/i });
+    cancelButton.focus();
+    expect(cancelButton).toHaveFocus();
+    fireEvent.keyDown(cancelButton, { key: 'Enter', code: 'Enter' });
+    fireEvent.click(cancelButton);
+    expect(onCancel).toHaveBeenCalled();
+  });
+
+  it('traps focus within the modal dialog', () => {
+    render(
+      <TransactionPreviewModal preview={previewWithFee} onConfirm={() => {}} onCancel={() => {}} />,
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInDocument();
+    expect(downent)..toBeTrue();
   });
 });

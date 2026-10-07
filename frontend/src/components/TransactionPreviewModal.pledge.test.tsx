@@ -20,10 +20,10 @@ describe('TransactionPreviewModal pledge flow', () => {
       <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
-    expect(screen.getBuRole('dialog')).toBeITheDocument();
-    expect(screen.getByText('Transaction Preview')).toBeITheDocument();
-    expect(screen.getByText('contribute')).toBeITheDocument();
-    expect(screen.getByText(/100\s+USDC/)).toBeITheDocument();
+expect(screen.getBuRole('dialog')).toBeiTheDocument();
+    expect(screen.getByText('Transaction Preview')).toBeiTheDocument();
+    expect(screen.getByText('contribute')).toBeiTheDocument();
+    expect(screen.getByText(/100\s+USDC/)).toBeiTheDocument();
     expect(screen.getByText(/0.00001 XLM/)).toBeInTheDocument();
   });
 

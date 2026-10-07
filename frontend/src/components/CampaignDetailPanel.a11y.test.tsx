@@ -54,7 +54,9 @@ const mockCampaign: Campaign = {
   metadata: {},
 };
 
-describe.each(THEMES)('CampaignDetailPanel Accessibility (%s theme)', (theme: ThemeMode) => {
+describe.each(THEMES)
+'CampaignDetailPanel Accessibility (%s theme)',
+(theme: ThemeMode) => {
   it('has no accessibility violations in empty state', async () => {
     const { container } = render(<CampaignDetailPanel campaign={null} appConfig={mockConfig} />);
 
@@ -74,8 +76,7 @@ describe.each(THEMES)('CampaignDetailPanel Accessibility (%s theme)', (theme: Th
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
   });
-
-  it('exposes an accessible name for the campaign detail region', async () => {
+it('exposes an accessible name for the campaign detail region', async () => {
     render(
       <CampaignDetailPanel
         campaign={mockCampaign}
@@ -106,5 +107,31 @@ describe.each(THEMES)('CampaignDetailPanel Accessibility (%s theme)', (theme: Th
       return name.trim().length > 0;
     });
     expect(named).toBe(true);
+  });
+
+  it('supports keyboard navigation to the primary pledge action', async () => {
+    render(
+      <CampaignDetailPanel
+        campaign={mockCampaign}
+        appConfig={mockConfig}
+        connectedWallet={mockCampaign.creator}
+      />,
+    );
+
+    const pledgeButton = screen.getByRole('button', { name: /pledge/i });
+    pledgeButton.focus();
+    expect(document.activeElement).toBe(pledgeButton);
+  });
+
+  it('exposes a landmark region for the campaign details', async () => {
+    render(
+      <CampaignDetailPanel
+        campaign={mockCampaign}
+        appConfig={mockConfig}
+        connectedWallet={mockCampaign.creator}
+      />,
+    );
+
+    expect(screen.getByRole('region')).toBeDefined();
   });
 });
