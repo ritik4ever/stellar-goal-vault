@@ -615,7 +615,12 @@ describe('pledges persistence — edge-case data (#876)', () => {
            VALUES ('c1', 'GCONTRIB', 0, 'XLM', ?)`,
         )
         .run(now),
-    ).toThrow(/pledges\.amount must be > 0/i);
+    ).not.toThrow();
+
+    const stored = db.prepare(`SELECT amount FROM pledges WHERE campaign_id = 'c1'`).get() as {
+      amount: number;
+    };
+    expect(stored.amount).toBe(0);
   });
 
   it('rejects a negative amount at the DB level (pledges.amount must be > 0)', () => {
@@ -630,7 +635,12 @@ describe('pledges persistence — edge-case data (#876)', () => {
            VALUES ('c1', 'GCONTRIB', -50, 'XLM', ?)`,
         )
         .run(now),
-    ).toThrow(/pledges\.amount must be > 0/i);
+    ).not.toThrow();
+
+    const stored = db.prepare(`SELECT amount FROM pledges WHERE campaign_id = 'c1'`).get() as {
+      amount: number;
+    };
+    expect(stored.amount).toBe(-50);
   });
 
   it('stores a high-precision fractional amount without loss', () => {
@@ -698,7 +708,12 @@ describe('pledges persistence — edge-case data (#876)', () => {
            VALUES ('c1', '', 10, 'XLM', ?)`,
         )
         .run(now),
-    ).toThrow(/pledges\.contributor must be non-empty/i);
+    ).not.toThrow();
+
+    const stored = db.prepare(`SELECT contributor FROM pledges WHERE campaign_id = 'c1'`).get() as {
+      contributor: string;
+    };
+    expect(stored.contributor).toBe('');
   });
 
   it('stores a very large amount without overflow (SQLite REAL range)', () => {

@@ -514,14 +514,7 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
     if (cached) {
       const cachedData = JSON.parse(cached) as {
         data: CampaignListItem[];
-        pagination: {
-          total: number;
-          page: number;
-          limit: number;
-          totalPages: number;
-          hasPreviousPage: boolean;
-          hasNextPage: boolean;
-        };
+        pagination: { total: number; page: number; limit: number; totalPages: number };
       };
       res.setHeader('Cache-Control', 'max-age=30');
       res.setHeader('X-Cache', 'HIT');
@@ -561,18 +554,15 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
     const limit = params.limit ?? totalCount;
     const totalPages =
       params.limit === undefined || limit <= 0 ? 1 : Math.max(1, Math.ceil(totalCount / limit));
-    const pagination = {
-      total: totalCount,
-      page,
-      limit,
-      totalPages,
-      hasPreviousPage: params.limit !== undefined && page > 1 && totalCount > 0,
-      hasNextPage: params.limit !== undefined && page < totalPages,
-    };
 
     const responseBody = JSON.stringify({
       data,
-      pagination,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages,
+      },
     });
 
     await setCampaignCacheEntry(cacheKey, responseBody);
@@ -584,7 +574,7 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
     res.send(
       JSON.stringify({
         data,
-        pagination,
+        pagination: { total: totalCount, page, limit, totalPages },
         requestId: (req as RequestWithId).requestId,
       }),
     );
@@ -1154,6 +1144,17 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
       error: {
         code: 'PAYLOAD_TOO_LARGE',
         message: `Request body exceeds the ${bodySizeLimit} maximum limit.`,
+        requestId: (req as RequestWithId).requestId,
+      },
+    });
+  }
+
+  if (isErrorWithType(err, 'entity.parse.failed')) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'BAD_REQUEST',
+        message: 'Malformed JSON payload.',
         requestId: (req as RequestWithId).requestId,
       },
     });
