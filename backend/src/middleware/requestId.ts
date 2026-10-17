@@ -26,52 +26,6 @@ const SENSITIVE_HEADERS = new Set([
   'x-signature',
 ]);
 
-const SENSITIVE_QUERY_PARAMS = new Set([
-  'authorization',
-  'token',
-  'secret',
-  'password',
-  'passphrase',
-  'key',
-  'api_key',
-  'apiKey',
-  'wallet_secret',
-  'walletSecret',
-  'private_key',
-  'privateKey',
-  'client_secret',
-  'clientSecret',
-  'webhook_secret',
-  'webhookSecret',
-  'signature',
-  'access_token',
-  'refresh_token',
-  'session_token',
-  'code',
-]);
-
-/**
- * Redacts sensitive values from a URL string.
- */
-function redactUrl(url: string): string {
-  try {
-    const urlObj = new URL(url, 'http://localhost');
-    // Redact query parameters
-    const searchParams = urlObj.searchParams;
-    for (const key of searchParams.keys()) {
-      if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) {
-        searchParams.set(key, '[REDACTED]');
-      }
-    }
-    // Reconstruct URL with redacted query string
-    const redactedPath = urlObj.pathname + urlObj.search;
-    return redactedPath;
-  } catch {
-    // If URL parsing fails, return original
-    return url;
-  }
-}
-
 /**
  * Redacts sensitive headers from an object.
  */
@@ -85,6 +39,38 @@ function redactHeaders(headers: Record<string, string>): Record<string, string> 
     }
   }
   return redacted;
+}
+
+/** Route prefix whose `:id` segment is a campaign ID. */
+const CAMPAIGN_ROUTE_PREFIX = '/api/campaigns/:id';
+
+/**
+ * Structured routing fields for the request log, derived from the matched
+ * Express route so they stay low-cardinality and don't depend on the raw URL.
+ */
+export function describeRoute(
+  method: string,
+  routePattern: string | undefined,
+  path: string,
+): { route?: string; operation: string; campaignId?: string } {
+  if (!routePattern) {
+    return { operation: 'unmatched' };
+  }
+
+  let campaignId: string | undefined;
+  if (routePattern === CAMPAIGN_ROUTE_PREFIX || routePattern.startsWith(`${CAMPAIGN_ROUTE_PREFIX}/`)) {
+    // `/api/campaigns/:id/...` -> the ID is the fourth path segment.
+    const segment = path.split('/')[3];
+    if (segment) {
+      try {
+        campaignId = decodeURIComponent(segment);
+      } catch {
+        campaignId = segment;
+      }
+    }
+  }
+
+  return { route: routePattern, operation: `${method} ${routePattern}`, campaignId };
 }
 
 export function requestIdMiddleware(req: RequestWithId, res: Response, next: NextFunction): void {
@@ -101,12 +87,18 @@ export function requestIdMiddleware(req: RequestWithId, res: Response, next: Nex
   if (retryReason) req.retryReason = retryReason;
 
   const startedAt = process.hrtime.bigint();
+  let logged = false;
 
-  res.on('finish', () => {
+  const log = (aborted: boolean) => {
+    if (logged) return;
+    logged = true;
+
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    // Query strings can carry user input; keep them out of the log line.
+    const path = (req.originalUrl || req.path).split('?')[0];
+    const routePattern = typeof req.route?.path === 'string' ? `${req.baseUrl}${req.route.path}` : undefined;
 
     // Redact sensitive information from request context for logging
-    const redactedPath = redactUrl(req.originalUrl || req.path);
     const redactedHeaders = redactHeaders(req.headers as Record<string, string>);
 
     const finalOutcome = req.finalOutcome || (res.statusCode >= 400 ? 'failure' : 'success');
@@ -115,9 +107,12 @@ export function requestIdMiddleware(req: RequestWithId, res: Response, next: Nex
       {
         requestId,
         method: req.method,
-        path: redactedPath,
+        path,
         status: res.statusCode,
         durationMs,
+        ...describeRoute(req.method, routePattern, path),
+        errorCode: typeof res.locals.errorCode === 'string' ? res.locals.errorCode : undefined,
+        aborted,
         headers: redactedHeaders,
         ip: req.ip,
         userAgent: req.get('user-agent'),
@@ -127,7 +122,10 @@ export function requestIdMiddleware(req: RequestWithId, res: Response, next: Nex
       },
       config.logLevel,
     );
-  });
+  };
+
+  res.on('finish', () => log(false));
+  res.on('close', () => log(!res.writableFinished));
 
   requestContext.run({ requestId }, () => {
     next();
