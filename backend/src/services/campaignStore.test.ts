@@ -141,6 +141,39 @@ describe('campaign store search', () => {
     ).toHaveLength(1);
   });
 
+  it('treats a replayed claim with the same transaction hash as a no-op', () => {
+    const campaign = createCampaign({
+      creator: CREATOR,
+      title: 'Idempotent claim replay',
+      description: 'A client retry with the same confirmed claim must not conflict.',
+      assetCode: 'USDC',
+      targetAmount: 100,
+      deadline: FIXED_DEADLINE,
+    });
+
+    addPledge(campaign.id, { contributor: CONTRIBUTOR, amount: 100 });
+    getDb()
+      .prepare(`UPDATE campaigns SET deadline = ? WHERE id = ?`)
+      .run(FIXED_NOW - 5, campaign.id);
+
+    const claimTxHash = '1'.repeat(64);
+    const first = claimCampaign(campaign.id, {
+      creator: CREATOR,
+      transactionHash: claimTxHash,
+      confirmedAt: FIXED_NOW,
+    });
+    const replay = claimCampaign(campaign.id, {
+      creator: CREATOR,
+      transactionHash: claimTxHash,
+      confirmedAt: FIXED_NOW + 10,
+    });
+
+    expect(replay.claimedAt).toBe(first.claimedAt);
+    expect(
+      getCampaignHistory(campaign.id).filter((event) => event.eventType === 'claimed'),
+    ).toHaveLength(1);
+  });
+
   it('handles empty search query gracefully', () => {
     const allCampaigns = listCampaigns();
     const emptySearchCampaigns = listCampaigns({ searchQuery: '' });

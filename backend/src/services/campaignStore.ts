@@ -1,5 +1,10 @@
 import { getDb, initDb } from './db';
-import { getCampaignHistory, recordEvent, BlockchainMetadata } from './eventHistory';
+import {
+  getCampaignHistory,
+  getEventByTxHash,
+  recordEvent,
+  BlockchainMetadata,
+} from './eventHistory';
 import { createNotification } from './notificationService';
 import { dispatchWebhook } from './webhookService';
 
@@ -1467,6 +1472,12 @@ function reconcileOnChainClaim(campaignId: string, input: ReconciledClaimInput):
   }
 
   if (campaign.claimedAt) {
+    // Replaying the same confirmed claim (e.g. a client retry after a lost
+    // response) is a no-op rather than a conflict.
+    const priorClaim = getEventByTxHash(input.transactionHash);
+    if (priorClaim?.campaignId === campaignId && priorClaim.eventType === 'claimed') {
+      return campaign;
+    }
     throw toServiceError('Campaign already claimed.', 409, 'CAMPAIGN_ALREADY_CLAIMED');
   }
 
