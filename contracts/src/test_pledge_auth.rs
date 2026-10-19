@@ -204,6 +204,7 @@ fn claim_requires_exactly_the_creator_signature() {
     f.client.claim(&f.campaign_id, &f.creator);
     assert_sole_signer(&f, &f.creator, "claim");
     assert!(f.client.get_campaign(&f.campaign_id).claimed);
+    assert_eq!(balance(&f, &f.creator), TARGET);
 }
 
 #[test]

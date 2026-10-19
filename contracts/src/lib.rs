@@ -927,6 +927,9 @@ impl StellarGoalVaultContract {
         if campaign.canceled {
             panic!("campaign canceled");
         }
+        if creator == env.current_contract_address() {
+            panic!("creator cannot be the vault contract");
+        }
         // Campaign must be approved before claiming
         if campaign.approval_threshold > 0 {
             let approval_count: u32 = env
@@ -945,6 +948,9 @@ impl StellarGoalVaultContract {
             panic!("campaign is not funded");
         }
 
+        // Authorization is enforced above: only the campaign creator (the
+        // stored `creator`) can claim, and the signature covers campaign_id.
+        // No other signer can trigger this privileged state transition.
         campaign.claimed = true;
         env.storage()
             .persistent()
