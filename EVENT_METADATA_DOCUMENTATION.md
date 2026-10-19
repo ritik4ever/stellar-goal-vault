@@ -28,7 +28,30 @@ interface BlockchainMetadata {
 - **contractId**: The Soroban smart contract that emitted this event. Helps filter events by contract.
 - **source**: Indicates whether the event originated locally ('local') or from blockchain sync ('soroban').
 
-### Campaign Creation Event Topics and Payload
+### Campaign Creation and Pledge Event Topics and Payload
+
+#### Campaign Creation Event (`CampaignCreated`)
+- **Topics**: `[symbol_short!("Goal"), symbol_short!("Create")]`
+- **Payload**:
+  - `campaign_id` (`u64`): ID of the newly created campaign
+  - `creator` (`Address`): Address of the campaign creator
+  - `token` (`Address`): First accepted token address
+  - `target_amount` (`i128`): Funding target in stroops
+  - `deadline` (`u64`): Expiration timestamp in seconds
+  - `metadata` (`String`): Campaign metadata / URI
+
+#### Campaign Pledge Structured Event (`CampaignPledgedEvent`)
+- **Topics**: `[symbol_short!("Goal"), symbol_short!("Pledged")]`
+- **Payload**:
+  - `campaign_id` (`u64`): Campaign ID receiving the pledge
+  - `contributor` (`Address`): Contributor address
+  - `token` (`Address`): Token contract address contributed
+  - `amount` (`i128`): Amount pledged in this transaction (stroops)
+  - `total_pledged` (`i128`): Campaign's total pledged amount after this pledge
+  - `contributor_count` (`u32`): Campaign's unique contributor count after this pledge
+  - `token_balance` (`i128`): Campaign's token balance after this pledge
+  - `contributor_total` (`i128`): Contributor's total pledged amount for this token
+  - `pledged_at` (`u64`): Ledger timestamp when pledge was recorded
 
 ## Database Schema Changes
 
@@ -70,7 +93,11 @@ Event objects in API responses now include the optional `blockchainMetadata` fie
 
 ## Event Sources
 
-### Campaign Creation Event Emission
+### Contract Event Emission Guarantees
+
+- **`CampaignCreated`**: Emitted once per successful `create_campaign` invocation after all parameter validation and initial storage state are committed. Topic: `("Goal", "Create")`.
+- **`CampaignPledgedEvent`**: Emitted once per successful `contribute` call after token transfer and state modifications (campaign total, contributor count, token balance, contributor pledge balance) are successfully persisted. Topic: `("Goal", "Pledged")`.
+- **Atomic Rollback Guarantee**: If any validation, auth check, or token transfer reverts, the Soroban transaction aborts and no events are emitted to the ledger.
 
 ### Local Events
 Events created by local API operations (create campaign, add pledge, etc.) are marked with `source: 'local'` and contain no blockchain-specific fields until the operations are synchronized to the blockchain.
@@ -78,18 +105,17 @@ Events created by local API operations (create campaign, add pledge, etc.) are m
 ### Soroban Events
 Events synchronized from the Soroban network contain full blockchain metadata including transaction hashes, ledger information, and contract details.
 
-## Backward Compatibility
+## Backward Compatibility & Stability Contract
 
-### Campaign Creation Event Guarantees
+- Existing events without blockchain metadata continue to work normally.
+- Legacy `CampaignPledged` (`"Goal"`, `"Pledge"`) continues to be emitted alongside `CampaignPledgedEvent` (`"Goal"`, `"Pledged"`) for backward compatibility with legacy consumers.
+- The `blockchainMetadata` field is optional in all interfaces.
+- Local event flows remain unchanged.
+- API responses include the new field only when metadata is available.
 
-- Existing events without blockchain metadata continue to work normally
-- The `blockchainMetadata` field is optional in all interfaces
-- Local event flows remain unchanged
-- API responses include the new field only when metadata is available
+## Off-Chain Indexing & Query Functions
 
-## New Query Functions
-
-### Campaign Creation Event Indexing
+Indexers can listen to topic `("Goal", "Pledged")` and parse `CampaignPledgedEvent` directly to reconstruct cumulative campaign pledge balances and contributor totals without executing auxiliary smart contract queries.
 
 Additional helper functions are available for querying events by blockchain metadata:
 

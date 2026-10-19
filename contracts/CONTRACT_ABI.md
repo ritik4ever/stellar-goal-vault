@@ -272,7 +272,9 @@ fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, 
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 | Contributor is the vault contract | `"contributor cannot be the vault contract"` | High | Pledge from a real account; the vault cannot fund itself |
 
-**Emits:** `CampaignPledged`
+**Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
+
+**Indexer note:** The `CampaignPledgedEvent` event is emitted exactly once per successful `contribute` call, after all validations, token transfer, and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Pledged")` and use `campaign_id` + `contributor` + `pledged_at` for deduplication and reconstructing pledge state without auxiliary contract reads.
 
 **Gas estimate:** 30,000 + token transfer cost (~10,000) + storage writes ≈ 50,000 units + 20% headroom = **60,000**
 
@@ -705,6 +707,39 @@ All events use the topic prefix `(symbol_short!("Goal"), ...)`.
 | `amount` | `i128` | Contribution amount |
 
 **Emitted by:** `contribute`
+
+---
+
+### `CampaignPledgedEvent`
+
+Structured event emitted for off-chain indexers and audit pipelines upon successful pledge execution.
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Pledged"` |
+
+**Data** (`CampaignPledgedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `contributor` | `Address` | Contributor address |
+| `token` | `Address` | Token contract address contributed |
+| `amount` | `i128` | Amount contributed in this transaction (in stroops) |
+| `total_pledged` | `i128` | Total amount pledged across all tokens for the campaign after this pledge |
+| `contributor_count` | `u32` | Total unique contributors to the campaign after this pledge |
+| `token_balance` | `i128` | Total balance of this specific token held by the campaign after this pledge |
+| `contributor_total` | `i128` | Cumulative amount this contributor has contributed with this token |
+| `pledged_at` | `u64` | Unix timestamp (seconds) of the pledge transaction ledger |
+
+**Emitted by:** `contribute`
+
+**Stability contract & Indexer guidelines:**
+- Topic symbols `"Goal"` and `"Pledged"` are frozen for this contract version.
+- Emitted only after all validations, auth checks, token transfer, and storage writes succeed. Reverted or rejected transactions emit no event.
+- All amounts are represented as `i128` stroops.
+- Indexers can reconstruct campaign and contributor pledge state directly without additional contract storage reads.
 
 ---
 

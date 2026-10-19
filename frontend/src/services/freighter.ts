@@ -210,6 +210,23 @@ export async function submitFreighterClaim(params: {
     );
   }
 
+  let details: { networkPassphrase?: string } | undefined;
+  try {
+    const networkDetails = await getNetworkDetails();
+    details = {
+      networkPassphrase: networkDetails.networkPassphrase,
+    };
+  } catch {
+    details = undefined;
+  }
+
+  if (details?.networkPassphrase && details.networkPassphrase !== config.networkPassphrase) {
+    throw buildError(
+      'FREIGHTER_NETWORK_MISMATCH',
+      `Freighter is connected to ${networkLabel(details.networkPassphrase)}, but this app expects ${networkLabel(config.networkPassphrase)}.`,
+    );
+  }
+
   const server = getRpcServer(config.sorobanRpcUrl);
   const sourceAccount = await server.getAccount(creator).catch((error) => {
     throw buildError(
@@ -335,6 +352,23 @@ export async function submitFreighterPledge(params: {
     throw buildError(
       'CONFIG_MISSING',
       'Wallet signing is not configured yet. Set CONTRACT_ID and SOROBAN_RPC_URL on the backend.',
+    );
+  }
+
+  let details: { networkPassphrase?: string } | undefined;
+  try {
+    const networkDetails = await getNetworkDetails();
+    details = {
+      networkPassphrase: networkDetails.networkPassphrase,
+    };
+  } catch {
+    details = undefined;
+  }
+
+  if (details?.networkPassphrase && details.networkPassphrase !== config.networkPassphrase) {
+    throw buildError(
+      'FREIGHTER_NETWORK_MISMATCH',
+      `Freighter is connected to ${networkLabel(details.networkPassphrase)}, but this app expects ${networkLabel(config.networkPassphrase)}.`,
     );
   }
 
