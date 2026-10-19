@@ -225,14 +225,27 @@ prepareTransaction()       → attaches simulation footprint to the XDR
         ↓
 signTransaction()          → Freighter prompts user; returns signed XDR
         ↓
-sendTransaction()          → submits signed XDR to Soroban RPC
-        ↓
-waitForTransaction()       → polls until SUCCESS or FAILED (25 attempts, 1.2 s each)
+sendAndConfirmTransaction() → submits signed XDR to Soroban RPC, resending the same
+                              envelope on TRY_AGAIN_LATER, then polls until SUCCESS
+                              or FAILED (25 attempts, 1.2 s each)
         ↓
 POST /api/campaigns/:id/pledges/reconcile   → backend records confirmed hash in SQLite
 ```
 
 The full implementation lives in [`frontend/src/services/freighter.ts`](../frontend/src/services/freighter.ts).
+
+### Transaction status and retries
+
+Each pledge, claim, and refund moves through an explicit status (`idle → pending → confirmed`, or `failed` / `retryable`), defined in [`frontend/src/lib/transactionStatus.ts`](../frontend/src/lib/transactionStatus.ts):
+
+| Outcome | Status | What a retry does |
+| --- | --- | --- |
+| Ledger reports `SUCCESS` | `confirmed` | — (if saving to the backend failed, a retry only re-saves the same transaction hash) |
+| RPC busy (`TRY_AGAIN_LATER`), RPC unreachable, confirmation timeout | `retryable` | Resumes the **same signed transaction**; nothing new is signed |
+| Previous attempt expired before reaching the ledger, `txInsufficientFee`, `txTooLate` | `retryable` | Builds and signs a new transaction (the old one can no longer land) |
+| Ledger reports `FAILED`, `txBadSeq`, `txInsufficientBalance`, simulation/contract errors | `failed` | Starts over from a fresh transaction |
+
+While an action is `pending`, repeating it (double-clicks, repeated submits) is ignored. On the backend, pledge reconciliation and claims are idempotent by transaction hash, so replaying the same confirmed transaction never records it twice.
 
 ---
 

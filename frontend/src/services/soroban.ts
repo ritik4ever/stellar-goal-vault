@@ -3,11 +3,17 @@ import {
   Address,
   BASE_FEE,
   Contract,
+  Transaction,
   TransactionBuilder,
   nativeToScVal,
   rpc,
 } from '@stellar/stellar-sdk';
 import { getAppConfig } from './api';
+import {
+  ConfirmedTransaction,
+  resumeSubmittedTransaction,
+  sendAndConfirmTransaction,
+} from './freighter';
 import { SorobanRefundMetadata } from '../types/campaign';
 import { GoalVaultContract } from '../generated';
 import { verifyFreighterNetwork } from './freighter';
@@ -119,52 +125,53 @@ async function buildAndSubmitRefund(
     throw causedError('SIGNING_FAILED', error, 'UNKNOWN');
   }
 
-  const signedTransaction = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
-  const sendResponse = await server.sendTransaction(signedTransaction).catch((error) => {
-    throw createSigningError('SUBMISSION_FAILED', {
-      signingErrorClass: 'RPC_FAILURE',
-      cause: error,
-    });
-  });
+  const signedTransaction = TransactionBuilder.fromXDR(signedXdr, networkPassphrase) as Transaction;
+  const confirmed = await sendAndConfirmTransaction(server, signedTransaction, 'SUBMISSION_FAILED');
 
-  if (sendResponse.status === 'ERROR' || !sendResponse.hash) {
-    throw createSigningError('SUBMISSION_FAILED', {
-      signingErrorClass: 'CONTRACT_REJECTED',
-      cause: sendResponse.status,
-    });
-  }
+  return toRefundReceipt(confirmed, { contractId, networkPassphrase, rpcUrl, walletAddress });
+}
 
-  const finalResponse = await server
-    .pollTransaction(sendResponse.hash, { attempts: 15 })
-    .catch((error) => {
-      throw createSigningError('TRANSACTION_TIMEOUT', {
-        signingErrorClass: 'RPC_FAILURE',
-        cause: error,
-      });
-    });
-  if (finalResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-    throw createSigningError('TRANSACTION_FAILED', {
-      signingErrorClass: 'CONTRACT_REJECTED',
-      cause: finalResponse.status,
-    });
-  }
-
-  const finalResponseAny = finalResponse as {
-    ledger?: number;
-    createdAt?: number;
-    latestLedger?: number;
-  };
-
+function toRefundReceipt(
+  confirmed: ConfirmedTransaction,
+  context: { contractId: string; networkPassphrase: string; rpcUrl: string; walletAddress: string },
+): SorobanRefundMetadata {
   return {
-    txHash: sendResponse.hash,
+    txHash: confirmed.transactionHash,
+    ...context,
+    ledger: confirmed.ledger,
+    createdAt: confirmed.confirmedAt,
+    latestLedger: confirmed.latestLedger,
+  };
+}
+
+/**
+ * Resumes a refund transaction from a previous retryable attempt without
+ * signing a new one. See `resumeSubmittedTransaction`.
+ */
+export async function resumeRefundTransaction(
+  submittedTransaction: string,
+  contributor: string,
+): Promise<SorobanRefundMetadata> {
+  const config = await getAppConfig();
+  const { contractId, networkPassphrase, rpcUrl } = config.soroban;
+
+  if (!contractId || !networkPassphrase || !rpcUrl) {
+    throw new Error(
+      'Soroban refund configuration is incomplete. Set the contract, network, and RPC settings on the backend.',
+    );
+  }
+
+  const confirmed = await resumeSubmittedTransaction(
+    rpcUrl,
+    networkPassphrase,
+    submittedTransaction,
+  );
+  return toRefundReceipt(confirmed, {
     contractId,
     networkPassphrase,
     rpcUrl,
-    walletAddress,
-    ledger: finalResponseAny.ledger,
-    createdAt: finalResponseAny.createdAt,
-    latestLedger: finalResponseAny.latestLedger,
-  };
+    walletAddress: contributor,
+  });
 }
 
 export const executeSorobanRefund = submitRefundTransaction;

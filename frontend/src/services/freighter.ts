@@ -8,6 +8,7 @@ import {
   Address,
   BASE_FEE,
   Contract,
+  Transaction,
   TransactionBuilder,
   nativeToScVal,
   rpc,
@@ -201,31 +202,192 @@ export async function connectFreighterWallet(
   };
 }
 
+export interface ConfirmedTransaction extends PledgeTransactionResult {
+  ledger?: number;
+  latestLedger?: number;
+}
+
+const MAX_SEND_ATTEMPTS = 3;
+const MAX_POLL_ATTEMPTS = 25;
+const POLL_INTERVAL_MS = 1200;
+// Allowance for clock skew between this browser and ledger close time.
+const TIME_BOUNDS_GRACE_SECONDS = 30;
+
+/**
+ * Builds an error for a transaction that was handed to the network but whose
+ * outcome is unknown. `submittedTransaction` lets a retry resume the same
+ * envelope (same hash) instead of building a second transaction.
+ */
+function buildSubmittedError(
+  code: string,
+  message: string,
+  signedTransaction: Transaction,
+): AppErrorLike & { transactionHash: string; submittedTransaction: string } {
+  return Object.assign(buildError(code, message), {
+    transactionHash: transactionHashHex(signedTransaction),
+    submittedTransaction: signedTransaction.toXDR(),
+  });
+}
+
+function transactionHashHex(transaction: Transaction): string {
+  return Array.from(transaction.hash(), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function hasReachedNetwork(server: rpc.Server, transactionHash: string): Promise<boolean> {
+  const existing = await server.getTransaction(transactionHash).catch(() => null);
+  return Boolean(existing && existing.status !== rpc.Api.GetTransactionStatus.NOT_FOUND);
+}
+
 async function waitForTransaction(
   server: rpc.Server,
-  transactionHash: string,
-): Promise<PledgeTransactionResult> {
-  for (let attempt = 0; attempt < 25; attempt += 1) {
-    const result = await server.getTransaction(transactionHash);
-    if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+  signedTransaction: Transaction,
+): Promise<ConfirmedTransaction> {
+  const transactionHash = transactionHashHex(signedTransaction);
+  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+    // A transient RPC error while polling says nothing about the transaction.
+    const result = await server.getTransaction(transactionHash).catch(() => null);
+    if (result?.status === rpc.Api.GetTransactionStatus.SUCCESS) {
       return {
         transactionHash,
         confirmedAt: result.createdAt,
+        ledger: result.ledger,
+        latestLedger: result.latestLedger,
       };
     }
-    if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
+    if (result?.status === rpc.Api.GetTransactionStatus.FAILED) {
       throw buildError(
         'TRANSACTION_FAILED',
         `The network rejected transaction ${transactionHash}.`,
       );
     }
-    await sleep(1200);
+    await sleep(POLL_INTERVAL_MS);
   }
 
-  throw buildError(
+  throw buildSubmittedError(
     'TRANSACTION_TIMEOUT',
-    `Transaction ${transactionHash} was submitted but did not confirm before the UI timeout.`,
+    `Transaction ${transactionHash} was submitted but is not confirmed yet. Retry to keep checking it; it will not be submitted twice.`,
+    signedTransaction,
   );
+}
+
+/**
+ * Submits a signed transaction and waits for a final ledger result.
+ *
+ * Status mapping:
+ * - PENDING / DUPLICATE → poll until SUCCESS (confirmed) or FAILED (failed).
+ * - TRY_AGAIN_LATER and transport errors → resend the *same* envelope, so the
+ *   network can include it at most once; when attempts run out → retryable.
+ * - ERROR → `rejectedCode` (CONTRACT_REJECTED) carrying the Stellar result
+ *   code (e.g. txBadSeq, txInsufficientBalance), unless an earlier ambiguous
+ *   attempt already landed, in which case the original is polled instead.
+ */
+export async function sendAndConfirmTransaction(
+  server: rpc.Server,
+  signedTransaction: Transaction,
+  rejectedCode = 'TRANSACTION_REJECTED',
+): Promise<ConfirmedTransaction> {
+  const transactionHash = transactionHashHex(signedTransaction);
+
+  for (let attempt = 1; ; attempt += 1) {
+    let sendResult: rpc.Api.SendTransactionResponse;
+    try {
+      sendResult = await server.sendTransaction(signedTransaction);
+    } catch (error) {
+      if (attempt >= MAX_SEND_ATTEMPTS) {
+        throw buildSubmittedError(
+          'SUBMISSION_RETRY',
+          'Soroban RPC could not be reached. Retry to resubmit the same transaction.',
+          signedTransaction,
+        );
+      }
+      await sleep(POLL_INTERVAL_MS * attempt);
+      if (await hasReachedNetwork(server, transactionHash)) {
+        return waitForTransaction(server, signedTransaction);
+      }
+      continue;
+    }
+
+    if (sendResult.status === 'PENDING' || sendResult.status === 'DUPLICATE') {
+      return waitForTransaction(server, signedTransaction);
+    }
+
+    if (sendResult.status === 'TRY_AGAIN_LATER') {
+      if (attempt >= MAX_SEND_ATTEMPTS) {
+        throw buildSubmittedError(
+          'SUBMISSION_RETRY',
+          'Soroban RPC is busy and asked to retry later. Retry to resubmit the same transaction.',
+          signedTransaction,
+        );
+      }
+      await sleep(POLL_INTERVAL_MS * attempt);
+      continue;
+    }
+
+    if (attempt > 1 && (await hasReachedNetwork(server, transactionHash))) {
+      return waitForTransaction(server, signedTransaction);
+    }
+
+    let resultCode: string | undefined;
+    try {
+      // `errorResult` is an xdr.TransactionResult; its code name is e.g. txBadSeq.
+      const errorResult = sendResult.errorResult as
+        { result: () => { switch: () => { name: string } } } | undefined;
+      resultCode = errorResult?.result().switch().name;
+    } catch {
+      resultCode = undefined;
+    }
+    throw Object.assign(
+      createSigningError(rejectedCode, {
+        signingErrorClass: 'CONTRACT_REJECTED',
+        message: `Soroban RPC rejected transaction ${transactionHash}${resultCode ? ` (${resultCode})` : ''}. ${SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED}`,
+      }),
+      { resultCode, transactionHash },
+    );
+  }
+}
+
+/**
+ * Resumes a transaction from a previous attempt (see `submittedTransaction` on
+ * retryable errors) without building a new one. If it never reached the
+ * ledger and its time bounds have passed, it can no longer land, so a
+ * TRANSACTION_EXPIRED error tells the caller a fresh transaction is safe.
+ */
+export async function resumeSubmittedTransaction(
+  rpcUrl: string,
+  networkPassphrase: string,
+  submittedTransaction: string,
+): Promise<ConfirmedTransaction> {
+  const signedTransaction = TransactionBuilder.fromXDR(
+    submittedTransaction,
+    networkPassphrase,
+  ) as Transaction;
+  const server = getRpcServer(rpcUrl);
+  const transactionHash = transactionHashHex(signedTransaction);
+
+  let existing: rpc.Api.GetTransactionResponse;
+  try {
+    existing = await server.getTransaction(transactionHash);
+  } catch (error) {
+    throw buildSubmittedError(
+      'RPC_UNAVAILABLE',
+      'Soroban RPC could not be reached. Retry in a moment.',
+      signedTransaction,
+    );
+  }
+
+  if (existing.status !== rpc.Api.GetTransactionStatus.NOT_FOUND) {
+    return waitForTransaction(server, signedTransaction);
+  }
+
+  const maxTime = Number(signedTransaction.timeBounds?.maxTime ?? 0);
+  if (maxTime > 0 && Date.now() / 1000 > maxTime + TIME_BOUNDS_GRACE_SECONDS) {
+    throw buildError(
+      'TRANSACTION_EXPIRED',
+      `Transaction ${transactionHash} expired before reaching the network. Retry to submit a new one.`,
+    );
+  }
+
+  return sendAndConfirmTransaction(server, signedTransaction);
 }
 
 export async function submitFreighterClaim(params: {
@@ -240,7 +402,7 @@ export async function submitFreighterClaim(params: {
     xdr: string;
     estimatedFee?: EstimatedFee;
   }) => Promise<boolean>;
-}): Promise<PledgeTransactionResult> {
+}): Promise<ConfirmedTransaction> {
   const { campaignId, creator, config } = params;
 
   if (!config.contractId || !config.sorobanRpcUrl) {
@@ -323,29 +485,11 @@ export async function submitFreighterClaim(params: {
     throw buildError('SIGNING_FAILED', 'Freighter did not return a signed transaction.');
   }
 
-  const signedTransaction = TransactionBuilder.fromXDR(signedXdr, config.networkPassphrase);
-  const sendResult = await server.sendTransaction(signedTransaction).catch((error) => {
-    throw createSigningError('SUBMISSION_FAILED', {
-      signingErrorClass: 'RPC_FAILURE',
-      cause: error,
-    });
-  });
-
-  if (sendResult.status === 'ERROR') {
-    throw buildError(
-      'CONTRACT_CALL_FAILED',
-      `Soroban RPC rejected the claim transaction ${sendResult.hash}.`,
-    );
-  }
-
-  if (sendResult.status === 'TRY_AGAIN_LATER') {
-    throw buildError(
-      'SUBMISSION_RETRY',
-      'Soroban RPC asked the client to retry claim submission later.',
-    );
-  }
-
-  return waitForTransaction(server, sendResult.hash);
+  const signedTransaction = TransactionBuilder.fromXDR(
+    signedXdr,
+    config.networkPassphrase,
+  ) as Transaction;
+  return sendAndConfirmTransaction(server, signedTransaction, 'CONTRACT_CALL_FAILED');
 }
 
 export async function submitFreighterPledge(params: {
@@ -362,7 +506,7 @@ export async function submitFreighterPledge(params: {
     xdr: string;
     estimatedFee?: EstimatedFee;
   }) => Promise<boolean>;
-}): Promise<PledgeTransactionResult> {
+}): Promise<ConfirmedTransaction> {
   const { campaignId, contributor, amount, config, assetCode } = params;
 
   if (!config.contractId || !config.sorobanRpcUrl) {
@@ -459,29 +603,11 @@ export async function submitFreighterPledge(params: {
     throw buildError('SIGNING_FAILED', 'Freighter did not return a signed transaction.');
   }
 
-  const signedTransaction = TransactionBuilder.fromXDR(signedXdr, config.networkPassphrase);
-  const sendResult = await server.sendTransaction(signedTransaction).catch((error) => {
-    throw createSigningError('SUBMISSION_FAILED', {
-      signingErrorClass: 'RPC_FAILURE',
-      cause: error,
-    });
-  });
-
-  if (sendResult.status === 'ERROR') {
-    throw createSigningError('SUBMISSION_FAILED', {
-      signingErrorClass: 'CONTRACT_REJECTED',
-      message: `Soroban RPC rejected the transaction ${sendResult.hash}. ${SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED}`,
-    });
-  }
-
-  if (sendResult.status === 'TRY_AGAIN_LATER') {
-    throw buildError(
-      'SUBMISSION_RETRY',
-      'Soroban RPC asked the client to retry transaction submission later.',
-    );
-  }
-
-  return waitForTransaction(server, sendResult.hash);
+  const signedTransaction = TransactionBuilder.fromXDR(
+    signedXdr,
+    config.networkPassphrase,
+  ) as Transaction;
+  return sendAndConfirmTransaction(server, signedTransaction, 'SUBMISSION_FAILED');
 }
 
 export function watchFreighterAccount(onChange: (address: string) => void): () => void {

@@ -15,6 +15,7 @@ import { useCampaignShareCard } from './CampaignShareCard';
 import { useToast } from '../hooks/useToast';
 import { ShareButtons } from './ShareButtons';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
+import { TransactionStatus, classifyTransactionError } from '../lib/transactionStatus';
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -49,6 +50,23 @@ function describePledgeError(error: unknown): string {
     return error.message;
   }
   return 'The pledge could not be completed. Please try again.';
+}
+
+/**
+ * Status line for each pledge transaction state. `confirmed` uses the existing
+ * success message and `idle` shows nothing.
+ */
+function describePledgeStatus(status: TransactionStatus, assetCode: string): string | null {
+  switch (status) {
+    case 'pending':
+      return `Submitting your ${assetCode} pledge. Approve it in your wallet, then wait for network confirmation. Asset and amount are locked until it finishes.`;
+    case 'retryable':
+      return 'The network did not finish processing this pledge. Retry to continue the same transaction; you will not be charged twice. Asset and amount stay locked until it completes.';
+    case 'failed':
+      return 'This pledge failed and was not recorded. You can change the details and try again.';
+    default:
+      return null;
+  }
 }
 
 function networkName(config: AppConfig | null | undefined): string {
@@ -87,6 +105,10 @@ export function CampaignDetailPanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pledgeError, setPledgeError] = useState<string | null>(null);
   const [pledgeSuccess, setPledgeSuccess] = useState(false);
+  const [pledgeStatus, setPledgeStatus] = useState<TransactionStatus>('idle');
+  // Synchronous guard: state updates are async, so a ref blocks a second
+  // submit fired before React re-renders the disabled button.
+  const pledgeInFlightRef = useRef(false);
   const pledgeSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bannerImageError, setBannerImageError] = useState(false);
   const walletReady = appConfig?.walletIntegrationReady ?? false;
@@ -120,6 +142,14 @@ export function CampaignDetailPanel({
   useEffect(() => {
     setBannerImageError(false);
   }, [campaign?.id, connectedWallet]);
+
+  // Pledge status belongs to the campaign it was submitted for.
+  useEffect(() => {
+    if (!pledgeInFlightRef.current) {
+      setPledgeStatus('idle');
+      setPledgeError(null);
+    }
+  }, [campaign?.id]);
 
   useEffect(() => {
     return () => {
@@ -208,6 +238,11 @@ export function CampaignDetailPanel({
   );
 
   async function submitPledge() {
+    if (pledgeInFlightRef.current || isPledgePending) {
+      return;
+    }
+    pledgeInFlightRef.current = true;
+    setPledgeStatus('pending');
     setPledgeError(null);
     setPledgeSuccess(false);
     if (pledgeSuccessTimerRef.current !== null) {
@@ -217,19 +252,33 @@ export function CampaignDetailPanel({
     setIsSubmitting(true);
     try {
       await onPledge(activeCampaign.id, Number(pledgeAmount), selectedToken);
+      setPledgeStatus('confirmed');
       setPledgeAmount('25');
       setPledgeToken('');
       setPledgeSuccess(true);
       pledgeSuccessTimerRef.current = setTimeout(() => {
         setPledgeSuccess(false);
+        setPledgeStatus('idle');
         pledgeSuccessTimerRef.current = null;
       }, 4000);
     } catch (error) {
-      setPledgeError(describePledgeError(error));
+      if ((error as { code?: string } | null)?.code === 'USER_CANCELLED') {
+        setPledgeStatus('idle');
+      } else {
+        setPledgeStatus(classifyTransactionError(error));
+        setPledgeError(describePledgeError(error));
+      }
     } finally {
+      pledgeInFlightRef.current = false;
       setIsSubmitting(false);
     }
   }
+
+  // Locked while a pledge is in flight, and while a retryable one may still
+  // land, so a retry is always the same logical action (same asset and amount).
+  const pledgeFieldsLocked =
+    pledgeStatus === 'pending' || pledgeStatus === 'retryable' || isPledgePending;
+  const pledgeStatusMessage = describePledgeStatus(pledgeStatus, selectedToken);
 
   function handlePledge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -386,7 +435,10 @@ export function CampaignDetailPanel({
             min="1"
             step="1"
             value={pledgeAmount}
-            onChange={(e) => setPledgeAmount(e.target.value)}
+            onChange={(e) => {
+              if (!pledgeFieldsLocked) setPledgeAmount(e.target.value);
+            }}
+            disabled={pledgeFieldsLocked}
             aria-description="pledge-amount-help"
             required
           />
@@ -395,23 +447,20 @@ export function CampaignDetailPanel({
           </small>
         </div>
 
-        {availableTokens.length > 1 ? (
-          <div className="form-field">
-            <label htmlFor="pledge-token">Asset</label>
-            <select
-              id="pledge-token"
-              value={pledgeToken}
-              onChange={(e) => setPledgeToken(e.target.value)}
-            >
-              <option value="">{`Default (${activeCampaign.assetCode})`}</option>
-              {availableTokens.map((assetCode) => (
-                <option key={assetCode} value={assetCode}>
-                  {assetCode}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
+        <div className="form-field">
+          <label htmlFor="pledge-token">Asset</label>
+          <select
+            id="pledge-token"
+            value={pledgeToken}
+            onChange={(e) => {
+              if (!pledgeFieldsLocked) setPledgeToken(e.target.value);
+            }}
+            disabled={pledgeFieldsLocked}
+          >
+            <option value="">{`Default (${activeCampaign.assetCode})`}</option>
+            <option value={activeCampaign.assetCode}>{activeCampaign.assetCode}</option>
+          </select>
+        </div>
 
         <div className="form-actions">
           <button
@@ -420,9 +469,24 @@ export function CampaignDetailPanel({
             disabled={isSubmitting || isPledgePending || !walletReady}
             aria-busy={isSubmitting || isPledgePending}
           >
-            {isSubmitting || isPledgePending ? 'Submitting...' : 'Pledge'}
+            {isSubmitting || isPledgePending
+              ? 'Submitting...'
+              : pledgeStatus === 'retryable'
+                ? 'Retry pledge'
+                : 'Pledge'}
           </button>
         </div>
+
+        {pledgeStatusMessage ? (
+          <p
+            className="muted"
+            data-testid="pledge-status"
+            data-status={pledgeStatus}
+            aria-live="polite"
+          >
+            {pledgeStatusMessage}
+          </p>
+        ) : null}
 
         {pledgeError ? (
           <div ref={pledgeErrorRef} className="form-error" role="alert" tabIndex={-1}>

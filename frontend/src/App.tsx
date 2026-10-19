@@ -46,8 +46,13 @@ import {
   refundCampaign,
   softDeleteCampaign,
 } from './services/api';
-import { submitFreighterClaim, submitFreighterPledge } from './services/freighter';
-import { submitRefundTransaction } from './services/soroban';
+import {
+  ConfirmedTransaction,
+  resumeSubmittedTransaction,
+  submitFreighterClaim,
+  submitFreighterPledge,
+} from './services/freighter';
+import { resumeRefundTransaction, submitRefundTransaction } from './services/soroban';
 import { useWallet } from './hooks/useWallet';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useToast } from './hooks/useToast';
@@ -56,7 +61,15 @@ import { useCampaignShareCard } from './components/CampaignShareCard';
 import { didCampaignBecomeFunded } from './lib/fundingCelebration';
 import { appendUniqueCampaigns } from './lib/campaignListPagination';
 import { mergeCampaignDetail, mergeHistoryPages } from './lib/campaignDetailLoading';
-import { ApiError, AppConfig, Campaign, CampaignEvent, OpenIssue } from './types/campaign';
+import { createTransactionTracker } from './lib/transactionStatus';
+import {
+  ApiError,
+  AppConfig,
+  Campaign,
+  CampaignEvent,
+  OpenIssue,
+  SorobanRefundMetadata,
+} from './types/campaign';
 
 const DEFAULT_NETWORK_PASSPHRASE = 'Test SDF Network ; September 2015';
 const MAINNET_PASSPHRASE = 'Public Global Stellar Network ; September 2015';
@@ -187,6 +200,9 @@ function App() {
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
+  // One tracker per result type; keys identify a single logical on-chain action.
+  const chainTxTracker = useRef(createTransactionTracker<ConfirmedTransaction>()).current;
+  const refundTxTracker = useRef(createTransactionTracker<SorobanRefundMetadata>()).current;
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
   const [campaignsError, setCampaignsError] = useState<{
     message: string;
@@ -572,25 +588,44 @@ function App() {
       campaigns.find((campaign) => campaign.id === campaignId) ??
       (selectedCampaign?.id === campaignId ? selectedCampaign : null);
 
+    const actionKey = `pledge:${campaignId}:${connectedWallet}:${amount}:${assetCode}`;
+    if (chainTxTracker.isPending(actionKey)) {
+      return;
+    }
+
     setPendingPledgeCampaignId(campaignId);
 
     try {
-      const transactionResult = await submitFreighterPledge({
-        campaignId,
-        contributor: connectedWallet,
-        amount,
-        assetCode,
-        config: appConfig,
-        onPreview: handleTransactionPreview,
+      const outcome = await chainTxTracker.run(actionKey, {
+        submit: () =>
+          submitFreighterPledge({
+            campaignId,
+            contributor: connectedWallet,
+            amount,
+            assetCode,
+            config: appConfig,
+            onPreview: handleTransactionPreview,
+          }),
+        resume: (submittedTransaction) =>
+          resumeSubmittedTransaction(
+            appConfig.sorobanRpcUrl,
+            appConfig.networkPassphrase,
+            submittedTransaction,
+          ),
+        record: async (transaction) => {
+          await reconcilePledge(campaignId, {
+            contributor: connectedWallet,
+            amount,
+            assetCode,
+            transactionHash: transaction.transactionHash,
+            confirmedAt: transaction.confirmedAt,
+          });
+        },
       });
-
-      await reconcilePledge(campaignId, {
-        contributor: connectedWallet,
-        amount,
-        assetCode,
-        transactionHash: transactionResult.transactionHash,
-        confirmedAt: transactionResult.confirmedAt,
-      });
+      if (outcome.skipped) {
+        return;
+      }
+      const transactionResult = outcome.result;
 
       const refreshedCampaigns = await refreshCampaigns(campaignId);
       const refreshedCampaign =
@@ -613,14 +648,16 @@ function App() {
         },
       );
     } catch (error) {
-      if (
+      // Re-throw so the pledge form can show the exact transaction status
+      // (failed / retryable) inline; cancelling returns it to idle.
+      if (!(
         error &&
         typeof error === 'object' &&
         (error as { code?: string }).code === 'USER_CANCELLED'
-      ) {
-        return;
+      )) {
+        addToast(getErrorMessage(error), 'error');
       }
-      addToast(getErrorMessage(error), 'error');
+      throw error;
     } finally {
       setPendingPledgeCampaignId(null);
     }
@@ -642,20 +679,38 @@ function App() {
       return;
     }
 
-    try {
-      const transactionResult = await submitFreighterClaim({
-        campaignId: campaign.id,
-        creator: connectedWallet,
-        config: appConfig,
-        onPreview: handleTransactionPreview,
-      });
+    const actionKey = `claim:${campaign.id}`;
+    if (chainTxTracker.isPending(actionKey)) {
+      return;
+    }
 
-      await claimCampaign(
-        campaign.id,
-        connectedWallet,
-        transactionResult.transactionHash,
-        transactionResult.confirmedAt,
-      );
+    try {
+      const outcome = await chainTxTracker.run(actionKey, {
+        submit: () =>
+          submitFreighterClaim({
+            campaignId: campaign.id,
+            creator: connectedWallet,
+            config: appConfig,
+            onPreview: handleTransactionPreview,
+          }),
+        resume: (submittedTransaction) =>
+          resumeSubmittedTransaction(
+            appConfig.sorobanRpcUrl,
+            appConfig.networkPassphrase,
+            submittedTransaction,
+          ),
+        record: async (transaction) => {
+          await claimCampaign(
+            campaign.id,
+            connectedWallet,
+            transaction.transactionHash,
+            transaction.confirmedAt,
+          );
+        },
+      });
+      if (outcome.skipped) {
+        return;
+      }
 
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
@@ -694,12 +749,27 @@ function App() {
   }
 
   async function handleRefund(campaignId: string, contributor: string) {
+    const actionKey = `refund:${campaignId}:${contributor}`;
+    if (refundTxTracker.isPending(actionKey)) {
+      return;
+    }
+
     setActionError(null);
     setActionMessage('Preparing Soroban refund transaction...');
 
     try {
-      const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
-      await refundCampaign(campaignId, contributor, sorobanReceipt);
+      const outcome = await refundTxTracker.run(actionKey, {
+        submit: () => submitRefundTransaction(campaignId, contributor),
+        resume: (submittedTransaction) =>
+          resumeRefundTransaction(submittedTransaction, contributor),
+        record: async (sorobanReceipt) => {
+          await refundCampaign(campaignId, contributor, sorobanReceipt);
+        },
+      });
+      if (outcome.skipped) {
+        return;
+      }
+
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
       setActionMessage(null);
