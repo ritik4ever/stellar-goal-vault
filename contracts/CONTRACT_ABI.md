@@ -237,8 +237,21 @@ whatever state the campaign is in. Covered by `src/test_pledge_auth.rs`.
 | `contribute` | `contributor` | `contributor` must not be the vault contract |
 | `claim` | `creator` | must equal the campaign's stored creator |
 | `cancel_campaign` | `creator` | must equal the campaign's stored creator |
-| `refund` | `contributor` | refunds only that contributor's own pledges |
+| `refund` | `contributor` | refunds only that contributor's own pledges; `contributor` must not be the vault contract |
 | `refund_all` | stored `admin` | contract must be initialized |
+
+**Refund path.** A refund can only be started by the person whose money it
+returns (`refund`) or by the admin for everyone at once (`refund_all`). The
+creator, the admin and other contributors cannot call `refund` for someone
+else. A `refund` signature names its `campaign_id`, so it can't be replayed
+against another campaign. Refunds open when the deadline passes on an
+underfunded campaign, or when the creator calls `cancel_campaign`. Only the
+creator can cancel; a contributor or the admin signing a cancel is rejected.
+A valid signature never bypasses the lifecycle checks: refunds are still
+refused while the campaign is active, after a claim, on a funded campaign,
+or when nothing is left to return. A missing or wrong signature fails with
+the host error `Error(Auth, InvalidAction)` in every campaign state, before
+any of those checks run.
 
 ### `contribute`
 
@@ -328,13 +341,14 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 | Error Condition | Panic Message | Severity | Recovery Action |
 |----------------|---------------|----------|-----------------|
 | Contract paused | `"contract is paused"` | Medium | Wait for admin to unpause |
+| Vault named as contributor | `"contributor cannot be the vault contract"` | Low | Pass the contributor's own address |
+| Caller not authorized | `Error(Auth, InvalidAction)` | High | `contributor` must sign, for this `campaign_id`; checked before the campaign is read |
 | Campaign not found | `"campaign not found"` | High | Verify `campaign_id` |
 | Already claimed | `"campaign already claimed"` | Medium | Funds already withdrawn; no refunds possible |
 | Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or campaign cancellation |
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target; creator can claim |
 | Nothing to refund | `"nothing to refund"` | Low | Contributor had no contributions to this campaign |
 | Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; investigate |
-| Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 
 **Emits:** `CampaignRefunded` (one per token the contributor used)
 

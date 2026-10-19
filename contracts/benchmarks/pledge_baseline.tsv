@@ -1,0 +1,15 @@
+# wasm_bytes	25803
+scenario	mode	instructions	mem_bytes	read_entries	write_entries	write_bytes	events_bytes	fee_stroops
+claim_1_token_with_fee	wasm	1144636	1312862	11	6	1484	1024	4472345
+contribute_capped_10_tokens	wasm	1804806	1424584	23	8	2124	512	3393144
+contribute_capped_1_token	wasm	1199524	1302526	14	8	1764	512	3392413
+contribute_first_pledge	wasm	1166867	1301490	14	8	1764	512	3392390
+contribute_first_pledge_after_10	wasm	1370374	1358593	13	8	2164	512	2255130
+contribute_first_pledge_after_100	wasm	2699076	1898593	13	8	5764	512	2259136
+contribute_first_pledge_after_400	wasm	6986117	3698593	13	8	17764	512	2272391
+contribute_repeat_pledge	wasm	1082187	1289342	12	6	1460	512	2223093
+create_campaign_10_tokens	wasm	1130677	1330736	16	3	1108	1276	2253721
+create_campaign_1_token	wasm	695630	1252885	7	3	748	916	2243781
+refund_1_token	wasm	979459	1285630	10	6	1460	512	2223021
+refund_all_10_contributors	wasm	5170610	1813190	29	24	5276	5120	2324850
+refund_all_32_contributors	wasm	19917313	4558086	73	68	14604	16384	2576916

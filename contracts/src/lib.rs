@@ -270,6 +270,16 @@ mod test;
 #[cfg(test)]
 mod test_pledge_auth;
 
+// Repeatable resource measurements for the pledge path. The `bench_*` tests
+// are ignored by default; run them with `scripts/bench-pledge.sh`.
+#[cfg(test)]
+mod test_pledge_bench;
+
+// Repeatable resource measurements for the claim path; reuses the pledge
+// bench fixture. Run with `scripts/bench-claim.sh`.
+#[cfg(test)]
+mod test_claim_bench;
+
 // Governance module for multi-sig campaign approval
 mod governance;
 
@@ -1014,8 +1024,21 @@ impl StellarGoalVaultContract {
         }
     }
 
+    /// Return `contributor`'s own pledges from a canceled campaign, or from
+    /// one that missed its target by the deadline.
+    ///
+    /// Authorization: `contributor` must sign, and the signature covers
+    /// `campaign_id`, so it cannot be replayed against another campaign.
+    /// Nobody else (creator, admin, another contributor) can trigger a refund
+    /// on a contributor's behalf; the admin-only batch path is `refund_all`.
+    /// The vault-as-contributor check and the signature check both run
+    /// before the campaign is read, so an unauthorized call fails the same
+    /// way whatever state the campaign is in.
     pub fn refund(env: Env, campaign_id: u64, contributor: Address) {
         require_not_paused(&env);
+        if contributor == env.current_contract_address() {
+            panic!("contributor cannot be the vault contract");
+        }
         contributor.require_auth();
 
         let mut campaign = read_campaign(&env, campaign_id);
