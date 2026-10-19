@@ -1,0 +1,9 @@
+# wasm_bytes	25239
+scenario	mode	instructions	mem_bytes	read_entries	write_entries	write_bytes	events_bytes	fee_stroops
+claim_10_tokens_1_funded	wasm	1671584	1419638	20	6	1844	1024	4473021
+claim_10_tokens_fee_disabled	wasm	4535885	2004294	55	32	7164	5080	13599771
+claim_10_tokens_with_fee	wasm	7277502	2634854	65	42	9404	10240	24894839
+claim_1_token_fee_disabled	wasm	966946	1284402	10	5	1260	508	3342905
+claim_1_token_multisig_3	wasm	1220403	1327471	12	6	1604	1024	4472500
+claim_1_token_no_fee_recipient	wasm	953963	1283134	10	5	1260	508	3342896
+claim_1_token_with_fee	wasm	1144636	1312862	11	6	1484	1024	4472345
