@@ -1,6 +1,6 @@
 # Integration Test Architecture Diagram
 
-## System Overview
+##System Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

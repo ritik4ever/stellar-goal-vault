@@ -49,7 +49,12 @@ describe('webhookService', () => {
 
   describe('dispatchWebhook', () => {
     it('returns false immediately if no webhook URL is configured', async () => {
-      const result = await dispatchWebhook('campaign_funded', '101', { amount: 100 }, { webhookUrl: '' });
+      const result = await dispatchWebhook(
+        'campaign_funded',
+        '101',
+        { amount: 100 },
+        { webhookUrl: '' },
+      );
       expect(result).toBe(false);
       expect(axios.post).not.toHaveBeenCalled();
     });
@@ -102,6 +107,32 @@ describe('webhookService', () => {
       expect(dlq[0].campaign_id).toBe('102');
       expect(dlq[0].attempts).toBe(3);
     });
+
+    it('retries on timeout-style connection aborts and records the final timeout in the DLQ', async () => {
+      const timeoutError = new Error('timeout of 4000ms exceeded');
+      (timeoutError as Error & { code?: string }).code = 'ECONNABORTED';
+      vi.mocked(axios.post).mockRejectedValueOnce(timeoutError).mockRejectedValueOnce(timeoutError);
+
+      const result = await dispatchWebhook(
+        'campaign_failed',
+        '105',
+        { reason: 'deadline missed' },
+        {
+          webhookUrl: 'https://example.com/webhook',
+          maxRetries: 1,
+          initialDelayMs: 1,
+        },
+      );
+
+      expect(result).toBe(false);
+      expect(axios.post).toHaveBeenCalledTimes(2);
+
+      const dlq = getDeadLetterQueue();
+      expect(dlq).toHaveLength(1);
+      expect(dlq[0].campaign_id).toBe('105');
+      expect(dlq[0].error_message).toContain('timeout');
+      expect(dlq[0].attempts).toBe(2);
+    });
   });
 
   describe('Dead-Letter Queue Management', () => {
@@ -129,7 +160,12 @@ describe('webhookService', () => {
 
       // Populate again and test clear
       vi.mocked(axios.post).mockRejectedValueOnce(new Error('500 Error'));
-      await dispatchWebhook('campaign_failed', '104', {}, { webhookUrl: 'https://example.com/webhook', maxRetries: 0 });
+      await dispatchWebhook(
+        'campaign_failed',
+        '104',
+        {},
+        { webhookUrl: 'https://example.com/webhook', maxRetries: 0 },
+      );
       expect(getDeadLetterQueue()).toHaveLength(1);
 
       clearDeadLetterQueue();

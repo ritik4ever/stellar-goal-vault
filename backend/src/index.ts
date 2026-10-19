@@ -6,6 +6,9 @@ import helmet from 'helmet';
 import { createServer, Server } from 'node:http';
 
 import { validateEnv } from './validateEnv';
+
+validateEnv();
+
 import { z } from 'zod';
 import path from 'path';
 import { config, walletIntegrationReady } from './config';
@@ -13,7 +16,6 @@ import { apiKeyAuthMiddleware } from './middleware/apiKeyAuth';
 import { cacheMiddleware } from './middleware/cacheMiddleware';
 import { idempotencyMiddleware } from './middleware/idempotencyMiddleware';
 import { requestIdMiddleware } from './middleware/requestId';
-import { requestLoggingMiddleware } from './middleware/requestLogging';
 import { validateBody } from './middleware/validateBody';
 import type { RequestWithId } from './middleware/types';
 import { initRedisCache } from './services/cache';
@@ -29,8 +31,6 @@ import {
   CampaignStatus,
   claimCampaign,
   createCampaign,
-  createComment,
-  deleteComment,
   getCampaign,
   getCampaignWithProgress,
   getContributorSummary,
@@ -41,7 +41,6 @@ import {
   listCampaignPledges,
   listCampaigns,
   listContributorPledges,
-  listComments,
   type ListCampaignsOptions,
   reconcileOnChainPledge,
   refundContributor,
@@ -52,24 +51,20 @@ import {
 import { checkDbHealth } from './services/db';
 import { getCampaignTimeline, listCampaignHistory } from './services/eventHistory';
 import { startEventIndexer, getIndexerStatus } from './services/eventIndexer';
+import { listNotifications, getUnreadCount, markAllRead } from './services/notificationService';
 import {
-  listNotifications,
-  getUnreadCount,
-  markAllRead,
-} from './services/notificationService';
-import { getDeadLetterQueue, clearDeadLetterQueue, retryDeadLetter } from './services/webhookService';
+  getDeadLetterQueue,
+  clearDeadLetterQueue,
+  retryDeadLetter,
+} from './services/webhookService';
 import { fetchOpenIssues } from './services/openIssues';
 import { ensureSorobanRefundConfig, verifyRefundTransaction } from './services/sorobanRpc';
 import { AppError, ApiErrorResponse } from './types/errors';
 import {
   campaignIdSchema,
   claimCampaignPayloadSchema,
-  commentIdSchema,
   createCampaignPayloadSchema,
-  createCommentPayloadSchema,
   createPledgePayloadSchema,
-  deleteCommentPayloadSchema,
-  parseCommentListPaginationQuery,
   parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
   parseTimelineQuery,
@@ -79,9 +74,10 @@ import {
   zodIssuesToValidationIssues,
   parseCampaignListQuery,
   normalizeQueryValue,
+  parseContributorPledgesQuery,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
-import { logError, logInfo, logger } from './logger';
+import { logError, logInfo, logger, summarizeSecretConfig } from './logger';
 import {
   buildCampaignCacheKey,
   getCampaignCacheEntry,
@@ -89,7 +85,14 @@ import {
   setTrendingCacheEntry,
   invalidateCampaignCache,
   setCampaignCacheEntry,
-} from './services/campaignCache';export const app = express();
+} from './services/campaignCache';
+
+export const app = express();
+
+// Assign request IDs before any middleware that may short-circuit the request
+// (for example CORS, body parsing, authentication, rate limiting, or docs).
+// The finish logger is installed here too so every handled request is logged.
+app.use(requestIdMiddleware);
 
 type CampaignListItem = CampaignRecord & { progress: CampaignProgress };
 
@@ -135,6 +138,7 @@ app.use(
       'X-RateLimit-Limit',
       'X-RateLimit-Remaining',
       'X-RateLimit-Reset',
+      'X-Request-Id',
       'Retry-After',
     ],
   }),
@@ -145,7 +149,7 @@ app.use(compression({ threshold: 1024 }));
 const bodySizeLimit = process.env.MAX_BODY_SIZE || '16kb';
 app.use(express.json({ limit: bodySizeLimit }));
 
-// OpenAPI documentation endpoints are public and bypass API middleware.
+// Public OpenAPI/docs endpoints bypass API auth and rate limiting, but still receive IDs and logs.
 const openApiDocument = generateOpenApiDocument();
 app.get('/api/openapi.json', (_req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/json');
@@ -208,7 +212,10 @@ export function applyRateLimit(limitOverride?: number) {
     }
 
     // Skip rate limiting for local development to avoid blocking normal workflow
-    if (process.env.NODE_ENV === 'development' || (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test')) {
+    if (
+      process.env.NODE_ENV === 'development' ||
+      (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test')
+    ) {
       return next();
     }
 
@@ -245,9 +252,6 @@ export function applyRateLimit(limitOverride?: number) {
 }
 
 app.use(applyRateLimit());
-
-app.use(requestIdMiddleware);
-app.use(requestLoggingMiddleware);
 
 function sendValidationError(issues: z.ZodIssue[]): never {
   throw new AppError(
@@ -369,11 +373,34 @@ export function filterCampaignList(
 }
 
 app.get('/api/health', (_req: Request, res: Response) => {
+  const start = process.hrtime();
   const database = checkDbHealth();
   const indexer = getIndexerStatus();
-  
-  // Healthy if DB is reachable and indexer isn't stuck failing
+
+  // Operators distinguish healthy-but-idle from stale/failing via indexer.freshness.
+  // Degrade when DB is down or indexer is stale/failing (isHealthy already encodes this).
   const healthy = database.reachable && indexer.isHealthy;
+
+  const end = process.hrtime(start);
+  const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+
+  logInfo('health_check', {
+    operation: 'health_check_shallow',
+    outcome: healthy ? 'success' : 'failure',
+    latency_ms: latencyMs,
+    db_reachable: database.reachable,
+    indexer_healthy: indexer.isHealthy,
+    indexer_freshness: indexer.freshness,
+    indexer_lag_ms: indexer.lagMs,
+  });
+
+  const memUsage = process.memoryUsage();
+  const memory = {
+    rss: memUsage.rss,
+    heapUsed: memUsage.heapUsed,
+    heapTotal: memUsage.heapTotal,
+    external: memUsage.external,
+  };
 
   res.status(healthy ? 200 : 503).json({
     service: 'stellar-goal-vault-backend',
@@ -382,22 +409,12 @@ app.get('/api/health', (_req: Request, res: Response) => {
     uptimeSeconds: Number(process.uptime().toFixed(3)),
     database,
     indexer,
-  });
-});
-app.get('/api/contributors/:address/pledges', async (req: Request, res: Response) => {
-  const { address } = req.params;
-  const pagination = parsePledgeListPaginationQuery(req.query);
-  const result = await listContributorPledges(address, pagination);
-  res.setHeader('X-Total-Count', String(result.total));
-  res.json({
-    pledges: result.pledges,
-    page: pagination.page,
-    limit: pagination.limit,
-    total: result.total,
+    memory,
   });
 });
 
 app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Response) => {
+  const start = process.hrtime();
   try {
     const database = checkDbHealth();
     const hasContractId = !!config.contractId;
@@ -422,12 +439,37 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
     }
 
     const indexer = getIndexerStatus();
+    // Align overall with component.indexer.status (isHealthy includes freshness/lag).
     const allHealthy = database.reachable && hasContractId && sorobanHealthy && indexer.isHealthy;
+
+    const end = process.hrtime(start);
+    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+
+    logInfo('health_check', {
+      operation: 'health_check_deep',
+      outcome: allHealthy ? 'success' : 'failure',
+      latency_ms: latencyMs,
+      db_reachable: database.reachable,
+      soroban_healthy: sorobanHealthy,
+      indexer_healthy: indexer.isHealthy,
+      indexer_freshness: indexer.freshness,
+      indexer_lag_ms: indexer.lagMs,
+      has_contract_id: hasContractId,
+    });
+
+    const memUsage = process.memoryUsage();
+    const memory = {
+      rss: memUsage.rss,
+      heapUsed: memUsage.heapUsed,
+      heapTotal: memUsage.heapTotal,
+      external: memUsage.external,
+    };
 
     res.status(allHealthy ? 200 : 503).json({
       overall: allHealthy ? 'up' : 'down',
       timestamp: new Date().toISOString(),
       uptimeSeconds: Number(process.uptime().toFixed(3)),
+      memory,
       components: {
         db: {
           status: database.reachable ? 'up' : 'down',
@@ -450,6 +492,14 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
       },
     });
   } catch (error) {
+    const end = process.hrtime(start);
+    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+    logError(error, {
+      event: 'health_check_error',
+      operation: 'health_check_deep',
+      outcome: 'failure',
+      latency_ms: latencyMs,
+    });
     res.status(503).json({
       overall: 'down',
       timestamp: new Date().toISOString(),
@@ -461,75 +511,98 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
 
 app.get('/api/campaigns', async (req: Request, res: Response, next: express.NextFunction) => {
   try {
-  const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
-  if (!queryResult.ok) {
-    sendValidationError(queryResult.issues);
-  }
+    const queryResult = parseCampaignListQuery(req.query as Record<string, unknown>);
+    if (!queryResult.ok) {
+      sendValidationError(queryResult.issues);
+    }
 
-  const params = queryResult.data;
+    const params = queryResult.data;
 
-  // Build a stable cache key from the sorted query string
-  const qs = Object.keys(req.query as Record<string, unknown>)
-    .sort()
-    .map((k) => `${k}=${(req.query as Record<string, unknown>)[k]}`)
-    .join('&');
-  const cacheKey = buildCampaignCacheKey(qs);
+    // Build a stable cache key from the sorted query string
+    const qs = Object.keys(req.query as Record<string, unknown>)
+      .sort()
+      .map((k) => `${k}=${(req.query as Record<string, unknown>)[k]}`)
+      .join('&');
+    const cacheKey = buildCampaignCacheKey(qs);
 
-  const cached = await getCampaignCacheEntry(cacheKey);
-  if (cached) {
-    const cachedData = JSON.parse(cached);
-    res.setHeader('Cache-Control', 'max-age=30');
-    res.setHeader('X-Cache', 'HIT');
-    res.setHeader('X-Total-Count', String(cachedData.pagination.total));
-    res.setHeader('Content-Type', 'application/json');
-    res.send(cached);
-    return;
-  }
+    const cached = await getCampaignCacheEntry(cacheKey);
+    if (cached) {
+      const cachedData = JSON.parse(cached) as {
+        data: CampaignListItem[];
+        pagination: {
+          total: number;
+          page: number;
+          limit: number;
+          totalPages: number;
+          hasPreviousPage: boolean;
+          hasNextPage: boolean;
+        };
+      };
+      res.setHeader('Cache-Control', 'max-age=30');
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('X-Total-Count', String(cachedData.pagination.total));
+      res.setHeader('Content-Type', 'application/json');
+      // The cached payload is shared, but correlation IDs are per request.
+      res.send(JSON.stringify({ ...cachedData, requestId: (req as RequestWithId).requestId }));
+      return;
+    }
 
-  const listOptions: ListCampaignsOptions = {
-    searchQuery: params.search || params.q,
-    assetCodes: params.asset,
-    status: params.status,
-    includeDeleted: params.includeDeleted,
-    sort: params.sort,
-    order: params.order,
-    createdAfter: params.createdAfter,
-    createdBefore: params.createdBefore,
-  };
-  if (params.page !== undefined) {
-    listOptions.page = params.page;
-    listOptions.limit = params.limit;
-  }
+    const listOptions: ListCampaignsOptions = {
+      searchQuery: params.search || params.q,
+      assetCodes: params.asset,
+      status: params.status,
+      includeDeleted: params.includeDeleted,
+      sort: params.sort,
+      sortOrder: params.order,
+      createdAfter: params.createdAfter,
+      createdBefore: params.createdBefore,
+    };
+    if (params.page !== undefined) {
+      listOptions.page = params.page;
+      listOptions.limit = params.limit;
+    }
 
-  const { campaigns, totalCount } = listCampaigns(listOptions);
+    const { campaigns, pledgeCounts, totalCount } = listCampaigns(listOptions);
 
-  const data = campaigns.map((campaign) => ({
-    ...campaign,
-    progress: calculateProgress(campaign),
-  }));
+    // `listCampaigns` already aggregated active pledge counts in SQL for exactly
+    // the rows on this page, so reuse them instead of letting `calculateProgress`
+    // issue one COUNT query per campaign (an N+1 read on the hot list endpoint).
+    const data = campaigns.map((campaign) => ({
+      ...campaign,
+      progress: calculateProgress(campaign, undefined, pledgeCounts[campaign.id]),
+    }));
 
-  const page = params.page ?? 1;
-  const limit = params.limit ?? totalCount;
-  const totalPages =
-    params.limit === undefined || limit <= 0 ? 1 : Math.max(1, Math.ceil(totalCount / limit));
-
-  const responseBody = JSON.stringify({
-    data,
-    pagination: {
+    const page = params.page ?? 1;
+    const limit = params.limit ?? totalCount;
+    const totalPages =
+      params.limit === undefined || limit <= 0 ? 1 : Math.max(1, Math.ceil(totalCount / limit));
+    const pagination = {
       total: totalCount,
       page,
       limit,
       totalPages,
-    },
-  });
+      hasPreviousPage: params.limit !== undefined && page > 1 && totalCount > 0,
+      hasNextPage: params.limit !== undefined && page < totalPages,
+    };
 
-  await setCampaignCacheEntry(cacheKey, responseBody);
+    const responseBody = JSON.stringify({
+      data,
+      pagination,
+    });
 
-  res.setHeader('Cache-Control', 'max-age=30');
-  res.setHeader('X-Cache', 'MISS');
-  res.setHeader('X-Total-Count', String(totalCount));
-  res.setHeader('Content-Type', 'application/json');
-  res.send(responseBody);
+    await setCampaignCacheEntry(cacheKey, responseBody);
+
+    res.setHeader('Cache-Control', 'max-age=30');
+    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('X-Total-Count', String(totalCount));
+    res.setHeader('Content-Type', 'application/json');
+    res.send(
+      JSON.stringify({
+        data,
+        pagination,
+        requestId: (req as RequestWithId).requestId,
+      }),
+    );
   } catch (error) {
     next(error);
   }
@@ -663,22 +736,22 @@ app.post(
   validateBody(createCampaignPayloadSchema),
   async (req: Request, res: Response, next: express.NextFunction) => {
     try {
-    const body = req.body as z.infer<typeof createCampaignPayloadSchema>;
+      const body = req.body as z.infer<typeof createCampaignPayloadSchema>;
 
-    if (body.deadline <= Math.floor(Date.now() / 1000)) {
-      throw new AppError('deadline must be in the future.', 400, 'INVALID_DEADLINE');
-    }
+      if (body.deadline <= Math.floor(Date.now() / 1000)) {
+        throw new AppError('deadline must be in the future.', 400, 'INVALID_DEADLINE');
+      }
 
-    const campaignInput = {
-      ...body,
-      maxPerContributor:
-        body.maxPerContributor ??
-        (config.defaultMaxPerContributor > 0 ? config.defaultMaxPerContributor : undefined),
-    };
+      const campaignInput = {
+        ...body,
+        maxPerContributor:
+          body.maxPerContributor ??
+          (config.defaultMaxPerContributor > 0 ? config.defaultMaxPerContributor : undefined),
+      };
 
-    const campaign = createCampaign(campaignInput);
-    await invalidateCampaignCache();
-    res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+      const campaign = createCampaign(campaignInput);
+      await invalidateCampaignCache();
+      res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
     } catch (error) {
       next(error);
     }
@@ -692,15 +765,15 @@ app.post(
   validateBody(createPledgePayloadSchema),
   async (req: Request, res: Response, next: express.NextFunction) => {
     try {
-    const parsedId = parseCampaignId(req.params.id);
-    if (!parsedId.ok) {
-      sendValidationError(parsedId.issues);
-    }
+      const parsedId = parseCampaignId(req.params.id);
+      if (!parsedId.ok) {
+        sendValidationError(parsedId.issues);
+      }
 
-    const body = req.body as z.infer<typeof createPledgePayloadSchema>;
-    const campaign = addPledge(parsedId.value, body);
-    await invalidateCampaignCache();
-    res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+      const body = req.body as z.infer<typeof createPledgePayloadSchema>;
+      const campaign = addPledge(parsedId.value, body);
+      await invalidateCampaignCache();
+      res.status(201).json({ data: { ...campaign, progress: calculateProgress(campaign) } });
     } catch (error) {
       next(error);
     }
@@ -713,20 +786,20 @@ app.post(
   validateBody(reconcilePledgePayloadSchema),
   async (req: Request, res: Response, next: express.NextFunction) => {
     try {
-    const parsedId = parseCampaignId(req.params.id);
-    if (!parsedId.ok) {
-      sendValidationError(parsedId.issues);
-    }
+      const parsedId = parseCampaignId(req.params.id);
+      if (!parsedId.ok) {
+        sendValidationError(parsedId.issues);
+      }
 
-    const body = req.body as z.infer<typeof reconcilePledgePayloadSchema>;
-    const result = reconcileOnChainPledge(parsedId.value, body);
-    invalidateCampaignCache();
-    res.status(result.existing ? 200 : 201).json({
-      data: {
-        campaign: { ...result.campaign, progress: calculateProgress(result.campaign) },
-        transactionHash: body.transactionHash,
-      },
-    });
+      const body = req.body as z.infer<typeof reconcilePledgePayloadSchema>;
+      const result = reconcileOnChainPledge(parsedId.value, body);
+      invalidateCampaignCache();
+      res.status(result.existing ? 200 : 201).json({
+        data: {
+          campaign: { ...result.campaign, progress: calculateProgress(result.campaign) },
+          transactionHash: body.transactionHash,
+        },
+      });
     } catch (error) {
       next(error);
     }
@@ -739,19 +812,19 @@ app.post(
   validateBody(claimCampaignPayloadSchema),
   async (req: Request, res: Response, next: express.NextFunction) => {
     try {
-    const parsedId = parseCampaignId(req.params.id);
-    if (!parsedId.ok) {
-      sendValidationError(parsedId.issues);
-    }
+      const parsedId = parseCampaignId(req.params.id);
+      if (!parsedId.ok) {
+        sendValidationError(parsedId.issues);
+      }
 
-    const body = req.body as z.infer<typeof claimCampaignPayloadSchema>;
-    const campaign = claimCampaign(parsedId.value, {
-      creator: body.creator,
-      transactionHash: body.transactionHash,
-      confirmedAt: body.confirmedAt,
-    });
-    await invalidateCampaignCache();
-    res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
+      const body = req.body as z.infer<typeof claimCampaignPayloadSchema>;
+      const campaign = claimCampaign(parsedId.value, {
+        creator: body.creator,
+        transactionHash: body.transactionHash,
+        confirmedAt: body.confirmedAt,
+      });
+      await invalidateCampaignCache();
+      res.json({ data: { ...campaign, progress: calculateProgress(campaign) } });
     } catch (error) {
       next(error);
     }
@@ -811,18 +884,18 @@ app.get('/api/campaigns/:id/contributors', (req: Request, res: Response) => {
 });
 
 app.get('/api/contributors/:address/pledges', (req: Request, res: Response) => {
-  const { address } = req.params;
-  const paginationResult = parsePledgeListPaginationQuery({
+  const query = parseContributorPledgesQuery({
+    address: req.params.address,
     page: req.query.page,
     limit: req.query.limit,
   });
-  if (!paginationResult.ok) {
-    sendValidationError(paginationResult.issues);
+  if (!query.ok) {
+    sendValidationError(query.issues);
   }
 
-  const { pledges, totalCount } = listContributorPledges(address, {
-    page: paginationResult.page,
-    limit: paginationResult.limit,
+  const { pledges, totalCount } = listContributorPledges(query.address, {
+    page: query.page,
+    limit: query.limit,
   });
 
   res.setHeader('X-Total-Count', String(totalCount));
@@ -830,9 +903,9 @@ app.get('/api/contributors/:address/pledges', (req: Request, res: Response) => {
     data: pledges,
     pagination: {
       total: totalCount,
-      page: paginationResult.page,
-      limit: paginationResult.limit,
-      totalPages: Math.max(1, Math.ceil(totalCount / paginationResult.limit)),
+      page: query.page,
+      limit: query.limit,
+      totalPages: Math.max(1, Math.ceil(totalCount / query.limit)),
     },
   });
 });
@@ -882,7 +955,10 @@ app.get('/api/campaigns/:id/timeline', (req: Request, res: Response) => {
     limit: parsed.limit,
   });
 
-  res.json({ data: result.data, pagination: { nextCursor: result.nextCursor, hasMore: result.hasMore } });
+  res.json({
+    data: result.data,
+    pagination: { nextCursor: result.nextCursor, hasMore: result.hasMore },
+  });
 });
 
 app.get('/api/open-issues', async (_req: Request, res: Response) => {
@@ -890,9 +966,22 @@ app.get('/api/open-issues', async (_req: Request, res: Response) => {
   res.json({ data });
 });
 
-const ASSET_METADATA: Record<string, { name: string, icon_url: string, min_pledge: number, max_pledge: number }> = {
-  USDC: { name: 'USD Coin', icon_url: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png', min_pledge: 1, max_pledge: 10000 },
-  XLM: { name: 'Stellar Lumens', icon_url: 'https://cryptologos.cc/logos/stellar-xlm-logo.png', min_pledge: 10, max_pledge: 100000 },
+const ASSET_METADATA: Record<
+  string,
+  { name: string; icon_url: string; min_pledge: number; max_pledge: number }
+> = {
+  USDC: {
+    name: 'USD Coin',
+    icon_url: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.png',
+    min_pledge: 1,
+    max_pledge: 10000,
+  },
+  XLM: {
+    name: 'Stellar Lumens',
+    icon_url: 'https://cryptologos.cc/logos/stellar-xlm-logo.png',
+    min_pledge: 10,
+    max_pledge: 100000,
+  },
   ARS: { name: 'Argentine Peso', icon_url: '', min_pledge: 1000, max_pledge: 10000000 },
 };
 
@@ -1079,7 +1168,7 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
       success: false,
       error: {
         code: 'PAYLOAD_TOO_LARGE',
-        message: `Request body exceeds the ${bodySizeLimit} maximum limit.`, 
+        message: `Request body exceeds the ${bodySizeLimit} maximum limit.`,
         requestId: (req as RequestWithId).requestId,
       },
     });
@@ -1126,6 +1215,7 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
       path: req.originalUrl || req.path,
       status: statusCode,
       code,
+      indexer: getIndexerStatus(),
     },
     config.logLevel,
   );
@@ -1149,6 +1239,8 @@ function printStartupBanner(): void {
       port: config.port,
       environment: nodeEnv,
       databasePath: dbPath,
+      // Presence-only; values never logged (see redactSecretConfig / issue #955)
+      ...summarizeSecretConfig(),
     },
     config.logLevel,
   );

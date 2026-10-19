@@ -1,6 +1,7 @@
 import { getDb } from './db';
 
-export type NotificationType = 'new_pledge' | 'campaign_funded' | 'refund_available' | 'creator_update';
+export type NotificationType =
+  'new_pledge' | 'campaign_funded' | 'refund_available' | 'creator_update';
 
 export interface Notification {
   id: number;
@@ -103,9 +104,7 @@ export function listNotifications(
 export function getUnreadCount(wallet: string): number {
   const db = getDb();
   const row = db
-    .prepare(
-      'SELECT COUNT(*) as count FROM notifications WHERE target_wallet = ? AND is_read = 0',
-    )
+    .prepare('SELECT COUNT(*) as count FROM notifications WHERE target_wallet = ? AND is_read = 0')
     .get(wallet) as { count: number };
   return row.count;
 }
@@ -120,7 +119,9 @@ export function markAllRead(wallet: string): void {
 export function getContributorsForCampaign(campaignId: string): string[] {
   const db = getDb();
   const rows = db
-    .prepare('SELECT DISTINCT contributor FROM pledges WHERE campaign_id = ? AND refunded_at IS NULL')
+    .prepare(
+      'SELECT DISTINCT contributor FROM pledges WHERE campaign_id = ? AND refunded_at IS NULL',
+    )
     .all(campaignId) as { contributor: string }[];
   return rows.map((r) => r.contributor);
 }

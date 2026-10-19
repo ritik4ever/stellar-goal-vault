@@ -33,6 +33,7 @@ export function idempotencyMiddleware(
         for (const [name, value] of Object.entries(cached.headers)) {
           res.setHeader(name, value);
         }
+        (req as IdempotencyRequest & { finalOutcome?: string }).finalOutcome = 'idempotent_replay';
         res.status(cached.statusCode).send(cached.body);
         return;
       }

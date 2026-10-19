@@ -1,4 +1,4 @@
-import { getDb, initDb } from './db';
+import { ensureSeedWorkflowIndexes, getDb, initDb } from './db';
 
 const FIXED_NOW = 1_750_000_000;
 
@@ -63,8 +63,20 @@ const BASE_CAMPAIGNS: SeedCampaign[] = [
 ];
 
 const BASE_PLEDGES: SeedPledge[] = [
-  { campaignId: '1', contributor: `G${'D'.repeat(55)}`, amount: 100, assetCode: 'USDC', createdAt: FIXED_NOW - 250 },
-  { campaignId: '2', contributor: `G${'E'.repeat(55)}`, amount: 250, assetCode: 'XLM', createdAt: FIXED_NOW - 150 },
+  {
+    campaignId: '1',
+    contributor: `G${'D'.repeat(55)}`,
+    amount: 100,
+    assetCode: 'USDC',
+    createdAt: FIXED_NOW - 250,
+  },
+  {
+    campaignId: '2',
+    contributor: `G${'E'.repeat(55)}`,
+    amount: 250,
+    assetCode: 'XLM',
+    createdAt: FIXED_NOW - 150,
+  },
 ];
 
 // Deterministic status/asset rotation used to extend past the 3 base campaigns.
@@ -160,42 +172,62 @@ function buildSeedSet(count: number): { campaigns: SeedCampaign[]; pledges: Seed
 export function seedDeterministicState(count: number = BASE_CAMPAIGNS.length): string[] {
   initDb();
   const db = getDb();
+  // Ensure seed-path indexes exist before wipe/reseed so FK checks and
+  // post-seed accounting queries use the intended plans.
+  ensureSeedWorkflowIndexes(db);
 
   const { campaigns, pledges } = buildSeedSet(count);
 
-  db.prepare(`DELETE FROM campaign_events`).run();
-  db.prepare(`DELETE FROM pledges`).run();
-  db.prepare(`DELETE FROM campaigns`).run();
+  // Use explicit transaction to ensure atomicity: either all data is seeded
+  // or no partial state is persisted, allowing safe retries.
+  db.transaction(() => {
+    // Child tables first so FK enforcement cannot leave a partial wipe.
+    // notifications / campaign_comments are not always empty in long-lived
+    // dev DBs; skipping them is a failure mode happy-path API tests miss.
+    db.prepare(`DELETE FROM notifications`).run();
+    db.prepare(`DELETE FROM campaign_comments`).run();
+    db.prepare(`DELETE FROM campaign_events`).run();
+    db.prepare(`DELETE FROM pledges`).run();
+    db.prepare(`DELETE FROM campaigns`).run();
+    // FTS delete trigger is not guaranteed on every migrated DB — clear explicitly.
+    db.prepare(`DELETE FROM campaigns_fts`).run();
 
-  const insertCampaign = db.prepare(
-    `INSERT INTO campaigns (
-      id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-  );
-
-  for (const campaign of campaigns) {
-    insertCampaign.run(
-      campaign.id,
-      campaign.creator,
-      campaign.title,
-      campaign.description,
-      JSON.stringify([campaign.assetCode]),
-      campaign.targetAmount,
-      campaign.pledgedAmount,
-      campaign.deadline,
-      campaign.createdAt,
-      campaign.claimedAt,
+    const insertCampaign = db.prepare(
+      `INSERT INTO campaigns (
+        id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     );
-  }
 
-  const insertPledge = db.prepare(
-    `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
-     VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-  );
+    for (const campaign of campaigns) {
+      insertCampaign.run(
+        campaign.id,
+        campaign.creator,
+        campaign.title,
+        campaign.description,
+        JSON.stringify([campaign.assetCode]),
+        campaign.targetAmount,
+        campaign.pledgedAmount,
+        campaign.deadline,
+        campaign.createdAt,
+        campaign.claimedAt,
+      );
+    }
 
-  for (const pledge of pledges) {
-    insertPledge.run(pledge.campaignId, pledge.contributor, pledge.amount, pledge.assetCode, pledge.createdAt);
-  }
+    const insertPledge = db.prepare(
+      `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
+    );
+
+    for (const pledge of pledges) {
+      insertPledge.run(
+        pledge.campaignId,
+        pledge.contributor,
+        pledge.amount,
+        pledge.assetCode,
+        pledge.createdAt,
+      );
+    }
+  })();
 
   return campaigns.map((c) => c.id);
 }
@@ -206,9 +238,7 @@ export function parseCountArg(argv: string[]): number {
     return BASE_CAMPAIGNS.length;
   }
 
-  const raw = argv[flagIndex].includes('=')
-    ? argv[flagIndex].split('=')[1]
-    : argv[flagIndex + 1];
+  const raw = argv[flagIndex].includes('=') ? argv[flagIndex].split('=')[1] : argv[flagIndex + 1];
 
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {

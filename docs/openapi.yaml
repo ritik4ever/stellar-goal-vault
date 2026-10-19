@@ -569,11 +569,21 @@ components:
               type: integer
               description: Total number of pages.
               example: 5
+            hasPreviousPage:
+              type: boolean
+              description: Whether a previous page exists for this paginated request.
+              example: false
+            hasNextPage:
+              type: boolean
+              description: Whether a later page exists for this paginated request.
+              example: true
           required:
             - total
             - page
             - limit
             - totalPages
+            - hasPreviousPage
+            - hasNextPage
       required:
         - data
         - pagination
@@ -1080,23 +1090,23 @@ paths:
       tags:
         - Campaigns
       summary: List campaigns
-      description: List campaigns with optional filtering, sorting, and pagination.
+      description: List campaigns with optional filtering, sorting, and pagination. Omit both page and limit to return the full filtered set; when paginating, provide both and use a limit from 1 to 100.
       parameters:
         - schema:
             type: integer
             minimum: 1
-            description: Page number (requires limit).
+            description: 1-based page number. Requires limit; omit page and limit for all results.
           required: false
-          description: Page number (requires limit).
+          description: 1-based page number. Requires limit; omit page and limit for all results.
           name: page
           in: query
         - schema:
             type: integer
             minimum: 1
             maximum: 100
-            description: Items per page (requires page).
+            description: Items per page, from 1 to 100. Requires page; omit page and limit for all results.
           required: false
-          description: Items per page (requires page).
+          description: Items per page, from 1 to 100. Requires page; omit page and limit for all results.
           name: limit
           in: query
         - schema:

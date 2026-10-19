@@ -157,6 +157,8 @@ fn create_campaign(
 
 **Emits:** `CampaignCreated` (with the first token from the accepted list)
 
+**Indexer note:** The `CampaignCreated` event is emitted exactly once per successful `create_campaign` call, after all validation and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Create")` and use `campaign_id` as the primary dedup key.
+
 **Gas estimate:** base 25,000 + 3,000 per accepted token + 5,000 per storage write ≈ 45,000 units + 20% headroom = **54,000**
 
 ---
@@ -223,6 +225,21 @@ fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: S
 
 ## Contributions & Funds
 
+### Pledge-path authorization (issue #898)
+
+Every state transition on the pledge path requires exactly one signer, and
+the signature covers all arguments. The auth check runs before any campaign
+state is read, so a call without the right signature fails the same way
+whatever state the campaign is in. Covered by `src/test_pledge_auth.rs`.
+
+| Entry point | Required signer | Extra identity check |
+|---|---|---|
+| `contribute` | `contributor` | `contributor` must not be the vault contract |
+| `claim` | `creator` | must equal the campaign's stored creator |
+| `cancel_campaign` | `creator` | must equal the campaign's stored creator |
+| `refund` | `contributor` | refunds only that contributor's own pledges |
+| `refund_all` | stored `admin` | contract must be initialized |
+
 ### `contribute`
 
 Contribute tokens to a campaign. Tokens are transferred from the contributor to the contract.
@@ -253,6 +270,7 @@ fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, 
 | Per-contributor cap exceeded | Soroban arithmetic panic | Medium | Check `max_per_contributor` set at campaign creation |
 | Insufficient token balance | Soroban token transfer error | High | Ensure contributor has enough tokens and has approved transfer |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
+| Contributor is the vault contract | `"contributor cannot be the vault contract"` | High | Pledge from a real account; the vault cannot fund itself |
 
 **Emits:** `CampaignPledged`
 
@@ -284,6 +302,7 @@ fn claim(env: Env, campaign_id: u64, creator: Address)
 | Campaign canceled | `"campaign canceled"` | Medium | Campaign was canceled; no funds to claim |
 | Still active | `"campaign is still active"` | Medium | Wait for deadline to pass |
 | Underfunded | `"campaign is not funded"` | Medium | `pledged_amount < target_amount`; contributors should use `refund()` |
+| Caller not authorized | Soroban auth failure | High | Ensure `creator` signs the transaction |
 
 **Emits:** `CampaignClaimed` (one per token with a non-zero balance)
 
@@ -315,6 +334,7 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target; creator can claim |
 | Nothing to refund | `"nothing to refund"` | Low | Contributor had no contributions to this campaign |
 | Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; investigate |
+| Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 
 **Emits:** `CampaignRefunded` (one per token the contributor used)
 
@@ -324,7 +344,7 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 
 ### `refund_all`
 
-Batch refund all contributors at once. Intended for admin/automation use after a failed or canceled campaign.
+Batch refund all contributors at once, after a failed or canceled campaign. **Admin only** (issue #898): the admin set by `initialize` must sign. Contributors can always reclaim their own funds with `refund`.
 
 ```
 fn refund_all(env: Env, campaign_id: u64)
@@ -344,6 +364,8 @@ fn refund_all(env: Env, campaign_id: u64)
 | Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or cancellation |
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target |
 | Nothing to refund (no contributors) | `"nothing to refund"` | Low | No contributors found |
+| Contract not initialized | `"not initialized"` | High | Call `initialize` to set an admin first |
+| Caller not authorized | Soroban auth failure | High | Ensure the stored `admin` signs the transaction |
 
 **Emits:** `CampaignRefunded` (one per contributor per token)
 
@@ -661,6 +683,8 @@ All events use the topic prefix `(symbol_short!("Goal"), ...)`.
 | `metadata` | `String` | Campaign metadata |
 
 **Emitted by:** `create_campaign`
+
+**Stability contract:** Topic symbols `"Goal"` and `"Create"` are frozen for the lifetime of this contract version. Payload fields are append-only; existing field order and types must not change without a major version bump. `metadata` is the creator-supplied string and may contain arbitrary UTF-8 — indexers should treat it as untrusted display data, not as a key.
 
 ---
 

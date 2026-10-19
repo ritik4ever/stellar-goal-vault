@@ -34,8 +34,7 @@ export function NotificationBell({ wallet, campaignId }: NotificationBellProps) 
       const result = await listNotifications(wallet, { limit: 20 });
       setNotifications(result.data);
       setUnreadCount(result.unreadCount);
-    } catch {
-    }
+    } catch {}
   }, [wallet]);
 
   useEffect(() => {
@@ -73,8 +72,7 @@ export function NotificationBell({ wallet, campaignId }: NotificationBellProps) 
       await markAllNotificationsRead(wallet);
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
       setUnreadCount(0);
-    } catch {
-    }
+    } catch {}
   };
 
   const filtered = campaignId

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { History } from 'lucide-react';
 import { CampaignEvent } from '../types/campaign';
 import { EmptyState } from './EmptyState';
@@ -11,6 +12,9 @@ interface CampaignTimelineProps {
   isLoading?: boolean;
   targetAmount?: number;
   pledgedAmount?: number;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 function formatTimestamp(unixSeconds: number): string {
@@ -92,7 +96,25 @@ export function CampaignTimeline({
   isLoading = false,
   targetAmount,
   pledgedAmount,
+  hasMore = false,
+  isLoadingMore = false,
+  onLoadMore,
 }: CampaignTimelineProps) {
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!hasMore || !onLoadMore || isLoadingMore) return;
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) onLoadMore();
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, onLoadMore, isLoadingMore]);
   const percentFunded =
     targetAmount && targetAmount > 0 ? Math.min((pledgedAmount ?? 0) / targetAmount, 1) * 100 : 0;
 
@@ -186,6 +208,17 @@ export function CampaignTimeline({
           );
         })}
       </div>
+      {hasMore ? (
+        <div ref={loadMoreRef} style={{ padding: '12px 0', textAlign: 'center' }}>
+          {isLoadingMore ? (
+            <span className="muted">Loading more history…</span>
+          ) : (
+            <button type="button" className="btn-ghost" onClick={() => onLoadMore?.()}>
+              Load more
+            </button>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }

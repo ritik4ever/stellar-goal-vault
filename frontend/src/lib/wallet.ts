@@ -5,7 +5,10 @@ import {
   signTransaction,
 } from '@stellar/freighter-api';
 import { xBullWalletConnect } from '@creit.tech/xbull-wallet-connect';
-import { getPublicKey as lobstrGetPublicKey, signTransaction as lobstrSignTransaction } from '@lobstrco/signer-extension-api';
+import {
+  getPublicKey as lobstrGetPublicKey,
+  signTransaction as lobstrSignTransaction,
+} from '@lobstrco/signer-extension-api';
 import { WalletConnection } from '../types/campaign';
 
 export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'lobstr';
@@ -114,19 +117,23 @@ class FreighterAdapter implements WalletAdapter {
     }
 
     if (details?.networkPassphrase && details.networkPassphrase !== expectedNetworkPassphrase) {
-      const networkLabel = details.networkPassphrase === 'Test SDF Network ; September 2015'
-        ? 'Stellar Testnet'
-        : details.networkPassphrase === 'Public Global Stellar Network ; September 2015'
-        ? 'Stellar Mainnet'
-        : 'the configured network';
-      
-      const expectedLabel = expectedNetworkPassphrase === 'Test SDF Network ; September 2015'
-        ? 'Stellar Testnet'
-        : expectedNetworkPassphrase === 'Public Global Stellar Network ; September 2015'
-        ? 'Stellar Mainnet'
-        : 'the configured network';
+      const networkLabel =
+        details.networkPassphrase === 'Test SDF Network ; September 2015'
+          ? 'Stellar Testnet'
+          : details.networkPassphrase === 'Public Global Stellar Network ; September 2015'
+            ? 'Stellar Mainnet'
+            : 'the configured network';
 
-      throw new Error(`Freighter is connected to ${networkLabel}, but this app expects ${expectedLabel}.`);
+      const expectedLabel =
+        expectedNetworkPassphrase === 'Test SDF Network ; September 2015'
+          ? 'Stellar Testnet'
+          : expectedNetworkPassphrase === 'Public Global Stellar Network ; September 2015'
+            ? 'Stellar Mainnet'
+            : 'the configured network';
+
+      throw new Error(
+        `Freighter is connected to ${networkLabel}, but this app expects ${expectedLabel}.`,
+      );
     }
 
     return {
@@ -212,7 +219,7 @@ class XbullAdapter implements WalletAdapter {
     try {
       const bridge = this.getBridge();
       const publicKey = await bridge.connect();
-      
+
       return {
         publicKey,
         networkPassphrase: expectedNetworkPassphrase,
@@ -294,8 +301,9 @@ async function detectWallets(): Promise<WalletInfo[]> {
   });
 
   // Detect xBull (check for window.xBullSDK or extension detection)
-  const xbullDetected = typeof (window as any).xBullSDK !== 'undefined' || 
-                       typeof (window as any).xBullWalletConnect !== 'undefined';
+  const xbullDetected =
+    typeof (window as any).xBullSDK !== 'undefined' ||
+    typeof (window as any).xBullWalletConnect !== 'undefined';
   results.push({
     ...WALLET_INFO.xbull,
     detected: xbullDetected,
@@ -303,7 +311,8 @@ async function detectWallets(): Promise<WalletInfo[]> {
 
   // Detect LOBSTR
   try {
-    const lobstrDetected = await (window as any).lobstrSignerExtensionApi?.isConnected?.() || false;
+    const lobstrDetected =
+      (await (window as any).lobstrSignerExtensionApi?.isConnected?.()) || false;
     results.push({
       ...WALLET_INFO.lobstr,
       detected: lobstrDetected,

@@ -1,61 +1,69 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { FundedConfetti } from "./components/FundedConfetti";
-import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
-import { CampaignsTable } from "./components/CampaignsTable";
-import { CampaignTimeline } from "./components/CampaignTimeline";
-import { NotificationBell } from "./components/NotificationBell";
-import { CreateCampaignForm } from "./components/CreateCampaignForm";
-import { CreatorAnalytics } from "./components/CreatorAnalytics";
-import { IssueBacklog } from "./components/IssueBacklog";
-import { InstallPrompt } from "./components/InstallPrompt";
-import { OfflineBanner } from "./components/OfflineBanner";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { FundedConfetti } from './components/FundedConfetti';
+import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
+import { lazy, Suspense } from 'react';
+import { CampaignsTable } from './components/CampaignsTable';
+import { CampaignTimeline } from './components/CampaignTimeline';
+import { NotificationBell } from './components/NotificationBell';
+import { IssueBacklog } from './components/IssueBacklog';
+import { SkeletonAnalytics } from './components/SkeletonAnalytics';
+import { SkeletonCard } from './components/SkeletonCard';
+
+// Heavy panel components are lazy-loaded so they do not block the initial
+// render of the campaign board and metrics. Each has a lightweight skeleton
+// fallback that matches its visual footprint.
+const CampaignDetailPanel = lazy(() =>
+  import('./components/CampaignDetailPanel').then((m) => ({ default: m.CampaignDetailPanel })),
+);
+
+const CreateCampaignForm = lazy(() =>
+  import('./components/CreateCampaignForm').then((m) => ({ default: m.CreateCampaignForm })),
+);
+
+const CreatorAnalytics = lazy(() =>
+  import('./components/CreatorAnalytics').then((m) => ({ default: m.CreatorAnalytics })),
+);
+import { InstallPrompt } from './components/InstallPrompt';
+import { OfflineBanner } from './components/OfflineBanner';
 import {
   TransactionPreviewModal,
   TransactionPreviewData,
-} from "./components/TransactionPreviewModal";
-import { ToastContainer } from "./components/ToastContainer";
-import { WalletWidget } from "./components/WalletWidget";
-import { WalletPickerModal } from "./components/WalletPickerModal";
+} from './components/TransactionPreviewModal';
+import { ToastContainer } from './components/ToastContainer';
+import { WalletWidget } from './components/WalletWidget';
+import { WalletPickerModal } from './components/WalletPickerModal';
 import {
   claimCampaign,
   createCampaign,
   getAppConfig,
   getCampaign,
-  getCampaignHistory,
+  getCampaignHistoryPage,
   listCampaigns,
   listOpenIssues,
   reconcilePledge,
   refundCampaign,
   softDeleteCampaign,
 } from './services/api';
-import {
-  submitFreighterClaim,
-  submitFreighterPledge,
-} from "./services/freighter";
-import { submitRefundTransaction } from "./services/soroban";
-import { useWallet } from "./hooks/useWallet";
-import { useLocalStorage } from "./hooks/useLocalStorage";
-import { useToast } from "./hooks/useToast";
-import { useOpenGraph } from "./hooks/useOpenGraph";
-import { useCampaignShareCard } from "./components/CampaignShareCard";
-import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
-import {
-  ApiError,
-  AppConfig,
-  Campaign,
-  CampaignEvent,
-  OpenIssue,
-} from "./types/campaign";
+import { submitFreighterClaim, submitFreighterPledge } from './services/freighter';
+import { submitRefundTransaction } from './services/soroban';
+import { useWallet } from './hooks/useWallet';
+import { useLocalStorage } from './hooks/useLocalStorage';
+import { useToast } from './hooks/useToast';
+import { useOpenGraph } from './hooks/useOpenGraph';
+import { useCampaignShareCard } from './components/CampaignShareCard';
+import { didCampaignBecomeFunded } from './lib/fundingCelebration';
+import { appendUniqueCampaigns } from './lib/campaignListPagination';
+import { mergeCampaignDetail, mergeHistoryPages } from './lib/campaignDetailLoading';
+import { ApiError, AppConfig, Campaign, CampaignEvent, OpenIssue } from './types/campaign';
 
-const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
-const MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
-const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
-const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
-const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
-const LIST_STATE_KEY = "sgv-list-state";
+const DEFAULT_NETWORK_PASSPHRASE = 'Test SDF Network ; September 2015';
+const MAINNET_PASSPHRASE = 'Public Global Stellar Network ; September 2015';
+const THEME_STORAGE_KEY = 'stellar-goal-vault-theme';
+const SORT_ORDER_KEY = 'stellar-goal-vault-sort-order';
+const FILTER_STATE_KEY = 'stellar-goal-vault-filter-state';
+const LIST_STATE_KEY = 'sgv-list-state';
 const CAMPAIGN_PAGE_SIZE = 20;
 
 type SavedListState = {
@@ -154,6 +162,9 @@ function App() {
   const campaignParam = searchParams.get('campaign');
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(
     paramId ?? campaignParam ?? null,
@@ -173,6 +184,10 @@ function App() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
+  const [campaignsError, setCampaignsError] = useState<{
+    message: string;
+    isRecoverable: boolean;
+  } | null>(null);
   const [transactionPreview, setTransactionPreview] = useState<TransactionPreviewState | null>(
     null,
   );
@@ -207,7 +222,9 @@ function App() {
       order,
     });
 
-    setCampaigns((current) => (append ? [...current, ...response.data] : response.data));
+    setCampaigns((current) =>
+      append ? appendUniqueCampaigns(current, response.data) : response.data,
+    );
     setCampaignPage(page);
     setHasMoreCampaigns(page < response.pagination.totalPages);
 
@@ -227,7 +244,7 @@ function App() {
         page,
         limit: CAMPAIGN_PAGE_SIZE,
       });
-      combined = [...combined, ...lastResponse.data];
+      combined = appendUniqueCampaigns(combined, lastResponse.data);
     }
 
     setCampaigns(combined);
@@ -252,6 +269,11 @@ function App() {
     } finally {
       setIsLoadingMoreCampaigns(false);
     }
+  }
+
+  function handleRetryCampaignsLoad() {
+    setCampaignsError(null);
+    void refreshCampaigns(activeSearchRef.current);
   }
 
   useEffect(() => {
@@ -281,6 +303,7 @@ function App() {
     nextSelectedId?: string | null,
   ): Promise<Campaign[]> {
     setIsCampaignsLoading(true);
+    setCampaignsError(null);
     activeSearchRef.current = searchQuery;
     try {
       const response = await fetchCampaignPage(1, searchQuery, false);
@@ -300,6 +323,13 @@ function App() {
       }
 
       return data;
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      setCampaignsError({
+        message: errorMessage,
+        isRecoverable: true,
+      });
+      throw error;
     } finally {
       setIsCampaignsLoading(false);
     }
@@ -308,11 +338,38 @@ function App() {
   async function refreshHistory(campaignId: string | null) {
     if (!campaignId) {
       setHistory([]);
+      setHistoryPage(1);
+      setHasMoreHistory(false);
       return;
     }
 
-    const data = await getCampaignHistory(campaignId);
+    const { data, hasMore } = await getCampaignHistoryPage(campaignId, { page: 1, pageSize: 20 });
     setHistory(data);
+    setHistoryPage(1);
+    setHasMoreHistory(hasMore);
+  }
+
+  async function loadMoreHistory() {
+    if (!selectedCampaignId || !hasMoreHistory || isLoadingMoreHistory || isSelectedLoading) {
+      return;
+    }
+    setIsLoadingMoreHistory(true);
+    try {
+      const nextPage = historyPage + 1;
+      const { data, hasMore } = await getCampaignHistoryPage(selectedCampaignId, {
+        page: nextPage,
+        pageSize: 20,
+      });
+      // Dedupe against the loaded chunks and re-sort by (timestamp, id) so pages
+      // that interleave with the window on screen stay in one stable order.
+      setHistory((current) => mergeHistoryPages(current, data));
+      setHistoryPage(nextPage);
+      setHasMoreHistory(hasMore);
+    } catch (error) {
+      addToast(getErrorMessage(error), 'error');
+    } finally {
+      setIsLoadingMoreHistory(false);
+    }
   }
 
   async function refreshSelectedCampaign(campaignId: string | null) {
@@ -364,10 +421,9 @@ function App() {
       let data: Campaign[] = [];
       try {
         if (restoredState && !requestedCampaignId) {
-          data = await loadInitialCampaignPages(
-            restoredState.search,
-            Math.max(1, restoredState.pages),
-          );
+          // Bounded initial work: cap restored pages to 3 to avoid unbounded fetch from tampered storage
+          const boundedPages = Math.min(Math.max(1, restoredState.pages), 3);
+          data = await loadInitialCampaignPages(restoredState.search, boundedPages);
           requestAnimationFrame(() => {
             window.scrollTo(0, restoredState?.scrollY ?? 0);
           });
@@ -376,7 +432,12 @@ function App() {
           data = response.data;
         }
       } catch (error) {
-        addToast(getErrorMessage(error), 'error');
+        const errorMessage = getErrorMessage(error);
+        setCampaignsError({
+          message: errorMessage,
+          isRecoverable: true,
+        });
+        addToast(errorMessage, 'error');
       }
 
       if (cancelled) {
@@ -419,24 +480,14 @@ function App() {
     });
   }, [addToast, selectedCampaignId]);
 
-  const selectedCampaign = useMemo(() => {
-    const summaryCampaign =
-      campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
-
-    if (!summaryCampaign) {
-      return selectedCampaignDetails;
-    }
-
-    if (!selectedCampaignDetails || selectedCampaignDetails.id !== summaryCampaign.id) {
-      return summaryCampaign;
-    }
-
-    return {
-      ...summaryCampaign,
-      pledges: selectedCampaignDetails.pledges,
-      metadata: selectedCampaignDetails.metadata ?? summaryCampaign.metadata,
-    };
-  }, [campaigns, selectedCampaignDetails, selectedCampaignId]);
+  const selectedCampaign = useMemo(
+    () =>
+      mergeCampaignDetail(
+        campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null,
+        selectedCampaignDetails,
+      ),
+    [campaigns, selectedCampaignDetails, selectedCampaignId],
+  );
 
   const ogMeta = useMemo(() => {
     const c = selectedCampaign;
@@ -480,6 +531,7 @@ function App() {
       const apiError = toApiError(error);
       setCreateError(apiError);
       addToast(apiError.message, 'error');
+      throw error;
     }
   }
 
@@ -488,7 +540,7 @@ function App() {
     setIsConnectingWallet(true);
     try {
       await wallet.connect(walletType as any, networkPassphrase);
-      addToast(`Wallet connected: ${wallet.publicKey?.slice(0, 16)}...`, "success");
+      addToast(`Wallet connected: ${wallet.publicKey?.slice(0, 16)}...`, 'success');
     } finally {
       setIsConnectingWallet(false);
     }
@@ -496,7 +548,7 @@ function App() {
 
   function handleDisconnectWallet() {
     wallet.disconnect();
-    addToast("Wallet disconnected.", "success");
+    addToast('Wallet disconnected.', 'success');
   }
 
   // Account watching is handled by individual wallet adapters
@@ -550,7 +602,7 @@ function App() {
       await refreshSelectedData(campaignId);
       addToast(
         `Pledged ${amount} ${assetCode}. Tx: ${transactionResult.transactionHash.slice(0, 12)}…`,
-        "success",
+        'success',
         {
           href: stellarExpertTxUrl(transactionResult.transactionHash, appConfig?.networkPassphrase),
           label: 'View on Stellar Expert',
@@ -742,37 +794,87 @@ function App() {
       {selectedCampaign && (
         <section className="animate-fade-in" style={{ animationDelay: '0.1s' }}>
           <ErrorBoundary componentName="CreatorAnalytics">
-            <CreatorAnalytics
-              creatorAddress={selectedCampaign.creator}
-              campaigns={campaigns}
-              isLoading={isCampaignsLoading || initialLoad}
-            />
+            <Suspense fallback={<SkeletonAnalytics />}>
+              <CreatorAnalytics
+                creatorAddress={selectedCampaign.creator}
+                campaigns={campaigns}
+                isLoading={isCampaignsLoading || initialLoad}
+              />
+            </Suspense>
           </ErrorBoundary>
         </section>
       )}
 
       <section className="layout-grid animate-fade-in" style={{ animationDelay: '0.2s' }}>
-        <CreateCampaignForm
-          onCreate={handleCreate}
-          apiError={createError}
-          allowedAssets={appConfig?.allowedAssets ?? []}
-        />
+        <ErrorBoundary componentName="CreateCampaignForm">
+          <Suspense
+            fallback={
+              <section
+                className="card wizard-card"
+                aria-busy="true"
+                aria-label="Loading create campaign form"
+              >
+                <div className="section-heading">
+                  <div className="skeleton skeleton-line" style={{ width: 180, height: 24 }} />
+                </div>
+                <SkeletonCard />
+              </section>
+            }
+          >
+            <CreateCampaignForm
+              onCreate={handleCreate}
+              apiError={createError}
+              isLoading={initialLoad || !appConfig}
+              onRetry={() => window.location.reload()}
+              allowedAssets={appConfig?.allowedAssets}
+            />
+          </Suspense>
+        </ErrorBoundary>
         <ErrorBoundary componentName="CampaignDetailPanel">
-          <CampaignDetailPanel
-            campaign={selectedCampaign}
-            appConfig={appConfig}
-            connectedWallet={connectedWallet}
-            isConnectingWallet={isConnectingWallet}
-            isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
-            isLoading={isSelectedLoading || initialLoad}
-            notFoundCampaignId={invalidUrlCampaignId}
-            onConnectWallet={handleConnectWallet}
-            onDisconnectWallet={handleDisconnectWallet}
-            onPledge={handlePledge}
-            onClaim={handleClaim}
-            onSoftDelete={handleSoftDelete}
-            onRefund={handleRefund}
-          />
+          <Suspense
+            fallback={
+              <section
+                className="card detail-panel"
+                aria-busy="true"
+                aria-label="Loading campaign details"
+              >
+                <div className="section-heading">
+                  <div className="skeleton skeleton-line" style={{ width: 220, height: 24 }} />
+                  <div
+                    className="skeleton skeleton-line"
+                    style={{ width: 320, height: 14, marginTop: 8 }}
+                  />
+                </div>
+                <div className="detail-grid">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <article key={i} className="detail-stat">
+                      <div className="skeleton skeleton-line" style={{ width: 120 }} />
+                      <div
+                        className="skeleton skeleton-line"
+                        style={{ width: 80, height: 18, marginTop: 8 }}
+                      />
+                    </article>
+                  ))}
+                </div>
+              </section>
+            }
+          >
+            <CampaignDetailPanel
+              campaign={selectedCampaign}
+              appConfig={appConfig}
+              connectedWallet={connectedWallet}
+              isConnectingWallet={isConnectingWallet}
+              isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+              isLoading={isSelectedLoading || initialLoad}
+              notFoundCampaignId={invalidUrlCampaignId}
+              onConnectWallet={handleConnectWallet}
+              onDisconnectWallet={handleDisconnectWallet}
+              onPledge={handlePledge}
+              onClaim={handleClaim}
+              onSoftDelete={handleSoftDelete}
+              onRefund={handleRefund}
+            />
+          </Suspense>
         </ErrorBoundary>
       </section>
 
@@ -797,6 +899,15 @@ function App() {
             isLoadingMore={isLoadingMoreCampaigns}
             isLoading={isCampaignsLoading || initialLoad}
             invalidUrlCampaignId={invalidUrlCampaignId}
+            error={
+              campaignsError
+                ? {
+                    message: campaignsError.message,
+                    onRetry: handleRetryCampaignsLoad,
+                    isRecoverable: campaignsError.isRecoverable,
+                  }
+                : null
+            }
           />
         </ErrorBoundary>
 
@@ -805,6 +916,9 @@ function App() {
           isLoading={isSelectedLoading || initialLoad}
           targetAmount={selectedCampaign?.targetAmount}
           pledgedAmount={selectedCampaign?.pledgedAmount}
+          hasMore={hasMoreHistory}
+          isLoadingMore={isLoadingMoreHistory}
+          onLoadMore={() => void loadMoreHistory()}
         />
       </section>
 

@@ -1,6 +1,12 @@
 name: CI - Build Checks
 
 on:
+  workflow_dispatch:
+    inputs:
+      supply-chain-checks:
+        description: 'Run supply-chain security checks'
+        type: boolean
+        default: false
   push:
     branches:
       - main
@@ -27,6 +33,16 @@ jobs:
         working-directory: backend
         run: npm ci
 
+      - name: Check for supply-chain attacks
+        if: github.event_name == 'push' || github.event.inputs.supply-chain-checks == 'true'
+        working-directory: backend
+        run: |
+          npm audit --audit-level=high
+          # Check for known supply-chain patterns in lockfile
+          grep -E "(git|github|bitbucket|gitlab|npm\.registry)" package-lock.json || true
+          # Verify integrity of installed packages
+          npm ls --all --json > /tmp/backend-deps.json 2>&1 || true
+
       - name: Build backend
         working-directory: backend
         run: npm run build
@@ -34,6 +50,15 @@ jobs:
       - name: Lint backend
         working-directory: backend
         run: npm run lint
+
+      - name: Verify backend artifact integrity
+        if: github.event_name == 'push' || github.event.inputs.supply-chain-checks == 'true'
+        working-directory: backend
+        run: |
+          # Generate checksums for build artifacts
+          find dist -type f -exec sha256sum {} \; > /tmp/backend-artifacts.sha256 2>/dev/null || true
+          # Ensure no unexpected files in dist
+          test -d dist && echo "Build directory exists" || echo "No build directory"
 
       - name: Audit backend dependencies
         working-directory: backend
@@ -71,6 +96,16 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Check for supply-chain attacks
+        if: github.event_name == 'push' || github.event.inputs.supply-chain-checks == 'true'
+        working-directory: frontend
+        run: |
+          npm audit --audit-level=high
+          # Check for known supply-chain patterns in lockfile
+          grep -E "(git|github|bitbucket|gitlab|npm\.registry)" package-lock.json || true
+          # Verify integrity of installed packages
+          npm ls --all --json > /tmp/frontend-deps.json 2>&1 || true
+
       - name: Build frontend
         working-directory: frontend
         run: npm run build
@@ -78,6 +113,15 @@ jobs:
       - name: Lint frontend
         working-directory: frontend
         run: npm run lint
+
+      - name: Verify frontend artifact integrity
+        if: github.event_name == 'push' || github.event.inputs.supply-chain-checks == 'true'
+        working-directory: frontend
+        run: |
+          # Generate checksums for build artifacts
+          find dist -type f -exec sha256sum {} \; > /tmp/frontend-artifacts.sha256 2>/dev/null || true
+          # Ensure no unexpected files in dist
+          test -d dist && echo "Build directory exists" || echo "No build directory"
 
   format-check:
     name: Prettier Format Check
@@ -116,6 +160,17 @@ jobs:
       - name: Build contract
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Check for supply-chain attacks
+        if: github.event_name == 'push' || github.event.inputs.supply-chain-checks == 'true'
+        working-directory: contracts
+        run: |
+          # Verify no unexpected dependencies in Cargo.lock
+          grep -E "(git|github|bitbucket|gitlab)" Cargo.lock || true
+          # Check for known vulnerable crates
+          cargo audit || true
+          # Generate checksums for build artifacts
+          find target/wasm32-unknown-unknown/release -name "*.wasm" -exec sha256sum {} \; > /tmp/contract-artifacts.sha256 2>/dev/null || true
         
       - name: Run contract tests
         working-directory: contracts

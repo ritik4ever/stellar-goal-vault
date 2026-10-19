@@ -3,7 +3,7 @@ import { LRUCache } from 'lru-cache';
 import { config } from '../config';
 import { logError, logInfo } from '../logger';
 
-const CACHE_TTL_MS = 30_000;
+const CACHE_TTL_MS = 30000;
 const CACHE_TTL_SECONDS = 30;
 const CACHE_MAX_SIZE = Number(process.env.CAMPAIGN_CACHE_MAX_SIZE ?? 100);
 
@@ -43,8 +43,12 @@ let isRedisConnected = false;
 if (config.redisUrl) {
   redisClient = createClient({ url: config.redisUrl });
   redisClient.on('error', (err) => logError(err, { event: 'redis_client_error' }));
-  redisClient.on('connect', () => { isRedisConnected = true; });
-  redisClient.on('disconnect', () => { isRedisConnected = false; });
+  redisClient.on('connect', () => {
+    isRedisConnected = true;
+  });
+  redisClient.on('disconnect', () => {
+    isRedisConnected = false;
+  });
   // Fire and forget connect
   redisClient.connect().catch((err) => logError(err, { event: 'redis_connect_error' }));
 }
