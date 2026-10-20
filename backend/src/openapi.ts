@@ -72,6 +72,26 @@ const paginationSchema = z.object({
   }),
 });
 
+const analyticsPaginationSchema = z
+  .object({
+    page: z.number().int().openapi({ description: 'Current page (1-based).', example: 1 }),
+    limit: z.number().int().openapi({ description: 'Number of items per page.', example: 10 }),
+    total: z
+      .number()
+      .int()
+      .openapi({ description: 'Total number of items matching the query.', example: 42 }),
+    totalPages: z.number().int().openapi({ description: 'Total number of pages.', example: 5 }),
+    hasPreviousPage: z.boolean().openapi({
+      description: 'Whether a previous page exists for this paginated request.',
+      example: false,
+    }),
+    hasNextPage: z.boolean().openapi({
+      description: 'Whether a later page exists for this paginated request.',
+      example: true,
+    }),
+  })
+  .openapi('AnalyticsPagination');
+
 const apiErrorSchema = z.object({
   success: z.literal(false),
   error: z.object({
@@ -307,6 +327,17 @@ const campaignAnalyticsSchema = z
   })
   .openapi('CampaignAnalytics');
 
+const campaignAnalyticsListResponseSchema = z
+  .object({
+    data: z.array(campaignAnalyticsSchema),
+    pagination: analyticsPaginationSchema,
+    requestId: z.string().openapi({
+      description: 'Correlation ID also returned in the X-Request-Id response header.',
+      example: 'req-123',
+    }),
+  })
+  .openapi('CampaignAnalyticsListResponse');
+
 const campaignAnalyticsResponseSchema = z
   .object({ data: campaignAnalyticsSchema })
   .openapi('CampaignAnalyticsResponse');
@@ -481,6 +512,10 @@ const registeredSchemas = {
   CampaignAnalyticsResponse: registry.register(
     'CampaignAnalyticsResponse',
     campaignAnalyticsResponseSchema,
+  ),
+  CampaignAnalyticsListResponse: registry.register(
+    'CampaignAnalyticsListResponse',
+    campaignAnalyticsListResponseSchema,
   ),
   PledgeListResponse: registry.register('PledgeListResponse', pledgeListResponseSchema),
   ContributorPledgeListResponse: registry.register(
@@ -831,14 +866,28 @@ registry.registerPath({
   summary: 'Get campaign analytics',
   description:
     'Read-only analytics for one campaign. The path id must be a canonical positive integer ' +
-    '(no leading zeros, signs, or decimals) and the endpoint accepts no query parameters: ' +
-    'unknown or malformed input is rejected with 400 instead of being ignored. Missing ' +
-    'campaigns return 404.',
-  request: { params: z.object({ id: campaignIdParamSchema }) },
+    '(no leading zeros, signs, or decimals). Pagination is deterministic: page defaults to 1 ' +
+    'and limit defaults to 10 when omitted, both must be integers, and limit is capped at 100. ' +
+    'Out-of-range values are rejected with 400 rather than clamped. The response includes ' +
+    'total, totalPages, hasPreviousPage, and hasNextPage so callers can navigate without ' +
+    'guessing where the collection ends. Missing campaigns return 404.',
+  request: {
+    params: z.object({ id: campaignIdParamSchema }),
+    query: z.object({
+      page: z.coerce.number().int().min(1).optional().openapi({
+        description: '1-based page number (default 1).',
+      }),
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Items per page, 1 to 100 (default 10).',
+      }),
+    }),
+  },
   responses: {
     200: {
-      description: 'Campaign analytics',
-      content: { 'application/json': { schema: registeredSchemas.CampaignAnalyticsResponse } },
+      description: 'Paginated campaign analytics',
+      content: {
+        'application/json': { schema: registeredSchemas.CampaignAnalyticsListResponse },
+      },
     },
     400: validationErrorResponse,
     404: notFoundResponse,
@@ -869,8 +918,12 @@ registry.registerPath({
   request: {
     params: z.object({ id: campaignIdParamSchema }),
     query: z.object({
-      page: z.coerce.number().int().min(1).optional(),
-      pageSize: z.coerce.number().int().min(1).max(100).optional(),
+      page: z.coerce.number().int().min(1).optional().openapi({
+        description: '1-based page number (default 1).',
+      }),
+      pageSize: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Items per page, 1 to 100 (default 10).',
+      }),
     }),
   },
   responses: {
