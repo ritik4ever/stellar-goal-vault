@@ -717,33 +717,37 @@ app.get('/api/campaigns/:id', async (req: Request, res: Response, next: express.
   }
 });
 
-app.get('/api/campaigns/:id/analytics', (req: Request, res: Response) => {
-  // Validate the whole boundary before touching storage: the path id must be a
-  // canonical positive integer, and this read model takes no query parameters.
-  // Rejecting unknown keys (instead of ignoring them) keeps `?page=2`-style
-  // requests from looking like they did something when they did not.
-  const parsedId = parseCampaignId(req.params.id);
-  if (!parsedId.ok) {
-    sendValidationError(parsedId.issues);
-  }
+app.get('/api/campaigns/:id/analytics', (req: Request, res: Response, next: express.NextFunction) => {
+  try {
+    // Validate the whole boundary before touching storage: the path id must be a
+    // canonical positive integer, and this read model takes no query parameters.
+    // Rejecting unknown keys (instead of ignoring them) keeps `?page=2`-style
+    // requests from looking like they did something when they did not.
+    const parsedId = parseCampaignId(req.params.id);
+    if (!parsedId.ok) {
+      sendValidationError(parsedId.issues);
+    }
 
-  const parsedQuery = parseCampaignAnalyticsQuery(req.query as Record<string, unknown>);
-  if (!parsedQuery.ok) {
-    sendValidationError(parsedQuery.issues);
-  }
+    const parsedQuery = parseCampaignAnalyticsQuery(req.query as Record<string, unknown>);
+    if (!parsedQuery.ok) {
+      sendValidationError(parsedQuery.issues);
+    }
 
-  const analytics = getCampaignAnalytics(parsedId.value);
-  if (!analytics) {
-    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
-  }
+    const analytics = getCampaignAnalytics(parsedId.value);
+    if (!analytics) {
+      throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+    }
 
-  res.setHeader('Cache-Control', 'max-age=30');
-  res.json({
-    data: {
-      campaignId: parsedId.value,
-      ...analytics,
-    },
-  });
+    res.setHeader('Cache-Control', 'max-age=30');
+    res.json({
+      data: {
+        campaignId: parsedId.value,
+        ...analytics,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.delete(
