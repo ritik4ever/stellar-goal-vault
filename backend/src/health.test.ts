@@ -309,6 +309,22 @@ describe('GET /api/health request validation', () => {
       expect.arrayContaining([expect.objectContaining({ field: 'body' })]),
     );
   });
+
+  it('rejects JSON arrays instead of treating an empty array as no body', async () => {
+    const res = await request(app)
+      .get('/api/health')
+      .set('Content-Type', 'application/json')
+      .send([]);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      requestId: res.headers['x-request-id'],
+    });
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'body' })]),
+    );
+  });
 });
 
 // GET /api/health/deep — deep health

@@ -689,11 +689,13 @@ export function parseHealthRequest(
       path: ['query'],
     }));
 
-  if (
-    body !== undefined &&
+  const isEmptyJsonObject =
+    typeof body === 'object' &&
     body !== null &&
-    (typeof body !== 'object' || Object.keys(body as Record<string, unknown>).length > 0)
-  ) {
+    !Array.isArray(body) &&
+    Object.keys(body as Record<string, unknown>).length === 0;
+
+  if (body !== undefined && body !== null && !isEmptyJsonObject) {
     issues.push({
       code: 'custom',
       message: 'This endpoint accepts no request body.',
