@@ -124,6 +124,24 @@ describe('request id middleware', () => {
     );
   });
 
+  it('correlates campaign-detail validation responses with request id', async () => {
+    const invalid = await request(app)
+      .get('/api/campaigns/invalid-id')
+      .set(REQUEST_ID_HEADER, 'campaign-detail-invalid');
+
+    expect(invalid.status).toBe(400);
+    expect(invalid.headers[REQUEST_ID_HEADER.toLowerCase()]).toBe('campaign-detail-invalid');
+    expect(invalid.body).toEqual(
+      expect.objectContaining({
+        success: false,
+        error: expect.objectContaining({
+          code: 'VALIDATION_ERROR',
+          requestId: 'campaign-detail-invalid',
+        }),
+      }),
+    );
+  });
+
   it('replaces unsafe incoming IDs with a generated correlation ID', async () => {
     const response = await request(app).get('/api/campaigns').set(REQUEST_ID_HEADER, 'bad id');
 

@@ -69,12 +69,30 @@ Basic liveness check. Returns service status and a lightweight database reachabi
 - `database.status` is `"up"` or `"down"` based on a lightweight SQLite reachability check.
 - `indexer` exposes the last successful update and freshness/lag for the background event indexer.
 - Returns `503` when the service is degraded.
+- Unexpected failures return the standard error envelope `{ "success": false, "error": { "code": string, "message": string, "requestId": string } }` (status `500`) while logging internal details securely.
 
 ---
 
 ### `GET /api/health/deep`
 
 Extended health check that probes the database, Soroban RPC, and the configured contract.
+
+The `components` collection is paginated deterministically in a fixed order
+(`db`, `soroban`, `contract`, `indexer`).
+
+**Query parameters:**
+
+| Parameter | Type    | Description                                                     |
+|-----------|---------|-----------------------------------------------------------------|
+| `page`    | integer | 1-based page number. Defaults to `1`.                           |
+| `limit`   | integer | Components per page, 1–100. Defaults to `20`.                   |
+
+Pagination defaults to returning the full collection: the default `limit` of 20
+exceeds the number of components, so omitting both parameters preserves the
+pre-pagination response. Invalid or out-of-range values (for example `page=0`,
+`limit=0`, `limit=101`, or non-integers) are rejected with `400 Bad Request`
+rather than clamped. Navigation metadata is returned under `pagination`:
+`total`, `page`, `limit`, `totalPages`, `hasPreviousPage`, and `hasNextPage`.
 
 **Response `200 OK`:**
 
@@ -97,11 +115,22 @@ Extended health check that probes the database, Soroban RPC, and the configured 
         "lagMs": 1500
       }
     }
+  },
+  "pagination": {
+    "total": 4,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1,
+    "hasPreviousPage": false,
+    "hasNextPage": false
   }
 }
 ```
 
-Returns `503` when `overall` is `"down"`.
+Returns `503` when `overall` is `"down"`. Invalid pagination parameters return `400 Bad Request`
+with the standard error envelope. Unexpected failures return the standard error envelope
+`{ "success": false, "error": { "code": string, "message": string, "requestId": string } }`
+(status `500`) while logging structured context securely without exposing sensitive internals.
 
 ---
 
@@ -221,12 +250,13 @@ pledges. Full pledge history and pagination live on the dedicated collection end
 the `id` field rather than being coerced.
 
 **Response `200 OK`:** Campaign object with `progress` and a `pledges` preview, wrapped in
-`{ "data": { ... } }`. Responses are cached per campaign for 30 seconds (`X-Cache` reports
-`MISS` for a fresh read and `HIT` for a cached one).
+`{ "data": { ... }, "requestId": "..." }`. The `requestId` correlation ID matches the `X-Request-Id` response
+header and can be correlated across structured backend logs. Responses are cached per campaign for 30 seconds (`X-Cache`
+reports `MISS` for a fresh read and `HIT` for a cached one; cached payloads are shared while correlation IDs remain unique per request).
 
 **Response `400 Bad Request`** for a malformed ID, **`404 Not Found`** when the campaign does
 not exist, and **`500`** with a generic error body (no storage or stack details) when the
-underlying read fails.
+underlying read fails. Known error paths return the standard error envelope `{ "success": false, "error": { "code": string, "message": string, "requestId": string, "details"?: array } }` while unexpected failures log structured context without leaking internals.
 
 ---
 
@@ -315,20 +345,30 @@ The same `pagination` shape (including `hasPreviousPage`/`hasNextPage`) is retur
 
 Adds a pledge to an open campaign.
 
+**Path parameters:** `id` — canonical positive integer campaign ID. Malformed IDs (such as
+`0`, `-1`, `1.5`, `01`, or non-numeric strings) return `400` with a `VALIDATION_ERROR`
+envelope containing a field-level detail for `id`.
+
 **Request body:**
 
 ```json
 {
   "contributor": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-  "amount": 50
+  "amount": 50,
+  "assetCode": "USDC"
 }
 ```
 
-**Response `201 Created`:** Updated campaign object wrapped in `{ "data": { ... } }`.
+**Response `201 Created`:** Updated campaign object with computed `progress`, wrapped in `{ "data": { ... } }`.
 
-**Response `400`** when the campaign is not open, the amount is invalid, or a per-contributor limit is exceeded.
+**Response `400 Bad Request`** for malformed path IDs, payload validation failures, closed or expired
+campaigns (`INVALID_CAMPAIGN_STATE`), per-contributor limit breaches (`MAX_PER_CONTRIBUTOR_EXCEEDED`),
+funding cap breaches (`CAMPAIGN_FUNDING_CAP_EXCEEDED`), or unsupported tokens (`INVALID_ASSET`).
 
-**Response `404`** when the campaign does not exist.
+**Response `404 Not Found`** when the campaign does not exist.
+
+**Response `500 Internal Server Error`** with a generic error envelope (no storage or stack details) when a
+server-side failure occurs.
 
 ---
 

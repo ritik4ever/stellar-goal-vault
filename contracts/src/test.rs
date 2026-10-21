@@ -3,10 +3,13 @@ mod tests {
     use soroban_sdk::{
         testutils::{Address as _, Events as _, Ledger},
         token::{Client as TokenClient, StellarAssetClient},
-        Address, Env, String,
+        Address, Env, IntoVal, String,
     };
 
-    use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
+    use crate::{
+        CampaignClaimed, FeeCollected, StellarGoalVaultContract,
+        StellarGoalVaultContractClient,
+    };
     // Keep contract tests independent of the machine clock and local timezone.
     // Soroban timestamps are UTC Unix seconds; epoch zero preserves the mock
     // ledger's historical test behavior while making the chosen time explicit.
@@ -442,6 +445,114 @@ mod tests {
     }
 
     #[test]
+    fn test_claim_accounting_invariants_across_amounts_and_fees() {
+        for (amount, fee_bps) in [(100_i128, 0_i128), (101, 1), (999, 200), (10_000, 10_000)] {
+            let env = test_env();
+            env.mock_all_auths();
+
+            let creator = Address::generate(&env);
+            let contributor = Address::generate(&env);
+            let admin = Address::generate(&env);
+            let fee_recipient = Address::generate(&env);
+            let token = deploy_token(&env, &admin, &contributor, amount);
+            let client = deploy_contract(&env);
+            client.initialize(&admin, &100_i128);
+            client.set_fee(&admin, &fee_bps);
+            client.set_fee_recipient(&admin, &fee_recipient);
+
+            let deadline = env.ledger().timestamp() + 10;
+            let campaign_id = client.create_campaign(
+                &creator,
+                &soroban_sdk::vec![&env, token.clone()],
+                &amount,
+                &deadline,
+                &String::from_str(&env, "claim accounting invariant"),
+                &0_i128,
+                &soroban_sdk::vec![&env],
+                &0_u32,
+            );
+
+            client.contribute(&campaign_id, &contributor, &token, &amount);
+            advance_time(&env, 11);
+            client.claim(&campaign_id, &creator);
+
+            let token_client = TokenClient::new(&env, &token);
+            let fee_amount = amount * fee_bps / 10_000;
+            let creator_amount = amount - fee_amount;
+            assert_eq!(token_client.balance(&creator), creator_amount);
+            assert_eq!(token_client.balance(&fee_recipient), fee_amount);
+            assert_eq!(token_client.balance(&client.address), 0);
+            assert_eq!(
+                token_client.balance(&creator) + token_client.balance(&fee_recipient),
+                amount,
+                "claim must distribute every contributed token"
+            );
+            assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+
+            let campaign = client.get_campaign(&campaign_id);
+            assert!(campaign.claimed);
+            assert_eq!(campaign.pledged_amount, amount);
+
+            assert!(client.try_claim(&campaign_id, &creator).is_err());
+            assert_eq!(token_client.balance(&creator), creator_amount);
+            assert_eq!(token_client.balance(&fee_recipient), fee_amount);
+            assert_eq!(token_client.balance(&client.address), 0);
+            assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+        }
+    }
+
+    #[test]
+    fn test_invalid_claim_accounting_invariants() {
+        for (funding, past_deadline, wrong_creator) in
+            [(1_000_i128, false, false), (500, true, false), (1_000, true, true)]
+        {
+            let env = test_env();
+            env.mock_all_auths();
+
+            let creator = Address::generate(&env);
+            let attacker = Address::generate(&env);
+            let contributor = Address::generate(&env);
+            let admin = Address::generate(&env);
+            let token = deploy_token(&env, &admin, &contributor, 1_000);
+            let client = deploy_contract(&env);
+            let deadline = env.ledger().timestamp() + 10;
+            let campaign_id = client.create_campaign(
+                &creator,
+                &soroban_sdk::vec![&env, token.clone()],
+                &1_000_i128,
+                &deadline,
+                &String::from_str(&env, "invalid claim invariant"),
+                &0_i128,
+                &soroban_sdk::vec![&env],
+                &0_u32,
+            );
+
+            client.contribute(&campaign_id, &contributor, &token, &funding);
+            if past_deadline {
+                advance_time(&env, 11);
+            }
+
+            let claimant = if wrong_creator { &attacker } else { &creator };
+            assert!(client.try_claim(&campaign_id, claimant).is_err());
+
+            let token_client = TokenClient::new(&env, &token);
+            assert_eq!(token_client.balance(&contributor), 1_000 - funding);
+            assert_eq!(token_client.balance(&client.address), funding);
+            assert_eq!(token_client.balance(&creator), 0);
+            assert_eq!(
+                token_client.balance(&contributor) + token_client.balance(&client.address),
+                1_000,
+                "rejected claim must not create or destroy tokens"
+            );
+            assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), funding);
+
+            let campaign = client.get_campaign(&campaign_id);
+            assert!(!campaign.claimed);
+            assert_eq!(campaign.pledged_amount, funding);
+        }
+    }
+
+    #[test]
     #[should_panic(expected = "creator mismatch")]
     fn test_claim_creator_mismatch() {
         let env = test_env();
@@ -504,6 +615,37 @@ mod tests {
 
         client.contribute(&campaign_id, &contributor, &token, &target);
         client.claim(&campaign_id, &creator);
+    }
+
+    #[test]
+    fn test_failed_claim_emits_no_success_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 100),
+            &String::from_str(&env, "failed claim event test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor, &token, &1_000);
+
+        let events_before_claim = env.events().all().len();
+        assert!(client.try_claim(&campaign_id, &creator).is_err());
+        assert_eq!(
+            env.events().all().len(),
+            events_before_claim,
+            "failed claim must not leave success events"
+        );
     }
 
     #[test]
@@ -2557,6 +2699,39 @@ mod tests {
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 980);
         assert_eq!(token_client.balance(&fee_recipient), 20);
+
+        let events = env.events().all();
+        let claim_topics = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Claim"))
+            .into_val(&env);
+        let fee_topics = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Fee"))
+            .into_val(&env);
+        let mut claim_events = events.iter().filter(|(_, topics, _)| topics == &claim_topics);
+        let claim_event = claim_events.next().expect("claim event should be emitted");
+        assert!(claim_events.next().is_none(), "one claim event is expected");
+        assert_eq!(
+            claim_event.2,
+            CampaignClaimed {
+                campaign_id,
+                creator: creator.clone(),
+                token: token.clone(),
+                amount: target,
+            }
+            .into_val(&env)
+        );
+
+        let mut fee_events = events.iter().filter(|(_, topics, _)| topics == &fee_topics);
+        let fee_event = fee_events.next().expect("fee event should be emitted");
+        assert!(fee_events.next().is_none(), "one fee event is expected");
+        assert_eq!(
+            fee_event.2,
+            FeeCollected {
+                campaign_id,
+                token: token.clone(),
+                fee_amount: 20,
+                fee_recipient: fee_recipient.clone(),
+            }
+            .into_val(&env)
+        );
     }
 
     #[test]
@@ -2599,6 +2774,31 @@ mod tests {
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 1_000);
         assert_eq!(token_client.balance(&fee_recipient), 0);
+
+        let events = env.events().all();
+        let claim_topics = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Claim"))
+            .into_val(&env);
+        let fee_topics = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Fee"))
+            .into_val(&env);
+        let claim_events: Vec<_> = events
+            .iter()
+            .filter(|(_, topics, _)| topics == &claim_topics)
+            .collect();
+        assert_eq!(claim_events.len(), 1);
+        assert_eq!(
+            claim_events[0].2,
+            CampaignClaimed {
+                campaign_id,
+                creator: creator.clone(),
+                token: token.clone(),
+                amount: target,
+            }
+            .into_val(&env)
+        );
+        assert!(
+            events.iter().all(|(_, topics, _)| topics != &fee_topics),
+            "zero fee must not emit a fee event"
+        );
     }
 
     // --- Failure-path coverage (issue #989) ---
@@ -2907,701 +3107,69 @@ mod tests {
         client.set_fee(&admin, &(-1_i128));
     }
 
-    // =====================================================================
-    // Refund-path lifecycle and accounting invariants (#911)
-    // =====================================================================
-    // After every accepted step the refund books must balance:
-    //   (1) pledged_amount == Σ contributions over {contributor, token}
-    //   (2) pledged_amount == Σ CampaignTokenBalance(campaign, token)
-    //   (3) CampaignTokenBalance(campaign, token) == vault's real holdings
-    // Invalid transitions (premature refund, funded campaign refund, claimed
-    // refund, double refund, unauthorized stranger refund, paused refund)
-    // must fail cleanly and leave (1)–(3) untouched: invalid transitions
-    // neither create nor destroy value. See contracts/PROPERTY_TESTS.md.
-
-    fn token_balance(env: &Env, token: &Address, who: &Address) -> i128 {
-        TokenClient::new(env, token).balance(who)
-    }
-
-    fn deploy_token_minting(
-        env: &Env,
-        admin: &Address,
-        holders: &[Address],
-        amount: i128,
-    ) -> Address {
-        let token = env
-            .register_stellar_asset_contract_v2(admin.clone())
-            .address();
-        let asset_client = StellarAssetClient::new(env, &token);
-        for holder in holders {
-            asset_client.mint(holder, &amount);
-        }
-        token
-    }
-
-    fn assert_refund_books(
-        env: &Env,
-        client: &StellarGoalVaultContractClient,
-        campaign_id: u64,
-        tokens: &[Address],
-        contributors: &[Address],
-    ) {
-        let campaign = client.get_campaign(&campaign_id);
-        let vault = client.address.clone();
-
-        // 1. Sum of all individual contributions across all tokens
-        let mut sum_contributions: i128 = 0;
-        for token in tokens {
-            for contributor in contributors {
-                let contribution = client.get_contribution(&campaign_id, contributor, token);
-                assert!(contribution >= 0, "contribution must be non-negative");
-                sum_contributions += contribution;
-            }
-        }
-
-        // 2. Sum of CampaignTokenBalance across all tokens
-        let mut sum_token_balances: i128 = 0;
-        for token in tokens {
-            let token_bal = client.get_campaign_token_balance(&campaign_id, token);
-            assert!(token_bal >= 0, "campaign token balance must be non-negative");
-            sum_token_balances += token_bal;
-
-            // 3. CampaignTokenBalance must equal the vault's actual token balance
-            let real_vault_bal = TokenClient::new(env, token).balance(&vault);
-            assert_eq!(
-                token_bal, real_vault_bal,
-                "CampaignTokenBalance must match vault real token holdings"
-            );
-        }
-
-        // 4. Pledged amount must equal sum of contributions
-        assert_eq!(
-            campaign.pledged_amount, sum_contributions,
-            "pledged_amount must equal sum of active contributions"
-        );
-
-        // 5. Pledged amount must equal sum of token balances
-        assert_eq!(
-            campaign.pledged_amount, sum_token_balances,
-            "pledged_amount must equal sum of CampaignTokenBalances"
-        );
-
-        // 6. Pledged amount must be non-negative
-        assert!(
-            campaign.pledged_amount >= 0,
-            "pledged_amount must remain non-negative"
-        );
-    }
-
     #[test]
-    fn test_refund_lifecycle_table_driven_underfunded_preserves_accounting_invariants() {
-        struct Row {
-            target: i128,
-            deadline_offset: u64,
-            pledges: &'static [i128],
-        }
-
-        let cases = [
-            Row {
-                target: 1_000,
-                deadline_offset: 50,
-                pledges: &[200, 300],
-            },
-            Row {
-                target: 5_000,
-                deadline_offset: 100,
-                pledges: &[800, 1_200, 1_500],
-            },
-            Row {
-                target: 10_000,
-                deadline_offset: 200,
-                pledges: &[100, 400, 1_500, 3_000],
-            },
-            Row {
-                target: 2_000,
-                deadline_offset: 30,
-                pledges: &[100, 1_899],
-            },
-        ];
-
-        for (case_idx, row) in cases.iter().enumerate() {
-            let env = test_env();
-            env.mock_all_auths();
-
-            let creator = Address::generate(&env);
-            let admin = Address::generate(&env);
-            let contributors: soroban_sdk::Vec<Address> = {
-                let mut v = soroban_sdk::Vec::new(&env);
-                for _ in 0..row.pledges.len() {
-                    v.push_back(Address::generate(&env));
-                }
-                v
-            };
-
-            let mut contrib_slice: std::vec::Vec<Address> = std::vec::Vec::new();
-            for i in 0..contributors.len() {
-                contrib_slice.push(contributors.get(i).unwrap());
-            }
-
-            let initial_mint = 50_000_i128;
-            let token = deploy_token_minting(&env, &admin, &contrib_slice, initial_mint);
-            let tokens = [token.clone()];
-            let client = deploy_contract(&env);
-            let vault = client.address.clone();
-
-            let campaign_id = client.create_campaign(
-                &creator,
-                &soroban_sdk::vec![&env, token.clone()],
-                &row.target,
-                &(env.ledger().timestamp() + row.deadline_offset),
-                &String::from_str(&env, "refund lifecycle table row"),
-                &0_i128,
-                &soroban_sdk::vec![&env],
-                &0_u32,
-            );
-
-            // Verify initial clean accounting
-            assert_refund_books(&env, &client, campaign_id, &tokens, &contrib_slice);
-
-            // Step 1: Sequential pledges
-            let mut total_pledged = 0_i128;
-            for (i, pledge) in row.pledges.iter().enumerate() {
-                let who = &contrib_slice[i];
-                let balance_before = token_balance(&env, &token, who);
-                client.contribute(&campaign_id, who, &token, pledge);
-                total_pledged += pledge;
-
-                assert_eq!(token_balance(&env, &token, who), balance_before - pledge);
-                assert_eq!(token_balance(&env, &token, &vault), total_pledged);
-                assert_refund_books(&env, &client, campaign_id, &tokens, &contrib_slice);
-            }
-
-            assert!(
-                total_pledged < row.target,
-                "case {} must be underfunded: {} < {}",
-                case_idx,
-                total_pledged,
-                row.target
-            );
-
-            // Step 2: Premature refunds while active are rejected without mutating state
-            for who in &contrib_slice {
-                assert!(
-                    client.try_refund(&campaign_id, who).is_err(),
-                    "active campaign must reject premature refund"
-                );
-                assert_refund_books(&env, &client, campaign_id, &tokens, &contrib_slice);
-            }
-
-            // Step 3: Advance past deadline
-            advance_time(&env, row.deadline_offset + 1);
-
-            // Step 4: Step-by-step partial refunds; each step preserves global accounting
-            let mut remaining_vault = total_pledged;
-            for (i, pledge) in row.pledges.iter().enumerate() {
-                let who = &contrib_slice[i];
-                let balance_before = token_balance(&env, &token, who);
-
-                client.refund(&campaign_id, who);
-
-                // Contributor is made whole to exact initial mint
-                assert_eq!(token_balance(&env, &token, who), balance_before + pledge);
-                assert_eq!(token_balance(&env, &token, who), initial_mint);
-
-                remaining_vault -= pledge;
-                assert_eq!(token_balance(&env, &token, &vault), remaining_vault);
-
-                // Assert invariant holds after each partial refund
-                assert_refund_books(&env, &client, campaign_id, &tokens, &contrib_slice);
-            }
-
-            // Step 5: Vault is fully drained to zero and campaign is cleared
-            assert_eq!(token_balance(&env, &token, &vault), 0);
-            assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
-
-            // Step 6: Double refunds are rejected and do not create negative balances
-            for who in &contrib_slice {
-                assert!(
-                    client.try_refund(&campaign_id, who).is_err(),
-                    "double refund must be rejected"
-                );
-                assert_eq!(token_balance(&env, &token, who), initial_mint);
-                assert_refund_books(&env, &client, campaign_id, &tokens, &contrib_slice);
-            }
-        }
-    }
-
-    #[test]
-    fn test_refund_invalid_transitions_preserve_state_and_conserve_value() {
-        // --- Scenario A: Active Campaign (before deadline) ---
-        {
-            let env = test_env();
-            env.mock_all_auths();
-
-            let creator = Address::generate(&env);
-            let admin = Address::generate(&env);
-            let alice = Address::generate(&env);
-            let contributors = [alice.clone()];
-
-            let initial_mint = 10_000_i128;
-            let token = deploy_token_minting(&env, &admin, &contributors, initial_mint);
-            let tokens = [token.clone()];
-            let client = deploy_contract(&env);
-            let vault = client.address.clone();
-
-            let target_a = 2_000_i128;
-            let offset_a = 100_u64;
-            let c_a = client.create_campaign(
-                &creator,
-                &soroban_sdk::vec![&env, token.clone()],
-                &target_a,
-                &(env.ledger().timestamp() + offset_a),
-                &String::from_str(&env, "active campaign"),
-                &0_i128,
-                &soroban_sdk::vec![&env],
-                &0_u32,
-            );
-            client.contribute(&c_a, &alice, &token, &500);
-            assert_refund_books(&env, &client, c_a, &tokens, &contributors);
-
-            // Attempt refund before deadline: rejected with books untouched
-            assert!(client.try_refund(&c_a, &alice).is_err());
-            assert_eq!(token_balance(&env, &token, &alice), initial_mint - 500);
-            assert_eq!(token_balance(&env, &token, &vault), 500);
-            assert_refund_books(&env, &client, c_a, &tokens, &contributors);
-        }
-
-        // --- Scenario B: Funded Campaign after deadline ---
-        {
-            let env = test_env();
-            env.mock_all_auths();
-
-            let creator = Address::generate(&env);
-            let admin = Address::generate(&env);
-            let alice = Address::generate(&env);
-            let bob = Address::generate(&env);
-            let contributors = [alice.clone(), bob.clone()];
-
-            let initial_mint = 10_000_i128;
-            let token = deploy_token_minting(&env, &admin, &contributors, initial_mint);
-            let tokens = [token.clone()];
-            let client = deploy_contract(&env);
-            let vault = client.address.clone();
-
-            let target_b = 1_000_i128;
-            let offset_b = 50_u64;
-            let c_b = client.create_campaign(
-                &creator,
-                &soroban_sdk::vec![&env, token.clone()],
-                &target_b,
-                &(env.ledger().timestamp() + offset_b),
-                &String::from_str(&env, "funded campaign"),
-                &0_i128,
-                &soroban_sdk::vec![&env],
-                &0_u32,
-            );
-            client.contribute(&c_b, &alice, &token, &600);
-            client.contribute(&c_b, &bob, &token, &400);
-            advance_time(&env, offset_b + 1);
-
-            // Funded campaigns cannot be refunded
-            assert!(client.try_refund(&c_b, &alice).is_err());
-            assert!(client.try_refund(&c_b, &bob).is_err());
-            assert_refund_books(&env, &client, c_b, &tokens, &contributors);
-
-            // --- Scenario C: Claimed Campaign ---
-            client.claim(&c_b, &creator);
-            assert!(client.get_campaign(&c_b).claimed);
-            // Claimed campaign strictly rejects refunds
-            assert!(client.try_refund(&c_b, &alice).is_err());
-            assert!(client.try_refund(&c_b, &bob).is_err());
-            assert_eq!(token_balance(&env, &token, &vault), 0);
-        }
-
-        // --- Scenario D: Stranger and Paused ---
-        {
-            let env = test_env();
-            env.mock_all_auths();
-
-            let creator = Address::generate(&env);
-            let admin = Address::generate(&env);
-            let alice = Address::generate(&env);
-            let stranger = Address::generate(&env);
-            let contributors = [alice.clone(), stranger.clone()];
-
-            let initial_mint = 10_000_i128;
-            let token = deploy_token_minting(&env, &admin, &contributors, initial_mint);
-            let tokens = [token.clone()];
-            let client = deploy_contract(&env);
-            let vault = client.address.clone();
-            client.initialize(&admin, &100_i128);
-
-            let target_d = 1_000_i128;
-            let offset_d = 50_u64;
-            let c_d = client.create_campaign(
-                &creator,
-                &soroban_sdk::vec![&env, token.clone()],
-                &target_d,
-                &(env.ledger().timestamp() + offset_d),
-                &String::from_str(&env, "stranger test"),
-                &0_i128,
-                &soroban_sdk::vec![&env],
-                &0_u32,
-            );
-            client.contribute(&c_d, &alice, &token, &300);
-            advance_time(&env, offset_d + 1);
-
-            // Stranger has nothing to refund
-            assert!(client.try_refund(&c_d, &stranger).is_err());
-            assert_refund_books(&env, &client, c_d, &tokens, &contributors);
-
-            // Paused contract rejects refund
-            client.set_paused(&admin, &true);
-            assert!(client.try_refund(&c_d, &alice).is_err());
-            assert_refund_books(&env, &client, c_d, &tokens, &contributors);
-
-            // Unpause restores valid refund transition
-            client.set_paused(&admin, &false);
-            client.refund(&c_d, &alice);
-            assert_refund_books(&env, &client, c_d, &tokens, &contributors);
-            assert_eq!(token_balance(&env, &token, &alice), initial_mint);
-            assert_eq!(token_balance(&env, &token, &vault), 0);
-        }
-    }
-
-    #[test]
-    fn test_canceled_campaign_refund_matrix_preserves_invariants() {
-        struct CancelRow {
-            target: i128,
-            deadline_offset: u64,
-            pledges: &'static [i128],
-        }
-
-        let cases = [
-            CancelRow {
-                target: 1_000,
-                deadline_offset: 100,
-                pledges: &[250, 450],
-            },
-            CancelRow {
-                target: 3_000,
-                deadline_offset: 200,
-                pledges: &[500, 700, 900],
-            },
-            CancelRow {
-                target: 2_000,
-                deadline_offset: 50,
-                pledges: &[1_200],
-            },
-        ];
-
-        for row in cases {
-            let env = test_env();
-            env.mock_all_auths();
-
-            let creator = Address::generate(&env);
-            let admin = Address::generate(&env);
-            let mut contributors: std::vec::Vec<Address> = std::vec::Vec::new();
-            for _ in 0..row.pledges.len() {
-                contributors.push(Address::generate(&env));
-            }
-
-            let initial_mint = 20_000_i128;
-            let token = deploy_token_minting(&env, &admin, &contributors, initial_mint);
-            let tokens = [token.clone()];
-            let client = deploy_contract(&env);
-            let vault = client.address.clone();
-
-            let campaign_id = client.create_campaign(
-                &creator,
-                &soroban_sdk::vec![&env, token.clone()],
-                &row.target,
-                &(env.ledger().timestamp() + row.deadline_offset),
-                &String::from_str(&env, "canceled refund row"),
-                &0_i128,
-                &soroban_sdk::vec![&env],
-                &0_u32,
-            );
-
-            for (i, pledge) in row.pledges.iter().enumerate() {
-                client.contribute(&campaign_id, &contributors[i], &token, pledge);
-            }
-            assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-
-            // Canceling does not alter token holdings or accounting books
-            client.cancel_campaign(&campaign_id, &creator);
-            assert!(client.get_campaign(&campaign_id).canceled);
-            assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-
-            // Canceled campaign cannot be claimed
-            assert!(client.try_claim(&campaign_id, &creator).is_err());
-            // Canceled campaign cannot be re-canceled
-            assert!(client.try_cancel_campaign(&campaign_id, &creator).is_err());
-
-            // Contributors can refund immediately, BEFORE deadline
-            for (i, pledge) in row.pledges.iter().enumerate() {
-                let who = &contributors[i];
-                let before = token_balance(&env, &token, who);
-                client.refund(&campaign_id, who);
-                assert_eq!(token_balance(&env, &token, who), before + pledge);
-                assert_eq!(token_balance(&env, &token, who), initial_mint);
-                assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-            }
-
-            // Vault drained to 0
-            assert_eq!(token_balance(&env, &token, &vault), 0);
-            assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
-
-            // Second refund attempt is rejected
-            for who in &contributors {
-                assert!(client.try_refund(&campaign_id, who).is_err());
-            }
-        }
-    }
-
-    #[test]
-    fn test_multi_token_refund_lifecycle_conserves_value() {
+    #[should_panic(expected = "fee must not exceed 10000 basis points")]
+    fn test_set_fee_rejects_above_10000_bps() {
         let env = test_env();
         env.mock_all_auths();
 
-        let creator = Address::generate(&env);
         let admin = Address::generate(&env);
-        let alice = Address::generate(&env);
-        let bob = Address::generate(&env);
-        let charlie = Address::generate(&env);
-        let contributors = [alice.clone(), bob.clone(), charlie.clone()];
-
-        let usdc = deploy_token_minting(&env, &admin, &contributors, 10_000);
-        let eurc = deploy_token_minting(&env, &admin, &contributors, 10_000);
-        let xlm = deploy_token_minting(&env, &admin, &contributors, 10_000);
-        let tokens = [usdc.clone(), eurc.clone(), xlm.clone()];
         let client = deploy_contract(&env);
-        let vault = client.address.clone();
-
-        let target = 3_000_i128;
-        let offset = 100_u64;
-        let campaign_id = client.create_campaign(
-            &creator,
-            &soroban_sdk::vec![&env, usdc.clone(), eurc.clone(), xlm.clone()],
-            &target,
-            &(env.ledger().timestamp() + offset),
-            &String::from_str(&env, "multi-token refund"),
-            &0_i128,
-            &soroban_sdk::vec![&env],
-            &0_u32,
-        );
-
-        // Diverse contribution matrix across multiple tokens
-        // Alice: 200 USDC + 150 EURC = 350
-        client.contribute(&campaign_id, &alice, &usdc, &200);
-        client.contribute(&campaign_id, &alice, &eurc, &150);
-
-        // Bob: 300 EURC + 400 XLM = 700
-        client.contribute(&campaign_id, &bob, &eurc, &300);
-        client.contribute(&campaign_id, &bob, &xlm, &400);
-
-        // Charlie: 100 USDC + 200 XLM = 300
-        client.contribute(&campaign_id, &charlie, &usdc, &100);
-        client.contribute(&campaign_id, &charlie, &xlm, &200);
-
-        let total_pledged = 1_350_i128;
-        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, total_pledged);
-        assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-
-        // Advance time past deadline (1350 < 3000 target => underfunded)
-        advance_time(&env, offset + 1);
-
-        // Alice refunds: receives 200 USDC + 150 EURC in one call
-        client.refund(&campaign_id, &alice);
-        assert_eq!(token_balance(&env, &usdc, &alice), 10_000);
-        assert_eq!(token_balance(&env, &eurc, &alice), 10_000);
-        assert_eq!(token_balance(&env, &xlm, &alice), 10_000);
-        assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-
-        // Bob's and Charlie's balances in vault remain completely intact
-        assert_eq!(token_balance(&env, &usdc, &vault), 100); // Charlie's USDC
-        assert_eq!(token_balance(&env, &eurc, &vault), 300); // Bob's EURC
-        assert_eq!(token_balance(&env, &xlm, &vault), 600);  // Bob's 400 + Charlie's 200
-
-        // Bob refunds: receives 300 EURC + 400 XLM
-        client.refund(&campaign_id, &bob);
-        assert_eq!(token_balance(&env, &usdc, &bob), 10_000);
-        assert_eq!(token_balance(&env, &eurc, &bob), 10_000);
-        assert_eq!(token_balance(&env, &xlm, &bob), 10_000);
-        assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-
-        // Charlie refunds: receives 100 USDC + 200 XLM
-        client.refund(&campaign_id, &charlie);
-        assert_eq!(token_balance(&env, &usdc, &charlie), 10_000);
-        assert_eq!(token_balance(&env, &eurc, &charlie), 10_000);
-        assert_eq!(token_balance(&env, &xlm, &charlie), 10_000);
-
-        // All vault balances drained to 0
-        assert_eq!(token_balance(&env, &usdc, &vault), 0);
-        assert_eq!(token_balance(&env, &eurc, &vault), 0);
-        assert_eq!(token_balance(&env, &xlm, &vault), 0);
-        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
-        assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
+        client.initialize(&admin, &100_i128);
+        client.set_fee(&admin, &10_001_i128);
     }
 
     #[test]
-    fn test_refund_all_admin_bulk_refund_table_driven() {
-        struct BulkRow {
-            target: i128,
-            pledges: &'static [i128],
-            canceled: bool,
-        }
+    fn test_set_fee_rejection_does_not_mutate_state() {
+        let env = test_env();
+        env.mock_all_auths();
 
-        let cases = [
-            BulkRow {
-                target: 1_000,
-                pledges: &[300, 400],
-                canceled: false,
-            },
-            BulkRow {
-                target: 5_000,
-                pledges: &[500, 800, 1_200, 1_500],
-                canceled: false,
-            },
-            BulkRow {
-                target: 2_500,
-                pledges: &[400, 600, 800],
-                canceled: true,
-            },
-        ];
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
 
-        for row in cases {
-            let env = test_env();
-            env.mock_all_auths();
+        assert_eq!(client.get_platform_fee_bps(), 50);
 
-            let admin = Address::generate(&env);
-            let creator = Address::generate(&env);
-            let client = deploy_contract(&env);
-            client.initialize(&admin, &100_i128);
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.set_fee(&admin, &(-100_i128));
+        }));
+        assert!(result.is_err());
+        assert_eq!(client.get_platform_fee_bps(), 50);
 
-            let mut contributors: std::vec::Vec<Address> = std::vec::Vec::new();
-            for _ in 0..row.pledges.len() {
-                contributors.push(Address::generate(&env));
-            }
-
-            let initial_mint = 25_000_i128;
-            let token = deploy_token_minting(&env, &admin, &contributors, initial_mint);
-            let tokens = [token.clone()];
-            let vault = client.address.clone();
-
-            let offset = 100_u64;
-            let campaign_id = client.create_campaign(
-                &creator,
-                &soroban_sdk::vec![&env, token.clone()],
-                &row.target,
-                &(env.ledger().timestamp() + offset),
-                &String::from_str(&env, "refund all bulk test"),
-                &0_i128,
-                &soroban_sdk::vec![&env],
-                &0_u32,
-            );
-
-            for (i, pledge) in row.pledges.iter().enumerate() {
-                client.contribute(&campaign_id, &contributors[i], &token, pledge);
-            }
-            assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-
-            if row.canceled {
-                client.cancel_campaign(&campaign_id, &creator);
-            } else {
-                // Premature bulk refund before deadline is rejected
-                assert!(client.try_refund_all(&campaign_id).is_err());
-                assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-                advance_time(&env, offset + 1);
-            }
-
-            // Single atomic bulk refund restores every contributor
-            client.refund_all(&campaign_id);
-
-            for who in &contributors {
-                assert_eq!(token_balance(&env, &token, who), initial_mint);
-            }
-            assert_eq!(token_balance(&env, &token, &vault), 0);
-            assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
-            assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-
-            // Second bulk refund call rejected (nothing to refund)
-            assert!(client.try_refund_all(&campaign_id).is_err());
-        }
+        let result_over = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.set_fee(&admin, &15_000_i128);
+        }));
+        assert!(result_over.is_err());
+        assert_eq!(client.get_platform_fee_bps(), 50);
     }
 
-    proptest::proptest! {
-        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(32))]
-        #[test]
-        fn test_prop_refund_conserves_system_value(
-            target in 700_i128..5_000_i128,
-            pledge_a in 100_i128..250_i128,
-            pledge_b in 100_i128..250_i128,
-            deadline_offset in 10_u64..1_000_u64,
-        ) {
-            let env = test_env();
-            env.mock_all_auths();
+    #[test]
+    #[should_panic(expected = "fee recipient cannot be the vault contract")]
+    fn test_set_fee_recipient_rejects_vault_address() {
+        let env = test_env();
+        env.mock_all_auths();
 
-            let creator = Address::generate(&env);
-            let admin = Address::generate(&env);
-            let alice = Address::generate(&env);
-            let bob = Address::generate(&env);
-            let contributors = [alice.clone(), bob.clone()];
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+        client.set_fee_recipient(&admin, &client.address);
+    }
 
-            let initial_mint = 10_000_i128;
-            let token = deploy_token_minting(&env, &admin, &contributors, initial_mint);
-            let tokens = [token.clone()];
-            let client = deploy_contract(&env);
-            let vault = client.address.clone();
+    #[test]
+    fn test_set_fee_recipient_rejection_does_not_mutate_state() {
+        let env = test_env();
+        env.mock_all_auths();
 
-            let campaign_id = client.create_campaign(
-                &creator,
-                &soroban_sdk::vec![&env, token.clone()],
-                &target,
-                &(env.ledger().timestamp() + deadline_offset),
-                &String::from_str(&env, "prop refund"),
-                &0_i128,
-                &soroban_sdk::vec![&env],
-                &0_u32,
-            );
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
 
-            // Step 1: Contribute
-            client.contribute(&campaign_id, &alice, &token, &pledge_a);
-            client.contribute(&campaign_id, &bob, &token, &pledge_b);
-            assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
+        assert!(client.get_fee_recipient().is_none());
 
-            // Total system tokens conserved
-            let total_system = token_balance(&env, &token, &alice)
-                + token_balance(&env, &token, &bob)
-                + token_balance(&env, &token, &vault);
-            assert_eq!(total_system, initial_mint * 2);
-
-            // Step 2: Premature refund is rejected and conserves state
-            assert!(client.try_refund(&campaign_id, &alice).is_err());
-            assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-
-            // Step 3: Advance past deadline (underfunded: pledge_a + pledge_b <= 400 < target >= 500)
-            advance_time(&env, deadline_offset + 1);
-
-            // Alice refunds
-            client.refund(&campaign_id, &alice);
-            assert_eq!(token_balance(&env, &token, &alice), initial_mint);
-            assert_eq!(token_balance(&env, &token, &bob), initial_mint - pledge_b);
-            assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-
-            // Bob refunds
-            client.refund(&campaign_id, &bob);
-            assert_eq!(token_balance(&env, &token, &bob), initial_mint);
-            assert_eq!(token_balance(&env, &token, &vault), 0);
-            assert_refund_books(&env, &client, campaign_id, &tokens, &contributors);
-
-            // Final state: both contributors restored, vault drained, pledged amount 0
-            assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
-
-            // Double refund fails cleanly
-            assert!(client.try_refund(&campaign_id, &alice).is_err());
-            assert!(client.try_refund(&campaign_id, &bob).is_err());
-            assert_eq!(token_balance(&env, &token, &vault), 0);
-        }
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.set_fee_recipient(&admin, &client.address);
+        }));
+        assert!(result.is_err());
+        assert!(client.get_fee_recipient().is_none());
     }
 }

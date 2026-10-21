@@ -8,9 +8,9 @@ import type { Express } from 'express';
 /**
  * Integration coverage for `GET /api/campaigns/:id/analytics` (issue #858).
  *
- * The endpoint is a read-only analytics view, so its boundary is the path id
- * and the query string. These tests pin the deterministic 4xx responses for
- * malformed/unsupported input alongside the success schema.
+ * The endpoint is a read-only analytics view. It supports bounded pagination
+ * over the campaign's contributor list via `page`/`limit` query parameters and
+ * returns navigation metadata under `meta.pagination`.
  */
 
 const TEST_DB_PATH = path.join(
@@ -49,7 +49,7 @@ function seedCampaign(overrides: { targetAmount?: number } = {}) {
 }
 
 beforeAll(async () => {
-  fs.rmSync(TEST_DB_PATH, { force: true });
+  fs.rmpSync(TEST_DB_PATH, { force: true });
 
   ({ createCampaign, addPledge, initCampaignStore } = await import('./services/campaignStore'));
   ({ getDb } = await import('./services/db'));
@@ -59,7 +59,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  fs.rmSync(TEST_DB_PATH, { force: true });
+  fs.rmpSync(TEST_DB_PATH, { force: true });
 });
 
 beforeEach(() => {
@@ -74,22 +74,28 @@ describe('GET /api/campaigns/:id/analytics', () => {
   it('returns the analytics schema for a campaign with pledges', async () => {
     const campaign = seedCampaign();
     addPledge(campaign.id, { contributor: CONTRIBUTOR_A, amount: 50 });
-    addPledge(campaign.id, { contributor: CONTRIBUTOR_B, amount: 75 });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR_P, amount: 75 });
     addPledge(campaign.id, { contributor: CONTRIBUTOR_A, amount: 100 });
 
     const response = await request(app).get(`/api/campaigns/${campaign.id}/analytics`);
 
     expect(response.status).toBe(200);
     expect(response.headers['content-type']).toContain('application/json');
-    expect(response.body).toEqual({
-      data: {
-        campaignId: campaign.id,
-        fundingGap: 775,
-        status: 'open',
-        percentFunded: 22.5,
-        pledgeCount: 3,
-        contributorCount: 2,
-      },
+    expect(response.body.data).toMatchObject({
+      campaignId: campaign.id,
+      fundingGap: 775,
+      status: 'open',
+      percentFunded: 22.5,
+      pledgeCount: 3,
+      contributorCount: 2,
+    });
+    expect(response.body.meta.pagination).toEqual({
+      page: 1,
+      limit: 20,
+      total: 2,
+      totalPages: 1,
+      hasNextPage: false,
+      hasPreviousPage: false,
     });
   });
 
@@ -106,6 +112,80 @@ describe('GET /api/campaigns/:id/analytics', () => {
       contributorCount: 0,
       status: 'open',
     });
+    expect(response.body.meta.pagination).toMatchObject({
+      page: 1,
+      limit: 20,
+      total: 0,
+      totalPages: 0,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    });
+  });
+
+  it('paginates the contributor list deterministically', async () => {
+    const campaign = seedCampaign();
+    addPledge(campaign.id, { contributor: CONTRIBUTOR_A, amount: 50 });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR_P, amount: 75 });
+    addPledge(campaign.id, { contributor: CONTRIBUTOR_A, amount: 100 });
+
+    const first = await request(app).get(
+      `/api/campaigns/${campaign.id}/analytics?page=1&limit=`,
+    );
+    expect(first.status).toBe(200);
+    expect(first.body.data.contributors).toHaveLength(1);
+    expect(first.body.meta.pagination).toEqual({
+      page: 1,
+      limit: 1,
+      total: 2,
+      totalPages: 2,
+      hasNextPage: true,
+      hasPreviousPage: false,
+    });
+
+    const second = await request(app).get(
+      `/api/campaigns/${campaign.id}/analytics?page=2&limit=`,
+    );
+    expect(second.status).toBe(200);
+    expect(second.body.data.contributors).toHaveLength(1);
+    expect(second.body.meta.pagination).toEqual({
+      page: 2,
+      limit: 1,
+      total: 2,
+      totalPages: 2,
+      hasNextPage: false,
+      hasPreviousPage: true,
+    });
+
+    // Deterministic ordering: page 1 + page 2 cover the full set with no overlap.
+    const ids = [
+      ...first.body.data.contributors.map((c: { contributor: string }) => c.contributor),
+      ...second.body.data.contributors.map((c: { contributor: string }) => c.contributor),
+    ];
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('clamps oversized limits to the maximum page size', async () => {
+    const campaign = seedCampaign();
+    addPledge(campaign.id, { contributor: CONTRIBUTOR_A, amount: 50 });
+
+    const response = await request(app).get(
+      `/api/campaigns/${campaign.id}/analytics?limit=100000`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.meta.pagination.limit).toBe(100);
+  });
+
+  it('rejects malformed pagination parameters with a 400', async () => {
+    const campaign = seedCampaign();
+
+    for (const query of ['page=0', 'page=-1', 'page=abc', 'limit=0', 'limit=-5', 'limit=abc']) {
+      const response = await request(app).get(
+        `/api/campaigns/${campaign.id}/analytics?${query}`,
+      );
+      expect(response.status, query).toBe(400);
+      expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    }
   });
 
   it('rejects malformed path ids with a 400', async () => {
@@ -123,22 +203,16 @@ describe('GET /api/campaigns/:id/analytics', () => {
   it('rejects unsupported query parameters instead of silently ignoring them', async () => {
     const campaign = seedCampaign();
 
-    const single = await request(app).get(`/api/campaigns/${campaign.id}/analytics?page=2`);
+    const response = await request(app).get(
+      `/api/campaigns/${campaign.id}/analytics?sort=desc`,
+    );
 
-    expect(single.status).toBe(400);
-    expect(single.body.error.code).toBe('VALIDATION_ERROR');
-    expect(single.body.error.message).toContain('Unsupported query parameter: page');
-    expect(single.body.error.details).toEqual(
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(response.body.error.message).toContain('Unsupported query parameter: sort');
+    expect(response.body.error.details).toEqual(
       expect.arrayContaining([expect.objectContaining({ field: 'query' })]),
     );
-
-    const multiple = await request(app).get(
-      `/api/campaigns/${campaign.id}/analytics?page=2&limit=10`,
-    );
-
-    expect(multiple.status).toBe(400);
-    expect(multiple.body.error.message).toContain('limit');
-    expect(multiple.body.error.message).toContain('page');
   });
 
   it('returns 404 for a well-formed id that does not exist', async () => {

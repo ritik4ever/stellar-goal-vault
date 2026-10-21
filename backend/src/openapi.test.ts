@@ -71,4 +71,56 @@ describe('OpenAPI documentation endpoints', () => {
       expect(spec.paths[pathName]).toBeDefined();
     }
   });
+
+  it('documents pledge errors with the shared ApiError envelope', async () => {
+    const response = await request(app).get('/api/openapi.json').expect(200);
+    const pledgePath = response.body.paths['/api/campaigns/{id}/pledges'];
+    const errorStatuses = {
+      get: ['400', '404', '500'],
+      post: ['400', '404', '413', '429', '500'],
+    };
+
+    for (const [method, statuses] of Object.entries(errorStatuses)) {
+      const operation = pledgePath[method];
+      for (const status of statuses) {
+        expect(
+          operation.responses[status].content['application/json'].schema.$ref,
+        ).toBe('#/components/schemas/ApiError');
+      }
+      expect(operation.description).toContain('INTERNAL_SERVER_ERROR');
+    }
+
+    expect(pledgePath.post.description).toContain('INVALID_CAMPAIGN_STATE');
+    expect(pledgePath.post.description).toContain('CAMPAIGN_FUNDING_CAP_EXCEEDED');
+  });
+
+  it('documents health pagination parameters and navigation metadata', async () => {
+    const response = await request(app).get('/api/openapi.json').expect(200);
+    const deepPath = response.body.paths['/api/health/deep'];
+
+    const paramNames = (deepPath.get.parameters ?? []).map(
+      (parameter: { name: string }) => parameter.name,
+    );
+    expect(paramNames).toEqual(expect.arrayContaining(['page', 'limit']));
+    expect(deepPath.get.description).toContain('defaults to 20');
+    expect(deepPath.get.responses['400'].content['application/json'].schema.$ref).toBe(
+      '#/components/schemas/ApiError',
+    );
+
+    const deepSchema =
+      response.body.components.schemas.DeepHealthResponse.properties.pagination.$ref;
+    expect(deepSchema).toBe('#/components/schemas/HealthPagination');
+
+    const paginationSchema = response.body.components.schemas.HealthPagination;
+    expect(Object.keys(paginationSchema.properties)).toEqual(
+      expect.arrayContaining([
+        'total',
+        'page',
+        'limit',
+        'totalPages',
+        'hasPreviousPage',
+        'hasNextPage',
+      ]),
+    );
+  });
 });
