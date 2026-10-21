@@ -898,31 +898,21 @@ registry.registerPath({
   summary: 'Get campaign analytics',
   description:
     'Read-only analytics for one campaign. The path id must be a canonical positive integer ' +
-    '(no leading zeros, signs, or decimals). Pagination is deterministic: page defaults to 1 ' +
-    'and limit defaults to 10 when omitted, both must be integers, and limit is capped at 100. ' +
-    'Out-of-range values are rejected with 400 rather than clamped. The response includes ' +
-    'total, totalPages, hasPreviousPage, and hasNextPage so callers can navigate without ' +
-    'guessing where the collection ends. Missing campaigns return 404.',
+    '(no leading zeros, signs, or decimals). This read model accepts no query parameters. ' +
+    'Missing campaigns return 404.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
-    query: z.object({
-      page: z.coerce.number().int().min(1).optional().openapi({
-        description: '1-based page number (default 1).',
-      }),
-      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
-        description: 'Items per page, 1 to 100 (default 10).',
-      }),
-    }),
   },
   responses: {
     200: {
-      description: 'Paginated campaign analytics',
+      description: 'Campaign analytics',
       content: {
-        'application/json': { schema: registeredSchemas.CampaignAnalyticsListResponse },
+        'application/json': { schema: registeredSchemas.CampaignAnalyticsResponse },
       },
     },
     400: validationErrorResponse,
     404: notFoundResponse,
+    500: internalServerErrorResponse,
   },
 });
 
