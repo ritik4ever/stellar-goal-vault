@@ -173,7 +173,10 @@ describe('Freighter service errors', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     freighterMocks.getNetworkDetails.mockRejectedValue(new Error(`boom ${FAKE_SECRET}`));
 
-    await verifyFreighterNetwork(TESTNET);
+    await expect(verifyFreighterNetwork(TESTNET)).rejects.toMatchObject({
+      code: 'FREIGHTER_NETWORK_UNKNOWN',
+      signingErrorClass: 'WALLET_UNAVAILABLE',
+    });
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(warn.mock.calls)).not.toContain(FAKE_SECRET);

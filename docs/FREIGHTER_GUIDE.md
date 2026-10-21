@@ -47,6 +47,8 @@ The Freighter header should now show **TESTNET** in the network badge.
 
 > **Screenshot placeholder:** Freighter network selector showing Testnet selected.
 
+> **Network mismatch protection:** Right before every pledge, claim, or refund is signed, the app checks Freighter's network again. If it differs from the app's configured network (for example, you switched Freighter to Mainnet after connecting), nothing is signed or submitted. You will see a message such as *"Freighter is connected to Stellar Mainnet, but this app expects Stellar Testnet. Please switch your wallet to Stellar Testnet and try again."* If Freighter is locked or does not report its network, the transaction is also blocked until you unlock it and retry.
+
 ---
 
 ## Step 3 — Fund Your Testnet Wallet

@@ -547,18 +547,20 @@ describe('Freighter Transaction Builder Integration Tests', () => {
       }
     });
 
-    it('allows transaction when getNetworkDetails fails (graceful degradation)', async () => {
+    it('blocks the transaction when getNetworkDetails fails (#933)', async () => {
       freighterMocks.getNetworkDetails.mockRejectedValue(new Error('Network unavailable'));
 
-      const result = await submitFreighterPledge({
-        campaignId: mockCampaignId,
-        contributor: mockContributor,
-        amount: 100,
-        assetCode: 'XLM',
-        config: mockConfig,
-      });
+      await expect(
+        submitFreighterPledge({
+          campaignId: mockCampaignId,
+          contributor: mockContributor,
+          amount: 100,
+          assetCode: 'XLM',
+          config: mockConfig,
+        }),
+      ).rejects.toMatchObject({ code: 'FREIGHTER_NETWORK_UNKNOWN' });
 
-      expect(result).toHaveProperty('transactionHash');
+      expect(freighterMocks.signTransaction).not.toHaveBeenCalled();
     });
   });
 

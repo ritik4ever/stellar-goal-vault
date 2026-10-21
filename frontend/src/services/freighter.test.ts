@@ -97,12 +97,17 @@ describe('freighter helpers', () => {
       ).resolves.toBeUndefined();
     });
 
-    it('does not throw when getNetworkDetails fails (allows simulation to catch mismatch)', async () => {
+    it('fails closed when getNetworkDetails fails (#933)', async () => {
       freighterMocks.getNetworkDetails.mockRejectedValue(new Error('Network details unavailable'));
 
       await expect(
         verifyFreighterNetwork('Test SDF Network ; September 2015'),
-      ).resolves.toBeUndefined();
+      ).rejects.toMatchObject({
+        code: 'FREIGHTER_NETWORK_UNKNOWN',
+        message: expect.stringMatching(
+          /Could not determine your wallet's network.*Stellar Testnet/,
+        ),
+      });
     });
   });
 });
