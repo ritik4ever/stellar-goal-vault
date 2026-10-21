@@ -280,6 +280,37 @@ describe('GET /api/health', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('GET /api/health request validation', () => {
+  it('rejects unsupported query parameters with a deterministic validation error', async () => {
+    const res = await request(app).get('/api/health?verbose=true');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      requestId: res.headers['x-request-id'],
+    });
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'query' })]),
+    );
+  });
+
+  it('rejects non-empty JSON bodies instead of ignoring them', async () => {
+    const res = await request(app)
+      .get('/api/health')
+      .set('Content-Type', 'application/json')
+      .send({ includeSecrets: true });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      requestId: res.headers['x-request-id'],
+    });
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'body' })]),
+    );
+  });
+});
+
 // GET /api/health/deep — deep health
 // ---------------------------------------------------------------------------
 
