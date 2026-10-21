@@ -1,0 +1,55 @@
+name: Contracts Integration Tests (Testnet)
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # nightly at 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  integration-testnet:
+    name: Run integration tests against Soroban testnet
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install soroban-cli
+        run: |
+          cargo install soroban-cli --locked
+
+      - name: Run integration tests
+        working-directory: contracts
+        env:
+          TESTNET_SECRET_KEY: ${{ secrets.TESTNET_SECRET_KEY }}
+          SOROBAN_RPC_URL: ${{ secrets.SOROBAN_RPC_URL }}
+          NETWORK_PASSPHRASE: Test SDF Network ; September 2015
+        run: |
+          if [ -z "${TESTNET_SECRET_KEY}" ]; then
+            echo "TESTNET_SECRET_KEY must be configured in repository secrets"
+            exit 1
+          fi
+          if [ -z "${SOROBAN_RPC_URL}" ]; then
+            echo "SOROBAN_RPC_URL must be configured in repository secrets"
+            exit 1
+          fi
+
+          # Run cargo tests enabling the 'integration' feature
+          cargo test --features integration -- --nocapture

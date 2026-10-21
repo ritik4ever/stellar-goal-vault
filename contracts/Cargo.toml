@@ -14,6 +14,7 @@ crate-type = ["cdylib"]
 #   when explicitly requested with `--features testutils`.
 [features]
 testutils = ["soroban-sdk/testutils"]
+integration = ["testutils"]
 
 [dependencies]
 soroban-sdk = "28.0.0"
