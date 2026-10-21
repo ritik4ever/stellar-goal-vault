@@ -1,0 +1,10 @@
+scenario	instructions	mem_bytes	disk_read_entries	memory_read_entries	write_entries	disk_read_bytes	write_bytes	events_bytes	fee_stroops
+wasm_size_bytes	25816
+refund_all_max_contributors	31
+refund/tokens=1	992284	1286847	0	10	6	0	1468	784	2224366
+refund/tokens=3	1784002	1386258	0	20	14	0	3180	1808	2263887
+refund/tokens=10	5404484	1962414	0	55	42	0	9172	5392	2402806
+refund_all/contributors=1,tokens=1	1068504	1288669	0	11	6	0	1468	768	2224340
+refund_all/contributors=10,tokens=1	5187781	1814521	0	29	24	0	5284	5376	2326119
+refund_all/contributors=25,tokens=1	14648822	3461341	0	59	54	0	11644	13056	2497566
+refund_all/contributors=10,tokens=3	17263832	3927646	0	75	68	0	14628	15616	2571328
