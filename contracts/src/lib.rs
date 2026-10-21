@@ -237,6 +237,25 @@ pub struct CampaignCreatedEvent {
     pub created_at: u64,
 }
 
+/// Emitted when a pledge is made to a campaign, with stable fields for off-chain
+/// indexers. Mirrors [`CampaignPledged`] but exposes campaign totals,
+/// token balances, contributor counts, and timestamp so indexers can reconstruct
+/// campaign and contributor pledge state without additional reads. Sensitive data
+/// (none exists here) is not duplicated.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignPledgedEvent {
+    pub campaign_id: u64,
+    pub contributor: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub total_pledged: i128,
+    pub contributor_count: u32,
+    pub token_balance: i128,
+    pub contributor_total: i128,
+    pub pledged_at: u64,
+}
+
 /// Emitted when a campaign receives its final required approval and goes live.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -742,9 +761,29 @@ impl StellarGoalVaultContract {
             (symbol_short!("Goal"), symbol_short!("Pledge")),
             CampaignPledged {
                 campaign_id,
+                contributor: contributor.clone(),
+                token: token.clone(),
+                amount,
+            },
+        );
+
+        // Structured pledge event for off-chain indexers. Emitted only after
+        // all storage writes succeed, so a failed transaction never produces a
+        // misleading success event. Uses a distinct topic ("Pledged") so
+        // indexers can subscribe without ambiguity with the legacy "Pledge"
+        // event above.
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Pledged")),
+            CampaignPledgedEvent {
+                campaign_id,
                 contributor,
                 token,
                 amount,
+                total_pledged: campaign.pledged_amount,
+                contributor_count: campaign.contributor_count,
+                token_balance: current_balance + amount,
+                contributor_total: current_contribution + amount,
+                pledged_at: env.ledger().timestamp(),
             },
         );
     }
@@ -1218,7 +1257,7 @@ impl StellarGoalVaultContract {
         approver.require_auth();
         require_not_paused(&env);
 
-        let mut campaign = read_campaign(&env, campaign_id);
+        let campaign = read_campaign(&env, campaign_id);
 
         // Campaign must be in pending state (not yet approved)
         if campaign.claimed || campaign.canceled {

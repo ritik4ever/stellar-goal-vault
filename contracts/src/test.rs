@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(campaign_id, 1);
         let events = env.events().all();
         assert!(
-            !events.is_empty(),
+            !events.events().is_empty(),
             "campaign creation must emit an event"
         );
     }
@@ -230,8 +230,62 @@ mod tests {
         }));
         assert!(result.is_err(), "creation must be rejected");
         assert!(
-            env.events().all().is_empty(),
+            env.events().all().events().is_empty(),
             "failed creation must not emit a success event"
+        );
+    }
+
+    #[test]
+    fn test_contribute_emits_structured_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline = env.ledger().timestamp() + 1_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &deadline,
+            &String::from_str(&env, "pledge event test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let events_before = env.events().all().events().len();
+
+        client.contribute(&campaign_id, &contributor, &token, &150_i128);
+
+        let events_after = env.events().all().events().len();
+        assert!(
+            events_after > events_before,
+            "pledge must emit events"
+        );
+    }
+
+    #[test]
+    fn test_contribute_rejection_emits_no_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&999, &contributor, &token, &100_i128);
+        }));
+        assert!(result.is_err(), "nonexistent campaign pledge must fail");
+        assert!(
+            env.events().all().events().is_empty(),
+            "failed pledge must not emit a success event"
         );
     }
 
