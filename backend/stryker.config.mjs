@@ -11,10 +11,7 @@ export default {
   },
 
   // Only mutate the two critical service files
-  mutate: [
-    'src/services/campaignStore.ts',
-    'src/services/eventHistory.ts',
-  ],
+  mutate: ['src/services/campaignStore.ts', 'src/services/eventHistory.ts'],
 
   // Reporters
   reporters: ['html', 'clear-text', 'progress', 'json'],

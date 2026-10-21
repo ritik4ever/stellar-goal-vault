@@ -25,6 +25,7 @@ This document details the setup and configuration of the comprehensive integrati
 ```
 
 **Key Features:**
+
 - **Process-Level Isolation**: Each test worker runs in its own process (Vitest default)
 - **Unique Database Paths**: Use `{PID}-{TIMESTAMP}` to guarantee unique databases
 - **Automatic Cleanup**: Temporary database files are cleaned up after tests
@@ -48,6 +49,7 @@ This document details the setup and configuration of the comprehensive integrati
 ## Test Suite Coverage
 
 ### 1. Campaign Lifecycle - Happy Path (8 assertions)
+
 - **Flow**: Create → 3 Pledges → Reach Target → Claim
 - **Verifications**:
   - Campaign progresses through states correctly
@@ -56,26 +58,30 @@ This document details the setup and configuration of the comprehensive integrati
   - Claim updates campaign state and records event
 
 ### 2. Campaign Lifecycle - Edge Cases (7 tests, 35+ assertions)
+
 - **Double Claim**: Verify idempotency and rejection of second claim
 - **Insufficient Funding**: Test claim prevention without reaching target
-- **Premature Claim**: Test claim prevention before deadline  
+- **Premature Claim**: Test claim prevention before deadline
 - **Refund After Claim**: Verify refunds blocked for claimed campaigns
 - **Failed Campaign Refunds**: Test refund flow for campaigns below target
 - **Invalid Contributors**: Reject refunds from users who didn't pledge
 - **Double Refund**: Prevent refunding same contributor twice
 
 ### 3. Authorization & Validation (5 tests, 20+ assertions)
+
 - **Unauthorized Claims**: Non-creator attempts to claim
 - **Field Validation**: Missing/invalid required fields
 - **Pledge Constraints**: Negative/zero amounts rejected
 - **Non-existent Campaigns**: All operations reject on invalid ID
 
 ### 4. State Consistency (3 tests, 15+ assertions)
+
 - **State Integrity**: Verify all state changes are consistent
 - **Event Ordering**: Timestamps and sequence verification
 - **Campaign Independence**: Multiple campaigns in parallel don't interfere
 
 ### 5. API Health & Stability (2 tests, 8+ assertions)
+
 - **Health Endpoint**: Services report status correctly
 - **Concurrent Requests**: 5 simultaneous campaign creations succeed
 
@@ -97,8 +103,8 @@ The test suite automatically handles cleanup:
 ```typescript
 // Create unique test database path using PID and timestamp
 const TEST_DB_PATH = path.join(
-  "/tmp",
-  `stellar-goal-vault-integration-${process.pid}-${Date.now()}.db`
+  '/tmp',
+  `stellar-goal-vault-integration-${process.pid}-${Date.now()}.db`,
 );
 
 // Set environment variable before importing app
@@ -108,7 +114,7 @@ process.env.DB_PATH = TEST_DB_PATH;
 afterAll(async () => {
   return new Promise<void>((resolve) => {
     server.close(() => {
-      fs.rmSync(TEST_DB_PATH, { force: true });  // Delete temp database
+      fs.rmSync(TEST_DB_PATH, { force: true }); // Delete temp database
       resolve();
     });
   });
@@ -118,6 +124,7 @@ afterAll(async () => {
 ## Performance Optimization
 
 ### Database Operations
+
 - **WAL Mode Enabled**: Better concurrent access
 - **Foreign Keys Enabled**: Data integrity
 - **Direct SQL**: No ORM overhead
@@ -142,6 +149,7 @@ Total: 500ms (4x faster!)
 ```
 
 ### Measured Performance
+
 - **Individual Test Suite**: 100-500ms
 - **Full Suite (15 tests)**: < 10 seconds
 - **Startup/Teardown**: < 1 second per worker
@@ -155,19 +163,25 @@ The test suite uses explicit environment variable checks to prevent accidental p
 
 ```typescript
 // Located at the very top of integration_test.ts
-process.env.DB_PATH = TEST_DB_PATH;           // Temporary only
-process.env.CONTRACT_ID = "";                  // Disable blockchain
-process.env.PORT = "0";                        // Random port only
+process.env.DB_PATH = TEST_DB_PATH; // Temporary only
+process.env.CONTRACT_ID = ''; // Disable blockchain
+process.env.PORT = '0'; // Random port only
 ```
 
 ### Production Database Protection
 
 ```typescript
 // Production DB would be (example):
-process.env.DB_PATH = "/var/lib/stellar-goal-vault/campaigns.db"
-
-// Test DB is (guaranteed):
-/tmp/stellar-goal-vault-integration-{PID}-{TIMESTAMP}.db
+process.env.DB_PATH =
+  '/var/lib/stellar-goal-vault/campaigns.db' /
+    // Test DB is (guaranteed):
+    tmp /
+    stellar -
+  goal -
+  vault -
+  integration -
+  { PID } -
+  { TIMESTAMP }.db;
 
 // These paths are completely different
 // → Cannot accidentally write to production
@@ -205,11 +219,11 @@ GitHub Actions Runner
 ├─ Node 18.x Matrix Job
 │  └─ npm test (4 Vitest threads)
 │     ├─ Test Worker 1 → /tmp/test-1.db
-│     ├─ Test Worker 2 → /tmp/test-2.db  
+│     ├─ Test Worker 2 → /tmp/test-2.db
 │     ├─ Test Worker 3 → /tmp/test-3.db
 │     └─ Test Worker 4 → /tmp/test-4.db
 │
-└─ Node 20.x Matrix Job  
+└─ Node 20.x Matrix Job
    └─ npm test (4 Vitest threads)
       ├─ Test Worker 1 → /tmp/test-5.db
       ├─ Test Worker 2 → /tmp/test-6.db
@@ -326,6 +340,7 @@ kill -9 <PID>
 
 **Cause**: Dependencies not installed  
 **Solution**:
+
 ```bash
 cd backend
 npm install
@@ -335,6 +350,7 @@ npm install
 
 **Cause**: Multiple processes accessing same database  
 **Solution**: This shouldn't happen due to unique path strategy. Verify:
+
 ```bash
 ls -la /tmp/stellar-goal-vault-*.db
 # Should show different PIDs/timestamps
@@ -344,6 +360,7 @@ ls -la /tmp/stellar-goal-vault-*.db
 
 **Cause**: Slow system or server not starting
 **Solution**:
+
 ```bash
 npm test -- --testTimeout 60000 --maxThreads 2
 ```
@@ -352,6 +369,7 @@ npm test -- --testTimeout 60000 --maxThreads 2
 
 **Cause**: Tests interrupted before cleanup  
 **Solution**:
+
 ```bash
 rm /tmp/stellar-goal-vault-*.db
 ```
@@ -364,19 +382,19 @@ Pre-defined test data ensures consistency:
 
 ```typescript
 MOCK_CREATORS = {
-  alice: "GAAA...",
-  bob: "GBBB...",
-}
+  alice: 'GAAA...',
+  bob: 'GBBB...',
+};
 
 MOCK_CONTRIBUTORS = {
-  dave: "GDDD...",
-  eve: "GEEE...",
-}
+  dave: 'GDDD...',
+  eve: 'GEEE...',
+};
 
 MOCK_ASSETS = {
-  USDC: "USDC",
-  XLM: "XLM",
-}
+  USDC: 'USDC',
+  XLM: 'XLM',
+};
 ```
 
 ### Campaign Test Templates
