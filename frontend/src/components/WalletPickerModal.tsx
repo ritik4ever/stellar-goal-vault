@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Wallet as WalletIcon, ExternalLink } from 'lucide-react';
+import { X, Wallet as _WalletIcon, ExternalLink } from 'lucide-react';
 import { WalletInfo, WalletType, detectWallets, WALLET_INFO } from '../lib/wallet';
 
 interface WalletPickerModalProps {

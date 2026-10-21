@@ -2,16 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  ensureCampaignsIntegrityConstraints,
-  ensureMigrationRunnerIndexes,
-  getDb,
-  initDb,
-  migrate,
-  resetDbForTests,
-  runMigrations,
-  type SQLiteDatabase,
-} from './index';
+import { getDb, initDb, migrate, resetDbForTests } from './index';
 
 const TEST_DB = path.join('/tmp', `sgv-migration-runner-regression-${process.pid}.db`);
 
@@ -114,7 +105,7 @@ describe('Migration runner database regression tests (#881)', () => {
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           'c-legacy',
-          'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+          'GBQRRH556UAOUNMCISIMEX2UPJQQ5MJ5NMHHY6TNCNCW52P5BWIVW6YT',
           'Legacy Campaign',
           'Created before migration runner additions.',
           '["XLM"]',
@@ -205,7 +196,7 @@ describe('Migration runner database regression tests (#881)', () => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         'c-search-sync',
-        'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        'GBQRRH556UAOUNMCISIMEX2UPJQQ5MJ5NMHHY6TNCNCW52P5BWIVW6YT',
         'Quantum Computing Fund',
         'Next-generation quantum algorithms on Stellar.',
         '["XLM"]',
@@ -246,7 +237,7 @@ describe('Migration runner database regression tests (#881)', () => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         'c-unique',
-        'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        'GBQRRH556UAOUNMCISIMEX2UPJQQ5MJ5NMHHY6TNCNCW52P5BWIVW6YT',
         'Unique Constraint Campaign',
         'Testing pledge hash uniqueness.',
         '["XLM"]',
@@ -265,7 +256,7 @@ describe('Migration runner database regression tests (#881)', () => {
       // First insert with hash succeeds
       insertPledge.run(
         'c-unique',
-        'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        'GBQRRH556UAOUNMCISIMEX2UPJQQ5MJ5NMHHY6TNCNCW52P5BWIVW6YT',
         10,
         'XLM',
         'XLM',
@@ -290,7 +281,7 @@ describe('Migration runner database regression tests (#881)', () => {
       expect(() => {
         insertPledge.run(
           'c-unique',
-          'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+          'GBQRRH556UAOUNMCISIMEX2UPJQQ5MJ5NMHHY6TNCNCW52P5BWIVW6YT',
           5,
           'XLM',
           'XLM',

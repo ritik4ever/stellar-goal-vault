@@ -44,7 +44,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v4
@@ -64,7 +64,7 @@ jobs:
       - name: Build contract
         working-directory: contracts
         run: |
-          cargo build --target wasm32-unknown-unknown --release --no-default-features
+          cargo build --target wasm32v1-none --release --no-default-features
 
       - name: Deploy to testnet
         id: deploy
@@ -81,7 +81,7 @@ jobs:
           
           echo "Deploying to testnet..."
           DEPLOY_OUTPUT=$(soroban contract deploy \
-            --wasm target/wasm32-unknown-unknown/release/stellar_goal_vault.wasm \
+            --wasm target/wasm32v1-none/release/stellar_goal_vault.wasm \
             --source-account "$SECRET_KEY" \
             --network testnet \
             --network-passphrase "$NETWORK_PASSPHRASE" \
@@ -165,7 +165,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v4
@@ -185,7 +185,7 @@ jobs:
       - name: Build contract
         working-directory: contracts
         run: |
-          cargo build --target wasm32-unknown-unknown --release --no-default-features
+          cargo build --target wasm32v1-none --release --no-default-features
 
       - name: Deploy to staging (testnet)
         id: deploy
@@ -202,7 +202,7 @@ jobs:
           
           echo "Deploying to staging (testnet)..."
           DEPLOY_OUTPUT=$(soroban contract deploy \
-            --wasm target/wasm32-unknown-unknown/release/stellar_goal_vault.wasm \
+            --wasm target/wasm32v1-none/release/stellar_goal_vault.wasm \
             --source-account "$SECRET_KEY" \
             --network testnet \
             --network-passphrase "$NETWORK_PASSPHRASE" \
@@ -269,7 +269,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v4
@@ -289,7 +289,7 @@ jobs:
       - name: Build contract
         working-directory: contracts
         run: |
-          cargo build --target wasm32-unknown-unknown --release --no-default-features
+          cargo build --target wasm32v1-none --release --no-default-features
 
       - name: Deploy to mainnet
         id: deploy
@@ -310,7 +310,7 @@ jobs:
           
           echo "Deploying to mainnet..."
           DEPLOY_OUTPUT=$(soroban contract deploy \
-            --wasm target/wasm32-unknown-unknown/release/stellar_goal_vault.wasm \
+            --wasm target/wasm32v1-none/release/stellar_goal_vault.wasm \
             --source-account "$SECRET_KEY" \
             --network public \
             --network-passphrase "$NETWORK_PASSPHRASE" \

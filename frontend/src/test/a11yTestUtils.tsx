@@ -1,5 +1,5 @@
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react';
-import { axe, type AxeResults } from 'vitest-axe';
+import { axe, type AxeCore } from 'vitest-axe';
 import type { ReactElement, ReactNode } from 'react';
 import { vi } from 'vitest';
 
@@ -41,7 +41,10 @@ export function setupDesktopViewport(width = 1280): void {
   });
 }
 
-export async function runAxeAudit(container: HTMLElement, theme: ThemeMode): Promise<AxeResults> {
+export async function runAxeAudit(
+  container: HTMLElement,
+  theme: ThemeMode,
+): Promise<AxeCore.AxeResults> {
   setTheme(theme);
   return axe(container);
 }

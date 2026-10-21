@@ -132,6 +132,7 @@ export function CampaignsTable({
         onSearchChange?.('');
       } catch (err) {
         // Preserve user input even if search fails
+        // eslint-disable-next-line no-console -- surfaced to the user via the toast layer
         console.error('Search change failed:', err);
       }
     }
@@ -231,7 +232,10 @@ export function CampaignsTable({
   });
 
   const showSkeleton = useMinDisplayTime(isLoading && isEmpty);
-  if (showSkeleton) {
+  // A load error must never be masked by the loading skeleton: the banner
+  // carries the retry affordance (and its "Retrying..." state), so it stays
+  // visible while a retry is in flight.
+  if (showSkeleton && !error) {
     return (
       <section className="card">
         <div className="section-heading">
@@ -247,40 +251,7 @@ export function CampaignsTable({
     );
   }
 
-  if (error) {
-    return (
-      <section className="card">
-        <div className="section-heading">
-          <h2>Campaign board</h2>
-        </div>
-        <div className="banner-error" role="alert">
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <AlertCircle size={20} aria-hidden="true" />
-            <div style={{ flex: 1 }}>
-              <p style={{ margin: 0, fontWeight: 500 }}>Unable to load campaigns</p>
-              <p className="muted" style={{ margin: '4px 0 0 0' }}>
-                {error.message}
-              </p>
-            </div>
-          </div>
-          {error.onRetry && (
-            <button
-              className="btn-secondary"
-              type="button"
-              onClick={error.onRetry}
-              disabled={isLoading}
-              style={{ marginTop: 12 }}
-            >
-              <RefreshCw size={16} style={{ marginRight: 8 }} />
-              {isLoading ? 'Retrying...' : 'Retry'}
-            </button>
-          )}
-        </div>
-      </section>
-    );
-  }
-
-  if (isEmpty) {
+  if (isEmpty && !error) {
     return (
       <EmptyState
         variant="card"
@@ -291,6 +262,32 @@ export function CampaignsTable({
     );
   }
 
+  const errorBanner = error ? (
+    <div className="banner-error" role="alert">
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <AlertCircle size={20} aria-hidden="true" />
+        <div style={{ flex: 1 }}>
+          <p style={{ margin: 0, fontWeight: 500 }}>Unable to load campaigns</p>
+          <p className="muted" style={{ margin: '4px 0 0 0' }}>
+            {error.message}
+          </p>
+        </div>
+      </div>
+      {error.onRetry && (
+        <button
+          className="btn-secondary"
+          type="button"
+          onClick={error.onRetry}
+          disabled={isLoading}
+          style={{ marginTop: 12 }}
+        >
+          <RefreshCw size={16} style={{ marginRight: 8 }} />
+          {isLoading ? 'Retrying...' : 'Retry'}
+        </button>
+      )}
+    </div>
+  ) : null;
+
   return (
     <section className="card">
       <div className="section-heading">
@@ -299,6 +296,8 @@ export function CampaignsTable({
           Monitor progress and open one campaign at a time in the action panel.
         </p>
       </div>
+
+      {errorBanner}
 
       {invalidUrlCampaignId ? (
         <p className="banner-warn muted">
@@ -318,7 +317,14 @@ export function CampaignsTable({
             disabled={isLoading}
           />
         </label>
-        <label className="field-group" style={{ minWidth: 180 }}>
+        {/*
+          The status filter is a group of toggle buttons, not a single form
+          control, so it must not be wrapped in a <label>. A <label> makes its
+          first labelable descendant (the "All" button) take the label's text
+          as its accessible name, which replaced the button's "All <count>"
+          name with "Status: Filter campaigns by status".
+        */}
+        <div className="field-group" style={{ minWidth: 180 }}>
           <span>Status:</span>
           <div className="status-filter-tabs" role="group" aria-label="Filter campaigns by status">
             {STATUS_FILTERS.map((filter) => {
@@ -340,14 +346,14 @@ export function CampaignsTable({
               );
             })}
           </div>
-        </label>
+        </div>
         <label className="field-group" style={{ minWidth: 180 }}>
           <span>Sort:</span>
           <SortDropdown value={sortBy} onChange={handleSortChange} disabled={isLoading} />
         </label>
       </div>
 
-      {filteredCampaigns.length === 0 && isFiltered ? (
+      {error && isEmpty ? null : filteredCampaigns.length === 0 && isFiltered ? (
         <EmptyState
           variant="inline"
           title={

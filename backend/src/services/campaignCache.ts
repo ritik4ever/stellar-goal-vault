@@ -1,7 +1,7 @@
 import { createClient, RedisClientType } from 'redis';
 import { LRUCache } from 'lru-cache';
 import { config } from '../config';
-import { logError, logInfo } from '../logger';
+import { logError } from '../logger';
 
 const CACHE_TTL_MS = 30000;
 const CACHE_TTL_SECONDS = 30;

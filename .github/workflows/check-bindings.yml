@@ -16,16 +16,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
 
       - name: Install dependencies
         run: npm ci
 
       - name: Install Stellar CLI
         run: |
-          curl -L https://github.com/stellar/js-stellar-sdk/releases/download/v14.0.0/stellar-cli-linux-x86_64.tar.gz -o stellar-cli.tar.gz
-          tar -xzf stellar-cli.tar.gz
-          chmod +x stellar
+          ./scripts/install-stellar-cli.sh
+          echo "$PWD/bin" >> "$GITHUB_PATH"
 
       - name: Regenerate bindings
         run: npm run gen:bindings

@@ -31,6 +31,8 @@ const mockCampaign = (id: string): Campaign => ({
   progress: {
     status: 'open',
     percentFunded: 10,
+    remainingAmount: 90,
+    pledgeCount: 1,
     hoursLeft: 24,
     canPledge: true,
     canClaim: false,

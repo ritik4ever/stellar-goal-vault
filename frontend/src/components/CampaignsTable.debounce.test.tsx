@@ -8,19 +8,22 @@ import { MemoryRouter } from 'react-router-dom';
 import { CampaignsTable } from './CampaignsTable';
 import type { Campaign } from '../types/campaign';
 
-// jsdom does not implement matchMedia
+// jsdom does not implement matchMedia. A plain function (not `vi.fn()`) is used
+// on purpose: vitest restores mock implementations between tests, which would
+// strip the body of a `vi.fn()` installed at module scope.
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
-  value: vi.fn().mockImplementation((query: string) => ({
+  configurable: true,
+  value: (query: string) => ({
     matches: false,
     media: query,
     onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })),
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }),
 });
 
 const STUB_CAMPAIGN: Campaign = {
@@ -37,6 +40,8 @@ const STUB_CAMPAIGN: Campaign = {
   progress: {
     status: 'open',
     percentFunded: 0,
+    remainingAmount: 1000,
+    pledgeCount: 0,
     hoursLeft: 24,
     canPledge: true,
     canClaim: false,

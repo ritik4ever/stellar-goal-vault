@@ -3,6 +3,7 @@ import {
   getIdempotencyCacheEntry,
   setIdempotencyCacheEntry,
   buildIdempotencyCacheKey,
+  createIdempotencyRequestFingerprint,
 } from '../services/idempotencyCache';
 import type { RequestWithApiKey } from './apiKeyAuth';
 
@@ -23,7 +24,10 @@ export function idempotencyMiddleware(
 
   const apiKey = (req as unknown as RequestWithApiKey).apiKey ?? 'anonymous';
   const campaignId = req.params.id as string;
-  const cacheKey = buildIdempotencyCacheKey(apiKey, campaignId, idempotencyKey);
+  // Bind the key to the request payload so two different operations that
+  // happen to share an Idempotency-Key do not replay each other's response.
+  const fingerprint = createIdempotencyRequestFingerprint(req.body);
+  const cacheKey = buildIdempotencyCacheKey(apiKey, campaignId, idempotencyKey, fingerprint);
 
   getIdempotencyCacheEntry(cacheKey).then(
     (cached) => {

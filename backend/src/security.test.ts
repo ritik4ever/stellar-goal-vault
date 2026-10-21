@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect, vi } from 'vitest';
 
 // Set environment before importing app
 process.env.DB_PATH = ':memory:';
@@ -7,7 +7,35 @@ process.env.NODE_ENV = 'test';
 process.env.CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 process.env.SOROBAN_RPC_URL = 'http://localhost:8000';
 
-import { app } from './index';
+// The app must be imported dynamically so the environment above is in place
+// before the module is evaluated (ES module imports are hoisted).
+type IndexModule = typeof import('./index');
+
+let app: IndexModule['app'];
+
+beforeAll(async () => {
+  ({ app } = await import('./index'));
+
+  // The health endpoints report degraded (503) unless the Soroban event
+  // indexer is healthy and the Soroban RPC answers. Neither is available in a
+  // unit-test environment, so stub both to keep the assertions about the
+  // health payload shape meaningful.
+  vi.spyOn(await import('./services/eventIndexer'), 'getIndexerStatus').mockReturnValue({
+    lastSuccessfulPollTime: Date.now(),
+    lastKnownLedger: 1,
+    isHealthy: true,
+    consecutiveFailures: 0,
+    lagMs: 0,
+    freshness: 'fresh',
+    staleLagMs: 300000,
+    freshLagMs: 30000,
+  });
+
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+    ok: true,
+    status: 200,
+  } as Response);
+});
 
 describe('Security Headers (Helmet)', () => {
   it('should set Content-Security-Policy header', async () => {

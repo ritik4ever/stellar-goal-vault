@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { LRUCache } from 'lru-cache';
 import { getCacheValue, setCacheValue, isCacheAvailable } from './cache';
 
@@ -20,8 +21,23 @@ export function buildIdempotencyCacheKey(
   apiKey: string,
   campaignId: string,
   idempotencyKey: string,
+  requestFingerprint: string,
 ): string {
-  return `idempotency:${apiKey}:${campaignId}:${idempotencyKey}`;
+  return `idempotency:${apiKey}:${campaignId}:${idempotencyKey}:${requestFingerprint}`;
+}
+
+/**
+ * Fingerprint of the request payload an idempotency key is bound to.
+ *
+ * Two requests that carry the same Idempotency-Key but different bodies are
+ * different logical operations (for example two different contributors
+ * pledging through an anonymous client), so they must not replay each
+ * other's cached response. Binding the key to a hash of the body keeps
+ * genuine retries - identical body - on the same cached response.
+ */
+export function createIdempotencyRequestFingerprint(body: unknown): string {
+  const serialized = JSON.stringify(body ?? null);
+  return createHash('sha256').update(serialized).digest('hex').slice(0, 32);
 }
 
 export async function getIdempotencyCacheEntry(key: string): Promise<IdempotencyCacheEntry | null> {

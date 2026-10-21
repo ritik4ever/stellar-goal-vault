@@ -35,7 +35,7 @@ describe('Event Metadata Support', () => {
       )
       .run(
         campaignId,
-        `G${'A'.repeat(55)}`,
+        'GBQRRH556UAOUNMCISIMEX2UPJQQ5MJ5NMHHY6TNCNCW52P5BWIVW6YT',
         `Campaign ${campaignId}`,
         'Synthetic campaign record for event metadata tests.',
         JSON.stringify(['USDC']),

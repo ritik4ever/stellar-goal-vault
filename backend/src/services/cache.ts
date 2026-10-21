@@ -56,7 +56,7 @@ export async function getCacheValue(key: string): Promise<string | null> {
 
   try {
     return await redisClient.get(key);
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -81,7 +81,7 @@ export async function setCacheValue(
       await redisClient.set(key, value);
     }
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -98,7 +98,7 @@ export async function deleteCacheValue(key: string): Promise<boolean> {
   try {
     const result = await redisClient.del(key);
     return result > 0;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -118,7 +118,7 @@ export async function clearCachePattern(pattern: string): Promise<number> {
       return 0;
     }
     return await redisClient.del(keys);
-  } catch (error) {
+  } catch {
     return 0;
   }
 }

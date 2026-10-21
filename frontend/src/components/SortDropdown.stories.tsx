@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
 import { SortDropdown, type SortOption } from './SortDropdown';
+import type { ComponentProps } from 'react';
 
 const meta: Meta<typeof SortDropdown> = {
   title: 'Components/SortDropdown',
@@ -30,7 +31,7 @@ export const Disabled: Story = {
 };
 
 export const Interactive: Story = {
-  render: (args: any) => {
+  render: (args: ComponentProps<typeof SortDropdown>) => {
     const [value, setValue] = useState<SortOption>('createdAt');
     return <SortDropdown {...args} value={value} onChange={setValue} />;
   },

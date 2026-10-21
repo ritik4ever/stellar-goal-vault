@@ -26,7 +26,8 @@ const mocks = vi.hoisted(() => {
       status: 'PENDING',
       hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     }),
-    getTransaction: vi.fn()
+    getTransaction: vi
+      .fn()
       .mockResolvedValueOnce({ status: 'NOT_FOUND' })
       .mockResolvedValueOnce({ status: 'SUCCESS', createdAt: Date.now() }),
   };
@@ -785,7 +786,9 @@ describe('Freighter Transaction Builder Integration Tests', () => {
     });
 
     it('propagates SIMULATION_PREPARE_FAILED', async () => {
-      mockServer.assembleTransaction.mockImplementation(() => { throw new Error('prepare failed'); });
+      mockServer.assembleTransaction.mockImplementation(() => {
+        throw new Error('prepare failed');
+      });
 
       await expect(
         submitFreighterPledge({

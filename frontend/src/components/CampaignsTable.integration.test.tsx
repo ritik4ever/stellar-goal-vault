@@ -15,10 +15,12 @@ describe('CampaignsTable Search Integration', () => {
       assetCode: 'USDC',
       targetAmount: 100000,
       pledgedAmount: 50000,
-      deadline: '2025-12-31',
+      deadline: 1767139200,
       progress: {
         status: 'open',
         percentFunded: 50,
+        remainingAmount: 50000,
+        pledgeCount: 1,
         hoursLeft: 240,
         canPledge: true,
         canClaim: false,
@@ -35,10 +37,12 @@ describe('CampaignsTable Search Integration', () => {
       assetCode: 'native',
       targetAmount: 50000,
       pledgedAmount: 30000,
-      deadline: '2025-11-30',
+      deadline: 1767139200,
       progress: {
         status: 'open',
         percentFunded: 60,
+        remainingAmount: 20000,
+        pledgeCount: 1,
         hoursLeft: 120,
         canPledge: true,
         canClaim: false,
@@ -55,10 +59,12 @@ describe('CampaignsTable Search Integration', () => {
       assetCode: 'USDC',
       targetAmount: 20000,
       pledgedAmount: 20000,
-      deadline: '2025-10-31',
+      deadline: 1761955200,
       progress: {
         status: 'funded',
         percentFunded: 100,
+        remainingAmount: 0,
+        pledgeCount: 2,
         hoursLeft: 0,
         canPledge: false,
         canClaim: true,
@@ -121,7 +127,6 @@ describe('CampaignsTable Search Integration', () => {
           onSelect={vi.fn()}
           isLoading={false}
           error={null}
-          error={null}
         />,
       );
 
@@ -147,7 +152,6 @@ describe('CampaignsTable Search Integration', () => {
           selectedCampaignId={null}
           onSelect={vi.fn()}
           isLoading={false}
-          error={null}
           error={null}
         />,
       );
@@ -439,12 +443,16 @@ describe('CampaignsTable Search Integration', () => {
         description: `Description ${i + 1}`,
         creator: `CREATOR${i}@stellar.org`,
         assetCode: i % 2 === 0 ? 'USDC' : 'native',
+        acceptedTokens: ['USDC'],
+        createdAt: Math.floor(Date.now() / 1000),
         targetAmount: 100000 * (i + 1),
         pledgedAmount: 50000 * (i + 1),
-        deadline: '2025-12-31',
+        deadline: 1767139200,
         progress: {
           status: 'open' as const,
           percentFunded: (i % 100) + 1,
+          remainingAmount: 50000 * (i + 1),
+          pledgeCount: 1,
           hoursLeft: 240,
           canPledge: true,
           canClaim: false,

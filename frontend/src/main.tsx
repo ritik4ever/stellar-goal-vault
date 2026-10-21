@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import './i18n/config';
 import './index.css';
 
 const App = lazy(() => import('./App'));
@@ -30,6 +31,7 @@ if ('serviceWorker' in navigator) {
       },
       onOfflineReady() {
         // SW installed and offline caching is active. Could show a toast here.
+        // eslint-disable-next-line no-console -- one-off startup notice
         console.info('[PWA] App is ready for offline use.');
       },
     });

@@ -23,7 +23,6 @@
  *  - No mocks — every assertion hits real SQLite behaviour.
  */
 
-import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -101,6 +100,22 @@ afterEach(() => {
 // 1. DB-LEVEL CONSTRAINT ENFORCEMENT
 // ===========================================================================
 
+/**
+ * Reads the `notnull` flag for a column straight from the table DDL. The
+ * pledges table additionally carries BEFORE INSERT integrity triggers, and
+ * those raise an actionable message before SQLite evaluates the NOT NULL
+ * constraint - so the DDL has to be inspected separately to prove the column
+ * is still declared NOT NULL.
+ */
+function columnIsNotNull(db: ReturnType<typeof getDb>, column: string): boolean {
+  const columns = db.prepare(`PRAGMA table_info(pledges)`).all() as Array<{
+    name: string;
+    notnull: number;
+  }>;
+  const found = columns.find((c) => c.name === column);
+  return found !== undefined && found.notnull === 1;
+}
+
 describe('pledges persistence — DB-level constraints (#876)', () => {
   /**
    * Failure mode missed by happy-path tests:
@@ -118,7 +133,10 @@ describe('pledges persistence — DB-level constraints (#876)', () => {
         `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at)
          VALUES (?, NULL, ?, ?, ?)`,
       ).run('c1', 100, 'XLM', now);
-    }).toThrow(/NOT NULL constraint failed: pledges\.contributor/i);
+    }).toThrow(
+      /pledges\.contributor must be non-empty|NOT NULL constraint failed: pledges\.contributor/i,
+    );
+    expect(columnIsNotNull(db, 'contributor')).toBe(true);
   });
 
   it('rejects a pledge with NULL amount (NOT NULL constraint)', () => {
@@ -131,7 +149,8 @@ describe('pledges persistence — DB-level constraints (#876)', () => {
         `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at)
          VALUES (?, ?, NULL, ?, ?)`,
       ).run('c1', 'GCONTRIB', 'XLM', now);
-    }).toThrow(/NOT NULL constraint failed: pledges\.amount/i);
+    }).toThrow(/pledges\.amount must be > 0|NOT NULL constraint failed: pledges\.amount/i);
+    expect(columnIsNotNull(db, 'amount')).toBe(true);
   });
 
   it('rejects a pledge with NULL asset_code (NOT NULL constraint)', () => {
@@ -144,7 +163,10 @@ describe('pledges persistence — DB-level constraints (#876)', () => {
         `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at)
          VALUES (?, ?, ?, NULL, ?)`,
       ).run('c1', 'GCONTRIB', 100, now);
-    }).toThrow(/NOT NULL constraint failed: pledges\.asset_code/i);
+    }).toThrow(
+      /pledges\.asset_code must be non-empty|NOT NULL constraint failed: pledges\.asset_code/i,
+    );
+    expect(columnIsNotNull(db, 'asset_code')).toBe(true);
   });
 
   it('rejects a pledge with NULL created_at (NOT NULL constraint)', () => {
@@ -156,7 +178,8 @@ describe('pledges persistence — DB-level constraints (#876)', () => {
         `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at)
          VALUES (?, ?, ?, ?, NULL)`,
       ).run('c1', 'GCONTRIB', 100, 'XLM');
-    }).toThrow(/NOT NULL constraint failed: pledges\.created_at/i);
+    }).toThrow(/pledges\.created_at must be > 0|NOT NULL constraint failed: pledges\.created_at/i);
+    expect(columnIsNotNull(db, 'created_at')).toBe(true);
   });
 
   /**

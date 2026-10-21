@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 
 // Set env before importing app so body parser limits and test DB are applied
 process.env.DB_PATH = ':memory:';
@@ -9,11 +9,20 @@ process.env.SOROBAN_RPC_URL = 'http://localhost:8000';
 // Make the JSON body limit small so we can trigger the 413 path reliably
 process.env.MAX_BODY_SIZE = '1kb';
 
-import { app } from './index';
+// The app must be imported dynamically: ES module imports are hoisted above the
+// process.env assignments above, so a static import would build the app with
+// the default body limit and never reach the 413 path.
+type IndexModule = typeof import('./index');
+
+let app: IndexModule['app'];
+
+beforeAll(async () => {
+  ({ app } = await import('./index'));
+});
 
 function validCampaignPayload(overrides = {}) {
   return {
-    creator: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    creator: 'GBQRRH556UAOUNMCISIMEX2UPJQQ5MJ5NMHHY6TNCNCW52P5BWIVW6YT',
     title: 'A valid campaign title',
     description: 'A reasonably long description that satisfies the minimum length requirement.',
     acceptedTokens: ['USDC'],
@@ -80,6 +89,8 @@ describe('Security regression — request input handling', () => {
     expect(res.status).toBe(413);
     expect(res.body).toHaveProperty('error');
     expect(res.body.error).toHaveProperty('code', 'PAYLOAD_TOO_LARGE');
+  });
+
   it('returns 400 for malformed JSON input', async () => {
     const raw = '{"title": "test", '; // Unterminated JSON
 

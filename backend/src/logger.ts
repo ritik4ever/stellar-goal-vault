@@ -23,7 +23,7 @@ function redactUrlCredentials(value: string): string {
   // redis://:password@host / postgres://user:pass@host → keep structure, drop secrets
   return value.replace(
     /^([a-z][a-z0-9+.-]*:\/\/)([^/@]*?)(:[^@]*)?@/i,
-    (_m, scheme: string, user: string, _pass?: string) => {
+    (_m, scheme: string, user: string) => {
       if (user === '' || user === ':') {
         return `${scheme}:***@`;
       }
@@ -197,7 +197,7 @@ export const logger = pino({
       'address',
       'creator',
     ],
-    censor: (value: any, path: string[]) => {
+    censor: (value: unknown, path: string[]) => {
       if (
         typeof value === 'string' &&
         (path.includes('address') || path.includes('creator')) &&
@@ -216,6 +216,9 @@ export const logger = pino({
 });
 
 export function logInfo(event: string, fields: LogFields, _configuredLevel?: LogLevel): void {
+  // The configured level is already enforced by the logger instance itself, so the
+  // parameter is accepted for call-site compatibility but intentionally not used.
+  void _configuredLevel;
   const safeFields = redactSensitive(fields) as LogFields;
   logger.info({ event, ...safeFields });
 }
@@ -232,6 +235,9 @@ export function logError(
   },
   _configuredLevel?: LogLevel,
 ): void {
+  // The configured level is already enforced by the logger instance itself, so the
+  // parameter is accepted for call-site compatibility but intentionally not used.
+  void _configuredLevel;
   const normalizedError =
     error instanceof Error ? error : new Error(typeof error === 'string' ? error : 'Unknown error');
 
@@ -264,6 +270,9 @@ export function logRequest(
   },
   _configuredLevel?: LogLevel,
 ): void {
+  // The configured level is already enforced by the logger instance itself, so the
+  // parameter is accepted for call-site compatibility but intentionally not used.
+  void _configuredLevel;
   const durationMs = Number(request.durationMs.toFixed(2));
 
   // Always emit http_request at info level so operators can filter by event name
@@ -291,6 +300,9 @@ export function logLine(
   fields: LogFields,
   _configuredLevel?: LogLevel,
 ): void {
+  // The configured level is already enforced by the logger instance itself, so the
+  // parameter is accepted for call-site compatibility but intentionally not used.
+  void _configuredLevel;
   const safeFields = redactSensitive(fields) as LogFields;
   if (level === 'debug') {
     logger.debug({ event, ...safeFields });

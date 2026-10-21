@@ -16,7 +16,87 @@ import {
   BASE_FEE,
   Address,
   nativeToScVal,
+  scValToNative,
+  xdr,
 } from '@stellar/stellar-sdk';
+
+/**
+ * Soroban `ScVal` accessors.
+ *
+ * Since stellar-sdk v17 `ScVal` is a discriminated union of variant classes
+ * (`ScValU64`, `ScValI128`, ...) that expose their payload as a readonly
+ * property instead of the accessor methods used by older releases. These
+ * helpers narrow the union and fail loudly when the contract returns an
+ * unexpected type.
+ *
+ * v17 exposes `ScVal` from the `xdr` module; `rpc.Api` no longer re-exports it.
+ */
+type ScVal = xdr.ScVal;
+
+function unexpectedScVal(context: string, expected: string, actual: ScVal): Error {
+  return new Error(`Expected ${expected} for ${context}, received ${actual.type}`);
+}
+
+function scValU64(value: ScVal, context: string): bigint {
+  if (value.type !== 'scvU64') {
+    throw unexpectedScVal(context, 'scvU64', value);
+  }
+  return scValToNative(value) as bigint;
+}
+
+function scValI128(value: ScVal, context: string): bigint {
+  if (value.type !== 'scvI128') {
+    throw unexpectedScVal(context, 'scvI128', value);
+  }
+  return scValToNative(value) as bigint;
+}
+
+function scValU32(value: ScVal, context: string): number {
+  if (value.type !== 'scvU32') {
+    throw unexpectedScVal(context, 'scvU32', value);
+  }
+  return Number(value.u32);
+}
+
+function scValString(value: ScVal, context: string): string {
+  if (value.type !== 'scvString') {
+    throw unexpectedScVal(context, 'scvString', value);
+  }
+  return String(scValToNative(value));
+}
+
+function scValBool(value: ScVal, context: string): boolean {
+  if (value.type !== 'scvBool') {
+    throw unexpectedScVal(context, 'scvBool', value);
+  }
+  // stellar-sdk v17 exposes the boolean payload as `b`.
+  return Boolean(value.b);
+}
+
+function scValAddress(value: ScVal, context: string): string {
+  if (value.type !== 'scvAddress') {
+    throw unexpectedScVal(context, 'scvAddress', value);
+  }
+  return Address.fromScAddress(value.address).toString();
+}
+
+function scValAddressVec(value: ScVal, context: string): string[] {
+  if (value.type !== 'scvVec') {
+    throw unexpectedScVal(context, 'scvVec', value);
+  }
+  return (value.vec ?? []).map((entry) => scValAddress(entry, context));
+}
+
+/**
+ * Reads a map key. Soroban encodes struct field names as `scvString`, but
+ * some contract versions use `scvSymbol`, so both are accepted.
+ */
+function scValKey(value: ScVal, context: string): string {
+  if (value.type === 'scvString' || value.type === 'scvSymbol') {
+    return String(scValToNative(value));
+  }
+  throw unexpectedScVal(context, 'scvString or scvSymbol', value);
+}
 
 export const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID || '';
 export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || 'https://soroban-testnet.stellar.org';
@@ -118,7 +198,7 @@ export class GoalVaultContract {
       throw new Error('No result returned from get_campaign_count');
     }
 
-    return BigInt(result.u64().toString());
+    return scValU64(result, 'get_campaign_count');
   }
 
   /**
@@ -191,7 +271,7 @@ export class GoalVaultContract {
       throw new Error('No result returned from get_contribution');
     }
 
-    return BigInt(result.i128().toString());
+    return scValI128(result, 'get_contribution');
   }
 
   /**
@@ -230,7 +310,7 @@ export class GoalVaultContract {
       throw new Error('No result returned from get_campaign_token_balance');
     }
 
-    return BigInt(result.i128().toString());
+    return scValI128(result, 'get_campaign_token_balance');
   }
 
   /**
@@ -264,7 +344,7 @@ export class GoalVaultContract {
       throw new Error('No result returned from get_contributor_count');
     }
 
-    return Number(result.u32());
+    return scValU32(result, 'get_contributor_count');
   }
 
   /**
@@ -293,7 +373,7 @@ export class GoalVaultContract {
       throw new Error('No result returned from get_next_campaign_id');
     }
 
-    return BigInt(result.u64().toString());
+    return scValU64(result, 'get_next_campaign_id');
   }
 
   /**
@@ -322,54 +402,56 @@ export class GoalVaultContract {
       throw new Error('No result returned from get_version');
     }
 
-    return result.str().toString();
+    return scValString(result, 'get_version');
   }
 }
 
 /**
  * Helper function to parse a Campaign struct from ScVal
  */
-function parseCampaignFromScVal(val: any): Campaign {
-  const fields = val.map();
-  if (!fields || fields.length === 0) {
+function parseCampaignFromScVal(val: ScVal): Campaign {
+  if (val.type !== 'scvMap') {
+    throw new Error('Invalid campaign structure');
+  }
+
+  const fields = val.map ?? [];
+  if (fields.length === 0) {
     throw new Error('Invalid campaign structure');
   }
 
   // Parse map entries (Soroban structs are represented as maps)
-  const campaign: any = {};
+  const campaign: Partial<Campaign> = {};
   for (const field of fields) {
-    const key = field.key().sym().toString();
-    const fieldVal = field.val();
+    const key = scValKey(field.key, 'campaign field key');
+    const fieldVal = field.val;
 
     switch (key) {
       case 'creator':
-        campaign.creator = fieldVal.address().accountId().toString();
+        campaign.creator = scValAddress(fieldVal, 'campaign.creator');
         break;
       case 'target_amount':
-        campaign.target_amount = BigInt(fieldVal.i128().toString());
+        campaign.target_amount = scValI128(fieldVal, 'campaign.target_amount');
         break;
       case 'pledged_amount':
-        campaign.pledged_amount = BigInt(fieldVal.i128().toString());
+        campaign.pledged_amount = scValI128(fieldVal, 'campaign.pledged_amount');
         break;
       case 'deadline':
-        campaign.deadline = fieldVal.u64().toNumber();
+        campaign.deadline = Number(scValU64(fieldVal, 'campaign.deadline'));
         break;
       case 'claimed':
-        campaign.claimed = fieldVal.bool();
+        campaign.claimed = scValBool(fieldVal, 'campaign.claimed');
         break;
       case 'canceled':
-        campaign.canceled = fieldVal.bool();
+        campaign.canceled = scValBool(fieldVal, 'campaign.canceled');
         break;
       case 'metadata':
-        campaign.metadata = fieldVal.str().toString();
+        campaign.metadata = scValString(fieldVal, 'campaign.metadata');
         break;
       case 'contributor_count':
-        campaign.contributor_count = fieldVal.u32().toNumber();
+        campaign.contributor_count = scValU32(fieldVal, 'campaign.contributor_count');
         break;
       case 'accepted_tokens':
-        campaign.accepted_tokens = fieldVal
-          .vec()
-          .map((token: any) => token.address().accountId().toString());
+        campaign.accepted_tokens = scValAddressVec(fieldVal, 'campaign.accepted_tokens');
         break;
     }
   }

@@ -19,7 +19,7 @@ import { verifyRefundTransaction } from './services/sorobanRpc';
 // Obviously fake values shaped like a Stellar secret seed and an XDR envelope.
 const FAKE_SECRET = `S${'A'.repeat(55)}`;
 const FAKE_XDR = `AAAA${'B'.repeat(120)}==`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
+const CONTRIBUTOR = 'GANQEYT3WHNUF6WOV3KQOQGAUBTX73MTG6HDGGPBRIML6BULYVBYRLRU';
 
 function refundBody() {
   return {

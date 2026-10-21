@@ -1,63 +1,62 @@
 import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import type { Pledge } from '../types/campaign';
+import { describe, expect, it, vi } from 'vitest';
+import type { ContributorSummary as ContributorSummaryRow } from '../types/campaign';
 import { ContributorSummary } from './ContributorSummary';
 import { runAxeAudit, THEMES, type ThemeMode } from '../test/a11yTestUtils';
 
-const samplePledges: Pledge[] = [
+// The component fetches its own contributor rows from
+// GET /campaigns/:id/contributors, so the API is mocked instead of passing
+// pledges in as a prop.
+const mockApi = vi.hoisted(() => ({ rows: [] as ContributorSummaryRow[] }));
+
+vi.mock('../services/httpClient', () => ({
+  apiRequest: vi.fn(async () => ({ data: mockApi.rows })),
+}));
+
+const sampleContributors: ContributorSummaryRow[] = [
   {
-    id: 1,
-    campaignId: '1',
     contributor: 'GABCD1234567890123456789012345678901234567890',
-    amount: 25,
-    assetCode: 'USDC',
-    createdAt: Math.floor(Date.now() / 1000),
+    totalPledged: 25,
+    refundedAmount: 0,
+    isFullyRefunded: false,
   },
   {
-    id: 2,
-    campaignId: '1',
     contributor: 'GEFGH1234567890123456789012345678901234567890',
-    amount: 10,
-    assetCode: 'USDC',
-    createdAt: Math.floor(Date.now() / 1000),
-    refundedAt: Math.floor(Date.now() / 1000),
+    totalPledged: 10,
+    refundedAmount: 10,
+    isFullyRefunded: true,
   },
 ];
 
-const pendingPledges: Pledge[] = [
+const partiallyRefundedContributors: ContributorSummaryRow[] = [
   {
-    id: -1,
-    campaignId: '1',
     contributor: 'GHIJK1234567890123456789012345678901234567890',
-    amount: 15,
-    assetCode: 'USDC',
-    createdAt: Math.floor(Date.now() / 1000),
+    totalPledged: 15,
+    refundedAmount: 5,
+    isFullyRefunded: false,
   },
 ];
 
 describe.each(THEMES)('ContributorSummary Accessibility (%s theme)', (theme: ThemeMode) => {
   it('has no accessibility violations with contributor data', async () => {
-    const { container } = render(
-      <ContributorSummary pledges={samplePledges} assetCode="USDC" campaignId="1" />,
-    );
+    mockApi.rows = sampleContributors;
+    const { container } = render(<ContributorSummary assetCode="USDC" campaignId="1" />);
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
   });
 
   it('has no accessibility violations in empty state', async () => {
-    const { container } = render(
-      <ContributorSummary pledges={[]} assetCode="USDC" campaignId="1" />,
-    );
+    mockApi.rows = [];
+    const { container } = render(<ContributorSummary assetCode="USDC" campaignId="1" />);
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
   });
 
   it('has no accessibility violations with pending pledge badge', async () => {
-    const { container } = render(
-      <ContributorSummary pledges={pendingPledges} assetCode="USDC" campaignId="1" />,
-    );
+    mockApi.rows = partiallyRefundedContributors;
+    const { container } = render(<ContributorSummary assetCode="USDC" campaignId="1" />);
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();

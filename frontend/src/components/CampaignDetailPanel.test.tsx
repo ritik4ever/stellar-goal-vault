@@ -5,8 +5,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { CampaignDetailPanel } from './CampaignDetailPanel';
 import { AppConfig, Campaign } from '../types/campaign';
-
-// Mock the ContributorSummary since it makes API calls
 vi.mock('./ContributorSummary', () => ({
   ContributorSummary: () => <div data-testid="contributor-summary-mock" />,
 }));
@@ -118,7 +116,7 @@ describe('CampaignDetailPanel', () => {
     expect(screen.getByRole('region', { name: 'Test Campaign' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Wallet status' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Campaign summary' })).toBeInTheDocument();
-    expect(screen.getByRole('form', { name: 'Pledge campaign' })).toBeInTheDocument();
+    expect(screen.getByRole('form', { name: 'Pledge form' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Refund contributor' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Campaign actions' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect Wallet' })).toHaveAccessibleName(
@@ -173,16 +171,12 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     campaignOverrides: Partial<Campaign> = {},
     extraProps: {
       onPledge?: (id: string, amount: number, assetCode: string) => Promise<void>;
-      isPledgePending?: boolean;
+      transactionState?: import('../lib/transactionStatus').TransactionState;
       connectedWallet?: string | null;
     } = {},
   ) {
     const campaign: Campaign = { ...mockCampaign, ...campaignOverrides };
-    const {
-      onPledge,
-      isPledgePending = false,
-      connectedWallet: wallet = connectedWallet,
-    } = extraProps;
+    const { onPledge, transactionState, connectedWallet: wallet = connectedWallet } = extraProps;
     return render(
       <BrowserRouter>
         <CampaignDetailPanel
@@ -190,7 +184,7 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
           appConfig={mockConfig}
           isLoading={false}
           connectedWallet={wallet}
-          isPledgePending={isPledgePending}
+          transactionState={transactionState}
           onPledge={onPledge}
         />
       </BrowserRouter>,
@@ -217,7 +211,7 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     );
     const region = screen.getByRole('region');
     expect(region).toHaveAttribute('aria-busy', 'true');
-    expect(screen.queryByRole('button', { name: /add pledge/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /pledge/i })).not.toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------
@@ -272,9 +266,11 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     const onPledge = vi.fn().mockResolvedValue(undefined);
     renderWithCampaign({}, { onPledge });
 
-    await user.click(screen.getByRole('button', { name: /add pledge/i }));
+    await user.click(screen.getByRole('button', { name: /pledge/i }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/pledge submitted successfully/i);
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      /pledge was submitted successfully/i,
+    );
   });
 
   it('auto-dismisses the success message after 4 seconds', async () => {
@@ -284,7 +280,7 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     const onPledge = vi.fn().mockResolvedValue(undefined);
     renderWithCampaign({}, { onPledge });
 
-    await user.click(screen.getByRole('button', { name: /add pledge/i }));
+    await user.click(screen.getByRole('button', { name: /pledge/i }));
     expect(await screen.findByRole('status')).toBeInTheDocument();
 
     await act(async () => {
@@ -304,7 +300,7 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     await user.type(amountInput, '99');
     expect(amountInput).toHaveValue(99);
 
-    await user.click(screen.getByRole('button', { name: /add pledge/i }));
+    await user.click(screen.getByRole('button', { name: /pledge/i }));
 
     await waitFor(() => expect(amountInput).toHaveValue(25));
   });
@@ -317,11 +313,11 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     });
     renderWithCampaign({}, { onPledge });
 
-    await user.click(screen.getByRole('button', { name: /add pledge/i }));
+    await user.click(screen.getByRole('button', { name: /pledge/i }));
     expect(await screen.findByRole('status')).toBeInTheDocument();
 
     rejectNext = true;
-    await user.click(screen.getByRole('button', { name: /add pledge/i }));
+    await user.click(screen.getByRole('button', { name: /pledge/i }));
 
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
     expect(screen.getByRole('alert')).toBeInTheDocument();
@@ -336,7 +332,7 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     const onPledge = vi.fn().mockRejectedValue(new Error('Insufficient balance'));
     renderWithCampaign({}, { onPledge });
 
-    await user.click(screen.getByRole('button', { name: /add pledge/i }));
+    await user.click(screen.getByRole('button', { name: /pledge/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/insufficient balance/i);
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
@@ -350,7 +346,7 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
       .mockResolvedValueOnce(undefined);
     renderWithCampaign({}, { onPledge });
 
-    await user.click(screen.getByRole('button', { name: /add pledge/i }));
+    await user.click(screen.getByRole('button', { name: /pledge/i }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /retry/i }));
@@ -365,7 +361,7 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     const onPledge = vi.fn().mockRejectedValue(feeError);
     renderWithCampaign({}, { onPledge });
 
-    await user.click(screen.getByRole('button', { name: /add pledge/i }));
+    await user.click(screen.getByRole('button', { name: /pledge/i }));
 
     expect(await screen.findByText(/could not estimate fee/i)).toBeInTheDocument();
   });
@@ -386,7 +382,7 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     renderWithCampaign({}, { onPledge });
 
     const amountInput = screen.getByRole('spinbutton');
-    await user.click(screen.getByRole('button', { name: /add pledge/i }));
+    await user.click(screen.getByRole('button', { name: /pledge/i }));
 
     expect(amountInput).toBeDisabled();
 
@@ -405,38 +401,71 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     );
     renderWithCampaign({}, { onPledge });
 
-    const submitBtn = screen.getByRole('button', { name: /add pledge/i });
+    const submitBtn = screen.getByRole('button', { name: /pledge/i });
     await user.click(submitBtn);
 
     expect(submitBtn).toHaveTextContent('Submitting...');
     expect(submitBtn).toBeDisabled();
 
     resolveOnPledge();
-    await waitFor(() => expect(submitBtn).toHaveTextContent('Add pledge'));
+    await waitFor(() => expect(submitBtn).toHaveTextContent('Pledge'));
   });
 
   // -------------------------------------------------------------------------
   // isPledgePending state (external in-flight flag from App.tsx)
   // -------------------------------------------------------------------------
 
-  it('shows pending note when isPledgePending is true', () => {
-    renderWithCampaign({}, { isPledgePending: true });
-    expect(screen.getByText(/pledge transaction is in flight/i)).toBeInTheDocument();
+  it('shows pending note when transaction is pending', () => {
+    const pendingState: import('../lib/transactionStatus').TransactionState = {
+      status: 'pending',
+      campaignId: '1',
+      actionType: 'pledge',
+      retryCount: 0,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    renderWithCampaign({}, { transactionState: pendingState });
+    // Matches: status label, button text, and status message
+    expect(screen.getAllByText(/submitting/i)).toHaveLength(3);
   });
 
-  it('disables the pledge amount input when isPledgePending is true', () => {
-    renderWithCampaign({}, { isPledgePending: true });
+  it('disables the pledge amount input when transaction is pending', () => {
+    const pendingState: import('../lib/transactionStatus').TransactionState = {
+      status: 'pending',
+      campaignId: '1',
+      actionType: 'pledge',
+      retryCount: 0,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    renderWithCampaign({}, { transactionState: pendingState });
     expect(screen.getByRole('spinbutton')).toBeDisabled();
   });
 
-  it('pledge form has aria-busy when isPledgePending is true', () => {
-    renderWithCampaign({}, { isPledgePending: true });
+  it('pledge form has aria-busy when transaction is pending', () => {
+    const pendingState: import('../lib/transactionStatus').TransactionState = {
+      status: 'pending',
+      campaignId: '1',
+      actionType: 'pledge',
+      retryCount: 0,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    renderWithCampaign({}, { transactionState: pendingState });
     const form = screen.getByRole('spinbutton').closest('form');
     expect(form).toHaveAttribute('aria-busy', 'true');
   });
 
-  it('submit button is disabled and shows Submitting... when isPledgePending is true', () => {
-    renderWithCampaign({}, { isPledgePending: true });
+  it('submit button is disabled and shows Submitting... when transaction is pending', () => {
+    const pendingState: import('../lib/transactionStatus').TransactionState = {
+      status: 'pending',
+      campaignId: '1',
+      actionType: 'pledge',
+      retryCount: 0,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    renderWithCampaign({}, { transactionState: pendingState });
     // disabled buttons are excluded from the accessibility tree by default;
     // use getAllByRole with hidden:true to find it
     const buttons = screen.getAllByRole('button', { hidden: true });

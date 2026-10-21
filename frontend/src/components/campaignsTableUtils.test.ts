@@ -10,6 +10,7 @@ const mockCampaigns: Campaign[] = [
     title: 'Build a Rocket Ship',
     description: 'We need funding to build an amazing rocket ship',
     assetCode: 'USDC',
+    acceptedTokens: ['USDC'],
     targetAmount: 10000,
     pledgedAmount: 5000,
     deadline: 1710086400,
@@ -31,6 +32,7 @@ const mockCampaigns: Campaign[] = [
     title: 'Community Garden Initiative',
     description: 'Create a sustainable community garden',
     assetCode: 'XLM',
+    acceptedTokens: ['XLM'],
     targetAmount: 5000,
     pledgedAmount: 2500,
     deadline: 1710172800,
@@ -49,9 +51,10 @@ const mockCampaigns: Campaign[] = [
   {
     id: '3',
     creator: 'GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
-    title: 'Educational Platform',
+    title: 'Build an online learning platform',
     description: 'Build an online learning platform',
     assetCode: 'USDC',
+    acceptedTokens: ['USDC'],
     targetAmount: 20000,
     pledgedAmount: 15000,
     deadline: 1710259200,
@@ -220,6 +223,7 @@ describe('sortCampaigns', () => {
       title: 'Campaign A',
       description: 'First campaign',
       assetCode: 'USDC',
+      acceptedTokens: ['USDC'],
       targetAmount: 10000,
       pledgedAmount: 5000,
       deadline: 1710086400,
@@ -241,6 +245,7 @@ describe('sortCampaigns', () => {
       title: 'Campaign B',
       description: 'Second campaign',
       assetCode: 'XLM',
+      acceptedTokens: ['XLM'],
       targetAmount: 5000,
       pledgedAmount: 2500,
       deadline: 1710172800,
@@ -262,6 +267,7 @@ describe('sortCampaigns', () => {
       title: 'Campaign C',
       description: 'Third campaign',
       assetCode: 'USDC',
+      acceptedTokens: ['USDC'],
       targetAmount: 20000,
       pledgedAmount: 15000,
       deadline: 1710259200,
@@ -279,9 +285,9 @@ describe('sortCampaigns', () => {
     },
   ];
 
-  describe('Sort by newest', () => {
+  describe('Sort by createdAt', () => {
     it('should sort campaigns by createdAt descending (newest first)', () => {
-      const sorted = sortCampaigns(mockCampaigns, 'newest');
+      const sorted = sortCampaigns(mockCampaigns, 'createdAt');
       expect(sorted[0].id).toBe('3'); // createdAt: 1710000200
       expect(sorted[1].id).toBe('2'); // createdAt: 1710000100
       expect(sorted[2].id).toBe('1'); // createdAt: 1710000000
@@ -289,7 +295,7 @@ describe('sortCampaigns', () => {
 
     it('should not mutate the original array', () => {
       const original = [...mockCampaigns];
-      sortCampaigns(mockCampaigns, 'newest');
+      sortCampaigns(mockCampaigns, 'createdAt');
       expect(mockCampaigns).toEqual(original);
     });
   });
@@ -303,27 +309,32 @@ describe('sortCampaigns', () => {
     });
   });
 
-  describe('Sort by percentFunded', () => {
-    it('should sort campaigns by percentFunded descending (highest first)', () => {
-      const sorted = sortCampaigns(mockCampaigns, 'percentFunded');
-      expect(sorted[0].id).toBe('3'); // percentFunded: 75
-      expect(sorted[1].id).toBe('1'); // percentFunded: 50
-      expect(sorted[2].id).toBe('2'); // percentFunded: 50
+  describe('Sort by targetAmount', () => {
+    it('should sort campaigns by targetAmount descending (largest first)', () => {
+      const sorted = sortCampaigns(mockCampaigns, 'targetAmount');
+      expect(sorted[0].id).toBe('3'); // targetAmount: 20000
+      expect(sorted[1].id).toBe('1'); // targetAmount: 10000
+      expect(sorted[2].id).toBe('2'); // targetAmount: 5000
     });
 
-    it('should maintain stable sort for equal percentFunded values', () => {
-      const sorted = sortCampaigns(mockCampaigns, 'percentFunded');
-      // Campaigns 1 and 2 both have 50% funded
-      // They should maintain their original relative order
-      const campaign1Index = sorted.findIndex((c) => c.id === '1');
-      const campaign2Index = sorted.findIndex((c) => c.id === '2');
-      expect(campaign1Index).toBeLessThan(campaign2Index);
+    it('should maintain stable sort for equal targetAmount values', () => {
+      const equalTarget: Campaign[] = [
+        { ...mockCampaigns[0], id: 'A', targetAmount: 1000 },
+        { ...mockCampaigns[1], id: 'B', targetAmount: 1000 },
+        { ...mockCampaigns[2], id: 'C', targetAmount: 1000 },
+      ];
+
+      const sorted = sortCampaigns(equalTarget, 'targetAmount');
+      // All have the same targetAmount, so order should be preserved
+      expect(sorted[0].id).toBe('A');
+      expect(sorted[1].id).toBe('B');
+      expect(sorted[2].id).toBe('C');
     });
   });
 
-  describe('Sort by totalPledged', () => {
+  describe('Sort by pledgedAmount', () => {
     it('should sort campaigns by pledgedAmount descending (largest first)', () => {
-      const sorted = sortCampaigns(mockCampaigns, 'totalPledged');
+      const sorted = sortCampaigns(mockCampaigns, 'pledgedAmount');
       expect(sorted[0].id).toBe('3'); // pledgedAmount: 15000
       expect(sorted[1].id).toBe('1'); // pledgedAmount: 5000
       expect(sorted[2].id).toBe('2'); // pledgedAmount: 2500
@@ -332,24 +343,24 @@ describe('sortCampaigns', () => {
 
   describe('Edge cases', () => {
     it('should handle empty campaign array', () => {
-      const sorted = sortCampaigns([], 'newest');
+      const sorted = sortCampaigns([], 'createdAt');
       expect(sorted).toHaveLength(0);
     });
 
     it('should handle single campaign', () => {
       const singleCampaign = [mockCampaigns[0]];
-      const sorted = sortCampaigns(singleCampaign, 'newest');
+      const sorted = sortCampaigns(singleCampaign, 'createdAt');
       expect(sorted).toHaveLength(1);
       expect(sorted[0].id).toBe('1');
     });
 
     it('should return a new array instance', () => {
-      const sorted = sortCampaigns(mockCampaigns, 'newest');
+      const sorted = sortCampaigns(mockCampaigns, 'createdAt');
       expect(sorted).not.toBe(mockCampaigns);
     });
 
     it('should preserve all campaign properties', () => {
-      const sorted = sortCampaigns(mockCampaigns, 'newest');
+      const sorted = sortCampaigns(mockCampaigns, 'createdAt');
       sorted.forEach((campaign) => {
         const original = mockCampaigns.find((c) => c.id === campaign.id);
         expect(campaign).toEqual(original);
@@ -366,7 +377,7 @@ describe('sortCampaigns', () => {
         { ...mockCampaigns[2], id: 'C', createdAt: 1000 },
       ];
 
-      const sorted = sortCampaigns(equalCreatedAt, 'newest');
+      const sorted = sortCampaigns(equalCreatedAt, 'createdAt');
       // All have same createdAt, so order should be preserved
       expect(sorted[0].id).toBe('A');
       expect(sorted[1].id).toBe('B');

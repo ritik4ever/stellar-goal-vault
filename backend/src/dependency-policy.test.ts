@@ -522,7 +522,11 @@ describe('Dependency policy — CI audit level cannot be weakened to moderate', 
     // Extract the block for the dedicated audit step (not the supply-chain step)
     const stepStart = raw.indexOf('Audit backend dependencies');
     expect(stepStart, '"Audit backend dependencies" step not found in ci.yml').toBeGreaterThan(-1);
-    const stepBlock = raw.slice(stepStart, stepStart + 300);
+    // Bound the block at the next workflow step: a fixed-size window would
+    // spill into "Upload backend audit report", which legitimately uses
+    // --audit-level=none to collect a report without failing the build.
+    const nextStep = raw.indexOf('\n      - name:', stepStart);
+    const stepBlock = raw.slice(stepStart, nextStep === -1 ? stepStart + 300 : nextStep);
     expect(stepBlock).toMatch(/--audit-level[=\s]+(?:high|critical)/);
     expect(stepBlock).not.toMatch(/--audit-level[=\s]+(?:none|low|moderate)/);
   });

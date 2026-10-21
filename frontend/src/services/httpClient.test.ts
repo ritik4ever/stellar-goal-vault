@@ -1,5 +1,5 @@
 import { AxiosHeaders } from 'axios';
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { REQUEST_ID_HEADER, apiClient, apiRequest } from './httpClient';
 

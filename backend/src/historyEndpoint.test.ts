@@ -20,7 +20,7 @@ let initCampaignStore: (typeof import('./services/campaignStore'))['initCampaign
 let recordEvent: (typeof import('./services/eventHistory'))['recordEvent'];
 let getDb: (typeof import('./services/db'))['getDb'];
 
-const CREATOR = `G${'A'.repeat(55)}`;
+const CREATOR = 'GBQRRH556UAOUNMCISIMEX2UPJQQ5MJ5NMHHY6TNCNCW52P5BWIVW6YT';
 
 function nowInSeconds(): number {
   return Math.floor(Date.now() / 1000);

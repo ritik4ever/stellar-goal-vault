@@ -13,10 +13,12 @@ const mockCampaigns: Campaign[] = [
     assetCode: 'USDC',
     targetAmount: 100000,
     pledgedAmount: 50000,
-    deadline: '2025-12-31',
+    deadline: 1767139200,
     progress: {
       status: 'open',
       percentFunded: 50,
+      remainingAmount: 50000,
+      pledgeCount: 2,
       hoursLeft: 240,
       canPledge: true,
       canClaim: false,
@@ -285,16 +287,18 @@ describe('CampaignsTable Error Handling', () => {
 
     it('should handle technical error messages gracefully', () => {
       render(
-        <CampaignsTable
-          campaigns={[]}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-          error={{
-            message: 'HTTP 500 Internal Server Error',
-            isRecoverable: true,
-          }}
-        />,
+        <MemoryRouter>
+          <CampaignsTable
+            campaigns={[]}
+            selectedCampaignId={null}
+            onSelect={vi.fn()}
+            isLoading={false}
+            error={{
+              message: 'HTTP 500 Internal Server Error',
+              isRecoverable: true,
+            }}
+          />
+        </MemoryRouter>,
       );
 
       // Should display the error message as-is (could be improved with translation)

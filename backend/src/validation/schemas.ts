@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { config } from '../config';
 import type { CampaignStatus, CampaignSortField, SortOrder } from '../services/campaignStore';
 import { httpsOnlyUrlSchema } from './urlSafety';
+import { isValidStellarPublicKey } from './stellarAddress';
 
 extendZodWithOpenApi(z);
 
@@ -20,39 +21,71 @@ export const TX_HASH_REGEX = /^[A-Fa-f0-9]{64}$/;
  * Schema for campaign images supporting both HTTPS URLs and base64 data URLs.
  * Base64 data URLs must be JPG or PNG format and under 2MB when decoded.
  */
+const MAX_IMAGE_DATA_URL_BYTES = 2 * 1024 * 1024;
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff]);
+const STRICT_BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
 export const imageUrlSchema = z
   .string()
   .trim()
-  .refine(
-    (value) => {
-      if (value.startsWith('data:')) {
-        // Validate base64 data URL
-        const dataUrlMatch = value.match(/^data:image\/(jpeg|png);base64,(.+)$/);
-        if (!dataUrlMatch) {
-          return false;
-        }
-
-        // Estimate decoded size (base64 adds ~33% overhead)
-        // A base64 string of length N encodes roughly N * 0.75 bytes
-        const base64Data = dataUrlMatch[2];
-        const estimatedBytes = (base64Data.length * 3) / 4;
-        const maxBytes = 2 * 1024 * 1024; // 2MB
-
-        return estimatedBytes <= maxBytes;
+  .superRefine((value, ctx) => {
+    if (value.startsWith('data:')) {
+      const dataUrlMatch = value.match(/^data:image\/(jpeg|png);base64,(.+)$/);
+      if (!dataUrlMatch) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Image must be a valid HTTPS URL or a base64 data URL (JPG/PNG, max 2MB)',
+        });
+        return;
       }
 
-      // For HTTPS URLs, delegate to httpsOnlyUrlSchema
-      try {
-        httpsOnlyUrlSchema.parse(value);
-        return true;
-      } catch {
-        return false;
+      const payload = dataUrlMatch[2];
+      if (!STRICT_BASE64.test(payload) || payload.length % 4 !== 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Image data URL must contain valid base64-encoded JPG or PNG data',
+        });
+        return;
       }
-    },
-    {
-      message: 'Image must be a valid HTTPS URL or a base64 data URL (JPG/PNG, max 2MB)',
-    },
-  );
+
+      const decoded = Buffer.from(payload, 'base64');
+      if (decoded.length === 0 || decoded.length > MAX_IMAGE_DATA_URL_BYTES) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `Image data URL must decode to at most ${MAX_IMAGE_DATA_URL_BYTES} bytes`,
+        });
+        return;
+      }
+
+      // Check the magic bytes so a truncated or mislabelled payload is
+      // rejected instead of being stored as if it were an image.
+      const isPng = decoded.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC);
+      const isJpeg = decoded.subarray(0, JPEG_MAGIC.length).equals(JPEG_MAGIC);
+      if (!isPng && !isJpeg) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Image data URL must contain valid base64-encoded JPG or PNG data',
+        });
+      }
+      return;
+    }
+
+    // For HTTPS URLs, delegate to httpsOnlyUrlSchema and forward its issues
+    // so the caller sees the specific reason the URL was rejected (for
+    // example "targets a private or loopback network") rather than a generic
+    // message.
+    const result = httpsOnlyUrlSchema.safeParse(value);
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        ctx.addIssue({
+          code: 'custom',
+          message: issue.message,
+          path: issue.path,
+        });
+      }
+    }
+  });
 
 export const campaignIdSchema = z
   .string()
@@ -65,7 +98,13 @@ export const stellarAccountIdSchema = z
   .regex(
     STELLAR_ACCOUNT_REGEX,
     'Must be a valid Stellar account ID (starts with G and is exactly 56 characters).',
-  );
+  )
+  // SEP-0023 checksum verification. The regex above only checks the shape of
+  // the address; the refine rejects addresses whose CRC-16/XModem checksum
+  // does not match, which is what catches typos and transposed characters.
+  .refine(isValidStellarPublicKey, {
+    message: 'creator must be a valid Stellar public key',
+  });
 
 export const assetCodeSchema = z
   .string()

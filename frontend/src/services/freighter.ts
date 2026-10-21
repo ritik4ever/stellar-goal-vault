@@ -127,6 +127,7 @@ export async function verifyFreighterNetwork(expectedNetworkPassphrase: string):
       throw error;
     }
     // If we can't get network details, we'll let the transaction simulation catch the mismatch
+    // eslint-disable-next-line no-console -- the wallet layer has no logger dependency
     console.warn('Could not verify Freighter network:', describeErrorForLog(error));
   }
 }
@@ -343,6 +344,7 @@ export async function submitFreighterClaim(params: {
 
   let preparedTransaction;
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- simulateTransaction returns a union the SDK does not narrow here
     preparedTransaction = rpc.assembleTransaction(transaction, simulation as any).build();
   } catch (error) {
     throw buildCausedError('SIMULATION_PREPARE_FAILED', error, 'MALFORMED_TRANSACTION');
@@ -486,6 +488,7 @@ export async function submitFreighterPledge(params: {
 
   let preparedTransaction;
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- simulateTransaction returns a union the SDK does not narrow here
     preparedTransaction = rpc.assembleTransaction(transaction, simulation as any).build();
   } catch (error) {
     throw buildCausedError('SIMULATION_PREPARE_FAILED', error, 'MALFORMED_TRANSACTION');

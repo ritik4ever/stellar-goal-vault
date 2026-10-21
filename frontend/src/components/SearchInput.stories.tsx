@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
 import { SearchInput } from './SearchInput';
+import type { ComponentProps } from 'react';
 
 const meta: Meta<typeof SearchInput> = {
   title: 'Components/SearchInput',
@@ -27,7 +28,7 @@ export const Disabled: Story = {
 };
 
 export const Interactive: Story = {
-  render: (args: any) => {
+  render: (args: ComponentProps<typeof SearchInput>) => {
     const [value, setValue] = useState('');
     return <SearchInput {...args} value={value} onChange={setValue} />;
   },

@@ -14,7 +14,7 @@ export function CopyButton({ value, ariaLabel = 'Copy value', className = '' }: 
       await navigator.clipboard.writeText(value);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
+    } catch (_err) {
       // navigator.clipboard may be unavailable in some embedded contexts; fallback
       const ta = document.createElement('textarea');
       ta.value = value;
@@ -26,7 +26,7 @@ export function CopyButton({ value, ariaLabel = 'Copy value', className = '' }: 
         document.execCommand('copy');
         setCopied(true);
         window.setTimeout(() => setCopied(false), 2000);
-      } catch (e) {
+      } catch (_e) {
         // ignore
       } finally {
         document.body.removeChild(ta);

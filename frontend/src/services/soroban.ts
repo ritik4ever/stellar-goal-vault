@@ -1,4 +1,4 @@
-import { getNetworkDetails, requestAccess, signTransaction } from '@stellar/freighter-api';
+import { requestAccess, signTransaction } from '@stellar/freighter-api';
 import {
   Address,
   BASE_FEE,

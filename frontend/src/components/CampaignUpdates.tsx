@@ -65,7 +65,7 @@ function sanitizeMarkdown(markdown: string): string {
 }
 
 export function CampaignUpdates({
-  campaignId,
+  campaignId: _campaignId,
   creator,
   updates = [],
   connectedWallet = null,
@@ -194,14 +194,18 @@ export function CampaignUpdates({
                           {children}
                         </a>
                       ),
-                      code: ({ inline, children }) =>
-                        inline ? (
-                          <code>{children}</code>
+                      code: ({ className, children }) => {
+                        // react-markdown v9+ dropped the `inline` flag: inline code
+                        // has no `language-*` class, block code always does.
+                        const isInline = !className?.includes('language-');
+                        return isInline ? (
+                          <code className={className}>{children}</code>
                         ) : (
                           <pre>
-                            <code>{children}</code>
+                            <code className={className}>{children}</code>
                           </pre>
-                        ),
+                        );
+                      },
                     }}
                   >
                     {sanitizeMarkdown(update.content)}

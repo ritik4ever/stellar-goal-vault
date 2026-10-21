@@ -4,6 +4,7 @@ import {
   CampaignEvent,
   ContributorBadge,
   ContributorBackedCampaign,
+  ContributorPledge,
   ContributorProfile,
   ContributorRefundEntry,
   CreateCampaignPayload,
@@ -11,7 +12,6 @@ import {
   LeaderboardEntry,
   NotificationItem,
   OpenIssue,
-  Pledge,
   ReconcilePledgePayload,
   SorobanRefundMetadata,
 } from '../types/campaign';
@@ -319,13 +319,13 @@ export async function getContributorProfile(address: string): Promise<Contributo
   let refundedAmount = 0;
 
   try {
-    const { data: pledges } = await apiRequest<{ data: any[] }>({
+    const { data: pledges } = await apiRequest<{ data: ContributorPledge[] }>({
       url: `/contributors/${address}/pledges`,
       method: 'GET',
       params: { limit: 1000 },
     });
 
-    const pledgesByCampaign = new Map<string, any[]>();
+    const pledgesByCampaign = new Map<string, ContributorPledge[]>();
     for (const pledge of pledges) {
       if (!pledgesByCampaign.has(pledge.campaignId)) {
         pledgesByCampaign.set(pledge.campaignId, []);
@@ -341,11 +341,7 @@ export async function getContributorProfile(address: string): Promise<Contributo
       // All pledges in the array belong to the same campaign, so metadata is consistent
       const firstPledge = campaignPledges[0];
       const title = firstPledge.campaignName || 'Unknown Campaign';
-      const status = firstPledge.claimedAt
-        ? 'claimed'
-        : firstPledge.pledgedAmount >= firstPledge.targetAmount
-          ? 'funded'
-          : 'open';
+      const status = firstPledge.campaignStatus;
       const assetCode = firstPledge.assetCode || 'USDC';
 
       for (const pledge of campaignPledges) {
@@ -380,6 +376,7 @@ export async function getContributorProfile(address: string): Promise<Contributo
       });
     }
   } catch (err) {
+    // eslint-disable-next-line no-console -- the API layer has no logger dependency
     console.error('Error fetching contributor pledges', describeErrorForLog(err));
   }
 

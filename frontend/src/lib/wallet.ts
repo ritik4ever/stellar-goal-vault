@@ -24,7 +24,7 @@ export interface WalletInfo {
 
 export interface WalletAdapter {
   connect: (expectedNetworkPassphrase: string) => Promise<WalletConnection>;
-  sign: (xdr: string, networkPassphrase: string, publicKey: string) => Promise<string>;
+  sign: (xdr: string, _networkPassphrase: string, _publicKey: string) => Promise<string>;
   disconnect: () => Promise<void> | void;
   /** Verifies the wallet's current network matches the expected network passphrase. */
   checkNetwork: (
@@ -204,6 +204,7 @@ class FreighterAdapter implements WalletAdapter {
 // Rabet Adapter
 class RabetAdapter implements WalletAdapter {
   async connect(expectedNetworkPassphrase: string): Promise<WalletConnection> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the Rabet extension owns this global
     const rabet = (window as any).rabet;
     if (!rabet) {
       throw createSigningError('RABET_UNAVAILABLE', {
@@ -233,7 +234,8 @@ class RabetAdapter implements WalletAdapter {
     }
   }
 
-  async sign(xdr: string, networkPassphrase: string, publicKey: string): Promise<string> {
+  async sign(xdr: string, networkPassphrase: string, _publicKey: string): Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the Rabet extension owns this global
     const rabet = (window as any).rabet;
     if (!rabet) {
       throw createSigningError('RABET_UNAVAILABLE', {
@@ -254,6 +256,7 @@ class RabetAdapter implements WalletAdapter {
   }
 
   async disconnect(): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the Rabet extension owns this global
     const rabet = (window as any).rabet;
     if (rabet && typeof rabet.disconnect === 'function') {
       await rabet.disconnect();
@@ -343,7 +346,7 @@ class LobstrAdapter implements WalletAdapter {
     }
   }
 
-  async sign(xdr: string, networkPassphrase: string, publicKey: string): Promise<string> {
+  async sign(xdr: string, _networkPassphrase: string, _publicKey: string): Promise<string> {
     try {
       return await lobstrSignTransaction(xdr);
     } catch (error) {
@@ -382,6 +385,7 @@ async function detectWallets(): Promise<WalletInfo[]> {
   }
 
   // Detect Rabet
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the Rabet extension owns this global
   const rabetDetected = typeof (window as any).rabet !== 'undefined';
   results.push({
     ...WALLET_INFO.rabet,
@@ -390,7 +394,9 @@ async function detectWallets(): Promise<WalletInfo[]> {
 
   // Detect xBull (check for window.xBullSDK or extension detection)
   const xbullDetected =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the xBull extension owns these globals
     typeof (window as any).xBullSDK !== 'undefined' ||
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the xBull extension owns these globals
     typeof (window as any).xBullWalletConnect !== 'undefined';
   results.push({
     ...WALLET_INFO.xbull,
@@ -400,6 +406,7 @@ async function detectWallets(): Promise<WalletInfo[]> {
   // Detect LOBSTR
   try {
     const lobstrDetected =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the LOBSTR extension owns this global
       (await (window as any).lobstrSignerExtensionApi?.isConnected?.()) || false;
     results.push({
       ...WALLET_INFO.lobstr,

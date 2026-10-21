@@ -11,11 +11,15 @@ import {
   ONE_DAY_SECONDS,
   WALLETS,
 } from './fixtures';
+import { isValidStellarPublicKey } from '../src/validation/stellarAddress';
 
 describe('shared backend fixtures', () => {
   it('builds deterministic wallet addresses and default inputs', () => {
     expect(buildAddress('a')).toBe(WALLETS.creator);
-    expect(buildAddress('invalid-value')).toBe(`GI${'I'.repeat(54)}`);
+    // 'invalid-value' reduces to the fill character 'I'. The address is a real
+    // SEP-0023 StrKey, so its CRC-16 checksum has to verify.
+    expect(buildAddress('invalid-value')).toBe(buildAddress('I'));
+    expect(isValidStellarPublicKey(buildAddress('invalid-value'))).toBe(true);
     expect(buildCampaignInput()).toMatchObject({
       creator: WALLETS.creator,
       acceptedTokens: ['USDC'],

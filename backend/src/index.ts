@@ -80,7 +80,7 @@ import {
   parseContributorPledgesQuery,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
-import { logError, logInfo, logger, summarizeSecretConfig } from './logger';
+import { logError, logInfo, summarizeSecretConfig } from './logger';
 import {
   buildCampaignCacheKey,
   getCampaignCacheEntry,
@@ -91,6 +91,31 @@ import {
 } from './services/campaignCache';
 
 export const app = express();
+
+// The campaign store owns the SQLite connection and is initialized on the first
+// request rather than at module load. Tests import `app` directly and assign
+// process.env.DB_PATH in their own module scope; ES module hoisting evaluates
+// those imports before this module's body runs, so resolving the database path
+// lazily is what lets each test file get the database it asked for. initDb()
+// and initCampaignStore() are idempotent, so the server entry point can keep
+// initializing eagerly via startServer().
+let campaignStoreReady = false;
+function ensureCampaignStoreReady(): void {
+  if (campaignStoreReady) return;
+  initCampaignStore();
+  campaignStoreReady = true;
+}
+
+app.use((_req, _res, next) => {
+  try {
+    ensureCampaignStoreReady();
+  } catch (error) {
+    // Leave campaignStoreReady false so a later request can retry, and let the
+    // health endpoints report the database as down.
+    logError(error, { event: 'campaign_store_init_failed' }, config.logLevel);
+  }
+  next();
+});
 
 // Assign request IDs before any middleware that may short-circuit the request
 // (for example CORS, body parsing, authentication, rate limiting, or docs).
@@ -422,97 +447,101 @@ app.get('/api/health', (req: Request, res: Response, next: express.NextFunction)
   }
 });
 
-app.get('/api/health/deep', applyRateLimit(1000), async (req: Request, res: Response, next: express.NextFunction) => {
-  const start = process.hrtime();
-  try {
-    const database = checkDbHealth();
-    const hasContractId = !!config.contractId;
-    let sorobanHealthy = false;
-
+app.get(
+  '/api/health/deep',
+  applyRateLimit(1000),
+  async (req: Request, res: Response, next: express.NextFunction) => {
+    const start = process.hrtime();
     try {
-      if (config.sorobanRpcUrl) {
-        const response = await fetch(config.sorobanRpcUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'getHealth',
-            id: 1,
-          }),
-          signal: AbortSignal.timeout(5000),
-        });
-        sorobanHealthy = response.ok || response.status < 500;
+      const database = checkDbHealth();
+      const hasContractId = !!config.contractId;
+      let sorobanHealthy = false;
+
+      try {
+        if (config.sorobanRpcUrl) {
+          const response = await fetch(config.sorobanRpcUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'getHealth',
+              id: 1,
+            }),
+            signal: AbortSignal.timeout(5000),
+          });
+          sorobanHealthy = response.ok || response.status < 500;
+        }
+      } catch {
+        sorobanHealthy = false;
       }
-    } catch {
-      sorobanHealthy = false;
+
+      const indexer = getIndexerStatus();
+      // Align overall with component.indexer.status (isHealthy includes freshness/lag).
+      const allHealthy = database.reachable && hasContractId && sorobanHealthy && indexer.isHealthy;
+
+      const end = process.hrtime(start);
+      const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+
+      logInfo('health_check', {
+        operation: 'health_check_deep',
+        outcome: allHealthy ? 'success' : 'failure',
+        latency_ms: latencyMs,
+        db_reachable: database.reachable,
+        soroban_healthy: sorobanHealthy,
+        indexer_healthy: indexer.isHealthy,
+        indexer_freshness: indexer.freshness,
+        indexer_lag_ms: indexer.lagMs,
+        has_contract_id: hasContractId,
+      });
+
+      const memUsage = process.memoryUsage();
+      const memory = {
+        rss: memUsage.rss,
+        heapUsed: memUsage.heapUsed,
+        heapTotal: memUsage.heapTotal,
+        external: memUsage.external,
+      };
+
+      res.status(allHealthy ? 200 : 503).json({
+        overall: allHealthy ? 'up' : 'down',
+        timestamp: new Date().toISOString(),
+        uptimeSeconds: Number(process.uptime().toFixed(3)),
+        memory,
+        components: {
+          db: {
+            status: database.reachable ? 'up' : 'down',
+            details: database.reachable ? 'SQLite database reachable' : database.error,
+          },
+          soroban: {
+            status: sorobanHealthy ? 'up' : 'down',
+            details: config.sorobanRpcUrl
+              ? 'Soroban RPC reachable'
+              : 'Soroban RPC URL not configured',
+          },
+          contract: {
+            status: hasContractId ? 'up' : 'down',
+            details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
+          },
+          indexer: {
+            status: indexer.isHealthy ? 'up' : 'down',
+            details: indexer,
+          },
+        },
+      });
+    } catch (error) {
+      const end = process.hrtime(start);
+      const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+      logError(error, {
+        event: 'health_check_error',
+        operation: 'health_check_deep',
+        outcome: 'failure',
+        latency_ms: latencyMs,
+        requestId: (req as RequestWithId).requestId,
+      });
+      return next(error);
     }
-
-    const indexer = getIndexerStatus();
-    // Align overall with component.indexer.status (isHealthy includes freshness/lag).
-    const allHealthy = database.reachable && hasContractId && sorobanHealthy && indexer.isHealthy;
-
-    const end = process.hrtime(start);
-    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
-
-    logInfo('health_check', {
-      operation: 'health_check_deep',
-      outcome: allHealthy ? 'success' : 'failure',
-      latency_ms: latencyMs,
-      db_reachable: database.reachable,
-      soroban_healthy: sorobanHealthy,
-      indexer_healthy: indexer.isHealthy,
-      indexer_freshness: indexer.freshness,
-      indexer_lag_ms: indexer.lagMs,
-      has_contract_id: hasContractId,
-    });
-
-    const memUsage = process.memoryUsage();
-    const memory = {
-      rss: memUsage.rss,
-      heapUsed: memUsage.heapUsed,
-      heapTotal: memUsage.heapTotal,
-      external: memUsage.external,
-    };
-
-    res.status(allHealthy ? 200 : 503).json({
-      overall: allHealthy ? 'up' : 'down',
-      timestamp: new Date().toISOString(),
-      uptimeSeconds: Number(process.uptime().toFixed(3)),
-      memory,
-      components: {
-        db: {
-          status: database.reachable ? 'up' : 'down',
-          details: database.reachable ? 'SQLite database reachable' : database.error,
-        },
-        soroban: {
-          status: sorobanHealthy ? 'up' : 'down',
-          details: config.sorobanRpcUrl
-            ? 'Soroban RPC reachable'
-            : 'Soroban RPC URL not configured',
-        },
-        contract: {
-          status: hasContractId ? 'up' : 'down',
-          details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
-        },
-        indexer: {
-          status: indexer.isHealthy ? 'up' : 'down',
-          details: indexer,
-        },
-      },
-    });
-  } catch (error) {
-    const end = process.hrtime(start);
-    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
-    logError(error, {
-      event: 'health_check_error',
-      operation: 'health_check_deep',
-      outcome: 'failure',
-      latency_ms: latencyMs,
-      requestId: (req as RequestWithId).requestId,
-    });
-    return next(error);
-  }
-});
+  },
+);
 
 app.get('/api/campaigns', async (req: Request, res: Response, next: express.NextFunction) => {
   try {
@@ -529,8 +558,14 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
       .map((k) => `${k}=${(req.query as Record<string, unknown>)[k]}`)
       .join('&');
     const cacheKey = buildCampaignCacheKey(qs);
+    // The `status` filter is evaluated against the current time (open/failed
+    // depend on whether the deadline has passed), so the *set* of campaigns a
+    // filtered list contains changes as the clock advances. Caching such a
+    // response would keep serving a stale membership list, so filtered lists
+    // bypass the cache entirely.
+    const cacheable = params.status === undefined;
 
-    const cached = await getCampaignCacheEntry(cacheKey);
+    const cached = cacheable ? await getCampaignCacheEntry(cacheKey) : undefined;
     if (cached) {
       const cachedData = JSON.parse(cached) as {
         data: CampaignListItem[];
@@ -543,12 +578,26 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
           hasNextPage: boolean;
         };
       };
+      // `progress` is time-dependent: canPledge/canClaim/status flip when the
+      // deadline passes, so replaying it from the cache would serve a stale
+      // lifecycle state for up to the cache TTL. Recompute it per request and
+      // keep the cached pledge count so no extra query is issued.
+      const data = cachedData.data.map((campaign) => ({
+        ...campaign,
+        progress: calculateProgress(campaign, undefined, campaign.progress.pledgeCount),
+      }));
       res.setHeader('Cache-Control', 'max-age=30');
       res.setHeader('X-Cache', 'HIT');
       res.setHeader('X-Total-Count', String(cachedData.pagination.total));
       res.setHeader('Content-Type', 'application/json');
       // The cached payload is shared, but correlation IDs are per request.
-      res.send(JSON.stringify({ ...cachedData, requestId: (req as RequestWithId).requestId }));
+      res.send(
+        JSON.stringify({
+          data,
+          pagination: cachedData.pagination,
+          requestId: (req as RequestWithId).requestId,
+        }),
+      );
       return;
     }
 
@@ -595,10 +644,12 @@ app.get('/api/campaigns', async (req: Request, res: Response, next: express.Next
       pagination,
     });
 
-    await setCampaignCacheEntry(cacheKey, responseBody);
+    if (cacheable) {
+      await setCampaignCacheEntry(cacheKey, responseBody);
+    }
 
     res.setHeader('Cache-Control', 'max-age=30');
-    res.setHeader('X-Cache', 'MISS');
+    res.setHeader('X-Cache', cacheable ? 'MISS' : 'BYPASS');
     res.setHeader('X-Total-Count', String(totalCount));
     res.setHeader('Content-Type', 'application/json');
     res.send(
@@ -655,12 +706,20 @@ app.get('/api/campaigns/:id', async (req: Request, res: Response, next: express.
     const cacheKey = `campaigns:detail:${parsedId.value}`;
     const cached = await getCampaignCacheEntry(cacheKey);
     if (cached) {
-      const cachedData = JSON.parse(cached) as { data: unknown };
+      const cachedData = JSON.parse(cached) as { data: CampaignListItem };
+      // `progress` depends on the current time (status/canPledge/canClaim
+      // flip when the deadline passes), so it must be recomputed on every
+      // request instead of being replayed from the cache.
+      const { progress: cachedProgress, ...campaign } = cachedData.data;
+      const data = {
+        ...campaign,
+        progress: calculateProgress(campaign, undefined, cachedProgress.pledgeCount),
+      };
       res.setHeader('Cache-Control', 'max-age=30');
       res.setHeader('X-Cache', 'HIT');
       res.setHeader('Content-Type', 'application/json');
       // The cached payload is shared, but correlation IDs are per request.
-      res.send(JSON.stringify({ ...cachedData, requestId }));
+      res.send(JSON.stringify({ data, requestId }));
       return;
     }
 
@@ -1347,7 +1406,7 @@ let isShuttingDown = false;
 function startServer() {
   validateEnv();
   printStartupBanner();
-  initCampaignStore();
+  ensureCampaignStoreReady();
   startEventIndexer();
 
   // Initialize Redis cache in production

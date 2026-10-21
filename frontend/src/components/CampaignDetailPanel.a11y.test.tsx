@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { AppConfig, Campaign } from '../types/campaign';
 import { CampaignDetailPanel } from './CampaignDetailPanel';
-import { runAxeAudit, THEMES, type ThemeMode } from '../test/a1yTestUtils';
+import { runAxeAudit, THEMES, type ThemeMode } from '../test/a11yTestUtils';
 
 const mockConfig: AppConfig = {
   allowedAssets: ['USDC', 'XLM'],
@@ -84,8 +84,9 @@ describe.each(THEMES)('CampaignDetailPanel Accessibility (%s theme)', (theme: Th
       />,
     );
 
+    // The region is labelled by the campaign title.
     const region = screen.getByRole('region', {
-      name: /Test Campaign details?/i,
+      name: /Test Campaign/i,
     });
     expect(region).toBeDefined();
   });
@@ -100,7 +101,7 @@ describe.each(THEMES)('CampaignDetailPanel Accessibility (%s theme)', (theme: Th
     );
 
     const controls = screen.getAllByRole('button');
-    expect(controls.length).greaterThan(0);
+    expect(controls.length).toBeGreaterThan(0);
     const named = controls.some((control) => {
       const name = control.getAttribute('aria-label') ?? control.textContent ?? '';
       return name.trim().length > 0;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FundedConfetti } from './components/FundedConfetti';
@@ -10,6 +11,14 @@ import { NotificationBell } from './components/NotificationBell';
 import { IssueBacklog } from './components/IssueBacklog';
 import { SkeletonAnalytics } from './components/SkeletonAnalytics';
 import { SkeletonCard } from './components/SkeletonCard';
+import {
+  TransactionState,
+  createTransactionState,
+  confirmTransaction,
+  canRetry,
+  isInProgress,
+  createErrorState,
+} from './lib/transactionStatus';
 
 // Heavy panel components are lazy-loaded so they do not block the initial
 // render of the campaign board and metrics. Each has a lightweight skeleton
@@ -51,8 +60,8 @@ import { submitRefundTransaction } from './services/soroban';
 import { useWallet } from './hooks/useWallet';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useToast } from './hooks/useToast';
+import type { WalletType } from './lib/wallet';
 import { useOpenGraph } from './hooks/useOpenGraph';
-import { useCampaignShareCard } from './components/CampaignShareCard';
 import { didCampaignBecomeFunded } from './lib/fundingCelebration';
 import { safeErrorMessage } from './lib/signingErrors';
 import { appendUniqueCampaigns } from './lib/campaignListPagination';
@@ -84,6 +93,17 @@ type ConfettiBurst = {
   id: number;
   campaignTitle: string;
 };
+
+interface TransactionStateMap {
+  [key: string]: TransactionState;
+}
+
+/**
+ * Generates a unique key for a transaction state based on campaignId and actionType.
+ */
+function getTransactionKey(campaignId: string, actionType: 'pledge' | 'claim' | 'refund'): string {
+  return `${campaignId}:${actionType}`;
+}
 
 function round(value: number): number {
   return Number(value.toFixed(2));
@@ -144,6 +164,7 @@ function getNetworkName(networkPassphrase: string): string {
 function App() {
   const { id: paramId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const wallet = useWallet();
   const { toasts, addToast, dismiss } = useToast();
   const connectedWallet = wallet.publicKey;
@@ -179,7 +200,6 @@ function App() {
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
   const [campaignsError, setCampaignsError] = useState<{
     message: string;
@@ -189,6 +209,8 @@ function App() {
     null,
   );
   const [confettiBurst, setConfettiBurst] = useState<ConfettiBurst | null>(null);
+  // Transaction states per campaign/action to prevent duplicate submissions
+  const [transactionStates, setTransactionStates] = useState<TransactionStateMap>({});
 
   const handleTransactionPreview = (data: TransactionPreviewData): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -388,8 +410,6 @@ function App() {
     await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
   }
 
-  const { toDataUrl } = useCampaignShareCard();
-
   const initialParamIdRef = useRef(paramId);
 
   useEffect(() => {
@@ -532,11 +552,18 @@ function App() {
     }
   }
 
-  async function handleConnectWallet(walletType: string) {
+  async function handleConnectWallet(walletType?: string) {
+    if (!walletType) {
+      // The detail panel only knows that "connect" was requested; let the user
+      // pick the wallet they want to use.
+      wallet.openPicker();
+      return;
+    }
+
     const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
     setIsConnectingWallet(true);
     try {
-      await wallet.connect(walletType as any, networkPassphrase);
+      await wallet.connect(walletType as WalletType, networkPassphrase);
       addToast(`Wallet connected: ${wallet.publicKey?.slice(0, 16)}...`, 'success');
     } finally {
       setIsConnectingWallet(false);
@@ -561,11 +588,17 @@ function App() {
       return;
     }
 
+    // Prevent duplicate submissions for the same campaign
+    if (isTransactionInProgress(campaignId, 'pledge')) {
+      addToast('A pledge submission is already in progress for this campaign.', 'error');
+      return;
+    }
+
     const previousCampaign =
       campaigns.find((campaign) => campaign.id === campaignId) ??
       (selectedCampaign?.id === campaignId ? selectedCampaign : null);
 
-    setPendingPledgeCampaignId(campaignId);
+    startTransaction(campaignId, 'pledge');
 
     try {
       const transactionResult = await submitFreighterPledge({
@@ -584,6 +617,8 @@ function App() {
         transactionHash: transactionResult.transactionHash,
         confirmedAt: transactionResult.confirmedAt,
       });
+
+      completeTransaction(campaignId, 'pledge', transactionResult);
 
       const refreshedCampaigns = await refreshCampaigns(campaignId);
       const refreshedCampaign =
@@ -611,11 +646,11 @@ function App() {
         typeof error === 'object' &&
         (error as { code?: string }).code === 'USER_CANCELLED'
       ) {
+        clearTransaction(campaignId, 'pledge');
         return;
       }
+      completeTransaction(campaignId, 'pledge', error as Error);
       addToast(getErrorMessage(error), 'error');
-    } finally {
-      setPendingPledgeCampaignId(null);
     }
   }
 
@@ -635,6 +670,14 @@ function App() {
       return;
     }
 
+    // Prevent duplicate submissions for the same campaign
+    if (isTransactionInProgress(campaign.id, 'claim')) {
+      addToast('A claim submission is already in progress for this campaign.', 'error');
+      return;
+    }
+
+    startTransaction(campaign.id, 'claim');
+
     try {
       const transactionResult = await submitFreighterClaim({
         campaignId: campaign.id,
@@ -650,6 +693,8 @@ function App() {
         transactionResult.confirmedAt,
       );
 
+      completeTransaction(campaign.id, 'claim', transactionResult);
+
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
       addToast('Campaign claimed successfully.', 'success');
@@ -659,8 +704,10 @@ function App() {
         typeof error === 'object' &&
         (error as { code?: string }).code === 'USER_CANCELLED'
       ) {
+        clearTransaction(campaign.id, 'claim');
         return;
       }
+      completeTransaction(campaign.id, 'claim', error as Error);
       addToast(getErrorMessage(error), 'error');
     }
   }
@@ -687,17 +734,32 @@ function App() {
   }
 
   async function handleRefund(campaignId: string, contributor: string) {
+    // Prevent duplicate submissions for the same campaign
+    if (isTransactionInProgress(campaignId, 'refund')) {
+      addToast('A refund submission is already in progress for this campaign.', 'error');
+      return;
+    }
+
     setActionError(null);
     setActionMessage('Preparing Soroban refund transaction...');
+
+    startTransaction(campaignId, 'refund');
 
     try {
       const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
       await refundCampaign(campaignId, contributor, sorobanReceipt);
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
+
+      completeTransaction(campaignId, 'refund', {
+        transactionHash: sorobanReceipt.txHash,
+        confirmedAt: sorobanReceipt.createdAt ?? Date.now(),
+      });
+
       setActionMessage(null);
       addToast('Contributor refunded successfully.', 'success');
     } catch (error) {
+      completeTransaction(campaignId, 'refund', error as Error);
       setActionError(toApiError(error));
       setActionMessage(null);
       addToast(getErrorMessage(error), 'error');
@@ -716,6 +778,98 @@ function App() {
     setInvalidUrlCampaignId(null);
     setSelectedCampaignId(campaignId);
     navigate('/campaigns/' + campaignId);
+  }
+
+  /**
+   * Checks if a transaction is in progress for the given campaign and action.
+   */
+  function isTransactionInProgress(
+    campaignId: string,
+    actionType: 'pledge' | 'claim' | 'refund',
+  ): boolean {
+    const key = getTransactionKey(campaignId, actionType);
+    const state = transactionStates[key];
+    return state !== undefined && isInProgress(state.status);
+  }
+
+  /**
+   * Gets the transaction state for a campaign/action.
+   */
+  function getTransactionState(
+    campaignId: string,
+    actionType: 'pledge' | 'claim' | 'refund',
+  ): TransactionState | undefined {
+    const key = getTransactionKey(campaignId, actionType);
+    return transactionStates[key];
+  }
+
+  /**
+   * Starts a new transaction submission.
+   */
+  function startTransaction(campaignId: string, actionType: 'pledge' | 'claim' | 'refund'): void {
+    const key = getTransactionKey(campaignId, actionType);
+    setTransactionStates((prev) => ({
+      ...prev,
+      [key]: createTransactionState(campaignId, actionType),
+    }));
+  }
+
+  /**
+   * Updates a transaction state after submission completes.
+   */
+  function completeTransaction(
+    campaignId: string,
+    actionType: 'pledge' | 'claim' | 'refund',
+    result: { transactionHash: string; confirmedAt: number } | Error,
+  ): void {
+    const key = getTransactionKey(campaignId, actionType);
+    setTransactionStates((prev) => {
+      const current = prev[key];
+      if (!current) return prev;
+
+      let newState: TransactionState;
+      if (result instanceof Error) {
+        newState = createErrorState(campaignId, actionType, result);
+      } else {
+        newState = confirmTransaction(current, result.transactionHash, result.confirmedAt);
+      }
+
+      return {
+        ...prev,
+        [key]: newState,
+      };
+    });
+  }
+
+  /**
+   * Clears a transaction state after it reaches a terminal state and user acknowledges it.
+   */
+  function clearTransaction(campaignId: string, actionType: 'pledge' | 'claim' | 'refund'): void {
+    const key = getTransactionKey(campaignId, actionType);
+    setTransactionStates((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  /**
+   * Retries a failed/retryable transaction.
+   */
+  function retryTransactionAction(
+    campaignId: string,
+    actionType: 'pledge' | 'claim' | 'refund',
+  ): void {
+    const key = getTransactionKey(campaignId, actionType);
+    setTransactionStates((prev) => {
+      const current = prev[key];
+      if (!current || !canRetry(current.status)) return prev;
+
+      return {
+        ...prev,
+        [key]: createTransactionState(campaignId, actionType),
+      };
+    });
   }
 
   function handleThemeToggle() {
@@ -861,15 +1015,26 @@ function App() {
               appConfig={appConfig}
               connectedWallet={connectedWallet}
               isConnectingWallet={isConnectingWallet}
-              isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+              isPledgePending={isTransactionInProgress(selectedCampaignId ?? '', 'pledge')}
               isLoading={isSelectedLoading || initialLoad}
               notFoundCampaignId={invalidUrlCampaignId}
+              walletNetworkPassphrase={wallet.networkPassphrase}
               onConnectWallet={handleConnectWallet}
               onDisconnectWallet={handleDisconnectWallet}
               onPledge={handlePledge}
               onClaim={handleClaim}
               onSoftDelete={handleSoftDelete}
               onRefund={handleRefund}
+              // Transaction state
+              transactionState={
+                selectedCampaignId ? getTransactionState(selectedCampaignId, 'pledge') : undefined
+              }
+              onRetryTransaction={() => {
+                if (selectedCampaignId) retryTransactionAction(selectedCampaignId, 'pledge');
+              }}
+              onClearTransaction={() => {
+                if (selectedCampaignId) clearTransaction(selectedCampaignId, 'pledge');
+              }}
             />
           </Suspense>
         </ErrorBoundary>

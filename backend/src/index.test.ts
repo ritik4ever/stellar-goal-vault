@@ -21,8 +21,8 @@ let calculateProgress: CampaignStoreModule['calculateProgress'];
 let initCampaignStore: CampaignStoreModule['initCampaignStore'];
 let getDb: DbModule['getDb'];
 
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
+const CREATOR = 'GBQRRH556UAOUNMCISIMEX2UPJQQ5MJ5NMHHY6TNCNCW52P5BWIVW6YT';
+const CONTRIBUTOR = 'GANQEYT3WHNUF6WOV3KQOQGAUBTX73MTG6HDGGPBRIML6BULYVBYRLRU';
 
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });

@@ -240,7 +240,7 @@ export async function getCampaignCountFromContract(): Promise<number> {
     }
 
     return 0;
-  } catch (error) {
+  } catch {
     // Log and gracefully return 0 so stats endpoint remains functional
     // even if contract call fails
     return 0;

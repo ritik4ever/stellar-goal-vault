@@ -13,6 +13,7 @@ vi.hoisted(() => {
 
 import { app } from './index';
 import { createCampaign, initCampaignStore } from './services/campaignStore';
+import { invalidateCampaignCache } from './services/campaignCache';
 import { getDb } from './services/db';
 
 // Deterministic baseline timestamp for integration testing.
@@ -20,7 +21,6 @@ import { getDb } from './services/db';
 // and test flakes across execution environments.
 // 1_700_000_000_000 ms corresponds to 2023-11-14T22:13:20.000Z (1_700_000_000 s).
 const BASE_MOCK_TIME_MS = 1_700_000_000_000;
-const BASE_MOCK_TIME_SEC = Math.floor(BASE_MOCK_TIME_MS / 1000);
 
 let currentMockTimeMs = BASE_MOCK_TIME_MS;
 let dateNowSpy: ReturnType<typeof vi.spyOn> | undefined;
@@ -91,22 +91,17 @@ beforeEach(() => {
   db.prepare(`DELETE FROM pledges`).run();
   db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM campaigns`).run();
+
+  // The campaign cache is not keyed by content, and campaign ids restart at 1
+  // after the table is wiped. Without clearing it, a cached list from the
+  // previous test would shadow the campaign this test just created.
+  invalidateCampaignCache();
 });
 
-const CREATOR = `G${'A'.repeat(55)}`;
-const CONTRIBUTOR = `G${'B'.repeat(55)}`;
+const CREATOR = 'GBQRRH556UAOUNMCISIMEX2UPJQQ5MJ5NMHHY6TNCNCW52P5BWIVW6YT';
+const CONTRIBUTOR = 'GANQEYT3WHNUF6WOV3KQOQGAUBTX73MTG6HDGGPBRIML6BULYVBYRLRU';
 
-async function post(apiPath: string, body: unknown) {
-  const response = await fetch(`${baseUrl}${apiPath}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await response.json().catch(() => null);
-  return { status: response.status, data, headers: response.headers };
-}
-
-async function postWithHeaders(apiPath: string, body: unknown, headers: Record<string, string>) {
+async function post(apiPath: string, body: unknown, headers: Record<string, string> = {}) {
   const mergedHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     ...headers,
@@ -118,6 +113,10 @@ async function postWithHeaders(apiPath: string, body: unknown, headers: Record<s
   });
   const data = await response.json().catch(() => null);
   return { status: response.status, data, headers: response.headers };
+}
+
+async function postWithHeaders(apiPath: string, body: unknown, headers: Record<string, string>) {
+  return post(apiPath, body, headers);
 }
 
 async function get(apiPath: string) {
@@ -193,7 +192,7 @@ describe('Campaign Lifecycle API', () => {
 
     // Verify no duplicate claim event in history
     const historyRes = await get(`/api/campaigns/${campaignId}/history`);
-    const claimEvents = historyRes.data.events?.filter(
+    const claimEvents = (historyRes.data.data as Array<{ eventType: string }>).filter(
       (e: { eventType: string }) => e.eventType === 'claimed',
     );
     expect(claimEvents?.length).toBe(1);
@@ -210,7 +209,7 @@ describe('Campaign Lifecycle API', () => {
 
     // Verify claim event still not duplicated
     const historyRes2 = await get(`/api/campaigns/${campaignId}/history`);
-    const claimEvents2 = historyRes2.data.events?.filter(
+    const claimEvents2 = (historyRes2.data.data as Array<{ eventType: string }>).filter(
       (e: { eventType: string }) => e.eventType === 'claimed',
     );
     expect(claimEvents2?.length).toBe(1);
@@ -805,8 +804,8 @@ describe('GET /api/stats', () => {
 });
 
 describe('POST /api/campaigns/:id/pledges with Idempotency-Key', () => {
-  const CONTRIBUTOR_C = `G${'D'.repeat(55)}`;
-  const CONTRIBUTOR_D = `G${'E'.repeat(55)}`;
+  const CONTRIBUTOR_C = 'GBMZX5SKZ4HX4A5JLEMFFX543RTWMS6I6KMM7S4PW3EGIIPD2PSRFWBV';
+  const CONTRIBUTOR_D = 'GAKS64HHCZRMTWMVBIZHEPDEZVYRCTWC3OARV4LW26ZYM5B4BE3X2FMU';
 
   async function createTestCampaign() {
     const createRes = await post('/api/campaigns', {

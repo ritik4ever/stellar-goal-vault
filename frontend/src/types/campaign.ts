@@ -37,6 +37,25 @@ export interface Pledge {
   transactionHash?: string;
 }
 
+/**
+ * A pledge row as returned by `GET /api/contributors/:address/pledges`.
+ *
+ * The endpoint joins the campaign in, so each row also carries the campaign
+ * name and its current lifecycle status.
+ */
+export interface ContributorPledge {
+  id: number;
+  campaignId: string;
+  campaignName: string;
+  campaignStatus: CampaignStatus;
+  amount: number;
+  assetCode: string;
+  tokenId?: string;
+  createdAt: number;
+  refundedAt?: number;
+  transactionHash?: string;
+}
+
 export interface Campaign {
   id: string;
   creator: string;
@@ -139,6 +158,7 @@ export interface AppConfig {
   networkPassphrase: string;
   contractAmountDecimals: number;
   walletIntegrationReady: boolean;
+  walletNetworkPassphrase?: string | null;
   assetAddresses: Record<string, string>;
 }
 

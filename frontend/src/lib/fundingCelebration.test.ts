@@ -9,6 +9,7 @@ function buildCampaign(status: Campaign['progress']['status']): Campaign {
     title: 'Orbit Fund',
     description: 'A campaign',
     assetCode: 'USDC',
+    acceptedTokens: ['USDC'],
     targetAmount: 100,
     pledgedAmount: status === 'funded' ? 100 : 50,
     deadline: 1_800_000_000,

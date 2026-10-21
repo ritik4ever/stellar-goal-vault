@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { User, History, Award, Wallet, TrendingUp, ExternalLink } from 'lucide-react';
+import { History, Award, Wallet, TrendingUp, ExternalLink } from 'lucide-react';
 import { AddressAvatar } from './AddressAvatar';
 import { CopyButton } from './CopyButton';
 import { EmptyState } from './EmptyState';

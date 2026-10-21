@@ -9,6 +9,7 @@ frontend/.vite/
 contracts/target/
 contracts/.stellar/
 backend/data/
+bin/
 CLAUDE.md
 pr.md
-issue.md
+issue.mdfrontend/storybook-static/

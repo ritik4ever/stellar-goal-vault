@@ -36,6 +36,8 @@ interface WizardValues {
   deadlineHours: string;
   maxPerContributor: string;
   imageUrl: string;
+  imageFile: File | null;
+  imagePreview: string;
   externalLink: string;
   rewardTiers: RewardTier[];
 }

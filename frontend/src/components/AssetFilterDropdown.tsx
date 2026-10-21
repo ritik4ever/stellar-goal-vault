@@ -35,7 +35,7 @@ export function AssetFilterDropdown({
           setOptions(assets);
           setError(null);
         }
-      } catch (err) {
+      } catch (_err) {
         if (!cancelled) {
           setError('Failed to load assets');
           setOptions([]);
@@ -62,7 +62,7 @@ export function AssetFilterDropdown({
         const assets = await getDistinctAssetCodes();
         setOptions(assets);
         setError(null);
-      } catch (err) {
+      } catch (_err) {
         setError('Failed to load assets');
         setOptions([]);
       } finally {

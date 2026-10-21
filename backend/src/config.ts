@@ -42,9 +42,12 @@ export const config = {
     .map((value) => value.trim().toUpperCase())
     .filter(Boolean),
 
+  // An environment variable that is present but empty is "not configured":
+  // `??` would keep the empty string and silently disable the wallet
+  // integration, so fall back on falsy values instead.
   sorobanNetworkPassphrase:
-    configuredNetworkPassphrase ?? (useDevelopmentDefaults ? DEFAULT_NETWORK_PASSPHRASE : ''),
-  sorobanRpcUrl: configuredRpcUrl ?? (useDevelopmentDefaults ? DEFAULT_SOROBAN_RPC_URL : ''),
+    configuredNetworkPassphrase || (useDevelopmentDefaults ? DEFAULT_NETWORK_PASSPHRASE : ''),
+  sorobanRpcUrl: configuredRpcUrl || (useDevelopmentDefaults ? DEFAULT_SOROBAN_RPC_URL : ''),
   contractId: process.env.CONTRACT_ID ?? '',
   redisUrl: process.env.REDIS_URL ?? '',
   webhookUrl: process.env.WEBHOOK_URL ?? '',

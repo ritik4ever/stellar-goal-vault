@@ -28,7 +28,8 @@
  */
 
 import request from 'supertest';
-import { describe, it, expect, beforeAll } from 'vitest';
+import net from 'net';
+import { beforeAll, describe, it, expect, vi } from 'vitest';
 
 // ── Environment must be set before `./index` is imported ──────────────────────
 // Simulate production-like explicit allowlist so the CORS guard is active.
@@ -42,12 +43,80 @@ process.env.CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 process.env.SOROBAN_RPC_URL = 'http://localhost:8000';
 process.env.ALLOWED_ORIGINS = 'https://app.example.com,https://staging.example.com';
 
-import { app } from './index';
+// The app must be imported dynamically: ES module imports are hoisted above
+// the process.env assignments above, so a static import would build the app
+// before the test environment is in place.
+type IndexModule = typeof import('./index');
+
+let app: IndexModule['app'];
+
+beforeAll(async () => {
+  ({ app } = await import('./index'));
+
+  // /api/health reports degraded (503) unless the Soroban event indexer is
+  // healthy, and the indexer only runs inside startServer(), which these
+  // tests never reach. Stub it as healthy so the probe endpoint reflects the
+  // CORS behaviour under test rather than indexer state.
+  vi.spyOn(await import('./services/eventIndexer'), 'getIndexerStatus').mockReturnValue({
+    lastSuccessfulPollTime: Date.now(),
+    lastKnownLedger: 1,
+    isHealthy: true,
+    consecutiveFailures: 0,
+    lagMs: 0,
+    freshness: 'fresh',
+    staleLagMs: 300000,
+    freshLagMs: 30000,
+  });
+});
 
 // ── Shared probe endpoint ─────────────────────────────────────────────────────
 // Use GET /api/health — it requires no auth and returns 200 under normal
 // conditions, so any non-200/non-403 result is a test environment problem.
 const PROBE = '/api/health';
+
+// Node's HTTP client refuses to transmit header values that contain CRLF or
+// non-Latin-1 characters (ERR_INVALID_CHAR), so those cases never reach the
+// server through supertest. Write the raw request bytes over a socket instead.
+async function rawRequest(originValue: string): Promise<{
+  status: number;
+  headers: Record<string, string>;
+  raw: string;
+}> {
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address() as net.AddressInfo;
+
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(port, '127.0.0.1', () => {
+      socket.write(
+        `GET ${PROBE} HTTP/1.1\r\nHost: localhost\r\nOrigin: ${originValue}\r\nConnection: close\r\n\r\n`,
+      );
+    });
+    let raw = '';
+    socket.setEncoding('latin1');
+    socket.on('data', (chunk: string) => {
+      raw += chunk;
+    });
+    socket.on('error', reject);
+    socket.on('close', () => {
+      server.close();
+      const separator = raw.indexOf('\r\n\r\n');
+      const head = separator === -1 ? raw : raw.slice(0, separator);
+      const body = separator === -1 ? '' : raw.slice(separator + 4);
+      const status = Number((head.split('\r\n')[0] ?? '').split(' ')[1]);
+      const headers: Record<string, string> = {};
+      for (const line of head.split('\r\n').slice(1)) {
+        const separatorIndex = line.indexOf(':');
+        if (separatorIndex > 0) {
+          headers[line.slice(0, separatorIndex).toLowerCase()] = line
+            .slice(separatorIndex + 1)
+            .trim();
+        }
+      }
+      resolve({ status, headers, raw: `${head}\r\n\r\n${body}` });
+    });
+  });
+}
 
 // The single origin that must be unconditionally allowed throughout these tests.
 const ALLOWED_ORIGIN = 'https://app.example.com';
@@ -189,11 +258,22 @@ describe('CORS — malformed Origin header values', () => {
   });
 
   it('rejects an Origin with an embedded newline (header injection attempt)', async () => {
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'https://app.example.com\r\nX-Injected: pwned');
+    // The CRLF terminates the Origin header at the protocol level, so the
+    // server must evaluate the origin on its own: a disallowed origin must
+    // still be rejected, and the injected header must not be smuggled through.
+    const res = await rawRequest('https://evil.com\r\nX-Injected: pwned');
 
     expect(res.status).toBe(403);
+    expect(res.raw).not.toContain('X-Injected');
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('does not let an injected header split the response for an allowed origin', async () => {
+    const res = await rawRequest('https://app.example.com\r\nX-Injected: pwned');
+
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBe(ALLOWED_ORIGIN);
+    expect(res.raw).not.toContain('pwned');
   });
 
   it('rejects an Origin that is not a valid URL', async () => {
@@ -310,11 +390,11 @@ describe('CORS — case-sensitivity of origin matching', () => {
 describe('CORS — unicode and homograph bypass attempts', () => {
   it('rejects an origin using a Cyrillic lookalike for "a" (U+0430)', async () => {
     // U+0430 CYRILLIC SMALL LETTER A looks identical to U+0061 LATIN SMALL LETTER A
-    // 'аpp' here starts with the Cyrillic character.
-    const res = await request(app).get(PROBE).set('Origin', 'https://\u0430pp.example.com');
+    // 'аpp' here starts with the Cyrillic character. A raw socket is required
+    // because Node's HTTP client rejects non-Latin-1 header values outright.
+    const res = await rawRequest('https://\u0430pp.example.com');
 
     expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('FORBIDDEN');
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 

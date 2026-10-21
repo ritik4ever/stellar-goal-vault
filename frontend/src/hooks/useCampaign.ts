@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getCampaign, getCampaignStats } from '../services/campaignService';
-import type { Campaign, CampaignStats } from '../types/campaign';
+import { getCampaign } from '../services/api';
+import type { Campaign } from '../types/campaign';
 
 interface UseCampaignResult {
   campaign: Campaign | null;
-  stats: CampaignStats | null;
   loading: boolean;
   error: Error | null;
   refetch: () => Promise<void>;
@@ -13,14 +12,12 @@ interface UseCampaignResult {
 /**
  * Loads a single campaign's detail view.
  *
- * The detail view needs both the campaign record and its stats. These are
- * fetched together and the in-flight request is shared so that repeated
- * renders (or a refetch triggered while a load is already running) do not
- * issue duplicate network calls for the same campaign id.
+ * The in-flight request is shared so that repeated renders (or a refetch
+ * triggered while a load is already running) do not issue duplicate network
+ * calls for the same campaign id.
  */
 export function useCampaign(campaignId: string | undefined): UseCampaignResult {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [stats, setStats] = useState<CampaignStats | null>(null);
   const [loading, setLoading] = useState<boolean>(Boolean(campaignId));
   const [error, setError] = useState<Error | null>(null);
 
@@ -37,16 +34,17 @@ export function useCampaign(campaignId: string | undefined): UseCampaignResult {
       return inFlight.promise;
     }
 
-    const promise = (async () => {
+    // Declared before the async IIFE so the `finally` block below can compare
+    // the in-flight entry against this exact promise. `prefer-const` is
+    // suppressed because the promise is referenced from its own initializer.
+    let promise!: Promise<void>;
+    // eslint-disable-next-line prefer-const -- referenced from its own initializer
+    promise = (async () => {
       setLoading(true);
       setError(null);
       try {
-        const [campaignData, statsData] = await Promise.all([
-          getCampaign(id),
-          getCampaignStats(id),
-        ]);
+        const campaignData = await getCampaign(id);
         setCampaign(campaignData);
-        setStats(statsData);
       } catch (err) {
         setError(err instanceof Error ? err : new Error(String(err)));
       } finally {
@@ -64,7 +62,6 @@ export function useCampaign(campaignId: string | undefined): UseCampaignResult {
   useEffect(() => {
     if (!campaignId) {
       setCampaign(null);
-      setStats(null);
       setLoading(false);
       setError(null);
       return;
@@ -83,7 +80,7 @@ export function useCampaign(campaignId: string | undefined): UseCampaignResult {
   }, [campaignId, load]);
 
   return useMemo(
-    () => ({ campaign, stats, loading, error, refetch }),
-    [campaign, stats, loading, error, refetch],
+    () => ({ campaign, loading, error, refetch }),
+    [campaign, loading, error, refetch],
   );
 }

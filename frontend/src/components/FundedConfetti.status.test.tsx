@@ -19,16 +19,15 @@ describe('FundedConfetti status transition', () => {
       progress: {
         status: 'open',
         percentFunded: 50,
+        hoursLeft: 24,
         canPledge: true,
         canClaim: false,
         canRefund: false,
-        remainingAmount: '500',
+        remainingAmount: 500,
         pledgeCount: 5,
       },
       pledges: [],
-      assetIssuer: 'G...',
       acceptedTokens: [],
-      metadata: null,
     };
 
     const fundedCampaign: Campaign = {
@@ -37,9 +36,10 @@ describe('FundedConfetti status transition', () => {
         ...openCampaign.progress,
         status: 'funded',
         percentFunded: 100,
+        hoursLeft: 0,
         canClaim: true,
         canPledge: false,
-        remainingAmount: '0',
+        remainingAmount: 0,
       },
     };
 
@@ -61,16 +61,15 @@ describe('FundedConfetti status transition', () => {
       progress: {
         status: 'funded',
         percentFunded: 100,
+        hoursLeft: 0,
         canPledge: false,
         canClaim: true,
         canRefund: false,
-        remainingAmount: '0',
+        remainingAmount: 0,
         pledgeCount: 10,
       },
       pledges: [],
-      assetIssuer: 'G...',
       acceptedTokens: [],
-      metadata: null,
     };
 
     const stillFunded: Campaign = {
@@ -96,16 +95,15 @@ describe('FundedConfetti status transition', () => {
       progress: {
         status: 'funded',
         percentFunded: 100,
+        hoursLeft: 0,
         canPledge: false,
         canClaim: true,
         canRefund: false,
-        remainingAmount: '0',
+        remainingAmount: 0,
         pledgeCount: 10,
       },
       pledges: [],
-      assetIssuer: 'G...',
       acceptedTokens: [],
-      metadata: null,
     };
 
     const transitioned = didCampaignBecomeFunded(null, fundedCampaign);

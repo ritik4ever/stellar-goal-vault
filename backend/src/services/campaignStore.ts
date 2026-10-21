@@ -1,11 +1,11 @@
 import { getDb, initDb } from './db';
-import { getCampaignHistory, recordEvent, BlockchainMetadata } from './eventHistory';
+import { recordEvent, BlockchainMetadata } from './eventHistory';
 import { createNotification } from './notificationService';
 import { dispatchWebhook } from './webhookService';
 
 interface Statement {
-  get(...params: any[]): any;
-  run(...params: any[]): { changes: number };
+  get(...params: unknown[]): unknown;
+  run(...params: unknown[]): { changes: number };
 }
 
 let getCampaignPledgedAmountStmt: Statement | undefined;
@@ -429,23 +429,6 @@ export function initCampaignStore(): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_transaction_hash ON pledges(transaction_hash);');
 }
 
-function checkContributorLimit(
-  campaign: CampaignRecord,
-  contributor: string,
-  amount: number,
-): void {
-  if (campaign.maxPerContributor !== undefined && campaign.maxPerContributor > 0) {
-    const existingPledged = getContributorPledgedTotal(campaign.id, contributor);
-    if (existingPledged + amount > campaign.maxPerContributor) {
-      throw toServiceError(
-        'Pledge exceeds maximum allowed per contributor.',
-        400,
-        'MAX_PER_CONTRIBUTOR_EXCEEDED',
-      );
-    }
-  }
-}
-
 function normalizePledgeAmount(amount: number): number {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw toServiceError('Pledge amount must be a finite positive number.', 400, 'INVALID_AMOUNT');
@@ -774,8 +757,7 @@ export function getCampaign(
 ): CampaignRecord | undefined {
   const db = getDb();
   const row = db.prepare(`SELECT * FROM campaigns WHERE id = ?`).get(campaignId) as
-    | CampaignRow
-    | undefined;
+    CampaignRow | undefined;
 
   if (row) {
     const now = nowInMilliseconds();

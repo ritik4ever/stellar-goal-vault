@@ -27,9 +27,7 @@ const baseCampaign: Campaign = {
     hoursLeft: 24,
   },
   pledges: [],
-  assetIssuer: 'G'.repeat(56),
   acceptedTokens: [],
-  metadata: null,
 };
 
 function renderCard(campaign: Campaign) {

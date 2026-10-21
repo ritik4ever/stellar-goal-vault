@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { logger } from './logger';
+
 const bodySizeRegex = /^\d+\s*(?:b|kb|mb|gb)?$/i;
 const nonNegativeIntRegex = /^\d+$/;
 
@@ -221,12 +223,7 @@ export function validateEnv(env: Record<string, string | undefined> = process.en
       (issue) => `  - ${issue.path.join('.')}: ${issue.message}`,
     );
     const errorMessage = `[startup] Environment validation failed. Fix the following before starting:\n${missing.join('\n')}`;
-    try {
-      const { logger } = require('./logger');
-      logger.error(`\n${errorMessage}\n`);
-    } catch {
-      console.error(errorMessage);
-    }
+    logger.error(`\n${errorMessage}\n`);
     if (env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'test') {
       process.exit(1);
     }

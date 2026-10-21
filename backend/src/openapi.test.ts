@@ -83,9 +83,9 @@ describe('OpenAPI documentation endpoints', () => {
     for (const [method, statuses] of Object.entries(errorStatuses)) {
       const operation = pledgePath[method];
       for (const status of statuses) {
-        expect(
-          operation.responses[status].content['application/json'].schema.$ref,
-        ).toBe('#/components/schemas/ApiError');
+        expect(operation.responses[status].content['application/json'].schema.$ref).toBe(
+          '#/components/schemas/ApiError',
+        );
       }
       expect(operation.description).toContain('INTERNAL_SERVER_ERROR');
     }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import axios from 'axios';
-import { initDb, resetDbForTests, getDb } from '../db';
+import { initDb, resetDbForTests } from '../db';
 import {
   dispatchWebhook,
   generateHmacSignature,

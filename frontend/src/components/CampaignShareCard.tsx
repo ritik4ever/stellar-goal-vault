@@ -59,7 +59,9 @@ function drawCard(ctx: CanvasRenderingContext2D, campaign: Campaign, brandLogoUr
       ctx.clip();
       ctx.drawImage(img, w - 84, 36, 48, 48);
       ctx.restore();
-    } catch {}
+    } catch {
+      // The avatar image is optional; fall back to the plain card.
+    }
   }
 
   ctx.font = '700 52px "Outfit", system-ui, sans-serif';

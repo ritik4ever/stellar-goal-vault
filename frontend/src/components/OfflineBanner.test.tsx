@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { OfflineBanner } from './OfflineBanner';
 
 // We need to control the navigator.onLine value to drive the hook

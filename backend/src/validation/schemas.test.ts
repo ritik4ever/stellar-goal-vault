@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCampaignPayloadSchema } from './schemas';
 
-const CREATOR = `G${'A'.repeat(55)}`;
+const CREATOR = 'GB7F5IAP5O7P5F2ZCYDD5O7OCUGYB4KJCKZUKGEC2M4WF6Y6INZG2WYJ';
 const FUTURE_DEADLINE = Math.floor(Date.now() / 1000) + 86400;
 
 function buildPayload(metadata?: Record<string, unknown>) {

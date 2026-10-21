@@ -38,14 +38,68 @@ export function buildPastDeadline(
   return baseSeconds - offsetSeconds;
 }
 
-/** Deterministic Stellar-looking account address: `G` followed by 55 repeats. */
+/** Base32 alphabet used by Stellar StrKey (RFC 4648, uppercase, no padding). */
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+/** CRC-16/XModem, the checksum StrKey uses (polynomial 0x1021, init 0x0000). */
+function crc16xmodem(data: Uint8Array): number {
+  let crc = 0x0000;
+  for (const byte of data) {
+    crc ^= byte << 8;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+    }
+  }
+  return crc;
+}
+
+/** Base32-encode bytes without padding. */
+function base32Encode(bytes: Uint8Array): string {
+  let output = '';
+  let buffer = 0;
+  let bitsLeft = 0;
+  for (const byte of bytes) {
+    buffer = (buffer << 8) | byte;
+    bitsLeft += 8;
+    while (bitsLeft >= 5) {
+      bitsLeft -= 5;
+      output += BASE32_ALPHABET[(buffer >> bitsLeft) & 31];
+    }
+  }
+  if (bitsLeft > 0) {
+    output += BASE32_ALPHABET[(buffer << (5 - bitsLeft)) & 31];
+  }
+  return output;
+}
+
+/**
+ * Build a deterministic Stellar account address (a valid StrKey G-address).
+ *
+ * The API validates the SEP-0023 CRC-16 checksum, so an address made of 55
+ * repeated characters is rejected. This encodes a real Ed25519 public key
+ * payload: version byte 0x30 followed by 32 bytes derived from the fill
+ * character, plus the little-endian checksum.
+ */
 export function buildAddress(fill: string): string {
   const char =
     fill
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, '')
       .charAt(0) || 'A';
-  return `G${char.repeat(55)}`;
+
+  const payload = new Uint8Array(33);
+  payload[0] = 0x30; // Ed25519 public key version byte
+  for (let i = 1; i < payload.length; i++) {
+    payload[i] = char.charCodeAt(0) & 0xff;
+  }
+
+  const crc = crc16xmodem(payload);
+  const bytes = new Uint8Array(35);
+  bytes.set(payload, 0);
+  bytes[33] = crc & 0xff;
+  bytes[34] = (crc >> 8) & 0xff;
+
+  return base32Encode(bytes);
 }
 
 /** Named wallets shared across the suite (all valid 56-char account ids). */

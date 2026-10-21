@@ -1,9 +1,15 @@
 import { describe, bench } from 'vitest';
-import { rpc, TransactionBuilder, Networks, Address, xdr } from '@stellar/stellar-sdk';
+import { rpc, TransactionBuilder, Networks } from '@stellar/stellar-sdk';
 
 describe('Transaction Preparation Benchmark', () => {
   const transaction = new TransactionBuilder(
-    new rpc.Server('https://soroban-testnet.stellar.org').getAccount('GBTEST...'),
+    // `TransactionBuilder` needs a resolved account source. The benchmark only
+    // measures the local assembly cost, so a stub account is enough.
+    {
+      accountId: () => 'GBTEST',
+      sequenceNumber: () => '0',
+      incrementSequenceNumber: () => '0',
+    },
     { fee: '100', networkPassphrase: Networks.TESTNET },
   ).build();
 
@@ -19,6 +25,7 @@ describe('Transaction Preparation Benchmark', () => {
 
   bench('rpc.assembleTransaction (Optimized / Local)', async () => {
     // Local assembly using existing simulation results
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the SDK does not export the simulation response type
     rpc.assembleTransaction(transaction, mockSimulation as any).build();
   });
 });
