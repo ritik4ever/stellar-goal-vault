@@ -391,7 +391,6 @@ components:
         - points
     ApiError:
       type: object
-      description: Standard error envelope. Internal exception messages, stacks, and secret material are not returned.
       properties:
         success:
           type: boolean
@@ -432,6 +431,8 @@ components:
       required:
         - success
         - error
+      description: Standard error envelope. Internal exception messages, stacks, and
+        secret material are not returned.
     CreateCampaignPayload:
       type: object
       properties:
@@ -1074,6 +1075,40 @@ components:
         - uptimeSeconds
         - database
         - indexer
+    HealthPagination:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of health components available.
+          example: 4
+        page:
+          type: integer
+          description: Current page (1-based).
+          example: 1
+        limit:
+          type: integer
+          description: Number of components per page.
+          example: 20
+        totalPages:
+          type: integer
+          description: Total number of pages.
+          example: 1
+        hasPreviousPage:
+          type: boolean
+          description: Whether a previous page exists for this paginated request.
+          example: false
+        hasNextPage:
+          type: boolean
+          description: Whether a later page exists for this paginated request.
+          example: false
+      required:
+        - total
+        - page
+        - limit
+        - totalPages
+        - hasPreviousPage
+        - hasNextPage
     DeepHealthResponse:
       type: object
       properties:
@@ -1163,16 +1198,14 @@ components:
               required:
                 - status
                 - details
-          required:
-            - db
-            - soroban
-            - contract
-            - indexer
+        pagination:
+          $ref: "#/components/schemas/HealthPagination"
       required:
         - overall
         - timestamp
         - uptimeSeconds
         - components
+        - pagination
     ConfigResponse:
       type: object
       properties:
@@ -1333,6 +1366,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "503":
           description: Service is degraded
           content:
@@ -1344,8 +1384,35 @@ paths:
       tags:
         - Health
       summary: Deep health check
-      description: Checks database, Soroban RPC, and contract configuration health.
+      description: "Checks database, Soroban RPC, and contract configuration health.
+        The `components` collection is paginated deterministically in a fixed
+        order (db, soroban, contract, indexer): page defaults to 1 and limit
+        defaults to 20 when omitted, both must be integers, and limit is capped
+        at 100. Out-of-range values are rejected with 400 rather than clamped.
+        The response includes total, totalPages, hasPreviousPage, and
+        hasNextPage under `pagination` so callers can navigate without guessing
+        where the collection ends. Because the default limit exceeds the number
+        of components, omitting both parameters returns every component exactly
+        as before."
       security: []
+      parameters:
+        - schema:
+            type: integer
+            minimum: 1
+            description: 1-based page number (default 1).
+          required: false
+          description: 1-based page number (default 1).
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Components per page, 1 to 100 (default 20).
+          required: false
+          description: Components per page, 1 to 100 (default 20).
+          name: limit
+          in: query
       responses:
         "200":
           description: All components are healthy
@@ -1353,6 +1420,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeepHealthResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "503":
           description: One or more components are unhealthy
           content:
@@ -1632,14 +1712,14 @@ paths:
       tags:
         - Pledges
       summary: List campaign pledges
-      description: >-
-        Returns pledges newest-first. Pagination is deterministic: page defaults
-        to 1 and limit defaults to 10 when omitted, both must be integers, and
-        limit is capped at 100. Out-of-range values are rejected with 400 rather
-        than clamped. The response includes total, totalPages, hasPreviousPage,
-        and hasNextPage so callers can navigate without guessing where the
-        collection ends. Errors use the ApiError envelope with stable codes:
-        VALIDATION_ERROR, NOT_FOUND, RATE_LIMITED, and INTERNAL_SERVER_ERROR.
+      description: "Returns pledges newest-first. Pagination is deterministic: page
+        defaults to 1 and limit defaults to 10 when omitted, both must be
+        integers, and limit is capped at 100. Out-of-range values are rejected
+        with 400 rather than clamped. The response includes total, totalPages,
+        hasPreviousPage, and hasNextPage so callers can navigate without
+        guessing where the collection ends. Errors use the ApiError envelope
+        with stable codes: VALIDATION_ERROR, NOT_FOUND, RATE_LIMITED, and
+        INTERNAL_SERVER_ERROR."
       parameters:
         - schema:
             type: string
@@ -1685,7 +1765,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "500":
-          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details are logged and are not returned.
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
           content:
             application/json:
               schema:
@@ -1694,14 +1775,13 @@ paths:
       tags:
         - Pledges
       summary: Create a pledge
-      description: >-
-        Creates a pledge for a campaign. Use the Idempotency-Key header to make
-        the request idempotent. Cached responses are returned for 24 hours.
+      description: "Creates a pledge for a campaign. Use the Idempotency-Key header to
+        make the request idempotent. Cached responses are returned for 24 hours.
         Errors use the ApiError envelope with stable codes: VALIDATION_ERROR,
         NOT_FOUND, INVALID_ASSET, INVALID_CAMPAIGN_STATE,
         MAX_PER_CONTRIBUTOR_EXCEEDED, CAMPAIGN_FUNDING_CAP_EXCEEDED,
         RATE_LIMITED, and INTERNAL_SERVER_ERROR. Unexpected failures are logged
-        without exposing internal details.
+        without exposing internal details."
       parameters:
         - schema:
             type: string
@@ -1748,7 +1828,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "500":
-          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details are logged and are not returned.
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
           content:
             application/json:
               schema:

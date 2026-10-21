@@ -318,6 +318,87 @@ describe('GET /api/health/deep', () => {
     });
   });
 
+  describe('pagination', () => {
+    it('returns navigation metadata and preserves the unpaginated default', async () => {
+      const res = await request(app).get('/api/health/deep');
+
+      expect([200, 503]).toContain(res.status);
+      // The default limit (20) exceeds the component count, so every component
+      // is returned exactly as it was before pagination was introduced.
+      expect(Object.keys(res.body.components).sort()).toEqual([
+        'contract',
+        'db',
+        'indexer',
+        'soroban',
+      ]);
+      expect(res.body.pagination).toMatchObject({
+        total: 4,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      });
+    });
+
+    it('paginates components deterministically across pages with no overlap', async () => {
+      const firstPage = await request(app).get('/api/health/deep?page=1&limit=2');
+      expect([200, 503]).toContain(firstPage.status);
+      expect(Object.keys(firstPage.body.components)).toEqual(['db', 'soroban']);
+      expect(firstPage.body.pagination).toMatchObject({
+        total: 4,
+        page: 1,
+        limit: 2,
+        totalPages: 2,
+        hasPreviousPage: false,
+        hasNextPage: true,
+      });
+
+      const lastPage = await request(app).get('/api/health/deep?page=2&limit=2');
+      expect([200, 503]).toContain(lastPage.status);
+      expect(Object.keys(lastPage.body.components)).toEqual(['contract', 'indexer']);
+      expect(lastPage.body.pagination).toMatchObject({
+        total: 4,
+        page: 2,
+        limit: 2,
+        totalPages: 2,
+        hasPreviousPage: true,
+        hasNextPage: false,
+      });
+
+      // The two pages together cover the collection exactly once.
+      const combined = [
+        ...Object.keys(firstPage.body.components),
+        ...Object.keys(lastPage.body.components),
+      ];
+      expect(new Set(combined).size).toBe(4);
+    });
+
+    it('returns an empty component page with valid metadata past the last page', async () => {
+      const res = await request(app).get('/api/health/deep?page=5&limit=2');
+      expect([200, 503]).toContain(res.status);
+      expect(res.body.components).toEqual({});
+      expect(res.body.pagination).toMatchObject({
+        total: 4,
+        page: 5,
+        limit: 2,
+        totalPages: 2,
+        hasPreviousPage: true,
+        hasNextPage: false,
+      });
+    });
+
+    it.each(['page=0', 'page=-1', 'page=abc', 'limit=0', 'limit=101', 'limit=abc'])(
+      'rejects invalid pagination parameter %s with a 400 validation error',
+      async (query) => {
+        const res = await request(app).get(`/api/health/deep?${query}`);
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      },
+    );
+  });
+
   describe('contract component', () => {
     it('reports contract status "down" when CONTRACT_ID is not set', async () => {
       const savedContractId = process.env.CONTRACT_ID;

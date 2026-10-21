@@ -77,6 +77,23 @@ Basic liveness check. Returns service status and a lightweight database reachabi
 
 Extended health check that probes the database, Soroban RPC, and the configured contract.
 
+The `components` collection is paginated deterministically in a fixed order
+(`db`, `soroban`, `contract`, `indexer`).
+
+**Query parameters:**
+
+| Parameter | Type    | Description                                                     |
+|-----------|---------|-----------------------------------------------------------------|
+| `page`    | integer | 1-based page number. Defaults to `1`.                           |
+| `limit`   | integer | Components per page, 1–100. Defaults to `20`.                   |
+
+Pagination defaults to returning the full collection: the default `limit` of 20
+exceeds the number of components, so omitting both parameters preserves the
+pre-pagination response. Invalid or out-of-range values (for example `page=0`,
+`limit=0`, `limit=101`, or non-integers) are rejected with `400 Bad Request`
+rather than clamped. Navigation metadata is returned under `pagination`:
+`total`, `page`, `limit`, `totalPages`, `hasPreviousPage`, and `hasNextPage`.
+
 **Response `200 OK`:**
 
 ```json
@@ -98,11 +115,22 @@ Extended health check that probes the database, Soroban RPC, and the configured 
         "lagMs": 1500
       }
     }
+  },
+  "pagination": {
+    "total": 4,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1,
+    "hasPreviousPage": false,
+    "hasNextPage": false
   }
 }
 ```
 
-Returns `503` when `overall` is `"down"`. Unexpected failures return the standard error envelope `{ "success": false, "error": { "code": string, "message": string, "requestId": string } }` (status `500`) while logging structured context securely without exposing sensitive internals.
+Returns `503` when `overall` is `"down"`. Invalid pagination parameters return `400 Bad Request`
+with the standard error envelope. Unexpected failures return the standard error envelope
+`{ "success": false, "error": { "code": string, "message": string, "requestId": string } }`
+(status `500`) while logging structured context securely without exposing sensitive internals.
 
 ---
 
