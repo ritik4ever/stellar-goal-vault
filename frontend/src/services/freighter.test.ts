@@ -12,55 +12,7 @@ const { freighterMocks, assembleTransactionMock } = vi.hoisted(() => ({
 
 vi.mock('@stellar/freighter-api', () => freighterMocks);
 
-vi.mock('@stellar/stellar-sdk', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@stellar/stellar-sdk')>();
-  return {
-    ...actual,
-    rpc: {
-      ...actual.rpc,
-      assembleTransaction: assembleTransactionMock,
-    },
-  };
-});
-
-import { Account, Keypair, TransactionBuilder, rpc } from '@stellar/stellar-sdk';
-import {
-  amountToContractUnits,
-  connectFreighterWallet,
-  submitFreighterClaim,
-  submitFreighterPledge,
-} from './freighter';
-import { AppConfig } from '../types/campaign';
-
-describe('freighter helpers and wallet integration', () => {
-  const TESTNET = 'Test SDF Network ; September 2015';
-  const MAINNET = 'Public Global Stellar Network ; September 2015';
-  const CONTRIBUTOR = Keypair.random().publicKey();
-  const CREATOR = Keypair.random().publicKey();
-
-  const mockConfig: AppConfig = {
-    contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM',
-    networkPassphrase: TESTNET,
-    sorobanRpcUrl: 'https://soroban-testnet.stellar.org:443',
-    assetAddresses: {
-      USDC: 'CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN',
-    },
-    contractAmountDecimals: 7,
-    allowedAssets: ['USDC'],
-    walletIntegrationReady: true,
-    soroban: {
-      enabled: true,
-      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM',
-      networkPassphrase: TESTNET,
-      rpcUrl: 'https://soroban-testnet.stellar.org:443',
-    },
-  };
-
-  let getAccountSpy: any;
-  let simulateSpy: any;
-  let sendTransactionSpy: any;
-  let getTransactionSpy: any;
-  let fromXdrSpy: any;
+import { amountToContractUnits, connectFreighterWallet, verifyFreighterNetwork } from './freighter';
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -382,6 +334,61 @@ describe('freighter helpers and wallet integration', () => {
 
       await vi.advanceTimersByTimeAsync(35000);
       await assertion;
+    });
+  });
+
+  describe('verifyFreighterNetwork', () => {
+    it('throws FREIGHTER_NETWORK_MISMATCH when wallet is on different network', async () => {
+      freighterMocks.getNetworkDetails.mockResolvedValue({
+        network: 'PUBLIC',
+        networkUrl: 'https://horizon.stellar.org',
+        networkPassphrase: 'Public Global Stellar Network ; September 2015',
+        sorobanRpcUrl: 'https://mainnet.rpc',
+      });
+
+      await expect(
+        verifyFreighterNetwork('Test SDF Network ; September 2015'),
+      ).rejects.toMatchObject({
+        code: 'FREIGHTER_NETWORK_MISMATCH',
+      });
+    });
+
+    it('throws FREIGHTER_NETWORK_MISMATCH with actionable message', async () => {
+      freighterMocks.getNetworkDetails.mockResolvedValue({
+        network: 'PUBLIC',
+        networkUrl: 'https://horizon.stellar.org',
+        networkPassphrase: 'Public Global Stellar Network ; September 2015',
+        sorobanRpcUrl: 'https://mainnet.rpc',
+      });
+
+      try {
+        await verifyFreighterNetwork('Test SDF Network ; September 2015');
+      } catch (error) {
+        expect((error as Error).message).toContain('Freighter is connected to Stellar Mainnet');
+        expect((error as Error).message).toContain('this app expects Stellar Testnet');
+        expect((error as Error).message).toContain('Please switch your wallet to Stellar Testnet');
+      }
+    });
+
+    it('does not throw when wallet is on correct network', async () => {
+      freighterMocks.getNetworkDetails.mockResolvedValue({
+        network: 'TESTNET',
+        networkUrl: 'https://horizon-testnet.stellar.org',
+        networkPassphrase: 'Test SDF Network ; September 2015',
+        sorobanRpcUrl: 'https://soroban-testnet.stellar.org',
+      });
+
+      await expect(
+        verifyFreighterNetwork('Test SDF Network ; September 2015'),
+      ).resolves.toBeUndefined();
+    });
+
+    it('does not throw when getNetworkDetails fails (allows simulation to catch mismatch)', async () => {
+      freighterMocks.getNetworkDetails.mockRejectedValue(new Error('Network details unavailable'));
+
+      await expect(
+        verifyFreighterNetwork('Test SDF Network ; September 2015'),
+      ).resolves.toBeUndefined();
     });
   });
 });

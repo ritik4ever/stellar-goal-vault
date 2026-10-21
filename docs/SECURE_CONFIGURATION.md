@@ -25,7 +25,7 @@ real `.env`, API key, private key, or database URL. Secret scanning
 | `REDIS_URL` | Authenticated URL (`redis://:password@host`) | unset (in-memory cache) | An unauthenticated cache can be read/poisoned by other tenants. |
 | `LOG_LEVEL` | `info` (never log secrets) | `debug` | Debug logs can leak request bodies/keys into logs. |
 | `MAX_BODY_SIZE` | Valid size string (e.g. `16kb`, `1mb`) | `16kb` | Unvalidated or overly large payload limits enable body payload DoS attacks. |
-| `RATE_LIMIT_WINDOW_MS` / limits | Positive numeric integers | `60000` / `120` | Disabling or misconfiguring rate limits exposes write endpoints to spam/bruteforce. |
+| `RATE_LIMIT_WINDOW_MS` / read and write limits | Positive numeric integers | `60000` / `120` reads / `20` writes | Disabling or misconfiguring rate limits exposes write endpoints to spam/bruteforce. |
 | `SECRET_KEY` / `SERVER_PRIVATE_KEY` (contract deploy) | Long random value, injected at runtime | never set locally | A committed/weak key compromises contract control. |
 
 ## Startup validation (enforced automatically)
@@ -98,6 +98,19 @@ local-development override.
 - **Local development:** SQLite file under `backend/data/`, in-memory cache.
 - **Risk of weakening:** a shared/unauth cache can be read or poisoned; a
   world-readable DB exposes campaign and pledge data.
+
+### API rate limits
+
+- **Production defaults:** 120 read requests and 20 write requests per client IP
+  per 60-second window. Writes include `POST`, `PUT`, `PATCH`, and `DELETE`.
+- **Configuration:** `RATE_LIMIT_WINDOW_MS` sets the window;
+  `RATE_LIMIT_READ_LIMIT` (or `RATE_LIMIT_MAX_REQUESTS`) sets the read limit;
+  `RATE_LIMIT_WRITE_LIMIT` (or `WRITE_RATE_LIMIT_MAX_REQUESTS`) sets the write
+  limit. A rejected request returns `429` with `Retry-After`.
+- **Local development:** rate limiting is skipped when `NODE_ENV=development`
+  or when `NODE_ENV` is unset, so ordinary local workflows are not throttled.
+- **Risk of weakening:** high limits or disabling the middleware allows repeated
+  mutations to consume backend and database resources.
 
 ### Secret material (`SECRET_KEY`, `SERVER_PRIVATE_KEY`)
 

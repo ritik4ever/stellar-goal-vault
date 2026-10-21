@@ -26,6 +26,8 @@ export interface UseWalletResult {
   openPicker: () => void;
   isPickerOpen: boolean;
   closePicker: () => void;
+  /** Verify the connected wallet's current network matches the expected network. */
+  checkNetwork: (expectedNetworkPassphrase: string) => Promise<{ match: boolean; currentNetwork?: string; expectedNetwork?: string }>;
 }
 
 export function useWallet(): UseWalletResult {
@@ -106,6 +108,16 @@ export function useWallet(): UseWalletResult {
     setIsPickerOpen(false);
   }, []);
 
+  const checkNetwork = useCallback(
+    async (expectedNetworkPassphrase: string) => {
+      if (!adapter) {
+        return { match: false, expectedNetwork: expectedNetworkPassphrase };
+      }
+      return await adapter.checkNetwork(expectedNetworkPassphrase);
+    },
+    [adapter],
+  );
+
   const walletName = walletType ? WALLET_INFO[walletType].name : null;
 
   return {
@@ -121,5 +133,6 @@ export function useWallet(): UseWalletResult {
     openPicker,
     isPickerOpen,
     closePicker,
+    checkNetwork,
   };
 }

@@ -10,6 +10,7 @@ import {
   signTransaction as lobstrSignTransaction,
 } from '@lobstrco/signer-extension-api';
 import { WalletConnection } from '../types/campaign';
+import { classifyCause, createSigningError, toSigningError } from './signingErrors';
 
 export type WalletType = 'freighter' | 'rabet' | 'xbull' | 'lobstr';
 
@@ -25,6 +26,10 @@ export interface WalletAdapter {
   connect: (expectedNetworkPassphrase: string) => Promise<WalletConnection>;
   sign: (xdr: string, networkPassphrase: string, publicKey: string) => Promise<string>;
   disconnect: () => Promise<void> | void;
+  /** Verifies the wallet's current network matches the expected network passphrase. */
+  checkNetwork: (
+    expectedNetworkPassphrase: string,
+  ) => Promise<{ match: boolean; currentNetwork?: string; expectedNetwork?: string }>;
 }
 
 const WALLET_INFO: Record<WalletType, Omit<WalletInfo, 'detected'>> = {
@@ -87,16 +92,35 @@ function clearLastUsedWallet(): void {
 // Freighter Adapter
 class FreighterAdapter implements WalletAdapter {
   async connect(expectedNetworkPassphrase: string): Promise<WalletConnection> {
-    const connected = await isConnected();
+    let connected: boolean;
+    try {
+      connected = await isConnected();
+    } catch (error) {
+      // A throwing probe means the extension is unusable, not that the user
+      // declined: classify as WALLET_UNAVAILABLE with a recoverable message.
+      throw createSigningError('FREIGHTER_UNAVAILABLE', {
+        signingErrorClass: 'WALLET_UNAVAILABLE',
+        cause: error,
+      });
+    }
     if (!connected) {
-      throw new Error('Freighter was not detected. Install or unlock the extension and try again.');
+      throw createSigningError('FREIGHTER_UNAVAILABLE', {
+        message: 'Freighter was not detected. Install or unlock the extension and try again.',
+      });
     }
 
     let publicKey: string;
     try {
       publicKey = await requestAccess();
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Freighter access was rejected.');
+      // Freighter can reject access with raw wallet text; keep it only as a
+      // redacted detail and show an authored recovery message instead.
+      throw createSigningError('FREIGHTER_ACCESS_DENIED', {
+        signingErrorClass: classifyCause(error, 'USER_REJECTED'),
+        cause: error,
+        message:
+          'Freighter access was declined. Click Connect and approve the request in the extension to retry.',
+      });
     }
 
     let details:
@@ -131,9 +155,9 @@ class FreighterAdapter implements WalletAdapter {
             ? 'Stellar Mainnet'
             : 'the configured network';
 
-      throw new Error(
-        `Freighter is connected to ${networkLabel}, but this app expects ${expectedLabel}.`,
-      );
+      throw createSigningError('FREIGHTER_NETWORK_MISMATCH', {
+        message: `Freighter is connected to ${networkLabel}, but this app expects ${expectedLabel}. Switch your wallet network and try again.`,
+      });
     }
 
     return {
@@ -144,14 +168,36 @@ class FreighterAdapter implements WalletAdapter {
   }
 
   async sign(xdr: string, networkPassphrase: string, publicKey: string): Promise<string> {
-    return await signTransaction(xdr, {
-      accountToSign: publicKey,
-      networkPassphrase,
-    });
+    try {
+      return await signTransaction(xdr, {
+        accountToSign: publicKey,
+        networkPassphrase,
+      });
+    } catch (error) {
+      throw toSigningError(error);
+    }
   }
 
   async disconnect(): Promise<void> {
     // Freighter doesn't have a disconnect method, just clear local state
+  }
+
+  async checkNetwork(
+    expectedNetworkPassphrase: string,
+  ): Promise<{ match: boolean; currentNetwork?: string; expectedNetwork?: string }> {
+    try {
+      const details = await getNetworkDetails();
+      const currentPassphrase = details.networkPassphrase;
+      const match = currentPassphrase === expectedNetworkPassphrase;
+      return {
+        match,
+        currentNetwork: currentPassphrase,
+        expectedNetwork: expectedNetworkPassphrase,
+      };
+    } catch {
+      // If we can't get network details, assume it matches to avoid blocking
+      return { match: true };
+    }
   }
 }
 
@@ -160,7 +206,10 @@ class RabetAdapter implements WalletAdapter {
   async connect(expectedNetworkPassphrase: string): Promise<WalletConnection> {
     const rabet = (window as any).rabet;
     if (!rabet) {
-      throw new Error('Rabet was not detected. Install the extension and try again.');
+      throw createSigningError('RABET_UNAVAILABLE', {
+        signingErrorClass: 'WALLET_UNAVAILABLE',
+        message: 'Rabet was not detected. Install the extension and try again.',
+      });
     }
 
     try {
@@ -175,14 +224,22 @@ class RabetAdapter implements WalletAdapter {
         networkPassphrase: expectedNetworkPassphrase,
       };
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Rabet access was rejected.');
+      throw createSigningError('RABET_ACCESS_DENIED', {
+        signingErrorClass: classifyCause(error, 'USER_REJECTED'),
+        cause: error,
+        message:
+          'Rabet access was declined. Click Connect and approve the request in the extension to retry.',
+      });
     }
   }
 
   async sign(xdr: string, networkPassphrase: string, publicKey: string): Promise<string> {
     const rabet = (window as any).rabet;
     if (!rabet) {
-      throw new Error('Rabet was not detected.');
+      throw createSigningError('RABET_UNAVAILABLE', {
+        signingErrorClass: 'WALLET_UNAVAILABLE',
+        message: 'Rabet was not detected.',
+      });
     }
 
     try {
@@ -192,7 +249,7 @@ class RabetAdapter implements WalletAdapter {
       }
       return result.xdr;
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'Rabet signing failed.');
+      throw toSigningError(error);
     }
   }
 
@@ -201,6 +258,13 @@ class RabetAdapter implements WalletAdapter {
     if (rabet && typeof rabet.disconnect === 'function') {
       await rabet.disconnect();
     }
+  }
+
+  async checkNetwork(
+    expectedNetworkPassphrase: string,
+  ): Promise<{ match: boolean; currentNetwork?: string; expectedNetwork?: string }> {
+    // Rabet doesn't expose network details; assume match to avoid blocking
+    return { match: true, expectedNetwork: expectedNetworkPassphrase };
   }
 }
 
@@ -225,7 +289,12 @@ class XbullAdapter implements WalletAdapter {
         networkPassphrase: expectedNetworkPassphrase,
       };
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'xBull access was rejected.');
+      throw createSigningError('XULL_ACCESS_DENIED', {
+        signingErrorClass: classifyCause(error, 'USER_REJECTED'),
+        cause: error,
+        message:
+          'xBull access was declined. Click Connect and approve the request in the extension to retry.',
+      });
     }
   }
 
@@ -234,13 +303,20 @@ class XbullAdapter implements WalletAdapter {
       const bridge = this.getBridge();
       return await bridge.sign({ xdr, publicKey, network: networkPassphrase });
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'xBull signing failed.');
+      throw toSigningError(error);
     }
   }
 
   async disconnect(): Promise<void> {
     // xBull doesn't have a disconnect method, just clear local state
     this.bridge = null;
+  }
+
+  async checkNetwork(
+    expectedNetworkPassphrase: string,
+  ): Promise<{ match: boolean; currentNetwork?: string; expectedNetwork?: string }> {
+    // xBull doesn't expose network details; assume match to avoid blocking
+    return { match: true, expectedNetwork: expectedNetworkPassphrase };
   }
 }
 
@@ -258,7 +334,12 @@ class LobstrAdapter implements WalletAdapter {
         networkPassphrase: expectedNetworkPassphrase,
       };
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'LOBSTR access was rejected.');
+      throw createSigningError('LOBSTR_ACCESS_DENIED', {
+        signingErrorClass: classifyCause(error, 'USER_REJECTED'),
+        cause: error,
+        message:
+          'LOBSTR access was declined or the wallet is unavailable. Unlock LOBSTR, then click Connect to retry.',
+      });
     }
   }
 
@@ -266,12 +347,19 @@ class LobstrAdapter implements WalletAdapter {
     try {
       return await lobstrSignTransaction(xdr);
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : 'LOBSTR signing failed.');
+      throw toSigningError(error);
     }
   }
 
   async disconnect(): Promise<void> {
     // LOBSTR doesn't have a disconnect method, just clear local state
+  }
+
+  async checkNetwork(
+    expectedNetworkPassphrase: string,
+  ): Promise<{ match: boolean; currentNetwork?: string; expectedNetwork?: string }> {
+    // LOBSTR doesn't expose network details; assume match to avoid blocking
+    return { match: true, expectedNetwork: expectedNetworkPassphrase };
   }
 }
 

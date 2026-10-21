@@ -108,6 +108,20 @@ if campaign.claimed == true, then:
 - Attempts to add contributions after claim (should fail)
 - Validates claim idempotency (second claim fails)
 
+### Claim Accounting Table Cases
+
+The contract test `test_claim_accounting_invariants_across_amounts_and_fees`
+checks successful claims over several contribution amounts and fee rates,
+including zero-fee, rounded fee, and full-fee boundaries. It verifies that
+the creator and fee recipient receive exactly the contributed amount in total,
+the vault token balance and campaign token accounting are cleared, and the
+campaign remains marked claimed.
+
+The `test_invalid_claim_accounting_invariants` table covers an early claim, an
+underfunded claim after the deadline, and a claim by the wrong creator. Each
+rejected transition must leave contributor/vault token balances, campaign token
+accounting, pledged amount, and claimed state unchanged.
+
 ---
 
 ### Invariant 5: Refund State Consistency
@@ -238,6 +252,11 @@ cargo test --lib
 ### Run Property Tests Only
 ```bash
 cargo test --lib property_tests
+```
+
+### Run Claim Accounting Cases
+```bash
+cargo test --lib claim_accounting
 ```
 
 ### Run Specific Invariant Tests

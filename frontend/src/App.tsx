@@ -54,6 +54,7 @@ import { useToast } from './hooks/useToast';
 import { useOpenGraph } from './hooks/useOpenGraph';
 import { useCampaignShareCard } from './components/CampaignShareCard';
 import { didCampaignBecomeFunded } from './lib/fundingCelebration';
+import { safeErrorMessage } from './lib/signingErrors';
 import { appendUniqueCampaigns } from './lib/campaignListPagination';
 import { mergeCampaignDetail, mergeHistoryPages } from './lib/campaignDetailLoading';
 import { ApiError, AppConfig, Campaign, CampaignEvent, OpenIssue } from './types/campaign';
@@ -89,13 +90,9 @@ function round(value: number): number {
 }
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-  if (typeof error === 'string' && error.trim().length > 0) {
-    return error;
-  }
-  return 'Something went wrong.';
+  // Wallet/RPC failures already carry authored, recoverable messages; anything
+  // else is still scrubbed so a stray SDK message cannot expose XDR or a seed.
+  return safeErrorMessage(error, 'Something went wrong.');
 }
 
 function toApiError(error: unknown): ApiError {
@@ -107,7 +104,7 @@ function toApiError(error: unknown): ApiError {
     };
 
     return {
-      message: maybeError.message || 'Something went wrong.',
+      message: safeErrorMessage(maybeError, 'Something went wrong.'),
       code: maybeError.code,
       details: maybeError.details,
       requestId: maybeError.requestId,
@@ -115,7 +112,7 @@ function toApiError(error: unknown): ApiError {
   }
 
   if (typeof error === 'string') {
-    return { message: error };
+    return { message: safeErrorMessage(error, 'Something went wrong.') };
   }
 
   return { message: 'Something went wrong.' };

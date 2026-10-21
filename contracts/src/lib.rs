@@ -289,6 +289,11 @@ mod test;
 #[cfg(test)]
 mod test_pledge_auth;
 
+// Authorization coverage for the configuration path (issue #913): every admin
+// setter must be driven by the stored admin's signature, and nobody else's.
+#[cfg(test)]
+mod test_admin_auth;
+
 // Governance module for multi-sig campaign approval
 mod governance;
 
@@ -329,15 +334,7 @@ impl StellarGoalVaultContract {
 
     /// Pauses or unpauses all state-mutating entry points. Admin only.
     pub fn set_paused(env: Env, caller: Address, paused: bool) {
-        caller.require_auth();
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic!("not initialized"));
-        if caller != admin {
-            panic!("caller is not admin");
-        }
+        require_admin(&env, &caller);
         env.storage().instance().set(&DataKey::Paused, &paused);
         let version = String::from_str(&env, CONTRACT_VERSION);
         if paused {
@@ -373,18 +370,17 @@ impl StellarGoalVaultContract {
 
     /// Sets the platform fee in basis points (e.g. 50 = 0.5%).
     /// Only the admin can call this. Pass 0 to disable the fee.
+    ///
+    /// `admin` is the caller: [`require_admin`] insists this address signed the
+    /// invocation *and* matches the address stored by `initialize`, so a caller
+    /// cannot name itself admin (issue #913).
     pub fn set_fee(env: Env, admin: Address, bps: i128) {
-        admin.require_auth();
-        let stored_admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic!("not initialized"));
-        if admin != stored_admin {
-            panic!("caller is not admin");
-        }
+        require_admin(&env, &admin);
         if bps < 0 {
             panic!("fee must be non-negative");
+        }
+        if bps > 10000 {
+            panic!("fee must not exceed 10000 basis points");
         }
         env.storage().instance().set(&DataKey::PlatformFeeBps, &bps);
     }
@@ -392,14 +388,9 @@ impl StellarGoalVaultContract {
     /// Sets the address that receives platform fees on campaign claims.
     /// Only the admin can call this.
     pub fn set_fee_recipient(env: Env, admin: Address, recipient: Address) {
-        admin.require_auth();
-        let stored_admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic!("not initialized"));
-        if admin != stored_admin {
-            panic!("caller is not admin");
+        require_admin(&env, &admin);
+        if recipient == env.current_contract_address() {
+            panic!("fee recipient cannot be the vault contract");
         }
         env.storage()
             .instance()
@@ -1204,13 +1195,7 @@ impl StellarGoalVaultContract {
         source_ids: Vec<u64>,
         campaigns: Vec<Campaign>,
     ) {
-        admin.require_auth();
-        let stored_admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("not initialized");
-        assert!(admin == stored_admin, "only admin can call migrate");
+        require_admin(&env, &admin);
         assert!(
             source_ids.len() == campaigns.len(),
             "source_ids and campaigns must have the same length"
@@ -1346,6 +1331,28 @@ impl StellarGoalVaultContract {
         }
         let count = governance::get_approval_count(&env, campaign_id);
         count >= threshold
+    }
+}
+
+/// Authorization guard for the contract's configuration entry points.
+///
+/// Every privileged configuration call (`set_paused`, `set_fee`,
+/// `set_fee_recipient`, `migrate`) must be signed by the address stored by
+/// `initialize`. Keeping the check in one place means a new setter cannot
+/// accidentally ship with only a parameter comparison (or only `require_auth`)
+/// and the panic strings stay stable and documented in `CONTRACT_ABI.md`:
+///
+/// * `"not initialized"` — no admin was stored yet.
+/// * `"caller is not admin"` — the caller signed, but is not that admin.
+fn require_admin(env: &Env, caller: &Address) {
+    caller.require_auth();
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .unwrap_or_else(|| panic!("not initialized"));
+    if caller != &admin {
+        panic!("caller is not admin");
     }
 }
 

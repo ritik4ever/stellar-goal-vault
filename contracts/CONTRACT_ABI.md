@@ -113,6 +113,53 @@ fn set_paused(env: Env, caller: Address, paused: bool)
 
 ---
 
+### `set_fee`
+
+Sets the platform fee in basis points (e.g. 50 = 0.5%). Admin only. Pass 0 to disable the fee. Maximum is 10000 bps (100%).
+
+```
+fn set_fee(env: Env, admin: Address, bps: i128)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Must match the stored admin address and authorize the call |
+| `bps` | `i128` | Platform fee in basis points (0–10000) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller is not admin | `"caller is not admin"` | Critical | Only the admin address stored during `initialize()` can call this |
+| `bps < 0` | `"fee must be non-negative"` | Medium | Provide a fee >= 0 bps |
+| `bps > 10000` | `"fee must not exceed 10000 basis points"` | Medium | Limit fee to 10000 basis points (100%) or lower |
+
+---
+
+### `set_fee_recipient`
+
+Sets the address that receives platform fees on campaign claims. Admin only.
+
+```
+fn set_fee_recipient(env: Env, admin: Address, recipient: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Must match the stored admin address and authorize the call |
+| `recipient` | `Address` | Address to receive platform fee deductions (cannot be the vault contract) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller is not admin | `"caller is not admin"` | Critical | Only the admin address stored during `initialize()` can call this |
+| Recipient is vault | `"fee recipient cannot be the vault contract"` | Medium | Provide a recipient address other than the vault contract address |
+
+---
+
 ## Campaign Lifecycle
 
 ### `create_campaign`
@@ -225,6 +272,21 @@ fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: S
 
 ## Contributions & Funds
 
+### Configuration-path authorization (issue #913)
+
+Every configuration entry point is guarded by `require_admin`, which requires
+the caller to sign **and** checks that the caller is the address stored by
+`initialize`. Keeping the check in one helper means a setter cannot ship with
+only one half of the check. Covered by `src/test_admin_auth.rs`.
+
+| Entry point | Required signer | Extra check |
+|---|---|---|
+| `initialize` | the `admin` argument | contract not already initialized |
+| `set_paused` | stored `admin` | contract must be initialized |
+| `set_fee` | stored `admin` | contract must be initialized |
+| `set_fee_recipient` | stored `admin` | contract must be initialized |
+| `migrate` | stored `admin` | contract must be initialized |
+
 ### Pledge-path authorization (issue #898)
 
 Every state transition on the pledge path requires exactly one signer, and
@@ -306,7 +368,10 @@ fn claim(env: Env, campaign_id: u64, creator: Address)
 | Underfunded | `"campaign is not funded"` | Medium | `pledged_amount < target_amount`; contributors should use `refund()` |
 | Caller not authorized | Soroban auth failure | High | Ensure `creator` signs the transaction |
 
-**Emits:** `CampaignClaimed` (one per token with a non-zero balance)
+**Emits:** `CampaignClaimed` (one per token with a non-zero balance), and
+`FeeCollected` for each token whose fee transfer is positive. `CampaignClaimed.amount`
+is the gross campaign balance claimed for that token, before any fee split.
+Failed calls commit no claim or fee success events.
 
 **Gas estimate:** 20,000 + 15,000 per accepted token (transfer + storage) ≈ base 20,000 + 15,000 per token + 20% headroom: **42,000** (1 token) / **102,000** (5 tokens)
 
@@ -400,8 +465,8 @@ fn migrate(
 
 | Error Condition | Panic Message | Severity | Recovery Action |
 |----------------|---------------|----------|-----------------|
-| Not initialized | `"not initialized"` (assert) | High | Call `initialize()` first |
-| Caller not admin | `"only admin can call migrate"` (assert) | Critical | Only the stored admin can migrate |
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller not admin | `"caller is not admin"` | Critical | Only the stored admin can migrate |
 | Length mismatch | `"source_ids and campaigns must have the same length"` (assert) | High | Ensure both vectors have equal length |
 | Caller not authorized | Soroban auth failure | High | Ensure `admin` signs the transaction |
 
@@ -759,7 +824,33 @@ Structured event emitted for off-chain indexers and audit pipelines upon success
 | `token` | `Address` | Token claimed |
 | `amount` | `i128` | Amount claimed |
 
-**Emitted by:** `claim` (one per token with balance)
+**Emitted by:** `claim` (one per token with a non-zero balance, after successful
+transfers and campaign balance clearing). `amount` is the gross amount removed
+from campaign accounting; when a fee applies, `FeeCollected` describes the fee
+portion of this amount. The event contains no contributor-specific data.
+
+---
+
+### `FeeCollected`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Fee"` |
+
+**Data** (`FeeCollected`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `token` | `Address` | Token from which the fee was collected |
+| `fee_amount` | `i128` | Positive fee transferred to the recipient |
+| `fee_recipient` | `Address` | Address receiving the fee |
+
+**Emitted by:** `claim`, once per token only when a fee recipient is configured
+and the calculated fee is greater than zero. No event is emitted for zero fees,
+or when no fee recipient is configured. As with `CampaignClaimed`, the event is
+committed only if the full claim transaction succeeds.
 
 ---
 
@@ -893,9 +984,11 @@ Structured event emitted for off-chain indexers and audit pipelines upon success
 |---------------|-----------|----------|----------|
 | `"already initialized"` | `initialize` | High | Do not call `initialize()` again |
 | `"min_contribution must be positive"` | `initialize` | High | Pass `min_contribution > 0` |
-| `"not initialized"` | `set_paused`, `get_admin`, `migrate` | High | Call `initialize()` with admin address |
-| `"caller is not admin"` | `set_paused` | Critical | Only the stored admin address can pause |
-| `"only admin can call migrate"` | `migrate` | Critical | Only the stored admin address can migrate |
+| `"not initialized"` | `set_paused`, `set_fee`, `set_fee_recipient`, `get_admin`, `migrate` | High | Call `initialize()` with admin address |
+| `"caller is not admin"` | `set_paused`, `set_fee`, `set_fee_recipient`, `migrate` | Critical | Only the admin address stored during `initialize()` may call configuration setters |
+| `"fee must be non-negative"` | `set_fee` | Medium | Provide a fee >= 0 bps |
+| `"fee must not exceed 10000 basis points"` | `set_fee` | Medium | Limit fee to 10000 basis points (100%) or lower |
+| `"fee recipient cannot be the vault contract"` | `set_fee_recipient` | Medium | Provide a fee recipient address other than the vault contract address |
 | `"contract is paused"` | all state-mutating functions | Medium | Wait for admin to unpause |
 | `"campaign not found"` | all campaign-specific functions | High | Verify `campaign_id` via `get_campaign()` |
 | `"target amount must be positive"` | `create_campaign` | High | Set `target_amount > 0` |

@@ -32,6 +32,21 @@ function redactUrlCredentials(value: string): string {
   );
 }
 
+// Stellar secret seeds: "S" + 55 base32 characters (StrKey ed25519 secret seed).
+const STELLAR_SECRET_SEED_RE = /\bS[A-Z2-7]{55}\b/g;
+// Base64 XDR transaction envelopes (signed or unsigned) start with "AAAA".
+const XDR_BLOB_RE = /\bAAAA[A-Za-z0-9+/]{76,}={0,2}/g;
+
+/**
+ * Removes Stellar secret seeds and transaction envelope XDR from free text
+ * such as error messages and stack traces.
+ */
+export function redactSecretMaterial(text: string): string {
+  return text
+    .replace(STELLAR_SECRET_SEED_RE, '[REDACTED_SECRET]')
+    .replace(XDR_BLOB_RE, '[REDACTED_XDR]');
+}
+
 /**
  * Deep-redact sensitive keys and credential-bearing URL strings from log payloads.
  */
@@ -63,7 +78,7 @@ export function redactSensitive(value: unknown, depth = 0): unknown {
         '$1[REDACTED]',
       );
     }
-    return value;
+    return redactSecretMaterial(value);
   }
   if (Array.isArray(value)) return value.map((v) => redactSensitive(v, depth + 1));
   if (typeof value === 'object') {
@@ -227,7 +242,7 @@ export function logError(
     event: safeContext.event ?? 'error',
     err: {
       message: typeof safeMessage === 'string' ? safeMessage : normalizedError.message,
-      stack: normalizedError.stack,
+      stack: normalizedError.stack ? redactSecretMaterial(normalizedError.stack) : undefined,
       name: normalizedError.name,
     },
   });

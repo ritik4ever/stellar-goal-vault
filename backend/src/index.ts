@@ -1,5 +1,6 @@
 import compression from 'compression';
 import cors from 'cors';
+import { randomUUID } from 'crypto';
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import helmet from 'helmet';
@@ -32,6 +33,7 @@ import {
   claimCampaign,
   createCampaign,
   getCampaign,
+  getCampaignAnalytics,
   getCampaignWithProgress,
   getContributorSummary,
   getGlobalStats,
@@ -65,6 +67,7 @@ import {
   claimCampaignPayloadSchema,
   createCampaignPayloadSchema,
   createPledgePayloadSchema,
+  parseCampaignAnalyticsQuery,
   parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
   parseTimelineQuery,
@@ -75,6 +78,7 @@ import {
   parseCampaignListQuery,
   normalizeQueryValue,
   parseContributorPledgesQuery,
+  parseHealthPaginationQuery,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
 import { logError, logInfo, logger, summarizeSecretConfig } from './logger';
@@ -265,7 +269,15 @@ function parseCampaignId(
 
   const parsed = campaignIdSchema.safeParse(campaignIdRaw);
   if (!parsed.success) {
-    return { ok: false, issues: parsed.error.issues };
+    // Path parameters have no Zod path of their own, so a schema-level
+    // refinement would surface as `field: "body"` in the error envelope.
+    // Label the failure with the actual parameter name instead.
+    return {
+      ok: false,
+      issues: parsed.error.issues.map((issue) =>
+        issue.path.length > 0 ? issue : { ...issue, path: ['id'] },
+      ),
+    };
   }
 
   return { ok: true, value: parsed.data };
@@ -357,50 +369,76 @@ export function filterCampaignList(
   });
 }
 
-app.get('/api/health', (_req: Request, res: Response) => {
-  const start = process.hrtime();
-  const database = checkDbHealth();
-  const indexer = getIndexerStatus();
-
-  // Operators distinguish healthy-but-idle from stale/failing via indexer.freshness.
-  // Degrade when DB is down or indexer is stale/failing (isHealthy already encodes this).
-  const healthy = database.reachable && indexer.isHealthy;
-
-  const end = process.hrtime(start);
-  const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
-
-  logInfo('health_check', {
-    operation: 'health_check_shallow',
-    outcome: healthy ? 'success' : 'failure',
-    latency_ms: latencyMs,
-    db_reachable: database.reachable,
-    indexer_healthy: indexer.isHealthy,
-    indexer_freshness: indexer.freshness,
-    indexer_lag_ms: indexer.lagMs,
-  });
-
-  const memUsage = process.memoryUsage();
-  const memory = {
-    rss: memUsage.rss,
-    heapUsed: memUsage.heapUsed,
-    heapTotal: memUsage.heapTotal,
-    external: memUsage.external,
-  };
-
-  res.status(healthy ? 200 : 503).json({
-    service: 'stellar-goal-vault-backend',
-    status: healthy ? 'ok' : 'degraded',
-    timestamp: new Date().toISOString(),
-    uptimeSeconds: Number(process.uptime().toFixed(3)),
-    database,
-    indexer,
-    memory,
-  });
-});
-
-app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Response) => {
+app.get('/api/health', (req: Request, res: Response, next: express.NextFunction) => {
   const start = process.hrtime();
   try {
+    const database = checkDbHealth();
+    const indexer = getIndexerStatus();
+
+    // Operators distinguish healthy-but-idle from stale/failing via indexer.freshness.
+    // Degrade when DB is down or indexer is stale/failing (isHealthy already encodes this).
+    const healthy = database.reachable && indexer.isHealthy;
+
+    const end = process.hrtime(start);
+    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+
+    logInfo('health_check', {
+      operation: 'health_check_shallow',
+      outcome: healthy ? 'success' : 'failure',
+      latency_ms: latencyMs,
+      db_reachable: database.reachable,
+      indexer_healthy: indexer.isHealthy,
+      indexer_freshness: indexer.freshness,
+      indexer_lag_ms: indexer.lagMs,
+    });
+
+    const memUsage = process.memoryUsage();
+    const memory = {
+      rss: memUsage.rss,
+      heapUsed: memUsage.heapUsed,
+      heapTotal: memUsage.heapTotal,
+      external: memUsage.external,
+    };
+
+    res.status(healthy ? 200 : 503).json({
+      service: 'stellar-goal-vault-backend',
+      status: healthy ? 'ok' : 'degraded',
+      timestamp: new Date().toISOString(),
+      uptimeSeconds: Number(process.uptime().toFixed(3)),
+      database,
+      indexer,
+      memory,
+    });
+  } catch (error) {
+    const end = process.hrtime(start);
+    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+    logError(error, {
+      event: 'health_check_error',
+      operation: 'health_check_shallow',
+      outcome: 'failure',
+      latency_ms: latencyMs,
+      requestId: (req as RequestWithId).requestId,
+    });
+    return next(error);
+  }
+});
+
+app.get('/api/health/deep', applyRateLimit(1000), async (req: Request, res: Response, next: express.NextFunction) => {
+  const start = process.hrtime();
+  try {
+    // The deep response exposes an ordered `components` collection, so it
+    // supports bounded pagination via page/limit (defaults 1 / 20, limit capped
+    // at 100). Invalid values are rejected with 400 rather than silently
+    // clamped. The default limit exceeds the number of components, so a request
+    // without parameters returns every component exactly as before.
+    const paginationResult = parseHealthPaginationQuery({
+      page: req.query.page,
+      limit: req.query.limit,
+    });
+    if (!paginationResult.ok) {
+      sendValidationError(paginationResult.issues);
+    }
+
     const database = checkDbHealth();
     const hasContractId = !!config.contractId;
     let sorobanHealthy = false;
@@ -450,30 +488,47 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
       external: memUsage.external,
     };
 
+    // Canonical, stable component order so a slice is deterministic across
+    // pages: page 1 + page 2 cover the set exactly once with no overlap.
+    const allComponents: Record<string, { status: 'up' | 'down'; details: unknown }> = {
+      db: {
+        status: database.reachable ? 'up' : 'down',
+        details: database.reachable ? 'SQLite database reachable' : database.error,
+      },
+      soroban: {
+        status: sorobanHealthy ? 'up' : 'down',
+        details: config.sorobanRpcUrl ? 'Soroban RPC reachable' : 'Soroban RPC URL not configured',
+      },
+      contract: {
+        status: hasContractId ? 'up' : 'down',
+        details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
+      },
+      indexer: {
+        status: indexer.isHealthy ? 'up' : 'down',
+        details: indexer,
+      },
+    };
+
+    const componentNames = Object.keys(allComponents);
+    const total = componentNames.length;
+    const { page, limit } = paginationResult;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const pageNames = componentNames.slice((page - 1) * limit, (page - 1) * limit + limit);
+    const components = Object.fromEntries(pageNames.map((name) => [name, allComponents[name]]));
+
     res.status(allHealthy ? 200 : 503).json({
       overall: allHealthy ? 'up' : 'down',
       timestamp: new Date().toISOString(),
       uptimeSeconds: Number(process.uptime().toFixed(3)),
       memory,
-      components: {
-        db: {
-          status: database.reachable ? 'up' : 'down',
-          details: database.reachable ? 'SQLite database reachable' : database.error,
-        },
-        soroban: {
-          status: sorobanHealthy ? 'up' : 'down',
-          details: config.sorobanRpcUrl
-            ? 'Soroban RPC reachable'
-            : 'Soroban RPC URL not configured',
-        },
-        contract: {
-          status: hasContractId ? 'up' : 'down',
-          details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
-        },
-        indexer: {
-          status: indexer.isHealthy ? 'up' : 'down',
-          details: indexer,
-        },
+      components,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasPreviousPage: page > 1 && total > 0,
+        hasNextPage: page < totalPages,
       },
     });
   } catch (error) {
@@ -484,13 +539,9 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
       operation: 'health_check_deep',
       outcome: 'failure',
       latency_ms: latencyMs,
+      requestId: (req as RequestWithId).requestId,
     });
-    res.status(503).json({
-      overall: 'down',
-      timestamp: new Date().toISOString(),
-      error: 'Deep health check failed',
-      message: error instanceof Error ? error.message : String(error),
-    });
+    return next(error);
   }
 });
 
@@ -622,13 +673,25 @@ app.get('/api/campaigns/:id', async (req: Request, res: Response, next: express.
       sendValidationError(parsedId.issues);
     }
 
+    const requestId =
+      (req as RequestWithId).requestId ||
+      (req.header('x-request-id') as string) ||
+      (req.header('X-Request-Id') as string) ||
+      randomUUID();
+    (req as RequestWithId).requestId = requestId;
+    if (!res.getHeader('X-Request-Id')) {
+      res.setHeader('X-Request-Id', requestId);
+    }
+
     const cacheKey = `campaigns:detail:${parsedId.value}`;
     const cached = await getCampaignCacheEntry(cacheKey);
     if (cached) {
+      const cachedData = JSON.parse(cached) as { data: unknown };
       res.setHeader('Cache-Control', 'max-age=30');
       res.setHeader('X-Cache', 'HIT');
       res.setHeader('Content-Type', 'application/json');
-      res.send(cached);
+      // The cached payload is shared, but correlation IDs are per request.
+      res.send(JSON.stringify({ ...cachedData, requestId }));
       return;
     }
 
@@ -643,10 +706,44 @@ app.get('/api/campaigns/:id', async (req: Request, res: Response, next: express.
     res.setHeader('Cache-Control', 'max-age=30');
     res.setHeader('X-Cache', 'MISS');
     res.setHeader('Content-Type', 'application/json');
-    res.send(responseBody);
+    res.send(
+      JSON.stringify({
+        data: campaign,
+        requestId,
+      }),
+    );
   } catch (error) {
     next(error);
   }
+});
+
+app.get('/api/campaigns/:id/analytics', (req: Request, res: Response) => {
+  // Validate the whole boundary before touching storage: the path id must be a
+  // canonical positive integer, and this read model takes no query parameters.
+  // Rejecting unknown keys (instead of ignoring them) keeps `?page=2`-style
+  // requests from looking like they did something when they did not.
+  const parsedId = parseCampaignId(req.params.id);
+  if (!parsedId.ok) {
+    sendValidationError(parsedId.issues);
+  }
+
+  const parsedQuery = parseCampaignAnalyticsQuery(req.query as Record<string, unknown>);
+  if (!parsedQuery.ok) {
+    sendValidationError(parsedQuery.issues);
+  }
+
+  const analytics = getCampaignAnalytics(parsedId.value);
+  if (!analytics) {
+    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+  }
+
+  res.setHeader('Cache-Control', 'max-age=30');
+  res.json({
+    data: {
+      campaignId: parsedId.value,
+      ...analytics,
+    },
+  });
 });
 
 app.delete(
@@ -679,45 +776,56 @@ app.post(
   },
 );
 
-app.get('/api/campaigns/:id/pledges', (req: Request, res: Response) => {
-  const parsedId = parseCampaignId(req.params.id);
-  if (!parsedId.ok) {
-    sendValidationError(parsedId.issues);
-  }
+app.get('/api/campaigns/:id/pledges', (req: Request, res: Response, next: express.NextFunction) => {
+  try {
+    const parsedId = parseCampaignId(req.params.id);
+    if (!parsedId.ok) {
+      sendValidationError(parsedId.issues);
+    }
 
-  const paginationResult = parsePledgeListPaginationQuery({
-    page: req.query.page,
-    limit: req.query.limit,
-  });
-  if (!paginationResult.ok) {
-    sendValidationError(paginationResult.issues);
-  }
+    const paginationResult = parsePledgeListPaginationQuery({
+      page: req.query.page,
+      limit: req.query.limit,
+    });
+    if (!paginationResult.ok) {
+      sendValidationError(paginationResult.issues);
+    }
 
-  const campaign = getCampaign(parsedId.value);
-  if (!campaign) {
-    throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
-  }
+    const campaign = getCampaign(parsedId.value);
+    if (!campaign) {
+      throw new AppError('Campaign not found.', 404, 'NOT_FOUND');
+    }
 
-  const { pledges, totalCount } = listCampaignPledges(parsedId.value, {
-    page: paginationResult.page,
-    limit: paginationResult.limit,
-  });
-  const totalPages = Math.max(1, Math.ceil(totalCount / paginationResult.limit));
-
-  res.setHeader('X-Total-Count', String(totalCount));
-  res.json({
-    data: pledges,
-    pagination: {
-      total: totalCount,
+    const { pledges, totalCount } = listCampaignPledges(parsedId.value, {
       page: paginationResult.page,
       limit: paginationResult.limit,
-      totalPages,
-    },
-  });
+    });
+    const totalPages = Math.max(1, Math.ceil(totalCount / paginationResult.limit));
+
+    res.setHeader('X-Total-Count', String(totalCount));
+    res.json({
+      data: pledges,
+      pagination: {
+        total: totalCount,
+        page: paginationResult.page,
+        limit: paginationResult.limit,
+        totalPages,
+        // Same navigation semantics as GET /api/campaigns: a page is only a
+        // "previous" page if there is something before it, and `hasNextPage`
+        // is derived from the bounded total, so clients never need a second
+        // request to discover the end of the collection.
+        hasPreviousPage: paginationResult.page > 1 && totalCount > 0,
+        hasNextPage: paginationResult.page < totalPages,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post(
   '/api/campaigns',
+  applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
   validateBody(createCampaignPayloadSchema),
   async (req: Request, res: Response, next: express.NextFunction) => {
     try {
@@ -882,6 +990,7 @@ app.get('/api/contributors/:address/pledges', (req: Request, res: Response) => {
     page: query.page,
     limit: query.limit,
   });
+  const totalPages = Math.max(1, Math.ceil(totalCount / query.limit));
 
   res.setHeader('X-Total-Count', String(totalCount));
   res.json({
@@ -890,7 +999,9 @@ app.get('/api/contributors/:address/pledges', (req: Request, res: Response) => {
       total: totalCount,
       page: query.page,
       limit: query.limit,
-      totalPages: Math.max(1, Math.ceil(totalCount / query.limit)),
+      totalPages,
+      hasPreviousPage: query.page > 1 && totalCount > 0,
+      hasNextPage: query.page < totalPages,
     },
   });
 });
@@ -1159,6 +1270,18 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
     });
   }
 
+  if (isErrorWithType(err, 'entity.parse.failed')) {
+    // The parser's message echoes fragments of the raw request body.
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'INVALID_JSON',
+        message: 'Request body is not valid JSON.',
+        requestId: (req as RequestWithId).requestId,
+      },
+    });
+  }
+
   if (isErrorWithMessage(err) && err.message === 'Not allowed by CORS') {
     return res.status(403).json({
       success: false,
@@ -1172,12 +1295,24 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
 
   const errorWithCode = err as { statusCode?: number; code?: string };
   const statusCode = err instanceof AppError ? err.statusCode : (errorWithCode.statusCode ?? 500);
-  const code = err instanceof AppError ? err.code : (errorWithCode.code ?? 'INTERNAL_SERVER_ERROR');
+  // Only application errors (AppError, or service errors carrying a client
+  // status and code) have messages written for clients. Anything else is an
+  // unexpected exception whose text may include internals, so it is replaced
+  // with a structured code and a generic message; details go to the log only.
+  const isClientFacingError =
+    err instanceof AppError ||
+    (typeof errorWithCode.code === 'string' && statusCode >= 400 && statusCode < 500);
+  const code = isClientFacingError
+    ? (errorWithCode.code ?? 'INTERNAL_SERVER_ERROR')
+    : 'INTERNAL_SERVER_ERROR';
   const response: ApiErrorResponse = {
     success: false,
     error: {
       code,
-      message: isErrorWithMessage(err) ? err.message : 'An unexpected error occurred',
+      message:
+        isClientFacingError && isErrorWithMessage(err)
+          ? err.message
+          : 'An unexpected error occurred',
       requestId: (req as RequestWithId).requestId,
     },
   };

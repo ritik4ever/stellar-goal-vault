@@ -243,6 +243,32 @@ components:
         - amount
         - assetCode
         - createdAt
+    ContributorPledge:
+      allOf:
+        - $ref: "#/components/schemas/Pledge"
+        - type: object
+          properties:
+            campaignName:
+              type: string
+              example: Clean Water Initiative
+            status:
+              type: string
+              enum:
+                - open
+                - funded
+                - claimed
+                - failed
+              example: open
+            refundStatus:
+              type: string
+              enum:
+                - refunded
+                - not_refunded
+              example: not_refunded
+          required:
+            - campaignName
+            - status
+            - refundStatus
     CampaignEvent:
       type: object
       properties:
@@ -262,6 +288,8 @@ components:
             - updated
             - metadata_updated
             - pledge_limit_reached
+            - archived
+            - restored
           example: pledged
         timestamp:
           type: integer
@@ -373,9 +401,11 @@ components:
           properties:
             code:
               type: string
+              description: Stable machine-readable error code.
               example: VALIDATION_ERROR
             message:
               type: string
+              description: Client-safe message; unexpected failures use a generic message.
               example: page must be a positive integer.
             details:
               type: array
@@ -393,6 +423,7 @@ components:
                   - message
             requestId:
               type: string
+              description: Correlation ID also returned in the X-Request-Id response header.
               example: req-123
           required:
             - code
@@ -400,6 +431,8 @@ components:
       required:
         - success
         - error
+      description: Standard error envelope. Internal exception messages, stacks, and
+        secret material are not returned.
     CreateCampaignPayload:
       type: object
       properties:
@@ -431,7 +464,6 @@ components:
           properties:
             imageUrl:
               type: string
-              maxLength: 2048
             externalLink:
               type: string
               maxLength: 2048
@@ -584,16 +616,121 @@ components:
             - totalPages
             - hasPreviousPage
             - hasNextPage
+        requestId:
+          type: string
+          description: Correlation ID also returned in the X-Request-Id response header.
+          example: req-123
       required:
         - data
         - pagination
+        - requestId
     CampaignDetailResponse:
       type: object
       properties:
         data:
           $ref: "#/components/schemas/Campaign"
+        requestId:
+          type: string
+          description: Correlation ID also returned in the X-Request-Id response header.
+          example: req-123
       required:
         - data
+    CampaignAnalyticsResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/CampaignAnalytics"
+      required:
+        - data
+    CampaignAnalytics:
+      type: object
+      properties:
+        campaignId:
+          type: string
+          description: Campaign ID.
+          example: "1"
+        fundingGap:
+          type: number
+          description: Amount still needed to reach the target (never negative).
+          example: 750
+        status:
+          type: string
+          enum:
+            - open
+            - funded
+            - claimed
+            - failed
+          example: open
+        percentFunded:
+          type: number
+          description: Pledged amount as a % of target.
+          example: 25
+        pledgeCount:
+          type: integer
+          description: Active (non-refunded) pledge count.
+          example: 3
+        contributorCount:
+          type: integer
+          description: Distinct contributors who still have funds in the campaign.
+          example: 2
+      required:
+        - campaignId
+        - fundingGap
+        - status
+        - percentFunded
+        - pledgeCount
+        - contributorCount
+    CampaignAnalyticsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CampaignAnalytics"
+        pagination:
+          $ref: "#/components/schemas/AnalyticsPagination"
+        requestId:
+          type: string
+          description: Correlation ID also returned in the X-Request-Id response header.
+          example: req-123
+      required:
+        - data
+        - pagination
+        - requestId
+    AnalyticsPagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          description: Current page (1-based).
+          example: 1
+        limit:
+          type: integer
+          description: Number of items per page.
+          example: 10
+        total:
+          type: integer
+          description: Total number of items matching the query.
+          example: 42
+        totalPages:
+          type: integer
+          description: Total number of pages.
+          example: 5
+        hasPreviousPage:
+          type: boolean
+          description: Whether a previous page exists for this paginated request.
+          example: false
+        hasNextPage:
+          type: boolean
+          description: Whether a later page exists for this paginated request.
+          example: true
+      required:
+        - page
+        - limit
+        - total
+        - totalPages
+        - hasPreviousPage
+        - hasNextPage
     PledgeListResponse:
       type: object
       properties:
@@ -620,11 +757,65 @@ components:
               type: integer
               description: Total number of pages.
               example: 5
+            hasPreviousPage:
+              type: boolean
+              description: Whether a previous page exists for this paginated request.
+              example: false
+            hasNextPage:
+              type: boolean
+              description: Whether a later page exists for this paginated request.
+              example: true
           required:
             - total
             - page
             - limit
             - totalPages
+            - hasPreviousPage
+            - hasNextPage
+      required:
+        - data
+        - pagination
+    ContributorPledgeListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContributorPledge"
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Total number of items matching the query.
+              example: 42
+            page:
+              type: integer
+              description: Current page (1-based).
+              example: 1
+            limit:
+              type: integer
+              description: Number of items per page.
+              example: 10
+            totalPages:
+              type: integer
+              description: Total number of pages.
+              example: 5
+            hasPreviousPage:
+              type: boolean
+              description: Whether a previous page exists for this paginated request.
+              example: false
+            hasNextPage:
+              type: boolean
+              description: Whether a later page exists for this paginated request.
+              example: true
+          required:
+            - total
+            - page
+            - limit
+            - totalPages
+            - hasPreviousPage
+            - hasNextPage
       required:
         - data
         - pagination
@@ -854,12 +1045,70 @@ components:
               type: string
           required:
             - reachable
+        indexer:
+          type: object
+          properties:
+            lastSuccessfulPollTime:
+              type:
+                - number
+                - "null"
+            lastKnownLedger:
+              type: number
+            isHealthy:
+              type: boolean
+            consecutiveFailures:
+              type: number
+            lagMs:
+              type:
+                - number
+                - "null"
+          required:
+            - lastSuccessfulPollTime
+            - lastKnownLedger
+            - isHealthy
+            - consecutiveFailures
+            - lagMs
       required:
         - service
         - status
         - timestamp
         - uptimeSeconds
         - database
+        - indexer
+    HealthPagination:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of health components available.
+          example: 4
+        page:
+          type: integer
+          description: Current page (1-based).
+          example: 1
+        limit:
+          type: integer
+          description: Number of components per page.
+          example: 20
+        totalPages:
+          type: integer
+          description: Total number of pages.
+          example: 1
+        hasPreviousPage:
+          type: boolean
+          description: Whether a previous page exists for this paginated request.
+          example: false
+        hasNextPage:
+          type: boolean
+          description: Whether a later page exists for this paginated request.
+          example: false
+      required:
+        - total
+        - page
+        - limit
+        - totalPages
+        - hasPreviousPage
+        - hasNextPage
     DeepHealthResponse:
       type: object
       properties:
@@ -915,15 +1164,48 @@ components:
               required:
                 - status
                 - details
-          required:
-            - db
-            - soroban
-            - contract
+            indexer:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - up
+                    - down
+                details:
+                  type: object
+                  properties:
+                    lastSuccessfulPollTime:
+                      type:
+                        - number
+                        - "null"
+                    lastKnownLedger:
+                      type: number
+                    isHealthy:
+                      type: boolean
+                    consecutiveFailures:
+                      type: number
+                    lagMs:
+                      type:
+                        - number
+                        - "null"
+                  required:
+                    - lastSuccessfulPollTime
+                    - lastKnownLedger
+                    - isHealthy
+                    - consecutiveFailures
+                    - lagMs
+              required:
+                - status
+                - details
+        pagination:
+          $ref: "#/components/schemas/HealthPagination"
       required:
         - overall
         - timestamp
         - uptimeSeconds
         - components
+        - pagination
     ConfigResponse:
       type: object
       properties:
@@ -980,6 +1262,30 @@ components:
         data:
           type: object
           properties:
+            total_campaigns:
+              type: integer
+              example: 10
+            open_campaigns:
+              type: integer
+              example: 5
+            funded_campaigns:
+              type: integer
+              example: 3
+            failed_campaigns:
+              type: integer
+              example: 1
+            total_pledged_usdc:
+              type: number
+              example: 35000
+            total_pledged_xlm:
+              type: number
+              example: 15000
+            total_contributors:
+              type: integer
+              example: 42
+            avg_funding_rate_pct:
+              type: number
+              example: 78.5
             totalCampaigns:
               type: integer
             openCampaigns:
@@ -995,13 +1301,14 @@ components:
             uniqueContributors:
               type: integer
           required:
-            - totalCampaigns
-            - openCampaigns
-            - fundedCampaigns
-            - claimedCampaigns
-            - failedCampaigns
-            - totalPledgeVolume
-            - uniqueContributors
+            - total_campaigns
+            - open_campaigns
+            - funded_campaigns
+            - failed_campaigns
+            - total_pledged_usdc
+            - total_pledged_xlm
+            - total_contributors
+            - avg_funding_rate_pct
       required:
         - data
     LeaderboardResponse:
@@ -1059,6 +1366,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "503":
           description: Service is degraded
           content:
@@ -1070,8 +1384,35 @@ paths:
       tags:
         - Health
       summary: Deep health check
-      description: Checks database, Soroban RPC, and contract configuration health.
+      description: "Checks database, Soroban RPC, and contract configuration health.
+        The `components` collection is paginated deterministically in a fixed
+        order (db, soroban, contract, indexer): page defaults to 1 and limit
+        defaults to 20 when omitted, both must be integers, and limit is capped
+        at 100. Out-of-range values are rejected with 400 rather than clamped.
+        The response includes total, totalPages, hasPreviousPage, and
+        hasNextPage under `pagination` so callers can navigate without guessing
+        where the collection ends. Because the default limit exceeds the number
+        of components, omitting both parameters returns every component exactly
+        as before."
       security: []
+      parameters:
+        - schema:
+            type: integer
+            minimum: 1
+            description: 1-based page number (default 1).
+          required: false
+          description: 1-based page number (default 1).
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Components per page, 1 to 100 (default 20).
+          required: false
+          description: Components per page, 1 to 100 (default 20).
+          name: limit
+          in: query
       responses:
         "200":
           description: All components are healthy
@@ -1079,6 +1420,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeepHealthResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "503":
           description: One or more components are unhealthy
           content:
@@ -1090,23 +1444,29 @@ paths:
       tags:
         - Campaigns
       summary: List campaigns
-      description: List campaigns with optional filtering, sorting, and pagination. Omit both page and limit to return the full filtered set; when paginating, provide both and use a limit from 1 to 100.
+      description: List campaigns with optional filtering, sorting, and pagination.
+        Omit both page and limit to return the full filtered set; when
+        paginating, provide both and use a limit from 1 to 100.
       parameters:
         - schema:
             type: integer
             minimum: 1
-            description: 1-based page number. Requires limit; omit page and limit for all results.
+            description: 1-based page number. Requires limit; omit page and limit for all
+              results.
           required: false
-          description: 1-based page number. Requires limit; omit page and limit for all results.
+          description: 1-based page number. Requires limit; omit page and limit for all
+            results.
           name: page
           in: query
         - schema:
             type: integer
             minimum: 1
             maximum: 100
-            description: Items per page, from 1 to 100. Requires page; omit page and limit for all results.
+            description: Items per page, from 1 to 100. Requires page; omit page and limit
+              for all results.
           required: false
-          description: Items per page, from 1 to 100. Requires page; omit page and limit for all results.
+          description: Items per page, from 1 to 100. Requires page; omit page and limit
+            for all results.
           name: limit
           in: query
         - schema:
@@ -1163,8 +1523,22 @@ paths:
             enum:
               - "true"
               - "false"
+            description: "Include archived (soft-deleted) campaigns. Alias:
+              'include_archived'."
           required: false
+          description: "Include archived (soft-deleted) campaigns. Alias:
+            'include_archived'."
           name: includeDeleted
+          in: query
+        - schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+            description: Alias for 'includeDeleted'.
+          required: false
+          description: Alias for 'includeDeleted'.
+          name: include_archived
           in: query
         - schema:
             type: string
@@ -1218,6 +1592,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /api/campaigns/{id}:
     get:
       tags:
@@ -1250,11 +1630,96 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+    delete:
+      tags:
+        - Campaigns
+      summary: Archive (soft-delete) a campaign
+      description: Sets the archivedAt/deletedAt timestamp on a campaign. Archived
+        campaigns are excluded from the default campaign list but their pledges
+        and history are preserved. Use POST /api/campaigns/{id}/restore to
+        un-archive.
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Campaign archived
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignDetailResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Campaign is already archived
+        "429":
+          description: Rate limit exceeded
+  /api/campaigns/{id}/restore:
+    post:
+      tags:
+        - Campaigns
+      summary: Restore an archived campaign
+      description: Clears the archivedAt/deletedAt timestamp, making the campaign
+        active again.
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Campaign restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignDetailResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Campaign is not archived
+        "429":
+          description: Rate limit exceeded
   /api/campaigns/{id}/pledges:
     get:
       tags:
         - Pledges
       summary: List campaign pledges
+      description: "Returns pledges newest-first. Pagination is deterministic: page
+        defaults to 1 and limit defaults to 10 when omitted, both must be
+        integers, and limit is capped at 100. Out-of-range values are rejected
+        with 400 rather than clamped. The response includes total, totalPages,
+        hasPreviousPage, and hasNextPage so callers can navigate without
+        guessing where the collection ends. Errors use the ApiError envelope
+        with stable codes: VALIDATION_ERROR, NOT_FOUND, RATE_LIMITED, and
+        INTERNAL_SERVER_ERROR."
       parameters:
         - schema:
             type: string
@@ -1266,14 +1731,18 @@ paths:
         - schema:
             type: integer
             minimum: 1
+            description: 1-based page number (default 1).
           required: false
+          description: 1-based page number (default 1).
           name: page
           in: query
         - schema:
             type: integer
             minimum: 1
             maximum: 100
+            description: Items per page, 1 to 100 (default 10).
           required: false
+          description: Items per page, 1 to 100 (default 10).
           name: limit
           in: query
       responses:
@@ -1295,10 +1764,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
     post:
       tags:
         - Pledges
       summary: Create a pledge
+      description: "Creates a pledge for a campaign. Use the Idempotency-Key header to
+        make the request idempotent. Cached responses are returned for 24 hours.
+        Errors use the ApiError envelope with stable codes: VALIDATION_ERROR,
+        NOT_FOUND, INVALID_ASSET, INVALID_CAMPAIGN_STATE,
+        MAX_PER_CONTRIBUTOR_EXCEEDED, CAMPAIGN_FUNDING_CAP_EXCEEDED,
+        RATE_LIMITED, and INTERNAL_SERVER_ERROR. Unexpected failures are logged
+        without exposing internal details."
       parameters:
         - schema:
             type: string
@@ -1332,8 +1815,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "429":
-          description: Rate limit exceeded
+          description: Rate limit exceeded (RATE_LIMITED)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /api/campaigns/{id}/pledges/reconcile:
     post:
       tags:
@@ -1370,6 +1870,12 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
           content:
             application/json:
               schema:
@@ -1411,6 +1917,12 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
           content:
             application/json:
               schema:
@@ -1457,8 +1969,71 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "429":
           description: Rate limit exceeded
+  /api/campaigns/{id}/analytics:
+    get:
+      tags:
+        - Campaigns
+      summary: Get campaign analytics
+      description: "Read-only analytics for one campaign. The path id must be a
+        canonical positive integer (no leading zeros, signs, or decimals).
+        Pagination is deterministic: page defaults to 1 and limit defaults to 10
+        when omitted, both must be integers, and limit is capped at 100.
+        Out-of-range values are rejected with 400 rather than clamped. The
+        response includes total, totalPages, hasPreviousPage, and hasNextPage so
+        callers can navigate without guessing where the collection ends. Missing
+        campaigns return 404."
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: integer
+            minimum: 1
+            description: 1-based page number (default 1).
+          required: false
+          description: 1-based page number (default 1).
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Items per page, 1 to 100 (default 10).
+          required: false
+          description: Items per page, 1 to 100 (default 10).
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Paginated campaign analytics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignAnalyticsListResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /api/campaigns/{id}/contributors:
     get:
       tags:
@@ -1507,14 +2082,18 @@ paths:
         - schema:
             type: integer
             minimum: 1
+            description: 1-based page number (default 1).
           required: false
+          description: 1-based page number (default 1).
           name: page
           in: query
         - schema:
             type: integer
             minimum: 1
             maximum: 100
+            description: Items per page, 1 to 100 (default 10).
           required: false
+          description: Items per page, 1 to 100 (default 10).
           name: pageSize
           in: query
       responses:
@@ -1532,6 +2111,57 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/contributors/{address}/pledges:
+    get:
+      tags:
+        - Contributors
+      summary: List pledges by contributor
+      description: "Returns all pledges made by a contributor address across all
+        campaigns. Unknown addresses return an empty array. Refunded pledges
+        include the refundedAt timestamp. Pagination uses the same defaults and
+        bounds as the campaign pledge list: page defaults to 1, limit defaults
+        to 10 and is capped at 100, and out-of-range values are rejected with
+        400."
+      parameters:
+        - schema:
+            type: string
+            pattern: ^G[A-Z2-7]{55}$
+            description: A 56-character Stellar public key (G...).
+            example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          required: true
+          description: A 56-character Stellar public key (G...).
+          name: address
+          in: path
+        - schema:
+            type: integer
+            minimum: 1
+            description: 1-based page number (default 1).
+          required: false
+          description: 1-based page number (default 1).
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Items per page, 1 to 100 (default 10).
+          required: false
+          description: Items per page, 1 to 100 (default 10).
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Paginated list of contributor pledges
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContributorPledgeListResponse"
+        "400":
+          description: Validation error
           content:
             application/json:
               schema:
