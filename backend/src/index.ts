@@ -78,6 +78,7 @@ import {
   parseCampaignListQuery,
   normalizeQueryValue,
   parseContributorPledgesQuery,
+  parseHealthPaginationQuery,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
 import { logError, logInfo, logger, summarizeSecretConfig } from './logger';
@@ -425,6 +426,19 @@ app.get('/api/health', (req: Request, res: Response, next: express.NextFunction)
 app.get('/api/health/deep', applyRateLimit(1000), async (req: Request, res: Response, next: express.NextFunction) => {
   const start = process.hrtime();
   try {
+    // The deep response exposes an ordered `components` collection, so it
+    // supports bounded pagination via page/limit (defaults 1 / 20, limit capped
+    // at 100). Invalid values are rejected with 400 rather than silently
+    // clamped. The default limit exceeds the number of components, so a request
+    // without parameters returns every component exactly as before.
+    const paginationResult = parseHealthPaginationQuery({
+      page: req.query.page,
+      limit: req.query.limit,
+    });
+    if (!paginationResult.ok) {
+      sendValidationError(paginationResult.issues);
+    }
+
     const database = checkDbHealth();
     const hasContractId = !!config.contractId;
     let sorobanHealthy = false;
@@ -474,30 +488,47 @@ app.get('/api/health/deep', applyRateLimit(1000), async (req: Request, res: Resp
       external: memUsage.external,
     };
 
+    // Canonical, stable component order so a slice is deterministic across
+    // pages: page 1 + page 2 cover the set exactly once with no overlap.
+    const allComponents: Record<string, { status: 'up' | 'down'; details: unknown }> = {
+      db: {
+        status: database.reachable ? 'up' : 'down',
+        details: database.reachable ? 'SQLite database reachable' : database.error,
+      },
+      soroban: {
+        status: sorobanHealthy ? 'up' : 'down',
+        details: config.sorobanRpcUrl ? 'Soroban RPC reachable' : 'Soroban RPC URL not configured',
+      },
+      contract: {
+        status: hasContractId ? 'up' : 'down',
+        details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
+      },
+      indexer: {
+        status: indexer.isHealthy ? 'up' : 'down',
+        details: indexer,
+      },
+    };
+
+    const componentNames = Object.keys(allComponents);
+    const total = componentNames.length;
+    const { page, limit } = paginationResult;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const pageNames = componentNames.slice((page - 1) * limit, (page - 1) * limit + limit);
+    const components = Object.fromEntries(pageNames.map((name) => [name, allComponents[name]]));
+
     res.status(allHealthy ? 200 : 503).json({
       overall: allHealthy ? 'up' : 'down',
       timestamp: new Date().toISOString(),
       uptimeSeconds: Number(process.uptime().toFixed(3)),
       memory,
-      components: {
-        db: {
-          status: database.reachable ? 'up' : 'down',
-          details: database.reachable ? 'SQLite database reachable' : database.error,
-        },
-        soroban: {
-          status: sorobanHealthy ? 'up' : 'down',
-          details: config.sorobanRpcUrl
-            ? 'Soroban RPC reachable'
-            : 'Soroban RPC URL not configured',
-        },
-        contract: {
-          status: hasContractId ? 'up' : 'down',
-          details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
-        },
-        indexer: {
-          status: indexer.isHealthy ? 'up' : 'down',
-          details: indexer,
-        },
+      components,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasPreviousPage: page > 1 && total > 0,
+        hasNextPage: page < totalPages,
       },
     });
   } catch (error) {
