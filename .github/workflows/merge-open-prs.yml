@@ -1,8 +1,17 @@
 name: Merge PR linked to Stellar Wave issues
 
+# Security: This workflow uses pull_request_target which runs in the base repo context
+# with write permissions. To mitigate risk, it requires an explicit 'auto-merge' label
+# to be added by a maintainer before the merge job will execute.
+# See: https://github.blog/security/application-security/github-actions-pull-request-target/
+#
+# Trigger: PR opened or labeled targeting main branch
+# Gate: Must have 'auto-merge' label AND not be a draft
+# Concurrency: One run per PR number
+
 on:
   pull_request_target:
-    types: [opened]
+    types: [opened, labeled]
     branches: [main]
 
 permissions:
@@ -16,7 +25,8 @@ concurrency:
 
 jobs:
   merge:
-    if: ${{ !github.event.pull_request.draft }}
+    # Security gate: only run if PR has 'auto-merge' label and is not a draft
+    if: ${{ !github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'auto-merge') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check labels, merge PR, and close issues

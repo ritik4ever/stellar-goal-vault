@@ -1,7 +1,10 @@
 export type CampaignStatus = 'open' | 'funded' | 'claimed' | 'failed';
 
 export type NotificationType =
-  'new_pledge' | 'campaign_funded' | 'refund_available' | 'creator_update';
+  | 'new_pledge'
+  | 'campaign_funded'
+  | 'refund_available'
+  | 'creator_update';
 
 export interface NotificationItem {
   id: number;
@@ -139,6 +142,7 @@ export interface AppConfig {
   networkPassphrase: string;
   contractAmountDecimals: number;
   walletIntegrationReady: boolean;
+  walletNetworkPassphrase?: string | null;
   assetAddresses: Record<string, string>;
 }
 

@@ -2594,3 +2594,118 @@ tbody tr:hover td {
     overflow: hidden;
   }
 }
+
+/* Transaction Status Display */
+.transaction-status {
+  margin-top: 8px;
+}
+
+.status-display {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-surface);
+}
+
+.status-display.status-pending {
+  border-color: var(--timeline-pending);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.status-display.status-confirmed {
+  border-color: var(--success-border);
+  background: var(--success-bg);
+}
+
+.status-display.status-failed,
+.status-display.status-retryable {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+}
+
+.status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.status-display.status-pending .status-icon {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--timeline-pending);
+}
+
+.status-display.status-confirmed .status-icon {
+  background: rgba(34, 197, 94, 0.2);
+  color: var(--success-text);
+}
+
+.status-display.status-failed .status-icon,
+.status-display.status-retryable .status-icon {
+  background: rgba(248, 113, 113, 0.2);
+  color: var(--error-text);
+}
+
+.status-icon .spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-label {
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: var(--text-main);
+}
+
+.status-display.status-pending .status-label {
+  color: var(--timeline-pending);
+}
+
+.status-display.status-confirmed .status-label {
+  color: var(--success-text);
+}
+
+.status-display.status-failed .status-label,
+.status-display.status-retryable .status-label {
+  color: var(--error-text);
+}
+
+.status-message {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-actions button {
+  min-height: 40px;
+}

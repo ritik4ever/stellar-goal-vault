@@ -5,8 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { CampaignDetailPanel } from './CampaignDetailPanel';
 import { AppConfig, Campaign } from '../types/campaign';
-
-// Mock the ContributorSummary since it makes API calls
+import { TransactionState } from '../lib/transactionStatus';
 vi.mock('./ContributorSummary', () => ({
   ContributorSummary: () => <div data-testid="contributor-summary-mock" />,
 }));
@@ -173,16 +172,12 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
     campaignOverrides: Partial<Campaign> = {},
     extraProps: {
       onPledge?: (id: string, amount: number, assetCode: string) => Promise<void>;
-      isPledgePending?: boolean;
+      transactionState?: import('../lib/transactionStatus').TransactionState;
       connectedWallet?: string | null;
     } = {},
   ) {
     const campaign: Campaign = { ...mockCampaign, ...campaignOverrides };
-    const {
-      onPledge,
-      isPledgePending = false,
-      connectedWallet: wallet = connectedWallet,
-    } = extraProps;
+    const { onPledge, transactionState, connectedWallet: wallet = connectedWallet } = extraProps;
     return render(
       <BrowserRouter>
         <CampaignDetailPanel
@@ -190,7 +185,7 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
           appConfig={mockConfig}
           isLoading={false}
           connectedWallet={wallet}
-          isPledgePending={isPledgePending}
+          transactionState={transactionState}
           onPledge={onPledge}
         />
       </BrowserRouter>,
@@ -419,24 +414,57 @@ describe('CampaignDetailPanel – Pledge Flow States', () => {
   // isPledgePending state (external in-flight flag from App.tsx)
   // -------------------------------------------------------------------------
 
-  it('shows pending note when isPledgePending is true', () => {
-    renderWithCampaign({}, { isPledgePending: true });
-    expect(screen.getByText(/pledge transaction is in flight/i)).toBeInTheDocument();
+  it('shows pending note when transaction is pending', () => {
+    const pendingState: import('../lib/transactionStatus').TransactionState = {
+      status: 'pending',
+      campaignId: '1',
+      actionType: 'pledge',
+      retryCount: 0,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    renderWithCampaign({}, { transactionState: pendingState });
+    // Matches: status label, button text, and status message
+    expect(screen.getAllByText(/submitting/i)).toHaveLength(3);
   });
 
-  it('disables the pledge amount input when isPledgePending is true', () => {
-    renderWithCampaign({}, { isPledgePending: true });
+  it('disables the pledge amount input when transaction is pending', () => {
+    const pendingState: import('../lib/transactionStatus').TransactionState = {
+      status: 'pending',
+      campaignId: '1',
+      actionType: 'pledge',
+      retryCount: 0,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    renderWithCampaign({}, { transactionState: pendingState });
     expect(screen.getByRole('spinbutton')).toBeDisabled();
   });
 
-  it('pledge form has aria-busy when isPledgePending is true', () => {
-    renderWithCampaign({}, { isPledgePending: true });
+  it('pledge form has aria-busy when transaction is pending', () => {
+    const pendingState: import('../lib/transactionStatus').TransactionState = {
+      status: 'pending',
+      campaignId: '1',
+      actionType: 'pledge',
+      retryCount: 0,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    renderWithCampaign({}, { transactionState: pendingState });
     const form = screen.getByRole('spinbutton').closest('form');
     expect(form).toHaveAttribute('aria-busy', 'true');
   });
 
-  it('submit button is disabled and shows Submitting... when isPledgePending is true', () => {
-    renderWithCampaign({}, { isPledgePending: true });
+  it('submit button is disabled and shows Submitting... when transaction is pending', () => {
+    const pendingState: import('../lib/transactionStatus').TransactionState = {
+      status: 'pending',
+      campaignId: '1',
+      actionType: 'pledge',
+      retryCount: 0,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    renderWithCampaign({}, { transactionState: pendingState });
     // disabled buttons are excluded from the accessibility tree by default;
     // use getAllByRole with hidden:true to find it
     const buttons = screen.getAllByRole('button', { hidden: true });
