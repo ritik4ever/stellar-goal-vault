@@ -36,7 +36,12 @@ const parseInteger = (value: string | undefined, fallback: number): number => {
 export const config = {
   port: Number(process.env.PORT ?? 3001),
   logLevel: normalizeLogLevel(process.env.LOG_LEVEL),
-  corsAllowedOrigins: parseOrigins(configuredOrigins),
+  get corsAllowedOrigins(): string[] {
+    const origins = process.env.ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS || '';
+    return parseOrigins(origins);
+  },
+  corsMaxAge: parseInteger(process.env.CORS_MAX_AGE, 86400),
+  corsAbuseMaxViolations: parseInteger(process.env.CORS_ABUSE_MAX_VIOLATIONS, 20),
   allowedAssets: (process.env.ALLOWED_ASSETS ?? 'USDC,XLM')
     .split(',')
     .map((value) => value.trim().toUpperCase())

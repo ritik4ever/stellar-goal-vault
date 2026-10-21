@@ -59,6 +59,10 @@ local-development override.
   ambient/at-rest auth this enables cross-site abuse.
 - **Compatibility:** `CORS_ALLOWED_ORIGINS` is accepted as a backwards-compatible
   alias, but new deployments should use `ALLOWED_ORIGINS`.
+- **CORS abuse controls & preflight caching:**
+  - `CORS_MAX_AGE`: cache duration in seconds for preflight `OPTIONS` responses (default: `86400` / 24 hours). Prevents browsers from repeatedly flooding the API with preflight checks.
+  - `CORS_ABUSE_MAX_VIOLATIONS`: maximum allowed CORS policy rejections per client IP within the rate limit window (default: `20` violations per 60-second window). When exceeded, repeated unauthorized requests are bounded with `429 RATE_LIMITED` and a `Retry-After` header.
+  - **Local development:** CORS abuse throttling is skipped when `NODE_ENV=development` or non-production so developer iteration is not blocked.
 
 ### `API_KEYS`
 

@@ -1,5 +1,6 @@
 import compression from 'compression';
 import cors from 'cors';
+import { LRUCache } from 'lru-cache';
 import { randomUUID } from 'crypto';
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
@@ -121,32 +122,74 @@ app.use(
   }),
 );
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      const isDev = process.env.NODE_ENV !== 'production';
-      if (
-        !origin ||
-        config.corsAllowedOrigins.includes(origin) ||
-        config.corsAllowedOrigins.includes('*') ||
-        (isDev && config.corsAllowedOrigins.length === 0)
-      ) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-    exposedHeaders: [
-      'X-Total-Count',
-      'X-RateLimit-Limit',
-      'X-RateLimit-Remaining',
-      'X-RateLimit-Reset',
-      'X-Request-Id',
-      'Retry-After',
-    ],
-  }),
-);
+export const CORS_ABUSE_MAX_VIOLATIONS = config.corsAbuseMaxViolations;
+export const CORS_MAX_AGE_SECONDS = config.corsMaxAge;
+
+const corsAbuseBuckets = new LRUCache<string, { count: number; resetAt: number }>({
+  max: 5000,
+});
+
+export function clearCorsAbuseCache() {
+  corsAbuseBuckets.clear();
+}
+
+const corsMiddlewareHandler = cors({
+  origin: (origin, callback) => {
+    const isDev = process.env.NODE_ENV !== 'production';
+    if (
+      !origin ||
+      config.corsAllowedOrigins.includes(origin) ||
+      config.corsAllowedOrigins.includes('*') ||
+      (isDev && config.corsAllowedOrigins.length === 0)
+    ) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  maxAge: CORS_MAX_AGE_SECONDS,
+  exposedHeaders: [
+    'X-Total-Count',
+    'X-RateLimit-Limit',
+    'X-RateLimit-Remaining',
+    'X-RateLimit-Reset',
+    'X-Request-Id',
+    'Retry-After',
+  ],
+});
+
+app.use((req: Request, res: Response, next: express.NextFunction) => {
+  const origin = req.headers.origin;
+  const clientIp = req.ip;
+
+  const isDev =
+    process.env.NODE_ENV === 'development' ||
+    (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test');
+
+  if (!isDev && clientIp && origin) {
+    const key = `cors-abuse:${clientIp}`;
+    const now = Date.now();
+    const current = corsAbuseBuckets.get(key);
+    if (current && now < current.resetAt && current.count >= CORS_ABUSE_MAX_VIOLATIONS) {
+      const retryAfterSec = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSec));
+      res.setHeader('X-RateLimit-Limit', String(CORS_ABUSE_MAX_VIOLATIONS));
+      res.setHeader('X-RateLimit-Remaining', '0');
+      res.setHeader('X-RateLimit-Reset', String(Math.ceil(current.resetAt / 1000)));
+      return res.status(429).json({
+        success: false,
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'CORS policy abuse limit exceeded. Please retry shortly.',
+          requestId: (req as RequestWithId).requestId,
+        },
+      });
+    }
+  }
+
+  return corsMiddlewareHandler(req, res, next);
+});
 
 app.use(compression({ threshold: 1024 }));
 
@@ -177,8 +220,6 @@ if (process.env.NODE_ENV === 'production') {
 if (process.env.NODE_ENV === 'production') {
   app.use(cacheMiddleware(300));
 }
-
-import { LRUCache } from 'lru-cache';
 
 const rateLimitBuckets = new LRUCache<string, { count: number; resetAt: number }>({
   max: 5000,
@@ -1283,6 +1324,41 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
   }
 
   if (isErrorWithMessage(err) && err.message === 'Not allowed by CORS') {
+    const clientIp = req.ip;
+    const isDev =
+      process.env.NODE_ENV === 'development' ||
+      (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test');
+
+    if (!isDev && clientIp) {
+      const key = `cors-abuse:${clientIp}`;
+      const now = Date.now();
+      const current = corsAbuseBuckets.get(key);
+      let count = 1;
+      let resetAt = now + RATE_LIMIT_WINDOW_MS;
+
+      if (current && now < current.resetAt) {
+        count = current.count + 1;
+        resetAt = current.resetAt;
+      }
+      corsAbuseBuckets.set(key, { count, resetAt });
+
+      if (count > CORS_ABUSE_MAX_VIOLATIONS) {
+        const retryAfterSec = Math.max(1, Math.ceil((resetAt - now) / 1000));
+        res.setHeader('Retry-After', String(retryAfterSec));
+        res.setHeader('X-RateLimit-Limit', String(CORS_ABUSE_MAX_VIOLATIONS));
+        res.setHeader('X-RateLimit-Remaining', '0');
+        res.setHeader('X-RateLimit-Reset', String(Math.ceil(resetAt / 1000)));
+        return res.status(429).json({
+          success: false,
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'CORS policy abuse limit exceeded. Please retry shortly.',
+            requestId: (req as RequestWithId).requestId,
+          },
+        });
+      }
+    }
+
     return res.status(403).json({
       success: false,
       error: {
