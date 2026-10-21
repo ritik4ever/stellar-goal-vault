@@ -84,6 +84,47 @@ Failing API responses carry the matching envelope:
 `{ success: false, error: { code, message, requestId, details? } }`,
 so a `requestId` from a client report can be found in the logs.
 
+### Health check outcome and retries (issue #1035)
+
+Each health request emits **exactly one** `health_check` line (info) carrying the outcome. Count
+health successes and failures from this line only. The `health_check_retry` lines explain what
+happened along the way. They never carry an `outcome` field, so a check that recovers after
+retries is counted once, as a success with `retry_count > 0`.
+
+`health_check` fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `operation` | string | `health_check_shallow` or `health_check_deep` |
+| `outcome` | string | `success` or `failure`, the final result of the whole check |
+| `latency_ms` | number | Total check time, including retry backoff |
+| `retry_count` | number | Retries performed (always `0` for the shallow check) |
+| `retry_reasons` | string[] | Deep only: reason for each failed attempt that was retried, in order |
+| `soroban_attempts` | number | Deep only: RPC `getHealth` attempts (`0` when `SOROBAN_RPC_URL` is unset) |
+| `soroban_failure_reason` | string \| null | Deep only: why the last attempt failed; `null` if the probe succeeded |
+| `db_reachable`, `soroban_healthy`, `indexer_healthy`, `has_contract_id` | boolean | Component states |
+
+`health_check_retry` (warn) is emitted once per failed Soroban RPC attempt that will be retried
+by `GET /api/health/deep`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `operation` | string | `health_check_deep` |
+| `component` | string | `soroban_rpc` |
+| `attempt` | number | 1-based attempt that failed |
+| `max_attempts` | number | `HEALTH_CHECK_RPC_MAX_ATTEMPTS` (default 3) |
+| `reason` | string | Failure reason code (see below) |
+| `next_retry_ms` | number | Backoff before the next attempt (`HEALTH_CHECK_RPC_RETRY_DELAY_MS` × 2^(attempt−1), default 100) |
+
+Reason codes are `timeout`, `http_<status>` (5xx only; 4xx counts as reachable), or
+`network_error[:<ERRNO>]` such as `network_error:ECONNREFUSED`. The raw error message is never
+logged, because fetch errors can echo the RPC URL, and the URL can embed provider credentials or
+API keys.
+
+All of these lines carry the request's `requestId` (via the logger's request-context mixin), the
+same id as the `http_request` line and the `X-Request-ID` response header. Filtering on that id
+reconstructs the whole check: each retry and its reason, then the one final outcome.
+
 Validation failures from `validateBody` middleware are routed through `next(AppError)` so
 the central error handler emits the same `request_error` structured log with `code:
 VALIDATION_ERROR` and the `details` array of `{ field, message }` issues.  This makes

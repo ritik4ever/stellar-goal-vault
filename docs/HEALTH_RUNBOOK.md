@@ -234,11 +234,22 @@ sudo systemctl restart stellar-goal-vault-backend
 
 ### 5. `components.soroban.status: "down"` (deep check only)
 
-**What it means:** The `getHealth` JSON-RPC call to `SOROBAN_RPC_URL` timed out or returned HTTP 5xx.
+**What it means:** Every `getHealth` JSON-RPC attempt to `SOROBAN_RPC_URL` timed out, failed to connect, or returned HTTP 5xx. The deep check retries the probe up to `HEALTH_CHECK_RPC_MAX_ATTEMPTS` times (default 3) with exponential backoff before it reports `down`.
 
 **Diagnosis**
 
 ```bash
+# Reconstruct one check from its request id: retries (warn) then the single outcome line
+RID=$(curl -s -D - -o /dev/null http://localhost:3001/api/health/deep | awk -F': ' 'tolower($1)=="x-request-id"{print $2}' | tr -d '\r')
+journalctl -u stellar-goal-vault-backend --since "5 minutes ago" -o cat \
+  | jq -c --arg rid "$RID" 'select(.requestId == $rid and (.event == "health_check_retry" or .event == "health_check"))
+      | {event, attempt, reason, outcome, retry_count, retry_reasons, soroban_failure_reason}'
+
+# Checks that only passed after retries (flaky RPC, still counted as one success)
+journalctl -u stellar-goal-vault-backend --since "1 hour ago" -o cat \
+  | jq -c 'select(.event == "health_check" and .operation == "health_check_deep" and .retry_count > 0)
+      | {requestId, outcome, retry_count, retry_reasons}'
+
 # Direct probe — look at the raw response
 curl -v -X POST "$SOROBAN_RPC_URL" \
   -H "Content-Type: application/json" \
