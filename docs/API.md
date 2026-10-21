@@ -69,6 +69,7 @@ Basic liveness check. Returns service status and a lightweight database reachabi
 - `database.status` is `"up"` or `"down"` based on a lightweight SQLite reachability check.
 - `indexer` exposes the last successful update and freshness/lag for the background event indexer.
 - Returns `503` when the service is degraded.
+- Unexpected failures return the standard error envelope `{ "success": false, "error": { "code": string, "message": string, "requestId": string } }` (status `500`) while logging internal details securely.
 
 ---
 
@@ -101,7 +102,7 @@ Extended health check that probes the database, Soroban RPC, and the configured 
 }
 ```
 
-Returns `503` when `overall` is `"down"`.
+Returns `503` when `overall` is `"down"`. Unexpected failures return the standard error envelope `{ "success": false, "error": { "code": string, "message": string, "requestId": string } }` (status `500`) while logging structured context securely without exposing sensitive internals.
 
 ---
 

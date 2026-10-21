@@ -394,16 +394,44 @@ describe('GET /api/health/deep', () => {
   });
 
   describe('error handling', () => {
-    it('returns 503 with overall "down" on unexpected thrown error', async () => {
+    it('returns standard 500 error envelope and does not leak internal details when deep health check throws', async () => {
       // Force the db check to throw rather than return a struct
       vi.spyOn(await import('./services/db'), 'checkDbHealth').mockImplementation(() => {
-        throw new Error('unexpected internal failure');
+        throw new Error('unexpected internal failure with secret SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
       });
 
       const res = await request(app).get('/api/health/deep');
-      expect(res.status).toBe(503);
-      expect(res.body.overall).toBe('down');
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
       expect(res.body.error).toBeDefined();
+      expect(res.body.error.code).toBe('INTERNAL_SERVER_ERROR');
+      expect(res.body.error.message).toBe('An unexpected error occurred');
+      expect(res.body.error.requestId).toBeDefined();
+
+      const raw = JSON.stringify(res.body);
+      expect(raw).not.toContain('unexpected internal failure');
+      expect(raw).not.toContain('SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+      expect(raw).not.toContain('stack');
+    });
+
+    it('returns standard 500 error envelope and does not leak internal details when shallow health check throws', async () => {
+      // Force the db check to throw rather than return a struct
+      vi.spyOn(await import('./services/db'), 'checkDbHealth').mockImplementation(() => {
+        throw new Error('database connection pool crashed at /var/lib/sqlite/db');
+      });
+
+      const res = await request(app).get('/api/health');
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBeDefined();
+      expect(res.body.error.code).toBe('INTERNAL_SERVER_ERROR');
+      expect(res.body.error.message).toBe('An unexpected error occurred');
+      expect(res.body.error.requestId).toBeDefined();
+
+      const raw = JSON.stringify(res.body);
+      expect(raw).not.toContain('database connection pool crashed');
+      expect(raw).not.toContain('/var/lib/sqlite/db');
+      expect(raw).not.toContain('stack');
     });
   });
 });
