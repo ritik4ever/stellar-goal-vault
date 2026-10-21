@@ -1,0 +1,166 @@
+name: Pledge Write Path Benchmark
+
+# Run on demand (manual dispatch) or weekly on Monday at 06:30 UTC.
+# Can also be triggered by pushing to any branch that touches the pledge
+# write path or this workflow file itself.
+on:
+  schedule:
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      connections:
+        description: "Concurrent connections (default: 10)"
+        required: false
+        default: "10"
+      duration:
+        description: "Test duration in seconds (default: 15)"
+        required: false
+        default: "15"
+  push:
+    paths:
+      - "backend/src/services/campaignStore.ts"
+      - "backend/scripts/pledge-write-benchmark.js"
+      - "backend/src/services/__tests__/pledgeWritePath.bench.ts"
+      - ".github/workflows/pledge-write-benchmark.yml"
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Job 1 — in-process micro-benchmark (no live server required)
+  # --------------------------------------------------------------------------
+  bench-in-process:
+    name: In-Process Vitest Benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run Vitest bench
+        working-directory: backend
+        run: |
+          npx vitest bench \
+            src/services/__tests__/pledgeWritePath.bench.ts \
+            --reporter=verbose 2>&1 | tee bench-output.txt
+
+      - name: Upload bench output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pledge-bench-in-process
+          path: backend/bench-output.txt
+
+  # --------------------------------------------------------------------------
+  # Job 2 — HTTP-level benchmark against a locally started backend
+  # --------------------------------------------------------------------------
+  bench-http:
+    name: HTTP Pledge Write Benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+
+      - name: Start backend (in-memory SQLite)
+        working-directory: backend
+        run: |
+          NODE_ENV=test DB_PATH=:memory: node dist/index.js &
+          BACKEND_PID=$!
+          echo "BACKEND_PID=$BACKEND_PID" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3001/api/health > /dev/null; then
+              echo "Backend ready after ${i}×2s"
+              break
+            fi
+            echo "Waiting for backend (attempt $i)…"
+            sleep 2
+          done
+
+      - name: Run pledge write benchmark
+        id: bench
+        working-directory: backend
+        run: |
+          CONNECTIONS="${{ github.event.inputs.connections || '10' }}"
+          DURATION="${{ github.event.inputs.duration || '15' }}"
+          node scripts/pledge-write-benchmark.js \
+            --base-url http://127.0.0.1:3001 \
+            --connections "$CONNECTIONS" \
+            --duration "$DURATION" \
+            2>&1 | tee pledge-bench-output.txt
+
+      - name: Parse JSON result and check thresholds
+        id: thresholds
+        run: |
+          python3 << 'EOF'
+          import json, os, sys
+
+          with open("backend/pledge-bench-output.txt") as f:
+              content = f.read()
+
+          try:
+              start = content.index("---JSON-START---") + len("---JSON-START---")
+              end   = content.index("---JSON-END---")
+              summary = json.loads(content[start:end].strip())
+          except (ValueError, json.JSONDecodeError) as exc:
+              print(f"ERROR: could not parse JSON result: {exc}", file=sys.stderr)
+              sys.exit(1)
+
+          p99        = summary["latency"]["p99"]
+          error_rate = summary["requests"]["errorRate"]
+          passed     = summary["passed"]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"p99={p99}\n")
+              out.write(f"error-rate={error_rate:.4f}\n")
+              out.write(f"passed={passed}\n")
+              out.write(f"summary={json.dumps(summary)}\n")
+
+          print(f"p99 latency : {p99:.2f} ms")
+          print(f"error rate  : {error_rate:.4f} %")
+          print(f"passed      : {passed}")
+
+          if not passed:
+              print("\n❌ Thresholds exceeded — see output above for details.")
+              sys.exit(1)
+          else:
+              print("\n✅ All thresholds passed.")
+          EOF
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pledge-bench-http
+          path: backend/pledge-bench-output.txt
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -n "${BACKEND_PID:-}" ]; then
+            kill "$BACKEND_PID" 2>/dev/null || true
+          fi
