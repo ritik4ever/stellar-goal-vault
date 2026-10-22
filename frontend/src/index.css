@@ -1417,8 +1417,54 @@ tbody tr:hover td {
   font-style: italic;
 }
 
+.wallet-widget__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  flex-shrink: 0;
+  animation: wallet-widget-spin 0.9s linear infinite;
+}
+
+@keyframes wallet-widget-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wallet-widget--empty,
 .wallet-widget--unavailable {
+  gap: 10px;
+}
+
+.wallet-widget__empty-text {
   color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.wallet-widget--error {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.wallet-widget__error-banner {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 280px;
+  color: var(--badge-failed-text);
+  font-size: 0.8rem;
+}
+
+.wallet-widget__error-banner svg {
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
 .wallet-widget__link {
@@ -1457,6 +1503,12 @@ tbody tr:hover td {
   min-height: 38px;
   padding: 0 16px;
   font-size: 0.875rem;
+}
+
+.wallet-widget__retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Connected pill */
@@ -2087,6 +2139,10 @@ tbody tr:hover td {
   }
 
   .wallet-widget__error {
+    max-width: 100%;
+  }
+
+  .wallet-widget__error-banner {
     max-width: 100%;
   }
 

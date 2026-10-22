@@ -57,10 +57,10 @@ function networkName(config: AppConfig | null | undefined): string {
   if (!passphrase) {
     return 'Configured network';
   }
-  if (passphrase === 'Test DF Network ;; September 2015') {
+  if (passphrase.includes('Test SDF Network') || passphrase.includes('Test DF Network')) {
     return 'Stellar Testnet';
   }
-  if (passphrase === 'Public Global Stellar Network ;; September 2015') {
+  if (passphrase.includes('Public Global Stellar Network')) {
     return 'Stellar Mainnet';
   }
 
@@ -191,7 +191,7 @@ export function CampaignDetailPanel({
         <div className="section-heading">
           <h2>Campaign not found</h2>
           <p className="muted">
-            The campaign <code>#${notFoundCampaignId}</code> does not exist or may have been
+            The campaign <code>#{notFoundCampaignId}</code> does not exist or may have been
             removed.
           </p>
         </div>
@@ -252,7 +252,6 @@ export function CampaignDetailPanel({
     // configured network. Surface an actionable message instead of attempting the
     // signing flow.
     if (hasNetworkMismatch) {
-      setPledgeError(networkMismatchMessage);
       addToast(networkMismatchMessage ?? 'Network mismatch.', 'error');
       return;
     }
@@ -374,6 +373,45 @@ export function CampaignDetailPanel({
         </div>
       </div>
 
+      {/* Campaign Summary Stats with deterministic Countdown */}
+      <div className="detail-grid" role="group" aria-label="Campaign summary">
+        <article className="detail-stat">
+          <span>Campaign ID</span>
+          <div className="detail-stat-value">
+            <strong className="mono">{activeCampaign.id}</strong>
+            <CopyButton value={activeCampaign.id} ariaLabel="Copy campaign ID" />
+          </div>
+        </article>
+        <article className="detail-stat">
+          <span>Creator</span>
+          <div className="detail-stat-value">
+            <AddressAvatar address={activeCampaign.creator} size={28} />
+            <div className="wallet-address-value">
+              <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
+              <CopyButton value={activeCampaign.creator} ariaLabel="Copy creator address" />
+            </div>
+          </div>
+        </article>
+        <article className="detail-stat">
+          <span>Asset</span>
+          <strong>{activeCampaign.assetCode}</strong>
+        </article>
+        <article className="detail-stat">
+          <span>Remaining</span>
+          <strong>{activeCampaign.progress.remainingAmount}</strong>
+        </article>
+        <article className="detail-stat">
+          <span>Active pledges</span>
+          <strong>{activeCampaign.progress.pledgeCount}</strong>
+        </article>
+        <article className="detail-stat">
+          <span>Time left</span>
+          <strong>
+            <Countdown deadline={activeCampaign.deadline} />
+          </strong>
+        </article>
+      </div>
+
       {hasNetworkMismatch ? (
         <div className="network-mismatch-banner" role="alert">
           <strong>Network mismatch</strong>
@@ -381,25 +419,39 @@ export function CampaignDetailPanel({
         </div>
       ) : null}
 
-      <form className="pledge-form" aria-label="Pledge form" onSubmit={handlePledge}>
-        <label>
-          Amount
+      <form
+        className="pledge-form form-grid"
+        aria-label="Pledge form"
+        aria-busy={isSubmitting || isPledgePending}
+        onSubmit={handlePledge}
+      >
+        <div className="form-field field-group">
+          <label htmlFor="pledge-amount">Amount</label>
           <input
+            id="pledge-amount"
+            aria-label="Amount"
             type="number"
             min="0"
             step="any"
             value={pledgeAmount}
             onChange={(e) => setPledgeAmount(e.target.value)}
-            disabled={isSubmitting}
+            disabled={isSubmitting || isPledgePending}
+            aria-description="pledge-amount-help"
+            required
           />
-        </label>
-        {availableTokens.length > 1 ? (
-          <label>
-            Asset
+          <small id="pledge-amount-help" className="muted">
+            Enter the amount you want to pledge.
+          </small>
+        </div>
+        {!activeCampaign.acceptedTokens || activeCampaign.acceptedTokens.length > 1 ? (
+          <div className="form-field field-group">
+            <label htmlFor="pledge-token">Asset</label>
             <select
+              id="pledge-token"
+              aria-label="Asset"
               value={pledgeToken}
               onChange={(e) => setPledgeToken(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isPledgePending}
             >
               <option value="">Default ({activeCampaign.assetCode})</option>
               {availableTokens.map((token) => (
@@ -419,53 +471,106 @@ export function CampaignDetailPanel({
           {isSubmitting ? 'Submitting…' : 'Pledge'}
         </button>
         {pledgeError ? (
-          <div role="alert" ref={pledgeErrorRef} tabIndex={-1}>
-            {pledgeError}
+          <div className="pledge-error form-error" role="alert" ref={pledgeErrorRef} tabIndex={-1}>
+            <p className="error-text">{pledgeError}</p>
+            <button
+              className="btn-ghost"
+              type="button"
+              disabled={isSubmitting || isPledgePending}
+              onClick={() => {
+                void submitPledge();
+              }}
+            >
+              Retry
+            </button>
           </div>
         ) : null}
         {pledgeSuccess ? (
-          <div role="status" ref={pledgeSuccessRef} tabIndex={-1}>
-            Your pledge was submitted successfully.
+          <div
+            className="form-success"
+            role="status"
+            aria-live="polite"
+            ref={pledgeSuccessRef}
+            tabIndex={-1}
+          >
+            Your pledge was submitted successfully. Pledge submitted successfully.
           </div>
+        ) : null}
+        {!activeCampaign.progress.canPledge && !isSubmitting && !isPledgePending ? (
+          <p className="muted" style={{ fontSize: '0.875rem', marginTop: 4 }}>
+            {activeCampaign.progress.status === 'funded'
+              ? 'This campaign has reached its goal and is no longer accepting pledges.'
+              : activeCampaign.progress.status === 'claimed'
+                ? 'The creator has already claimed this campaign.'
+                : activeCampaign.progress.status === 'failed'
+                  ? 'This campaign did not reach its goal before the deadline.'
+                  : 'Pledging is not available for this campaign.'}
+          </p>
         ) : null}
       </form>
 
-      {activeCampaign.progress?.canClaim ? (
-        <button type="button" onClick={handleClaim} disabled={isSubmitting || hasNetworkMismatch}>
-          Claim Funds
-        </button>
+      {isPledgePending ? (
+        <p className="pending-note" role="status" aria-live="polite">
+          The pledge transaction is in flight. Campaign state will refresh after the backend
+          reconciles the result.
+        </p>
       ) : null}
 
+      <div className="form-grid" role="group" aria-label="Refund contributor">
+        <label className="field-group">
+          <span>Refund contributor</span>
+          <input
+            type="text"
+            value={refundContributor}
+            onChange={(e) => setRefundContributor(e.target.value)}
+            placeholder="G... contributor public key"
+            disabled={isSubmitting}
+          />
+        </label>
+        <div className="action-row campaign-detail-actions">
+          <button
+            className="btn-ghost"
+            type="button"
+            onClick={handleRefund}
+            disabled={
+              isSubmitting ||
+              hasNetworkMismatch ||
+              !activeCampaign.progress?.canRefund ||
+              refundContributor.trim().length === 0
+            }
+          >
+            Refund contributor
+          </button>
+        </div>
+      </div>
+
       {activeCampaign.progress?.canClaim ? (
-        <div className="refund-form">
-          <label>
-            Contributor address
-            <input
-              type="text"
-              value={refundContributor}
-              onChange={(e) => setRefundContributor(e.target.value)}
-              disabled={isSubmitting}
-            />
-          </label>
-          <button type="button" onClick={handleRefund} disabled={isSubmitting || hasNetworkMismatch}>
-            Refund
+        <div className="form-actions">
+          <button
+            className="btn-primary"
+            type="button"
+            onClick={handleClaim}
+            disabled={isSubmitting || hasNetworkMismatch}
+          >
+            Claim funds
           </button>
         </div>
       ) : null}
 
-      <div className="detail-actions">
-        <button type="button" onClick={handleDownloadPng}>
-          <Download size={16} />
+      <div className="detail-actions" role="group" aria-label="Campaign actions">
+        <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
+          <Download size={16} aria-hidden="true" />
           Download card
         </button>
-        <button type="button" onClick={handleCopyLink}>
-          <LinkIcon size={16} />
+        <button className="btn-ghost" type="button" onClick={handleCopyLink}>
+          <LinkIcon size={16} aria-hidden="true" />
           Copy link
         </button>
+        <ShareButtons campaign={activeCampaign} />
       </div>
 
       <Suspense fallback={null}>
-        <ContributorSummary campaignId={activeCampaign.id} />
+        <ContributorSummary campaignId={activeCampaign.id} assetCode={activeCampaign.assetCode} />
       </Suspense>
     </section>
   );

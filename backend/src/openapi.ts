@@ -95,8 +95,14 @@ const analyticsPaginationSchema = z
 const apiErrorSchema = z.object({
   success: z.literal(false),
   error: z.object({
-    code: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-    message: z.string().openapi({ example: 'page must be a positive integer.' }),
+    code: z.string().openapi({
+      description: 'Stable machine-readable error code.',
+      example: 'VALIDATION_ERROR',
+    }),
+    message: z.string().openapi({
+      description: 'Client-safe message; unexpected failures use a generic message.',
+      example: 'page must be a positive integer.',
+    }),
     details: z
       .array(
         z.object({
@@ -105,8 +111,14 @@ const apiErrorSchema = z.object({
         }),
       )
       .optional(),
-    requestId: z.string().optional().openapi({ example: 'req-123' }),
+    requestId: z.string().optional().openapi({
+      description: 'Correlation ID also returned in the X-Request-Id response header.',
+      example: 'req-123',
+    }),
   }),
+}).openapi({
+  description:
+    'Standard error envelope. Internal exception messages, stacks, and secret material are not returned.',
 });
 
 // ---------------------------------------------------------------------------
@@ -302,6 +314,10 @@ const contributorPledgeListResponseSchema = z
 const campaignDetailResponseSchema = z
   .object({
     data: campaignSchema,
+    requestId: z.string().optional().openapi({
+      description: 'Correlation ID also returned in the X-Request-Id response header.',
+      example: 'req-123',
+    }),
   })
   .openapi('CampaignDetailResponse');
 
@@ -372,26 +388,49 @@ const healthResponseSchema = z
   })
   .openapi('HealthResponse');
 
+const healthPaginationSchema = z
+  .object({
+    total: z.number().int().openapi({
+      description: 'Total number of health components available.',
+      example: 4,
+    }),
+    page: z.number().int().openapi({ description: 'Current page (1-based).', example: 1 }),
+    limit: z.number().int().openapi({ description: 'Number of components per page.', example: 20 }),
+    totalPages: z.number().int().openapi({ description: 'Total number of pages.', example: 1 }),
+    hasPreviousPage: z.boolean().openapi({
+      description: 'Whether a previous page exists for this paginated request.',
+      example: false,
+    }),
+    hasNextPage: z.boolean().openapi({
+      description: 'Whether a later page exists for this paginated request.',
+      example: false,
+    }),
+  })
+  .openapi('HealthPagination');
+
 const deepHealthResponseSchema = z
   .object({
     overall: z.enum(['up', 'down']),
     timestamp: z.string().datetime(),
     uptimeSeconds: z.number(),
-    components: z.object({
-      db: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
-      soroban: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
-      contract: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
-      indexer: z.object({
-        status: z.enum(['up', 'down']),
-        details: z.object({
-          lastSuccessfulPollTime: z.number().nullable(),
-          lastKnownLedger: z.number(),
-          isHealthy: z.boolean(),
-          consecutiveFailures: z.number(),
-          lagMs: z.number().nullable(),
+    components: z
+      .object({
+        db: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
+        soroban: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
+        contract: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
+        indexer: z.object({
+          status: z.enum(['up', 'down']),
+          details: z.object({
+            lastSuccessfulPollTime: z.number().nullable(),
+            lastKnownLedger: z.number(),
+            isHealthy: z.boolean(),
+            consecutiveFailures: z.number(),
+            lagMs: z.number().nullable(),
+          }),
         }),
-      }),
-    }),
+      })
+      .partial(),
+    pagination: healthPaginationSchema,
   })
   .openapi('DeepHealthResponse');
 
@@ -534,6 +573,7 @@ const registeredSchemas = {
     campaignHistoryResponseSchema,
   ),
   HealthResponse: registry.register('HealthResponse', healthResponseSchema),
+  HealthPagination: registry.register('HealthPagination', healthPaginationSchema),
   DeepHealthResponse: registry.register('DeepHealthResponse', deepHealthResponseSchema),
   ConfigResponse: registry.register('ConfigResponse', configResponseSchema),
   StatsResponse: registry.register('StatsResponse', statsResponseSchema),
@@ -560,6 +600,17 @@ const payloadTooLargeResponse = {
   content: { 'application/json': { schema: registeredSchemas.ApiError } },
 };
 
+const rateLimitedResponse = {
+  description: 'Rate limit exceeded (RATE_LIMITED)',
+  content: { 'application/json': { schema: registeredSchemas.ApiError } },
+};
+
+const internalServerErrorResponse = {
+  description:
+    'Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details are logged and are not returned.',
+  content: { 'application/json': { schema: registeredSchemas.ApiError } },
+};
+
 registry.registerPath({
   method: 'get',
   path: '/api/health',
@@ -575,6 +626,7 @@ registry.registerPath({
       description: 'Service is degraded',
       content: { 'application/json': { schema: registeredSchemas.HealthResponse } },
     },
+    500: internalServerErrorResponse,
   },
 });
 
@@ -583,8 +635,26 @@ registry.registerPath({
   path: '/api/health/deep',
   tags: ['Health'],
   summary: 'Deep health check',
-  description: 'Checks database, Soroban RPC, and contract configuration health.',
+  description:
+    'Checks database, Soroban RPC, and contract configuration health. The `components` ' +
+    'collection is paginated deterministically in a fixed order (db, soroban, contract, ' +
+    'indexer): page defaults to 1 and limit defaults to 20 when omitted, both must be ' +
+    'integers, and limit is capped at 100. Out-of-range values are rejected with 400 rather ' +
+    'than clamped. The response includes total, totalPages, hasPreviousPage, and hasNextPage ' +
+    'under `pagination` so callers can navigate without guessing where the collection ends. ' +
+    'Because the default limit exceeds the number of components, omitting both parameters ' +
+    'returns every component exactly as before.',
   security: [],
+  request: {
+    query: z.object({
+      page: z.coerce.number().int().min(1).optional().openapi({
+        description: '1-based page number (default 1).',
+      }),
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Components per page, 1 to 100 (default 20).',
+      }),
+    }),
+  },
   responses: {
     200: {
       description: 'All components are healthy',
@@ -594,6 +664,8 @@ registry.registerPath({
       description: 'One or more components are unhealthy',
       content: { 'application/json': { schema: registeredSchemas.DeepHealthResponse } },
     },
+    400: validationErrorResponse,
+    500: internalServerErrorResponse,
   },
 });
 
@@ -735,7 +807,8 @@ registry.registerPath({
     'defaults to 10 when omitted, both must be integers, and limit is capped at 100. ' +
     'Out-of-range values are rejected with 400 rather than clamped. The response includes ' +
     'total, totalPages, hasPreviousPage, and hasNextPage so callers can navigate without ' +
-    'guessing where the collection ends.',
+    'guessing where the collection ends. Errors use the ApiError envelope with stable codes: ' +
+    'VALIDATION_ERROR, NOT_FOUND, RATE_LIMITED, and INTERNAL_SERVER_ERROR.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
     query: z.object({
@@ -754,6 +827,7 @@ registry.registerPath({
     },
     400: validationErrorResponse,
     404: notFoundResponse,
+    500: internalServerErrorResponse,
   },
 });
 
@@ -763,7 +837,7 @@ registry.registerPath({
   tags: ['Pledges'],
   summary: 'Create a pledge',
   description:
-    'Creates a pledge for a campaign. Use the Idempotency-Key header to make the request idempotent. Cached responses are returned for 24 hours.',
+    'Creates a pledge for a campaign. Use the Idempotency-Key header to make the request idempotent. Cached responses are returned for 24 hours. Errors use the ApiError envelope with stable codes: VALIDATION_ERROR, NOT_FOUND, INVALID_ASSET, INVALID_CAMPAIGN_STATE, MAX_PER_CONTRIBUTOR_EXCEEDED, CAMPAIGN_FUNDING_CAP_EXCEEDED, RATE_LIMITED, and INTERNAL_SERVER_ERROR. Unexpected failures are logged without exposing internal details.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
     body: {
@@ -779,7 +853,8 @@ registry.registerPath({
     400: validationErrorResponse,
     404: notFoundResponse,
     413: payloadTooLargeResponse,
-    429: { description: 'Rate limit exceeded' },
+    429: rateLimitedResponse,
+    500: internalServerErrorResponse,
   },
 });
 

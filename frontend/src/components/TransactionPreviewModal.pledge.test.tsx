@@ -20,10 +20,10 @@ describe('TransactionPreviewModal pledge flow', () => {
       <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
-    expect(screen.getBuRole('dialog')).toBeITheDocument();
-    expect(screen.getByText('Transaction Preview')).toBeITheDocument();
-    expect(screen.getByText('contribute')).toBeITheDocument();
-    expect(screen.getByText(/100\s+USDC/)).toBeITheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('Transaction Preview')).toBeInTheDocument();
+    expect(screen.getByText('contribute')).toBeInTheDocument();
+    expect(screen.getByText(/100\s+USDC/)).toBeInTheDocument();
     expect(screen.getByText(/0.00001 XLM/)).toBeInTheDocument();
   });
 
@@ -35,7 +35,7 @@ describe('TransactionPreviewModal pledge flow', () => {
       <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
-    expect(screen.getBuRole('button', { name: /Confirm and Sign/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Confirm and Sign/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Cancel/i })).toBeInTheDocument();
   });
 
@@ -62,7 +62,7 @@ describe('TransactionPreviewModal pledge flow', () => {
       <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
-    const cancelButton = screen.getBuRole('button', { name: /Cancel/i });
+    const cancelButton = screen.getByRole('button', { name: /Cancel/i });
     fireEvent.click(cancelButton);
 
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -77,7 +77,7 @@ describe('TransactionPreviewModal pledge flow', () => {
       <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
-    const confirmButton = screen.getBuRole('button', { name: /Confirm and Sign/i });
+    const confirmButton = screen.getByRole('button', { name: /Confirm and Sign/i });
     confirmButton.focus();
     expect(confirmButton).toHaveFocus();
 
@@ -110,7 +110,7 @@ describe('TransactionPreviewModal pledge flow', () => {
       <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
-    const confirmButton = screen.getBuRole('button', { name: /Confirm and Sign/i });
+    const confirmButton = screen.getByRole('button', { name: /Confirm and Sign/i });
     expect(confirmButton).toHaveAttribute('type', 'button');
   });
 });

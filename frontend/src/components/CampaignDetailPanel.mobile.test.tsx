@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { CampaignDetailPanel } from './CampaignDetailPanel';
 import { Campaign, AppConfig } from '../types/campaign';
+import { BASE_TEST_TIME_SEC } from '../test/timeTestUtils';
 
 describe('CampaignDetailPanel - Mobile Touch Targets', () => {
   const mockCampaign: Campaign = {
@@ -10,7 +11,7 @@ describe('CampaignDetailPanel - Mobile Touch Targets', () => {
     description: 'A test campaign for mobile responsiveness',
     creator: 'GCREATORADDRESSEXAMPLE1234567890ABCDEF',
     assetCode: 'USDC',
-    deadline: Date.now() + 86400000,
+    deadline: BASE_TEST_TIME_SEC + 86400,
     progress: {
       currentAmount: 500,
       goalAmount: 1000,
@@ -121,7 +122,7 @@ describe('CampaignDetailPanel - Mobile Touch Targets', () => {
     // Check that detail stats are rendered
     expect(screen.getByText('Campaign ID')).toBeInTheDocument();
     expect(screen.getByText('Creator')).toBeInTheDocument();
-    expect(screen.getByText('Asset')).toBeInTheDocument();
+    expect(screen.getAllByText('Asset')[0]).toBeInTheDocument();
     expect(screen.getByText('Remaining')).toBeInTheDocument();
     expect(screen.getByText('Active pledges')).toBeInTheDocument();
   });

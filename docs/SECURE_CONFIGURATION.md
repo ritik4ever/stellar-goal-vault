@@ -25,7 +25,7 @@ real `.env`, API key, private key, or database URL. Secret scanning
 | `REDIS_URL` | Authenticated URL (`redis://:password@host`) | unset (in-memory cache) | An unauthenticated cache can be read/poisoned by other tenants. |
 | `LOG_LEVEL` | `info` (never log secrets) | `debug` | Debug logs can leak request bodies/keys into logs. |
 | `MAX_BODY_SIZE` | Valid size string (e.g. `16kb`, `1mb`) | `16kb` | Unvalidated or overly large payload limits enable body payload DoS attacks. |
-| `RATE_LIMIT_WINDOW_MS` / limits | Positive numeric integers | `60000` / `120` | Disabling or misconfiguring rate limits exposes write endpoints to spam/bruteforce. |
+| `RATE_LIMIT_WINDOW_MS` / read and write limits | Positive numeric integers | `60000` / `120` reads / `20` writes | Disabling or misconfiguring rate limits exposes write endpoints to spam/bruteforce. |
 | `SECRET_KEY` / `SERVER_PRIVATE_KEY` (contract deploy) | Long random value, injected at runtime | never set locally | A committed/weak key compromises contract control. |
 
 ## Startup validation (enforced automatically)
@@ -59,6 +59,10 @@ local-development override.
   ambient/at-rest auth this enables cross-site abuse.
 - **Compatibility:** `CORS_ALLOWED_ORIGINS` is accepted as a backwards-compatible
   alias, but new deployments should use `ALLOWED_ORIGINS`.
+- **CORS abuse controls & preflight caching:**
+  - `CORS_MAX_AGE`: cache duration in seconds for preflight `OPTIONS` responses (default: `86400` / 24 hours). Prevents browsers from repeatedly flooding the API with preflight checks.
+  - `CORS_ABUSE_MAX_VIOLATIONS`: maximum allowed CORS policy rejections per client IP within the rate limit window (default: `20` violations per 60-second window). When exceeded, repeated unauthorized requests are bounded with `429 RATE_LIMITED` and a `Retry-After` header.
+  - **Local development:** CORS abuse throttling is skipped when `NODE_ENV=development` or non-production so developer iteration is not blocked.
 
 ### `API_KEYS`
 
@@ -98,6 +102,26 @@ local-development override.
 - **Local development:** SQLite file under `backend/data/`, in-memory cache.
 - **Risk of weakening:** a shared/unauth cache can be read or poisoned; a
   world-readable DB exposes campaign and pledge data.
+
+### API rate limits
+
+- **Production defaults:** 120 read requests and 20 write requests per client IP
+  per 60-second window. Writes include `POST`, `PUT`, `PATCH`, and `DELETE`.
+- **Configuration:** `RATE_LIMIT_WINDOW_MS` sets the window;
+  `RATE_LIMIT_READ_LIMIT` (or `RATE_LIMIT_MAX_REQUESTS`) sets the read limit;
+  `RATE_LIMIT_WRITE_LIMIT` (or `WRITE_RATE_LIMIT_MAX_REQUESTS`) sets the write
+  limit. A rejected request returns `429` with `Retry-After`.
+- **Local development:** rate limiting is skipped when `NODE_ENV=development`
+  or when `NODE_ENV` is unset, so ordinary local workflows are not throttled.
+- **Risk of weakening:** high limits or disabling the middleware allows repeated
+  mutations to consume backend and database resources.
+
+### Request input handling and payload limits (`MAX_BODY_SIZE`)
+
+- **Safe production default:** `16kb` (or conservative bounds tailored to expected payload size, e.g. `1mb` for file/metadata uploads). Configured via `MAX_BODY_SIZE`.
+- **Local development:** defaults to `16kb` if unset.
+- **Risk of weakening:** allowing unvalidated, unbounded, or excessively large request bodies exposes the backend server to Denial of Service (DoS) attacks via memory exhaustion and CPU resource starvation. Request bodies sent as unexpected content types or oversized payloads are rejected early.
+
 
 ### Secret material (`SECRET_KEY`, `SERVER_PRIVATE_KEY`)
 

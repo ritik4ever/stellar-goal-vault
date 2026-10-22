@@ -95,6 +95,8 @@ describe('GET /api/campaigns/:id', () => {
     expect(response.status).toBe(200);
     expect(response.headers['content-type']).toContain('application/json');
     expect(response.headers['x-cache']).toBe('MISS');
+    expect(response.headers['x-request-id']).toBeTruthy();
+    expect(response.body.requestId).toBe(response.headers['x-request-id']);
 
     const body = response.body as {
       data: Record<string, unknown> & {
@@ -203,11 +205,15 @@ describe('GET /api/campaigns/:id', () => {
 
     const firstMiss = await request(app).get(`/api/campaigns/${first.id}`);
     const secondMiss = await request(app).get(`/api/campaigns/${second.id}`);
-    const firstHit = await request(app).get(`/api/campaigns/${first.id}`);
+    const firstHit = await request(app)
+      .get(`/api/campaigns/${first.id}`)
+      .set('X-Request-Id', 'cache-hit-detail-req');
 
     expect(firstMiss.headers['x-cache']).toBe('MISS');
     expect(secondMiss.headers['x-cache']).toBe('MISS');
     expect(firstHit.headers['x-cache']).toBe('HIT');
+    expect(firstHit.headers['x-request-id']).toBe('cache-hit-detail-req');
+    expect(firstHit.body.requestId).toBe('cache-hit-detail-req');
 
     expect(firstMiss.body.data.id).toBe(first.id);
     expect(secondMiss.body.data.id).toBe(second.id);

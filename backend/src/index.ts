@@ -1,5 +1,7 @@
 import compression from 'compression';
 import cors from 'cors';
+import { LRUCache } from 'lru-cache';
+import { randomUUID } from 'crypto';
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import helmet from 'helmet';
@@ -77,6 +79,7 @@ import {
   parseCampaignListQuery,
   normalizeQueryValue,
   parseContributorPledgesQuery,
+  parseHealthPaginationQuery,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
 import { logError, logInfo, logger, summarizeSecretConfig } from './logger';
@@ -119,32 +122,74 @@ app.use(
   }),
 );
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      const isDev = process.env.NODE_ENV !== 'production';
-      if (
-        !origin ||
-        config.corsAllowedOrigins.includes(origin) ||
-        config.corsAllowedOrigins.includes('*') ||
-        (isDev && config.corsAllowedOrigins.length === 0)
-      ) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-    exposedHeaders: [
-      'X-Total-Count',
-      'X-RateLimit-Limit',
-      'X-RateLimit-Remaining',
-      'X-RateLimit-Reset',
-      'X-Request-Id',
-      'Retry-After',
-    ],
-  }),
-);
+export const CORS_ABUSE_MAX_VIOLATIONS = config.corsAbuseMaxViolations;
+export const CORS_MAX_AGE_SECONDS = config.corsMaxAge;
+
+const corsAbuseBuckets = new LRUCache<string, { count: number; resetAt: number }>({
+  max: 5000,
+});
+
+export function clearCorsAbuseCache() {
+  corsAbuseBuckets.clear();
+}
+
+const corsMiddlewareHandler = cors({
+  origin: (origin, callback) => {
+    const isDev = process.env.NODE_ENV !== 'production';
+    if (
+      !origin ||
+      config.corsAllowedOrigins.includes(origin) ||
+      config.corsAllowedOrigins.includes('*') ||
+      (isDev && config.corsAllowedOrigins.length === 0)
+    ) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  maxAge: CORS_MAX_AGE_SECONDS,
+  exposedHeaders: [
+    'X-Total-Count',
+    'X-RateLimit-Limit',
+    'X-RateLimit-Remaining',
+    'X-RateLimit-Reset',
+    'X-Request-Id',
+    'Retry-After',
+  ],
+});
+
+app.use((req: Request, res: Response, next: express.NextFunction) => {
+  const origin = req.headers.origin;
+  const clientIp = req.ip;
+
+  const isDev =
+    process.env.NODE_ENV === 'development' ||
+    (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test');
+
+  if (!isDev && clientIp && origin) {
+    const key = `cors-abuse:${clientIp}`;
+    const now = Date.now();
+    const current = corsAbuseBuckets.get(key);
+    if (current && now < current.resetAt && current.count >= CORS_ABUSE_MAX_VIOLATIONS) {
+      const retryAfterSec = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSec));
+      res.setHeader('X-RateLimit-Limit', String(CORS_ABUSE_MAX_VIOLATIONS));
+      res.setHeader('X-RateLimit-Remaining', '0');
+      res.setHeader('X-RateLimit-Reset', String(Math.ceil(current.resetAt / 1000)));
+      return res.status(429).json({
+        success: false,
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'CORS policy abuse limit exceeded. Please retry shortly.',
+          requestId: (req as RequestWithId).requestId,
+        },
+      });
+    }
+  }
+
+  return corsMiddlewareHandler(req, res, next);
+});
 
 app.use(compression({ threshold: 1024 }));
 
@@ -175,8 +220,6 @@ if (process.env.NODE_ENV === 'production') {
 if (process.env.NODE_ENV === 'production') {
   app.use(cacheMiddleware(300));
 }
-
-import { LRUCache } from 'lru-cache';
 
 const rateLimitBuckets = new LRUCache<string, { count: number; resetAt: number }>({
   max: 5000,
@@ -367,50 +410,76 @@ export function filterCampaignList(
   });
 }
 
-app.get('/api/health', (_req: Request, res: Response) => {
-  const start = process.hrtime();
-  const database = checkDbHealth();
-  const indexer = getIndexerStatus();
-
-  // Operators distinguish healthy-but-idle from stale/failing via indexer.freshness.
-  // Degrade when DB is down or indexer is stale/failing (isHealthy already encodes this).
-  const healthy = database.reachable && indexer.isHealthy;
-
-  const end = process.hrtime(start);
-  const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
-
-  logInfo('health_check', {
-    operation: 'health_check_shallow',
-    outcome: healthy ? 'success' : 'failure',
-    latency_ms: latencyMs,
-    db_reachable: database.reachable,
-    indexer_healthy: indexer.isHealthy,
-    indexer_freshness: indexer.freshness,
-    indexer_lag_ms: indexer.lagMs,
-  });
-
-  const memUsage = process.memoryUsage();
-  const memory = {
-    rss: memUsage.rss,
-    heapUsed: memUsage.heapUsed,
-    heapTotal: memUsage.heapTotal,
-    external: memUsage.external,
-  };
-
-  res.status(healthy ? 200 : 503).json({
-    service: 'stellar-goal-vault-backend',
-    status: healthy ? 'ok' : 'degraded',
-    timestamp: new Date().toISOString(),
-    uptimeSeconds: Number(process.uptime().toFixed(3)),
-    database,
-    indexer,
-    memory,
-  });
-});
-
-app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Response) => {
+app.get('/api/health', (req: Request, res: Response, next: express.NextFunction) => {
   const start = process.hrtime();
   try {
+    const database = checkDbHealth();
+    const indexer = getIndexerStatus();
+
+    // Operators distinguish healthy-but-idle from stale/failing via indexer.freshness.
+    // Degrade when DB is down or indexer is stale/failing (isHealthy already encodes this).
+    const healthy = database.reachable && indexer.isHealthy;
+
+    const end = process.hrtime(start);
+    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+
+    logInfo('health_check', {
+      operation: 'health_check_shallow',
+      outcome: healthy ? 'success' : 'failure',
+      latency_ms: latencyMs,
+      db_reachable: database.reachable,
+      indexer_healthy: indexer.isHealthy,
+      indexer_freshness: indexer.freshness,
+      indexer_lag_ms: indexer.lagMs,
+    });
+
+    const memUsage = process.memoryUsage();
+    const memory = {
+      rss: memUsage.rss,
+      heapUsed: memUsage.heapUsed,
+      heapTotal: memUsage.heapTotal,
+      external: memUsage.external,
+    };
+
+    res.status(healthy ? 200 : 503).json({
+      service: 'stellar-goal-vault-backend',
+      status: healthy ? 'ok' : 'degraded',
+      timestamp: new Date().toISOString(),
+      uptimeSeconds: Number(process.uptime().toFixed(3)),
+      database,
+      indexer,
+      memory,
+    });
+  } catch (error) {
+    const end = process.hrtime(start);
+    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+    logError(error, {
+      event: 'health_check_error',
+      operation: 'health_check_shallow',
+      outcome: 'failure',
+      latency_ms: latencyMs,
+      requestId: (req as RequestWithId).requestId,
+    });
+    return next(error);
+  }
+});
+
+app.get('/api/health/deep', applyRateLimit(1000), async (req: Request, res: Response, next: express.NextFunction) => {
+  const start = process.hrtime();
+  try {
+    // The deep response exposes an ordered `components` collection, so it
+    // supports bounded pagination via page/limit (defaults 1 / 20, limit capped
+    // at 100). Invalid values are rejected with 400 rather than silently
+    // clamped. The default limit exceeds the number of components, so a request
+    // without parameters returns every component exactly as before.
+    const paginationResult = parseHealthPaginationQuery({
+      page: req.query.page,
+      limit: req.query.limit,
+    });
+    if (!paginationResult.ok) {
+      sendValidationError(paginationResult.issues);
+    }
+
     const database = checkDbHealth();
     const hasContractId = !!config.contractId;
     let sorobanHealthy = false;
@@ -460,30 +529,47 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
       external: memUsage.external,
     };
 
+    // Canonical, stable component order so a slice is deterministic across
+    // pages: page 1 + page 2 cover the set exactly once with no overlap.
+    const allComponents: Record<string, { status: 'up' | 'down'; details: unknown }> = {
+      db: {
+        status: database.reachable ? 'up' : 'down',
+        details: database.reachable ? 'SQLite database reachable' : database.error,
+      },
+      soroban: {
+        status: sorobanHealthy ? 'up' : 'down',
+        details: config.sorobanRpcUrl ? 'Soroban RPC reachable' : 'Soroban RPC URL not configured',
+      },
+      contract: {
+        status: hasContractId ? 'up' : 'down',
+        details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
+      },
+      indexer: {
+        status: indexer.isHealthy ? 'up' : 'down',
+        details: indexer,
+      },
+    };
+
+    const componentNames = Object.keys(allComponents);
+    const total = componentNames.length;
+    const { page, limit } = paginationResult;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const pageNames = componentNames.slice((page - 1) * limit, (page - 1) * limit + limit);
+    const components = Object.fromEntries(pageNames.map((name) => [name, allComponents[name]]));
+
     res.status(allHealthy ? 200 : 503).json({
       overall: allHealthy ? 'up' : 'down',
       timestamp: new Date().toISOString(),
       uptimeSeconds: Number(process.uptime().toFixed(3)),
       memory,
-      components: {
-        db: {
-          status: database.reachable ? 'up' : 'down',
-          details: database.reachable ? 'SQLite database reachable' : database.error,
-        },
-        soroban: {
-          status: sorobanHealthy ? 'up' : 'down',
-          details: config.sorobanRpcUrl
-            ? 'Soroban RPC reachable'
-            : 'Soroban RPC URL not configured',
-        },
-        contract: {
-          status: hasContractId ? 'up' : 'down',
-          details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
-        },
-        indexer: {
-          status: indexer.isHealthy ? 'up' : 'down',
-          details: indexer,
-        },
+      components,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasPreviousPage: page > 1 && total > 0,
+        hasNextPage: page < totalPages,
       },
     });
   } catch (error) {
@@ -494,13 +580,9 @@ app.get('/api/health/deep', applyRateLimit(1000), async (_req: Request, res: Res
       operation: 'health_check_deep',
       outcome: 'failure',
       latency_ms: latencyMs,
+      requestId: (req as RequestWithId).requestId,
     });
-    res.status(503).json({
-      overall: 'down',
-      timestamp: new Date().toISOString(),
-      error: 'Deep health check failed',
-      message: error instanceof Error ? error.message : String(error),
-    });
+    return next(error);
   }
 });
 
@@ -632,13 +714,25 @@ app.get('/api/campaigns/:id', async (req: Request, res: Response, next: express.
       sendValidationError(parsedId.issues);
     }
 
+    const requestId =
+      (req as RequestWithId).requestId ||
+      (req.header('x-request-id') as string) ||
+      (req.header('X-Request-Id') as string) ||
+      randomUUID();
+    (req as RequestWithId).requestId = requestId;
+    if (!res.getHeader('X-Request-Id')) {
+      res.setHeader('X-Request-Id', requestId);
+    }
+
     const cacheKey = `campaigns:detail:${parsedId.value}`;
     const cached = await getCampaignCacheEntry(cacheKey);
     if (cached) {
+      const cachedData = JSON.parse(cached) as { data: unknown };
       res.setHeader('Cache-Control', 'max-age=30');
       res.setHeader('X-Cache', 'HIT');
       res.setHeader('Content-Type', 'application/json');
-      res.send(cached);
+      // The cached payload is shared, but correlation IDs are per request.
+      res.send(JSON.stringify({ ...cachedData, requestId }));
       return;
     }
 
@@ -653,7 +747,12 @@ app.get('/api/campaigns/:id', async (req: Request, res: Response, next: express.
     res.setHeader('Cache-Control', 'max-age=30');
     res.setHeader('X-Cache', 'MISS');
     res.setHeader('Content-Type', 'application/json');
-    res.send(responseBody);
+    res.send(
+      JSON.stringify({
+        data: campaign,
+        requestId,
+      }),
+    );
   } catch (error) {
     next(error);
   }
@@ -767,6 +866,7 @@ app.get('/api/campaigns/:id/pledges', (req: Request, res: Response, next: expres
 
 app.post(
   '/api/campaigns',
+  applyRateLimit(WRITE_RATE_LIMIT_MAX_REQUESTS),
   validateBody(createCampaignPayloadSchema),
   async (req: Request, res: Response, next: express.NextFunction) => {
     try {
@@ -1224,6 +1324,41 @@ app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) 
   }
 
   if (isErrorWithMessage(err) && err.message === 'Not allowed by CORS') {
+    const clientIp = req.ip;
+    const isDev =
+      process.env.NODE_ENV === 'development' ||
+      (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test');
+
+    if (!isDev && clientIp) {
+      const key = `cors-abuse:${clientIp}`;
+      const now = Date.now();
+      const current = corsAbuseBuckets.get(key);
+      let count = 1;
+      let resetAt = now + RATE_LIMIT_WINDOW_MS;
+
+      if (current && now < current.resetAt) {
+        count = current.count + 1;
+        resetAt = current.resetAt;
+      }
+      corsAbuseBuckets.set(key, { count, resetAt });
+
+      if (count > CORS_ABUSE_MAX_VIOLATIONS) {
+        const retryAfterSec = Math.max(1, Math.ceil((resetAt - now) / 1000));
+        res.setHeader('Retry-After', String(retryAfterSec));
+        res.setHeader('X-RateLimit-Limit', String(CORS_ABUSE_MAX_VIOLATIONS));
+        res.setHeader('X-RateLimit-Remaining', '0');
+        res.setHeader('X-RateLimit-Reset', String(Math.ceil(resetAt / 1000)));
+        return res.status(429).json({
+          success: false,
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'CORS policy abuse limit exceeded. Please retry shortly.',
+            requestId: (req as RequestWithId).requestId,
+          },
+        });
+      }
+    }
+
     return res.status(403).json({
       success: false,
       error: {

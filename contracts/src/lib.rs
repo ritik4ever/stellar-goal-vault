@@ -360,6 +360,9 @@ impl StellarGoalVaultContract {
         if bps < 0 {
             panic!("fee must be non-negative");
         }
+        if bps > 10000 {
+            panic!("fee must not exceed 10000 basis points");
+        }
         env.storage().instance().set(&DataKey::PlatformFeeBps, &bps);
     }
 
@@ -367,6 +370,9 @@ impl StellarGoalVaultContract {
     /// Only the admin can call this.
     pub fn set_fee_recipient(env: Env, admin: Address, recipient: Address) {
         require_admin(&env, &admin);
+        if recipient == env.current_contract_address() {
+            panic!("fee recipient cannot be the vault contract");
+        }
         env.storage()
             .instance()
             .set(&DataKey::FeeRecipient, &recipient);
