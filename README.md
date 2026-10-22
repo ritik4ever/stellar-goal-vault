@@ -7,7 +7,7 @@ Stellar Goal Vault is a lightweight crowdfunding MVP for the Stellar ecosystem.
 It includes:
 
 - A React dashboard to create and manage funding campaigns
-- A Node.js + Express API backed by SQLite
+- A Node.js + Express API backed by SQLite 
 - A Soroban contract scaffold for on-chain campaign creation, pledges, claims, and refunds
 - A seeded contribution backlog you can turn into GitHub issues after publishing
 
