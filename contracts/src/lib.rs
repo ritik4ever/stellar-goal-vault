@@ -906,6 +906,9 @@ impl StellarGoalVaultContract {
 
     pub fn claim(env: Env, campaign_id: u64, creator: Address) {
         require_not_paused(&env);
+        if creator == env.current_contract_address() {
+            panic!("creator cannot be the vault contract");
+        }
         creator.require_auth();
 
         let mut campaign = read_campaign(&env, campaign_id);
@@ -918,8 +921,19 @@ impl StellarGoalVaultContract {
         if campaign.canceled {
             panic!("campaign canceled");
         }
-        if creator == env.current_contract_address() {
-            panic!("creator cannot be the vault contract");
+        if campaign.target_amount <= 0
+            || campaign.pledged_amount < 0
+            || campaign.pledged_amount > campaign.target_amount
+        {
+            panic!("campaign amounts are invalid");
+        }
+        if campaign.deadline <= campaign.created_at
+            || campaign.deadline - campaign.created_at > MAX_CAMPAIGN_DURATION_SECONDS
+        {
+            panic!("campaign deadline is invalid");
+        }
+        if campaign.accepted_tokens.len() == 0 {
+            panic!("campaign has no accepted tokens");
         }
         // Campaign must be approved before claiming
         if campaign.approval_threshold > 0 {
@@ -939,6 +953,53 @@ impl StellarGoalVaultContract {
             panic!("campaign is not funded");
         }
 
+        let contract_address = env.current_contract_address();
+        let fee_bps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(DEFAULT_PLATFORM_FEE_BPS);
+        if !(0..=10000).contains(&fee_bps) {
+            panic!("platform fee must be between 0 and 10000 basis points");
+        }
+        let fee_recipient: Option<Address> = env.storage().instance().get(&DataKey::FeeRecipient);
+        if fee_recipient.as_ref() == Some(&contract_address) {
+            panic!("fee recipient cannot be the vault contract");
+        }
+
+        // Validate the stored payout snapshot before changing campaign state.
+        let mut total_balance = 0_i128;
+        let mut token_index = 0;
+        while token_index < campaign.accepted_tokens.len() {
+            let token = campaign.accepted_tokens.get(token_index).unwrap();
+            if TokenClient::new(&env, &token).try_decimals().is_err() {
+                panic!("campaign contains an invalid token address");
+            }
+            let mut other_index = token_index + 1;
+            while other_index < campaign.accepted_tokens.len() {
+                if token == campaign.accepted_tokens.get(other_index).unwrap() {
+                    panic!("campaign contains duplicate token addresses");
+                }
+                other_index += 1;
+            }
+
+            let balance: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::CampaignTokenBalance(campaign_id, token))
+                .unwrap_or(0);
+            if balance < 0 {
+                panic!("campaign token balance is invalid");
+            }
+            total_balance = total_balance
+                .checked_add(balance)
+                .unwrap_or_else(|| panic!("campaign token balances exceed the valid amount"));
+            token_index += 1;
+        }
+        if total_balance != campaign.pledged_amount {
+            panic!("campaign token balances do not match pledged amount");
+        }
+
         // Authorization is enforced above: only the campaign creator (the
         // stored `creator`) can claim, and the signature covers campaign_id.
         // No other signer can trigger this privileged state transition.
@@ -947,14 +1008,6 @@ impl StellarGoalVaultContract {
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
 
-        let contract_address = env.current_contract_address();
-
-        let fee_bps: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::PlatformFeeBps)
-            .unwrap_or(DEFAULT_PLATFORM_FEE_BPS);
-        let fee_recipient: Option<Address> = env.storage().instance().get(&DataKey::FeeRecipient);
         let take_fee = fee_bps > 0;
 
         for token in campaign.accepted_tokens.iter() {
@@ -966,7 +1019,8 @@ impl StellarGoalVaultContract {
 
                 if take_fee {
                     if let Some(ref recipient) = fee_recipient {
-                        let fee_amount = balance * fee_bps / 10000;
+                        let fee_amount = (balance / 10000) * fee_bps
+                            + ((balance % 10000) * fee_bps) / 10000;
                         let creator_amount = balance - fee_amount;
 
                         if fee_amount > 0 {
