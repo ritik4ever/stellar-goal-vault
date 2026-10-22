@@ -55,6 +55,7 @@ import { useOpenGraph } from './hooks/useOpenGraph';
 import { useCampaignShareCard } from './components/CampaignShareCard';
 import { didCampaignBecomeFunded } from './lib/fundingCelebration';
 import { safeErrorMessage } from './lib/signingErrors';
+import type { TransactionStatus } from './lib/transactionSubmission';
 import { appendUniqueCampaigns } from './lib/campaignListPagination';
 import { mergeCampaignDetail, mergeHistoryPages } from './lib/campaignDetailLoading';
 import { ApiError, AppConfig, Campaign, CampaignEvent, OpenIssue } from './types/campaign';
@@ -93,6 +94,19 @@ function getErrorMessage(error: unknown): string {
   // Wallet/RPC failures already carry authored, recoverable messages; anything
   // else is still scrubbed so a stray SDK message cannot expose XDR or a seed.
   return safeErrorMessage(error, 'Something went wrong.');
+}
+
+function transactionStatusMessage(action: string, status: TransactionStatus): string {
+  switch (status) {
+    case 'pending':
+      return `Processing ${action.toLowerCase()} transaction...`;
+    case 'confirmed':
+      return `${action} transaction confirmed. Updating campaign...`;
+    case 'failed':
+      return `${action} transaction failed.`;
+    case 'retryable':
+      return `Could not confirm the ${action.toLowerCase()} transaction. Check its status before retrying.`;
+  }
 }
 
 function toApiError(error: unknown): ApiError {
@@ -180,6 +194,7 @@ function App() {
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
+  const activeTransactionActions = useRef(new Set<string>());
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
   const [campaignsError, setCampaignsError] = useState<{
     message: string;
@@ -561,10 +576,17 @@ function App() {
       return;
     }
 
+    const actionKey = `pledge:${campaignId}:${connectedWallet.toUpperCase()}`;
+    if (activeTransactionActions.current.has(actionKey)) {
+      return;
+    }
+    activeTransactionActions.current.add(actionKey);
+
     const previousCampaign =
       campaigns.find((campaign) => campaign.id === campaignId) ??
       (selectedCampaign?.id === campaignId ? selectedCampaign : null);
 
+    setActionMessage(null);
     setPendingPledgeCampaignId(campaignId);
 
     try {
@@ -575,6 +597,9 @@ function App() {
         assetCode,
         config: appConfig,
         onPreview: handleTransactionPreview,
+        onStatusChange: ({ status }) => {
+          setActionMessage(transactionStatusMessage('Pledge', status));
+        },
       });
 
       await reconcilePledge(campaignId, {
@@ -605,6 +630,7 @@ function App() {
           label: 'View on Stellar Expert',
         },
       );
+      setActionMessage(null);
     } catch (error) {
       if (
         error &&
@@ -615,6 +641,7 @@ function App() {
       }
       addToast(getErrorMessage(error), 'error');
     } finally {
+      activeTransactionActions.current.delete(actionKey);
       setPendingPledgeCampaignId(null);
     }
   }
@@ -635,12 +662,22 @@ function App() {
       return;
     }
 
+    const actionKey = `claim:${campaign.id}:${connectedWallet.toUpperCase()}`;
+    if (activeTransactionActions.current.has(actionKey)) {
+      return;
+    }
+    activeTransactionActions.current.add(actionKey);
+    setActionMessage(null);
+
     try {
       const transactionResult = await submitFreighterClaim({
         campaignId: campaign.id,
         creator: connectedWallet,
         config: appConfig,
         onPreview: handleTransactionPreview,
+        onStatusChange: ({ status }) => {
+          setActionMessage(transactionStatusMessage('Claim', status));
+        },
       });
 
       await claimCampaign(
@@ -653,6 +690,7 @@ function App() {
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
       addToast('Campaign claimed successfully.', 'success');
+      setActionMessage(null);
     } catch (error) {
       if (
         error &&
@@ -662,6 +700,8 @@ function App() {
         return;
       }
       addToast(getErrorMessage(error), 'error');
+    } finally {
+      activeTransactionActions.current.delete(actionKey);
     }
   }
 
@@ -687,11 +727,18 @@ function App() {
   }
 
   async function handleRefund(campaignId: string, contributor: string) {
+    const actionKey = `refund:${campaignId}:${contributor.trim().toUpperCase()}`;
+    if (activeTransactionActions.current.has(actionKey)) {
+      return;
+    }
+    activeTransactionActions.current.add(actionKey);
     setActionError(null);
-    setActionMessage('Preparing Soroban refund transaction...');
+    setActionMessage(transactionStatusMessage('Refund', 'pending'));
 
     try {
-      const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
+      const sorobanReceipt = await submitRefundTransaction(campaignId, contributor, ({ status }) => {
+        setActionMessage(transactionStatusMessage('Refund', status));
+      });
       await refundCampaign(campaignId, contributor, sorobanReceipt);
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
@@ -701,6 +748,8 @@ function App() {
       setActionError(toApiError(error));
       setActionMessage(null);
       addToast(getErrorMessage(error), 'error');
+    } finally {
+      activeTransactionActions.current.delete(actionKey);
     }
   }
 
