@@ -38,8 +38,9 @@ const CODE_CLASSES: Record<string, SigningErrorClass> = {
   INVALID_AMOUNT_PRECISION: 'MALFORMED_TRANSACTION',
   INVALID_DECIMALS: 'MALFORMED_TRANSACTION',
   ASSET_NOT_CONFIGURED: 'MALFORMED_TRANSACTION',
+  ASSET_MISCONFIGURED: 'MALFORMED_TRANSACTION',
   CONFIG_MISSING: 'MALFORMED_TRANSACTION',
-  SIMULATION_FAILED: 'MALFORMED_TRANSACTION',
+  SIMULATION_FAILED: 'CONTRACT_REJECTED',
   SIMULATION_PREPARE_FAILED: 'MALFORMED_TRANSACTION',
   SOURCE_ACCOUNT_LOAD_FAILED: 'RPC_FAILURE',
   SUBMISSION_FAILED: 'RPC_FAILURE',
@@ -87,7 +88,7 @@ type ErrorLike = {
   response?: { status?: unknown };
 };
 
-function rawText(error: unknown): string {
+export function rawText(error: unknown): string {
   if (typeof error === 'string') return error;
   if (error && typeof error === 'object') {
     const message = (error as ErrorLike).message;

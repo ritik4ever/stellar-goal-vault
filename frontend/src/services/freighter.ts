@@ -19,6 +19,7 @@ import {
   classifyCause,
   createSigningError,
   describeErrorForLog,
+  rawText,
 } from '../lib/signingErrors';
 
 type AppErrorLike = Error & { code?: string };
@@ -325,13 +326,14 @@ export async function submitFreighterClaim(params: {
 
   const simulation = await server.simulateTransaction(transaction).catch((error) => {
     throw createSigningError('SIMULATION_FAILED', {
-      signingErrorClass: 'RPC_FAILURE',
+      signingErrorClass: 'CONTRACT_REJECTED',
       cause: error,
+      message: describeSimulationError(error),
     });
   });
 
   if ('error' in simulation) {
-    throw buildCausedError('SIMULATION_FAILED', simulation.error, 'MALFORMED_TRANSACTION');
+    throw buildCausedError('SIMULATION_FAILED', simulation.error, 'CONTRACT_REJECTED', describeSimulationError(simulation.error));
   }
 
   if ('restorePreamble' in simulation) {
@@ -406,6 +408,69 @@ export async function submitFreighterClaim(params: {
   return waitForTransaction(server, sendResult.hash);
 }
 
+/**
+ * Validates that an asset is properly configured for pledging.
+ * Throws a classified error if the asset is missing or misconfigured.
+ */
+export function validateAssetConfiguration(
+  assetCode: string,
+  config: AppConfig,
+): void {
+  const normalizedAssetCode = assetCode.toUpperCase();
+  const tokenAddress = config.assetAddresses[normalizedAssetCode];
+
+  if (!tokenAddress) {
+    throw buildError(
+      'ASSET_NOT_CONFIGURED',
+      `The asset ${assetCode} is not configured for this campaign. Please select a different asset or contact support.`,
+    );
+  }
+
+  // Validate that the address is a valid Stellar address format
+  if (!tokenAddress.startsWith('G') && !tokenAddress.startsWith('C')) {
+    throw buildError(
+      'ASSET_MISCONFIGURED',
+      `The asset ${assetCode} has an invalid contract address. Please contact support.`,
+    );
+  }
+}
+
+/**
+ * Extracts user-friendly error messages from Soroban simulation failures.
+ * Maps common contract errors to actionable recovery messages.
+ */
+export function describeSimulationError(error: unknown): string {
+  const errorText = rawText(error).toLowerCase();
+
+  // Insufficient balance errors
+  if (errorText.includes('insufficient') || errorText.includes('balance')) {
+    return 'Insufficient balance. Check that you have enough of the selected asset to complete this pledge.';
+  }
+
+  // Authorization errors
+  if (errorText.includes('authorization') || errorText.includes('auth')) {
+    return 'Authorization failed. The contract requires additional permissions for this operation.';
+  }
+
+  // Invalid account errors
+  if (errorText.includes('account') && (errorText.includes('not found') || errorText.includes('does not exist'))) {
+    return 'Account not found. Your wallet account may need to be funded on this network.';
+  }
+
+  // Token-specific errors
+  if (errorText.includes('token') || errorText.includes('allowance')) {
+    return 'Token error. You may need to approve the contract to spend your tokens.';
+  }
+
+  // Contract state errors
+  if (errorText.includes('state') || errorText.includes('archived') || errorText.includes('restore')) {
+    return 'Contract state error. The campaign contract may need to be restored before pledging.';
+  }
+
+  // Generic fallback
+  return 'Transaction simulation failed. Check the campaign status and your balance, then try again.';
+}
+
 export async function submitFreighterPledge(params: {
   campaignId: string;
   contributor: string;
@@ -433,16 +498,12 @@ export async function submitFreighterPledge(params: {
   // Verify wallet network matches expected network before proceeding
   await verifyFreighterNetwork(config.networkPassphrase);
 
+  // Validate asset configuration before building transaction
+  validateAssetConfiguration(assetCode, config);
+
   const server = getRpcServer(config.sorobanRpcUrl);
   const amountUnits = amountToContractUnits(amount, config.contractAmountDecimals);
   const tokenAddress = config.assetAddresses[assetCode.toUpperCase()];
-
-  if (!tokenAddress) {
-    throw buildError(
-      'ASSET_NOT_CONFIGURED',
-      `Soroban contract address for ${assetCode} is not configured.`,
-    );
-  }
 
   const sourceAccount = await server.getAccount(contributor).catch((error) => {
     throw buildCausedError('SOURCE_ACCOUNT_LOAD_FAILED', error, 'RPC_FAILURE');
@@ -468,13 +529,14 @@ export async function submitFreighterPledge(params: {
 
   const simulation = await server.simulateTransaction(transaction).catch((error) => {
     throw createSigningError('SIMULATION_FAILED', {
-      signingErrorClass: 'RPC_FAILURE',
+      signingErrorClass: 'CONTRACT_REJECTED',
       cause: error,
+      message: describeSimulationError(error),
     });
   });
 
   if ('error' in simulation) {
-    throw buildCausedError('SIMULATION_FAILED', simulation.error, 'MALFORMED_TRANSACTION');
+    throw buildCausedError('SIMULATION_FAILED', simulation.error, 'CONTRACT_REJECTED', describeSimulationError(simulation.error));
   }
 
   if ('restorePreamble' in simulation) {

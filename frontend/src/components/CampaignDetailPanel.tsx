@@ -6,6 +6,7 @@ import CopyButton from './CopyButton';
 import { AddressAvatar } from './AddressAvatar';
 import { EmptyState } from './EmptyState';
 import { CampaignImage } from './CampaignImage';
+import { validateAssetConfiguration } from '../services/freighter';
 
 const ContributorSummary = lazy(() =>
   import('./ContributorSummary').then((m) => ({ default: m.ContributorSummary })),
@@ -87,6 +88,7 @@ export function CampaignDetailPanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pledgeError, setPledgeError] = useState<string | null>(null);
   const [pledgeSuccess, setPledgeSuccess] = useState(false);
+  const [assetValidationError, setAssetValidationError] = useState<string | null>(null);
   const pledgeSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bannerImageError, setBannerImageError] = useState(false);
   const walletReady = appConfig?.walletIntegrationReady ?? false;
@@ -223,6 +225,22 @@ export function CampaignDetailPanel({
     new Set([ ...(activeCampaign.acceptedTokens ?? []), activeCampaign.assetCode ]),
   );
 
+  // Validate asset configuration when token selection changes
+  useEffect(() => {
+    if (!appConfig || !selectedToken) {
+      setAssetValidationError(null);
+      return;
+    }
+
+    try {
+      validateAssetConfiguration(selectedToken, appConfig);
+      setAssetValidationError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid asset selection';
+      setAssetValidationError(message);
+    }
+  }, [selectedToken, appConfig]);
+
   async function submitPledge() {
     setPledgeError(null);
     setPledgeSuccess(false);
@@ -235,6 +253,12 @@ export function CampaignDetailPanel({
     // signing flow.
     if (hasNetworkMismatch) {
       addToast(networkMismatchMessage ?? 'Network mismatch.', 'error');
+      return;
+    }
+    // Don't submit if asset validation failed
+    if (assetValidationError) {
+      setPledgeError(assetValidationError);
+      addToast(assetValidationError, 'error');
       return;
     }
     setIsSubmitting(true);
@@ -436,21 +460,16 @@ export function CampaignDetailPanel({
                 </option>
               ))}
             </select>
-          </div>
+            {assetValidationError && (
+              <div role="alert" className="error-text" style={{ marginTop: 4, fontSize: '0.875rem', color: '#ef4444' }}>
+                {assetValidationError}
+              </div>
+            )}
+          </label>
         ) : null}
-        <div className="form-actions action-row campaign-detail-actions">
-          <button
-            className="btn-primary"
-            type="submit"
-            disabled={
-              isSubmitting ||
-              isPledgePending ||
-              !activeCampaign.progress.canPledge
-            }
-          >
-            {isSubmitting || isPledgePending ? 'Submitting...' : 'Pledge'}
-          </button>
-        </div>
+        <button type="submit" disabled={isSubmitting || !hasNetworkMismatch || !!assetValidationError} >
+          {isSubmitting ? 'Submitting…' : 'Pledge'}
+        </button>
         {pledgeError ? (
           <div className="pledge-error form-error" role="alert" ref={pledgeErrorRef} tabIndex={-1}>
             <p className="error-text">{pledgeError}</p>
