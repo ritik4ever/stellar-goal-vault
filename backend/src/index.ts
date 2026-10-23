@@ -80,6 +80,7 @@ import {
   normalizeQueryValue,
   parseContributorPledgesQuery,
   parseHealthPaginationQuery,
+  parseHealthRequest,
 } from './validation/schemas';
 import { generateOpenApiDocument } from './openapi';
 import { logError, logInfo, logger, summarizeSecretConfig } from './logger';
@@ -413,6 +414,14 @@ export function filterCampaignList(
 app.get('/api/health', (req: Request, res: Response, next: express.NextFunction) => {
   const start = process.hrtime();
   try {
+    const requestValidation = parseHealthRequest(
+      req.query as Record<string, unknown>,
+      req.body,
+    );
+    if (!requestValidation.ok) {
+      sendValidationError(requestValidation.issues);
+    }
+
     const database = checkDbHealth();
     const indexer = getIndexerStatus();
 
