@@ -1007,6 +1007,9 @@ impl StellarGoalVaultContract {
 
     pub fn refund(env: Env, campaign_id: u64, contributor: Address) {
         require_not_paused(&env);
+        if contributor == env.current_contract_address() {
+            panic!("contributor cannot be the vault contract");
+        }
         contributor.require_auth();
 
         let mut campaign = read_campaign(&env, campaign_id);
@@ -1046,6 +1049,9 @@ impl StellarGoalVaultContract {
             .instance()
             .get(&DataKey::Admin)
             .unwrap_or_else(|| panic!("not initialized"));
+        if admin == env.current_contract_address() {
+            panic!("admin cannot be the vault contract");
+        }
         admin.require_auth();
 
         let mut campaign = read_campaign(&env, campaign_id);
@@ -1351,27 +1357,43 @@ fn refund_contributor(
             .persistent()
             .get(&contribution_key)
             .unwrap_or(0);
-        if amount > 0 {
-            let token_client = TokenClient::new(env, &token);
-            token_client.transfer(&contract_address, contributor, &amount);
-            env.storage().persistent().set(&contribution_key, &0_i128);
-            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
-            let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
-            env.storage()
-                .persistent()
-                .set(&balance_key, &(balance - amount));
-            campaign.pledged_amount -= amount;
-            total_refunded += amount;
-            env.events().publish(
-                (symbol_short!("Goal"), symbol_short!("Refund")),
-                CampaignRefunded {
-                    campaign_id,
-                    contributor: contributor.clone(),
-                    token: token.clone(),
-                    amount,
-                },
-            );
+
+        // Boundary validation: reject malformed contribution state before any
+        // refund writes to storage; the contract must never underflow the
+        // campaign's pledged amount or token balance when refunding.
+        if amount < 0 {
+            panic!("negative contribution amount");
         }
+        if amount == 0 {
+            continue;
+        }
+
+        let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+        let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        if balance < amount {
+            panic!("campaign balance below contribution");
+        }
+        if campaign.pledged_amount < amount {
+            panic!("refund exceeds pledged amount");
+        }
+
+        let token_client = TokenClient::new(env, &token);
+        token_client.transfer(&contract_address, contributor, &amount);
+        env.storage().persistent().set(&contribution_key, &0_i128);
+        env.storage()
+            .persistent()
+            .set(&balance_key, &(balance - amount));
+        campaign.pledged_amount -= amount;
+        total_refunded += amount;
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Refund")),
+            CampaignRefunded {
+                campaign_id,
+                contributor: contributor.clone(),
+                token: token.clone(),
+                amount,
+            },
+        );
     }
     total_refunded
 }
