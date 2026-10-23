@@ -84,7 +84,9 @@ Then open `chrome://inspect` in Chrome DevTools.
 ```
 backend/
 ├── tests/
-│   ├── integration_test.ts     # Main integration test suite
+│   ├── integration.test.ts     # Campaign lifecycle integration suite
+│   ├── health.integration.ts   # Health endpoint integration suite
+│   ├── fixtures.ts             # Deterministic fixtures and frozen clock
 │   ├── utils.ts                # Shared test utilities and helpers
 │   └── README.md               # This file
 ├── src/
@@ -125,6 +127,30 @@ Vitest automatically discovers test files matching these patterns:
 - **State Transitions**: Verify correct state changes across operations
 - **Event Ordering**: Ensure events are recorded in correct chronological order
 - **Independent Campaigns**: Verify multiple campaigns don't interfere with each other
+
+### Health Endpoint
+
+`tests/health.integration.ts` boots the real Express app against an isolated
+temporary database and exercises the health endpoints over HTTP. The Soroban
+RPC probe (`fetch`) and the indexer status are pinned per test and restored in
+`afterEach`, so no test depends on execution order or network access.
+
+Covered behavior:
+- `GET /api/health` — `200 ok` when the database and indexer are healthy;
+  `503 degraded` when either signal is down, including the real
+  `freshness: "never"` state of a process whose poller has not started.
+- `GET /api/health/deep` — `200 up` when db, Soroban RPC, `CONTRACT_ID`, and
+  the indexer are all healthy; deterministic component pagination; `503 down`
+  for a failing RPC probe or unreachable database.
+- Validation failures — `400 VALIDATION_ERROR` with `page`/`limit` field
+  details, and no database access on the rejected request.
+- Not-found — `404` for unknown paths under `/api/health` (never a health
+  payload).
+- Server-side failures — a generic `500 INTERNAL_SERVER_ERROR` envelope with
+  a request id and no leaked error text, paths, or stack traces.
+
+Response bodies are validated against strict Zod schemas defined in the suite,
+so both status codes and response shapes are asserted.
 
 ## Test Database Isolation
 
