@@ -29,6 +29,27 @@ interface BlockchainMetadata {
 - **source**: Indicates whether the event originated locally ('local') or from blockchain sync ('soroban').
 
 ### Campaign Creation Event Topics and Payload
+### Contract Configuration Event Topics and Payload (#914)
+
+Administrative configuration operations emit structured events designed for off-chain ingestion:
+
+1. **Contract Initialization (`Goal`, `Init`)**:
+   - `admin`: Account address assigned administrative role.
+   - `min_contribution`: Configured minimum contribution floor.
+   - `contract_version`: Semantic version string.
+2. **Contract Pause Configuration (`Goal`, `CfgPause`)**:
+   - `admin`: Administrator executing pause transition.
+   - `paused`: Boolean flag (`true` indicates emergency halt; `false` indicates normal operation).
+   - `contract_version`: Version string.
+3. **Platform Fee Configuration (`Goal`, `FeeSet`)**:
+   - `admin`: Administrator updating basis points.
+   - `old_fee_bps`: Prior basis point rate.
+   - `new_fee_bps`: Newly applied rate (0 disables fees).
+4. **Platform Fee Recipient (`Goal`, `RecipSet`)**:
+   - `admin`: Administrator setting treasury recipient.
+   - `old_recipient`: Prior recipient address (optional).
+   - `new_recipient`: Updated recipient address.
+
 
 ## Database Schema Changes
 

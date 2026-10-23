@@ -87,6 +87,40 @@ fn initialize(env: Env, admin: Address, min_contribution: i128)
 
 ---
 
+### `set_fee`
+
+Sets the platform fee in basis points (e.g. 50 = 0.5%). Admin only. Pass 0 to disable platform fees.
+
+```
+fn set_fee(env: Env, admin: Address, bps: i128)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Stored admin address (must authenticate) |
+| `bps` | `i128` | Fee in basis points (must be >= 0) |
+
+**Emits:** `PlatformFeeUpdatedEvent` with topic pair `("Goal", "FeeSet")`
+
+---
+
+### `set_fee_recipient`
+
+Sets the recipient address that receives platform fees upon campaign claims. Admin only.
+
+```
+fn set_fee_recipient(env: Env, admin: Address, recipient: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Stored admin address (must authenticate) |
+| `recipient` | `Address` | Address designated to receive fee deductions |
+
+**Emits:** `FeeRecipientUpdatedEvent` with topic pair `("Goal", "RecipSet")`
+
+---
+
 ### `set_paused`
 
 Pauses or unpauses all state-mutating entry points. Admin only.
@@ -854,6 +888,82 @@ committed only if the full claim transaction succeeds.
 | `creator` | `Address` | Creator who canceled |
 
 **Emitted by:** `cancel_campaign`
+
+---
+
+### `ContractInitializedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Init"` |
+
+**Data** (`ContractInitializedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Initialized admin address |
+| `min_contribution` | `i128` | Minimum contribution floor in stroops |
+| `contract_version` | `String` | Contract version deployed |
+
+**Emitted by:** `initialize`
+
+---
+
+### `ContractPausedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"CfgPause"` |
+
+**Data** (`ContractPausedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin address initiating pause state change |
+| `paused` | `bool` | New pause status (`true` = paused, `false` = unpaused) |
+| `contract_version` | `String` | Contract version at time of change |
+
+**Emitted by:** `set_paused`
+
+---
+
+### `PlatformFeeUpdatedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"FeeSet"` |
+
+**Data** (`PlatformFeeUpdatedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin updating fee |
+| `old_fee_bps` | `i128` | Previous fee in basis points |
+| `new_fee_bps` | `i128` | New fee in basis points |
+
+**Emitted by:** `set_fee`
+
+---
+
+### `FeeRecipientUpdatedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"RecipSet"` |
+
+**Data** (`FeeRecipientUpdatedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin updating recipient |
+| `old_recipient` | `Option<Address>` | Previous recipient address if configured |
+| `new_recipient` | `Address` | Newly designated recipient address |
+
+**Emitted by:** `set_fee_recipient`
 
 ---
 

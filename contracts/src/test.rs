@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 #[cfg(test)]
 mod tests {
     use soroban_sdk::{
@@ -200,7 +201,7 @@ mod tests {
         assert_eq!(campaign_id, 1);
         let events = env.events().all();
         assert!(
-            !events.is_empty(),
+            !events.events().is_empty(),
             "campaign creation must emit an event"
         );
     }
@@ -230,7 +231,7 @@ mod tests {
         }));
         assert!(result.is_err(), "creation must be rejected");
         assert!(
-            env.events().all().is_empty(),
+            env.events().all().events().is_empty(),
             "failed creation must not emit a success event"
         );
     }
