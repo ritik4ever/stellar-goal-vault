@@ -58,22 +58,25 @@ const CODE_CLASSES: Record<string, SigningErrorClass> = {
  */
 const TEXT_RULES: Array<[RegExp, SigningErrorClass]> = [
   [
-    /user (rejected|declined|denied|cancell?ed)|(rejected|declined|denied|cancell?ed) by (the )?user|request (was )?(rejected|declined|denied)/i,
+    /user (rejected|declined|denied|cancell?ed|refused|aborted)|(rejected|declined|denied|cancell?ed|refused|aborted) by (the )?user|request (was )?(rejected|declined|denied|aborted)|action cancell?ed|user closed/i,
     'USER_REJECTED',
   ],
   [
-    /not (installed|detected|connected|available)|locked|no wallet|extension/i,
+    /not (installed|detected|connected|available)|locked|no wallet|extension|unauthorized|account not found|session expired/i,
     'WALLET_UNAVAILABLE',
   ],
   [
-    /xdr|malformed|could not parse|invalid (transaction|envelope|param|argument)/i,
+    /xdr|malformed|could not parse|invalid (transaction|envelope|param|argument|amount|sequence)|bad sequence/i,
     'MALFORMED_TRANSACTION',
   ],
   [
-    /timed? ?out|network ?error|failed to fetch|econn|enotfound|socket|unavailable|\b50[0-4]\b|try_again_later/i,
+    /timed? ?out|network ?error|failed to fetch|econn|enotfound|socket|unavailable|\b50[0-4]\b|try_again_later|rpc error|horizon error/i,
     'RPC_FAILURE',
   ],
-  [/contract|host ?error|tx_?failed|\bop_/i, 'CONTRACT_REJECTED'],
+  [
+    /contract|host ?error|tx_?failed|\bop_|insufficient balance|underfunded|expired/i,
+    'CONTRACT_REJECTED',
+  ],
   // Stellar transaction result codes, e.g. txBadSeq, txInsufficientBalance.
   [/\btx[A-Z]\w+/, 'CONTRACT_REJECTED'],
 ];

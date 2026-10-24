@@ -356,4 +356,66 @@ describe('signing failure classes (#931)', () => {
     expect(secondError.message).toMatch(/already in progress/i);
     expectNoSecretLeak(secondError);
   });
+
+  it('separates malformed transaction error during signing as MALFORMED_TRANSACTION (#926)', async () => {
+    freighterMocks.signTransaction.mockRejectedValue(
+      new Error(`malformed transaction envelope: invalid xdr ${FAKE_SECRET}`),
+    );
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIGNING_FAILED',
+      signingErrorClass: 'MALFORMED_TRANSACTION',
+      message: SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION,
+    });
+    expectNoSecretLeak(error);
+    expect(error.detail).toContain('[REDACTED_SECRET]');
+  });
+
+  it('separates RPC failure during signing as RPC_FAILURE (#926)', async () => {
+    freighterMocks.signTransaction.mockRejectedValue(
+      new Error(`network error: connection timed out ${FAKE_SECRET}`),
+    );
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIGNING_FAILED',
+      signingErrorClass: 'RPC_FAILURE',
+      message: SIGNING_ERROR_MESSAGES.RPC_FAILURE,
+    });
+    expectNoSecretLeak(error);
+  });
+
+  it('separates contract rejection during signing as CONTRACT_REJECTED (#926)', async () => {
+    freighterMocks.signTransaction.mockRejectedValue(
+      new Error(`contract call failed: host error tx_failed ${FAKE_SECRET}`),
+    );
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIGNING_FAILED',
+      signingErrorClass: 'CONTRACT_REJECTED',
+      message: SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED,
+    });
+    expectNoSecretLeak(error);
+  });
+
+  it('hardens TransactionBuilder construction failure as MALFORMED_TRANSACTION (#926)', async () => {
+    stellarSdkMock.TransactionBuilder.mockImplementationOnce(() => {
+      throw new Error(`invalid transaction builder arguments ${FAKE_SECRET}`);
+    });
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'INVALID_TRANSACTION_PARAMS',
+      signingErrorClass: 'MALFORMED_TRANSACTION',
+      message: SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION,
+    });
+    expect(freighterMocks.signTransaction).not.toHaveBeenCalled();
+    expectNoSecretLeak(error);
+  });
 });

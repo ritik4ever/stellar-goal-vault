@@ -364,13 +364,18 @@ async function executeFreighterClaim(params: {
     ),
   );
 
-  const transaction = new TransactionBuilder(sourceAccount, {
-    fee: BASE_FEE,
-    networkPassphrase: config.networkPassphrase,
-  })
-    .addOperation(operation)
-    .setTimeout(60)
-    .build();
+  let transaction;
+  try {
+    transaction = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: config.networkPassphrase,
+    })
+      .addOperation(operation)
+      .setTimeout(60)
+      .build();
+  } catch (error) {
+    throw buildCausedError('INVALID_TRANSACTION_PARAMS', error, 'MALFORMED_TRANSACTION');
+  }
 
   const simulation = await server.simulateTransaction(transaction).catch((error) => {
     throw createSigningError('SIMULATION_FAILED', {
@@ -425,11 +430,19 @@ async function executeFreighterClaim(params: {
       networkPassphrase: config.networkPassphrase,
     });
   } catch (error) {
-    throw buildCausedError('SIGNING_FAILED', error, 'UNKNOWN');
+    const errorClass = classifyCause(error, 'UNKNOWN');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: errorClass,
+      cause: error,
+      message: SIGNING_ERROR_MESSAGES[errorClass],
+    });
   }
 
   if (!signedXdr) {
-    throw buildError('SIGNING_FAILED', 'Freighter did not return a signed transaction.');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: 'USER_REJECTED',
+      message: 'Freighter did not return a signed transaction.',
+    });
   }
 
   const signedTransaction = decodeSignedTransaction(signedXdr, config.networkPassphrase);
@@ -548,13 +561,18 @@ async function executeFreighterPledge(params: {
     ),
   );
 
-  const transaction = new TransactionBuilder(sourceAccount, {
-    fee: BASE_FEE,
-    networkPassphrase: config.networkPassphrase,
-  })
-    .addOperation(operation)
-    .setTimeout(60)
-    .build();
+  let transaction;
+  try {
+    transaction = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: config.networkPassphrase,
+    })
+      .addOperation(operation)
+      .setTimeout(60)
+      .build();
+  } catch (error) {
+    throw buildCausedError('INVALID_TRANSACTION_PARAMS', error, 'MALFORMED_TRANSACTION');
+  }
 
   const simulation = await server.simulateTransaction(transaction).catch((error) => {
     throw createSigningError('SIMULATION_FAILED', {
@@ -611,11 +629,19 @@ async function executeFreighterPledge(params: {
       networkPassphrase: config.networkPassphrase,
     });
   } catch (error) {
-    throw buildCausedError('SIGNING_FAILED', error, 'UNKNOWN');
+    const errorClass = classifyCause(error, 'UNKNOWN');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: errorClass,
+      cause: error,
+      message: SIGNING_ERROR_MESSAGES[errorClass],
+    });
   }
 
   if (!signedXdr) {
-    throw buildError('SIGNING_FAILED', 'Freighter did not return a signed transaction.');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: 'USER_REJECTED',
+      message: 'Freighter did not return a signed transaction.',
+    });
   }
 
   const signedTransaction = decodeSignedTransaction(signedXdr, config.networkPassphrase);

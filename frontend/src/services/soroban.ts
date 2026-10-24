@@ -12,6 +12,7 @@ import { SorobanRefundMetadata } from '../types/campaign';
 import { GoalVaultContract } from '../generated';
 import { verifyFreighterNetwork } from './freighter';
 import {
+  SIGNING_ERROR_MESSAGES,
   SigningErrorClass,
   classifyCause,
   createSigningError,
@@ -155,7 +156,19 @@ async function buildAndSubmitRefund(
       networkPassphrase,
     });
   } catch (error) {
-    throw causedError('SIGNING_FAILED', error, 'UNKNOWN');
+    const errorClass = classifyCause(error, 'UNKNOWN');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: errorClass,
+      cause: error,
+      message: SIGNING_ERROR_MESSAGES[errorClass],
+    });
+  }
+
+  if (!signedXdr) {
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: 'USER_REJECTED',
+      message: 'Freighter did not return a signed transaction.',
+    });
   }
 
   const signedTransaction = parseTransaction(
