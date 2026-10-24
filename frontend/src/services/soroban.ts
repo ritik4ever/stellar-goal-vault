@@ -134,7 +134,16 @@ async function buildAndSubmitRefund(
     });
   });
   if (rpc.Api.isSimulationError(simulation)) {
-    throw causedError('SIMULATION_FAILED', simulation.error, 'MALFORMED_TRANSACTION');
+    const errorClass = classifyCause(simulation.error, 'CONTRACT_REJECTED');
+    const userMessage =
+      errorClass === 'CONTRACT_REJECTED'
+        ? SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED
+        : SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION;
+    throw createSigningError('SIMULATION_FAILED', {
+      signingErrorClass: errorClass,
+      cause: simulation.error,
+      message: `${userMessage} Preflight check failed before signing.`,
+    });
   }
 
   transaction = buildOperation(() => rpc.assembleTransaction(transaction, simulation).build());

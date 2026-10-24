@@ -305,4 +305,36 @@ describe('signing failure classes (#931)', () => {
       message: SIGNING_ERROR_MESSAGES.USER_REJECTED,
     });
   });
+
+  it('surfaces simulation failure as CONTRACT_REJECTED before signing during preflight (#925)', async () => {
+    mockServer.simulateTransaction.mockResolvedValue({
+      error: 'HostError: Error(Contract, #1) campaign deadline reached',
+    });
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIMULATION_FAILED',
+      signingErrorClass: 'CONTRACT_REJECTED',
+    });
+    expect(error.message).toContain(SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED);
+    expect(error.message).toContain('Preflight check failed before signing.');
+    expect(freighterMocks.signTransaction).not.toHaveBeenCalled();
+    expectNoSecretLeak(error);
+  });
+
+  it('surfaces RPC simulation transport failure as RPC_FAILURE before signing (#925)', async () => {
+    mockServer.simulateTransaction.mockRejectedValue(
+      new Error(`rpc simulation timed out ${FAKE_SECRET}`),
+    );
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIMULATION_FAILED',
+      signingErrorClass: 'RPC_FAILURE',
+    });
+    expect(freighterMocks.signTransaction).not.toHaveBeenCalled();
+    expectNoSecretLeak(error);
+  });
 });

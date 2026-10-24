@@ -331,7 +331,16 @@ export async function submitFreighterClaim(params: {
   });
 
   if ('error' in simulation) {
-    throw buildCausedError('SIMULATION_FAILED', simulation.error, 'MALFORMED_TRANSACTION');
+    const errorClass = classifyCause(simulation.error, 'CONTRACT_REJECTED');
+    const userMessage =
+      errorClass === 'CONTRACT_REJECTED'
+        ? SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED
+        : SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION;
+    throw createSigningError('SIMULATION_FAILED', {
+      signingErrorClass: errorClass,
+      cause: simulation.error,
+      message: `${userMessage} Preflight check failed before signing.`,
+    });
   }
 
   if ('restorePreamble' in simulation) {
@@ -474,7 +483,16 @@ export async function submitFreighterPledge(params: {
   });
 
   if ('error' in simulation) {
-    throw buildCausedError('SIMULATION_FAILED', simulation.error, 'MALFORMED_TRANSACTION');
+    const errorClass = classifyCause(simulation.error, 'CONTRACT_REJECTED');
+    const userMessage =
+      errorClass === 'CONTRACT_REJECTED'
+        ? SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED
+        : SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION;
+    throw createSigningError('SIMULATION_FAILED', {
+      signingErrorClass: errorClass,
+      cause: simulation.error,
+      message: `${userMessage} Preflight check failed before signing.`,
+    });
   }
 
   if ('restorePreamble' in simulation) {
