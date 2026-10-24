@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearInFlightSubmissions } from './freighter';
 import type { AppConfig } from '../types/campaign';
 
 // Use vi.hoisted for all mock factories to avoid hoisting issues
@@ -116,6 +117,7 @@ function expectNoSecretLeak(error: { message?: string; detail?: string }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  clearInFlightSubmissions();
 
   stellarSdkMock.rpc.assembleTransaction.mockImplementation(() => ({
     build: vi.fn().mockReturnValue({
@@ -336,5 +338,22 @@ describe('signing failure classes (#931)', () => {
     });
     expect(freighterMocks.signTransaction).not.toHaveBeenCalled();
     expectNoSecretLeak(error);
+  });
+
+  it('blocks duplicate concurrent submissions while a transaction is pending (#924)', async () => {
+    // Hang the first transaction in pending state
+    mockServer.getTransaction.mockImplementation(() => new Promise(() => {}));
+
+    const firstPromise = pledge();
+
+    // Attempt second submission with same logical action
+    const secondError = await pledge().catch((e) => e);
+
+    expect(secondError).toMatchObject({
+      code: 'TRANSACTION_IN_FLIGHT',
+      signingErrorClass: 'USER_REJECTED',
+    });
+    expect(secondError.message).toMatch(/already in progress/i);
+    expectNoSecretLeak(secondError);
   });
 });

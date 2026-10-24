@@ -137,6 +137,25 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+/** In-flight submission lock to avoid duplicate concurrent transactions (#924). */
+const inFlightSubmissions = new Set<string>();
+
+export function getInFlightSubmissionKey(
+  operation: string,
+  targetId: string,
+  account: string,
+): string {
+  return `${operation}:${targetId}:${account}`;
+}
+
+export function isInFlight(operation: string, targetId: string, account: string): boolean {
+  return inFlightSubmissions.has(getInFlightSubmissionKey(operation, targetId, account));
+}
+
+export function clearInFlightSubmissions(): void {
+  inFlightSubmissions.clear();
+}
+
 const STROOPS_PER_XLM = 10_000_000;
 
 export interface EstimatedFee {
@@ -291,6 +310,36 @@ export async function submitFreighterClaim(params: {
   }) => Promise<boolean>;
 }): Promise<PledgeTransactionResult> {
   const { campaignId, creator, config } = params;
+  const lockKey = getInFlightSubmissionKey('claim', campaignId, creator);
+  if (inFlightSubmissions.has(lockKey)) {
+    throw createSigningError('TRANSACTION_IN_FLIGHT', {
+      signingErrorClass: 'USER_REJECTED',
+      message:
+        'A claim transaction is already in progress for this campaign. Please wait for it to complete.',
+    });
+  }
+  inFlightSubmissions.add(lockKey);
+  try {
+    return await executeFreighterClaim(params);
+  } finally {
+    inFlightSubmissions.delete(lockKey);
+  }
+}
+
+async function executeFreighterClaim(params: {
+  campaignId: string;
+  creator: string;
+  config: AppConfig;
+  onPreview?: (preview: {
+    operation: string;
+    amount?: number;
+    assetCode?: string;
+    contract: string;
+    xdr: string;
+    estimatedFee?: EstimatedFee;
+  }) => Promise<boolean>;
+}): Promise<PledgeTransactionResult> {
+  const { campaignId, creator, config } = params;
 
   if (!config.contractId || !config.sorobanRpcUrl) {
     throw buildError(
@@ -416,6 +465,38 @@ export async function submitFreighterClaim(params: {
 }
 
 export async function submitFreighterPledge(params: {
+  campaignId: string;
+  contributor: string;
+  amount: number;
+  assetCode: string;
+  config: AppConfig;
+  onPreview?: (preview: {
+    operation: string;
+    amount?: number;
+    assetCode?: string;
+    contract: string;
+    xdr: string;
+    estimatedFee?: EstimatedFee;
+  }) => Promise<boolean>;
+}): Promise<PledgeTransactionResult> {
+  const { campaignId, contributor, amount, config, assetCode } = params;
+  const lockKey = getInFlightSubmissionKey('pledge', campaignId, contributor);
+  if (inFlightSubmissions.has(lockKey)) {
+    throw createSigningError('TRANSACTION_IN_FLIGHT', {
+      signingErrorClass: 'USER_REJECTED',
+      message:
+        'A pledge transaction is already in progress for this campaign. Please wait for it to complete.',
+    });
+  }
+  inFlightSubmissions.add(lockKey);
+  try {
+    return await executeFreighterPledge(params);
+  } finally {
+    inFlightSubmissions.delete(lockKey);
+  }
+}
+
+async function executeFreighterPledge(params: {
   campaignId: string;
   contributor: string;
   amount: number;
