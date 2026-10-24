@@ -169,6 +169,27 @@ class FreighterAdapter implements WalletAdapter {
 
   async sign(xdr: string, networkPassphrase: string, publicKey: string): Promise<string> {
     try {
+      const networkCheck = await this.checkNetwork(networkPassphrase);
+      if (!networkCheck.match && networkCheck.currentNetwork) {
+        const networkLabel =
+          networkCheck.currentNetwork === 'Test SDF Network ; September 2015'
+            ? 'Stellar Testnet'
+            : networkCheck.currentNetwork === 'Public Global Stellar Network ; September 2015'
+              ? 'Stellar Mainnet'
+              : 'the configured network';
+
+        const expectedLabel =
+          networkPassphrase === 'Test SDF Network ; September 2015'
+            ? 'Stellar Testnet'
+            : networkPassphrase === 'Public Global Stellar Network ; September 2015'
+              ? 'Stellar Mainnet'
+              : 'the configured network';
+
+        throw createSigningError('FREIGHTER_NETWORK_MISMATCH', {
+          message: `Freighter is connected to ${networkLabel}, but this transaction expects ${expectedLabel}. Switch your wallet network and try again.`,
+        });
+      }
+
       return await signTransaction(xdr, {
         accountToSign: publicKey,
         networkPassphrase,
