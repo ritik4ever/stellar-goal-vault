@@ -1982,14 +1982,9 @@ paths:
       tags:
         - Campaigns
       summary: Get campaign analytics
-      description: "Read-only analytics for one campaign. The path id must be a
-        canonical positive integer (no leading zeros, signs, or decimals).
-        Pagination is deterministic: page defaults to 1 and limit defaults to 10
-        when omitted, both must be integers, and limit is capped at 100.
-        Out-of-range values are rejected with 400 rather than clamped. The
-        response includes total, totalPages, hasPreviousPage, and hasNextPage so
-        callers can navigate without guessing where the collection ends. Missing
-        campaigns return 404."
+      description: Read-only analytics for one campaign. The path id must be a
+        canonical positive integer (no leading zeros, signs, or decimals). This
+        read model accepts no query parameters. Missing campaigns return 404.
       parameters:
         - schema:
             type: string
@@ -1998,30 +1993,13 @@ paths:
           required: true
           name: id
           in: path
-        - schema:
-            type: integer
-            minimum: 1
-            description: 1-based page number (default 1).
-          required: false
-          description: 1-based page number (default 1).
-          name: page
-          in: query
-        - schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            description: Items per page, 1 to 100 (default 10).
-          required: false
-          description: Items per page, 1 to 100 (default 10).
-          name: limit
-          in: query
       responses:
         "200":
-          description: Paginated campaign analytics
+          description: Campaign analytics
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CampaignAnalyticsListResponse"
+                $ref: "#/components/schemas/CampaignAnalyticsResponse"
         "400":
           description: Validation error
           content:
@@ -2030,6 +2008,13 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
           content:
             application/json:
               schema:

@@ -289,8 +289,11 @@ the detail endpoint).
 (non-refunded) pledges, and `contributorCount` counts distinct contributors who still have
 funds in the campaign (fully refunded contributors are excluded).
 
-**Response `400 Bad Request`** for a malformed ID or unsupported query parameter, and
-**`404 Not Found`** when the campaign does not exist.
+**Response `400 Bad Request`** for a malformed ID or unsupported query parameter,
+**`404 Not Found`** when the campaign does not exist, and **`500 Internal Server Error`**
+with a generic error body (no storage or stack details) when an unexpected failure occurs.
+Known error paths return the standard error envelope `{ "success": false, "error": { "code": string, "message": string, "requestId": string, "details"?: array } }`
+while unexpected failures log structured context without leaking internals.
 
 ---
 
