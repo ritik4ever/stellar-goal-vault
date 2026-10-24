@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(deprecated, irrefutable_let_patterns)]
 mod tests {
     use soroban_sdk::{
         testutils::{Address as _, Events as _, Ledger},
@@ -693,11 +694,9 @@ mod tests {
         );
         client.contribute(&campaign_id, &contributor, &token, &1_000);
 
-        let events_before_claim = env.events().all().len();
         assert!(client.try_claim(&campaign_id, &creator).is_err());
-        assert_eq!(
-            env.events().all().len(),
-            events_before_claim,
+        assert!(
+            env.events().all().events().is_empty(),
             "failed claim must not leave success events"
         );
     }
@@ -2748,44 +2747,66 @@ mod tests {
         client.contribute(&campaign_id, &contributor, &token, &target);
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &creator);
+        use soroban_sdk::FromVal;
+        let events = env.events().all();
 
         // Verify event via balance check (core logic)
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 980);
         assert_eq!(token_client.balance(&fee_recipient), 20);
-
-        let events = env.events().all();
-        let claim_topics = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Claim"))
+        let claim_topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Claim"))
             .into_val(&env);
-        let fee_topics = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Fee"))
+        let claim_topics: soroban_sdk::xdr::ScVec = claim_topics_vec.into();
+        let fee_topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Fee"))
             .into_val(&env);
-        let mut claim_events = events.iter().filter(|(_, topics, _)| topics == &claim_topics);
-        let claim_event = claim_events.next().expect("claim event should be emitted");
-        assert!(claim_events.next().is_none(), "one claim event is expected");
-        assert_eq!(
-            claim_event.2,
-            CampaignClaimed {
+        let fee_topics: soroban_sdk::xdr::ScVec = fee_topics_vec.into();
+        let claim_events: std::vec::Vec<_> = events
+            .events()
+            .iter()
+            .filter(|e| {
+                if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = e.body {
+                    body.topics == *claim_topics
+                } else {
+                    false
+                }
+            })
+            .collect();
+        assert_eq!(claim_events.len(), 1, "one claim event is expected");
+        if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = claim_events[0].body {
+            let expected_val: soroban_sdk::Val = CampaignClaimed {
                 campaign_id,
                 creator: creator.clone(),
                 token: token.clone(),
                 amount: target,
             }
-            .into_val(&env)
-        );
+            .into_val(&env);
+            let expected_data = soroban_sdk::xdr::ScVal::from_val(&env, &expected_val);
+            assert_eq!(body.data, expected_data);
+        }
 
-        let mut fee_events = events.iter().filter(|(_, topics, _)| topics == &fee_topics);
-        let fee_event = fee_events.next().expect("fee event should be emitted");
-        assert!(fee_events.next().is_none(), "one fee event is expected");
-        assert_eq!(
-            fee_event.2,
-            FeeCollected {
+        let fee_events: std::vec::Vec<_> = events
+            .events()
+            .iter()
+            .filter(|e| {
+                if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = e.body {
+                    body.topics == *fee_topics
+                } else {
+                    false
+                }
+            })
+            .collect();
+        assert_eq!(fee_events.len(), 1, "one fee event is expected");
+        if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = fee_events[0].body {
+            let expected_fee_val: soroban_sdk::Val = FeeCollected {
                 campaign_id,
                 token: token.clone(),
                 fee_amount: 20,
                 fee_recipient: fee_recipient.clone(),
             }
-            .into_val(&env)
-        );
+            .into_val(&env);
+            let expected_fee_data = soroban_sdk::xdr::ScVal::from_val(&env, &expected_fee_val);
+            assert_eq!(body.data, expected_fee_data);
+        }
     }
 
     #[test]
@@ -2823,34 +2844,50 @@ mod tests {
         client.contribute(&campaign_id, &contributor, &token, &target);
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &creator);
+        use soroban_sdk::FromVal;
+        let events = env.events().all();
 
         // Fee=0 → all to creator
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 1_000);
         assert_eq!(token_client.balance(&fee_recipient), 0);
-
-        let events = env.events().all();
-        let claim_topics = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Claim"))
+        let claim_topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Claim"))
             .into_val(&env);
-        let fee_topics = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Fee"))
+        let claim_topics: soroban_sdk::xdr::ScVec = claim_topics_vec.into();
+        let fee_topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = (soroban_sdk::symbol_short!("Goal"), soroban_sdk::symbol_short!("Fee"))
             .into_val(&env);
-        let claim_events: Vec<_> = events
+        let fee_topics: soroban_sdk::xdr::ScVec = fee_topics_vec.into();
+        let claim_events: std::vec::Vec<_> = events
+            .events()
             .iter()
-            .filter(|(_, topics, _)| topics == &claim_topics)
+            .filter(|e| {
+                if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = e.body {
+                    body.topics == *claim_topics
+                } else {
+                    false
+                }
+            })
             .collect();
         assert_eq!(claim_events.len(), 1);
-        assert_eq!(
-            claim_events[0].2,
-            CampaignClaimed {
+        if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = claim_events[0].body {
+            let expected_val: soroban_sdk::Val = CampaignClaimed {
                 campaign_id,
                 creator: creator.clone(),
                 token: token.clone(),
                 amount: target,
             }
-            .into_val(&env)
-        );
+            .into_val(&env);
+            let expected_data = soroban_sdk::xdr::ScVal::from_val(&env, &expected_val);
+            assert_eq!(body.data, expected_data);
+        }
         assert!(
-            events.iter().all(|(_, topics, _)| topics != &fee_topics),
+            events.events().iter().all(|e| {
+                if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = e.body {
+                    body.topics != *fee_topics
+                } else {
+                    true
+                }
+            }),
             "zero fee must not emit a fee event"
         );
     }

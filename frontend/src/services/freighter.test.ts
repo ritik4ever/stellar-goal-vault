@@ -12,7 +12,56 @@ const { freighterMocks, assembleTransactionMock } = vi.hoisted(() => ({
 
 vi.mock('@stellar/freighter-api', () => freighterMocks);
 
-import { amountToContractUnits, connectFreighterWallet, verifyFreighterNetwork } from './freighter';
+vi.mock('@stellar/stellar-sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@stellar/stellar-sdk')>();
+  return {
+    ...actual,
+    rpc: {
+      ...actual.rpc,
+      assembleTransaction: assembleTransactionMock,
+    },
+  };
+});
+
+import { Account, Keypair, TransactionBuilder, rpc } from '@stellar/stellar-sdk';
+import {
+  amountToContractUnits,
+  connectFreighterWallet,
+  submitFreighterClaim,
+  submitFreighterPledge,
+  verifyFreighterNetwork,
+} from './freighter';
+import { AppConfig } from '../types/campaign';
+
+describe('freighter helpers and wallet integration', () => {
+  const TESTNET = 'Test SDF Network ; September 2015';
+  const MAINNET = 'Public Global Stellar Network ; September 2015';
+  const CONTRIBUTOR = Keypair.random().publicKey();
+  const CREATOR = Keypair.random().publicKey();
+
+  const mockConfig: AppConfig = {
+    contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM',
+    networkPassphrase: TESTNET,
+    sorobanRpcUrl: 'https://soroban-testnet.stellar.org:443',
+    assetAddresses: {
+      USDC: 'CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN',
+    },
+    contractAmountDecimals: 7,
+    allowedAssets: ['USDC'],
+    walletIntegrationReady: true,
+    soroban: {
+      enabled: true,
+      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM',
+      networkPassphrase: TESTNET,
+      rpcUrl: 'https://soroban-testnet.stellar.org:443',
+    },
+  };
+
+  let getAccountSpy: any;
+  let simulateSpy: any;
+  let sendTransactionSpy: any;
+  let getTransactionSpy: any;
+  let fromXdrSpy: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -29,12 +78,10 @@ import { amountToContractUnits, connectFreighterWallet, verifyFreighterNetwork }
       .spyOn(rpc.Server.prototype, 'sendTransaction')
       .mockResolvedValue({ status: 'PENDING', hash: 'tx-test-hash-123' } as any);
 
-    getTransactionSpy = vi
-      .spyOn(rpc.Server.prototype, 'getTransaction')
-      .mockResolvedValue({
-        status: rpc.Api.GetTransactionStatus.SUCCESS,
-        createdAt: 1700000000,
-      } as any);
+    getTransactionSpy = vi.spyOn(rpc.Server.prototype, 'getTransaction').mockResolvedValue({
+      status: rpc.Api.GetTransactionStatus.SUCCESS,
+      createdAt: 1700000000,
+    } as any);
 
     assembleTransactionMock.mockReturnValue({
       build: () => ({

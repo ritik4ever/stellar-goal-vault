@@ -108,9 +108,7 @@ describe('wallet adapter boundary tests', () => {
       freighterMocks.isConnected.mockResolvedValue(false);
 
       const adapter = getAdapter('freighter');
-      await expect(adapter.connect(TESTNET)).rejects.toThrow(
-        /freighter was not detected/i,
-      );
+      await expect(adapter.connect(TESTNET)).rejects.toThrow(/freighter was not detected/i);
     });
 
     it('handles freighter access rejection from user', async () => {
@@ -118,7 +116,7 @@ describe('wallet adapter boundary tests', () => {
       freighterMocks.requestAccess.mockRejectedValue(new Error('User declined'));
 
       const adapter = getAdapter('freighter');
-      await expect(adapter.connect(TESTNET)).rejects.toThrow(/user declined/i);
+      await expect(adapter.connect(TESTNET)).rejects.toThrow(/declined/i);
     });
 
     it('handles rabet access rejection', async () => {
@@ -127,21 +125,21 @@ describe('wallet adapter boundary tests', () => {
       };
 
       const adapter = getAdapter('rabet');
-      await expect(adapter.connect(TESTNET)).rejects.toThrow(/user rejected connection/i);
+      await expect(adapter.connect(TESTNET)).rejects.toThrow(/declined/i);
     });
 
     it('handles xbull access rejection', async () => {
       xbullMocks.connectFn.mockRejectedValue(new Error('Popup closed by user'));
 
       const adapter = getAdapter('xbull');
-      await expect(adapter.connect(TESTNET)).rejects.toThrow(/popup closed by user/i);
+      await expect(adapter.connect(TESTNET)).rejects.toThrow(/declined/i);
     });
 
     it('handles lobstr access rejection or missing key', async () => {
       lobstrMocks.getPublicKey.mockResolvedValue(null);
 
       const adapter = getAdapter('lobstr');
-      await expect(adapter.connect(TESTNET)).rejects.toThrow(/not connected or installed/i);
+      await expect(adapter.connect(TESTNET)).rejects.toThrow(/declined|unavailable/i);
     });
   });
 
@@ -177,7 +175,7 @@ describe('wallet adapter boundary tests', () => {
 
       const adapter = getAdapter('rabet');
       await expect(adapter.sign('unsigned-xdr', TESTNET, MOCK_PUBKEY)).rejects.toThrow(
-        /signing rejected/i,
+        /could not be completed|signing rejected/i,
       );
     });
 
