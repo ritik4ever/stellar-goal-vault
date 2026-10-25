@@ -29,6 +29,8 @@
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench": "vitest bench src/services/__tests__/pledgeWritePath.bench.ts --reporter=verbose",
+    "bench:pledge": "node scripts/pledge-write-benchmark.js",
     "check:openapi": "npm run build:openapi && git diff --exit-code -- ../docs/openapi.yaml",
     "validate:openapi": "swagger-cli validate ../docs/openapi.yaml"
   },

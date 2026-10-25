@@ -54,6 +54,7 @@ A map of every documentation file in the repository, organized by topic. Use thi
 | [backend/tests/README.md](backend/tests/README.md) | Integration test suite: how to run, scenarios, troubleshooting |
 | [backend/tests/SETUP.md](backend/tests/SETUP.md) | Integration test architecture, database isolation, CI/CD |
 | [backend/tests/IMPLEMENTATION.md](backend/tests/IMPLEMENTATION.md) | Integration test implementation: 770+ lines, 70+ assertions |
+| [docs/PLEDGE_WRITE_BENCHMARK.md](docs/PLEDGE_WRITE_BENCHMARK.md) | Repeatable pledge write path benchmark: in-process bench + HTTP script, thresholds, CI workflow |
 
 ### Backend Test Docs (Quick Access)
 
