@@ -149,6 +149,9 @@ async function buildAndSubmitRefund(
 
   transaction = buildOperation(() => rpc.assembleTransaction(transaction, simulation).build());
 
+  // Re-check right before signing in case the wallet network changed.
+  await verifyFreighterNetwork(networkPassphrase);
+
   let signedXdr: string;
   try {
     signedXdr = await signTransaction(transaction.toXDR(), {
