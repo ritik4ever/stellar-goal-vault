@@ -1,0 +1,32 @@
+name: Dependabot Auto-Label
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  auto-label:
+    name: Auto-label Dependabot PRs
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Add labels to Dependabot PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = ['dependencies', 'dependabot'];
+            const { data: existingLabels } = await github.rest.issues.listLabelsForIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            const existingLabelNames = existingLabels.map(l => l.name);
+            const labelsToAdd = labels.filter(l => !existingLabelNames.includes(l));
+            if (labelsToAdd.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labelsToAdd
+              });
+            }
