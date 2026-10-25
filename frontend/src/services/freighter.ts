@@ -137,6 +137,25 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+/** In-flight submission lock to avoid duplicate concurrent transactions (#924). */
+const inFlightSubmissions = new Set<string>();
+
+export function getInFlightSubmissionKey(
+  operation: string,
+  targetId: string,
+  account: string,
+): string {
+  return `${operation}:${targetId}:${account}`;
+}
+
+export function isInFlight(operation: string, targetId: string, account: string): boolean {
+  return inFlightSubmissions.has(getInFlightSubmissionKey(operation, targetId, account));
+}
+
+export function clearInFlightSubmissions(): void {
+  inFlightSubmissions.clear();
+}
+
 const STROOPS_PER_XLM = 10_000_000;
 
 export interface EstimatedFee {
@@ -291,6 +310,36 @@ export async function submitFreighterClaim(params: {
   }) => Promise<boolean>;
 }): Promise<PledgeTransactionResult> {
   const { campaignId, creator, config } = params;
+  const lockKey = getInFlightSubmissionKey('claim', campaignId, creator);
+  if (inFlightSubmissions.has(lockKey)) {
+    throw createSigningError('TRANSACTION_IN_FLIGHT', {
+      signingErrorClass: 'USER_REJECTED',
+      message:
+        'A claim transaction is already in progress for this campaign. Please wait for it to complete.',
+    });
+  }
+  inFlightSubmissions.add(lockKey);
+  try {
+    return await executeFreighterClaim(params);
+  } finally {
+    inFlightSubmissions.delete(lockKey);
+  }
+}
+
+async function executeFreighterClaim(params: {
+  campaignId: string;
+  creator: string;
+  config: AppConfig;
+  onPreview?: (preview: {
+    operation: string;
+    amount?: number;
+    assetCode?: string;
+    contract: string;
+    xdr: string;
+    estimatedFee?: EstimatedFee;
+  }) => Promise<boolean>;
+}): Promise<PledgeTransactionResult> {
+  const { campaignId, creator, config } = params;
 
   if (!config.contractId || !config.sorobanRpcUrl) {
     throw buildError(
@@ -315,13 +364,18 @@ export async function submitFreighterClaim(params: {
     ),
   );
 
-  const transaction = new TransactionBuilder(sourceAccount, {
-    fee: BASE_FEE,
-    networkPassphrase: config.networkPassphrase,
-  })
-    .addOperation(operation)
-    .setTimeout(60)
-    .build();
+  let transaction;
+  try {
+    transaction = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: config.networkPassphrase,
+    })
+      .addOperation(operation)
+      .setTimeout(60)
+      .build();
+  } catch (error) {
+    throw buildCausedError('INVALID_TRANSACTION_PARAMS', error, 'MALFORMED_TRANSACTION');
+  }
 
   const simulation = await server.simulateTransaction(transaction).catch((error) => {
     throw createSigningError('SIMULATION_FAILED', {
@@ -331,7 +385,16 @@ export async function submitFreighterClaim(params: {
   });
 
   if ('error' in simulation) {
-    throw buildCausedError('SIMULATION_FAILED', simulation.error, 'MALFORMED_TRANSACTION');
+    const errorClass = classifyCause(simulation.error, 'CONTRACT_REJECTED');
+    const userMessage =
+      errorClass === 'CONTRACT_REJECTED'
+        ? SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED
+        : SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION;
+    throw createSigningError('SIMULATION_FAILED', {
+      signingErrorClass: errorClass,
+      cause: simulation.error,
+      message: `${userMessage} Preflight check failed before signing.`,
+    });
   }
 
   if ('restorePreamble' in simulation) {
@@ -367,11 +430,19 @@ export async function submitFreighterClaim(params: {
       networkPassphrase: config.networkPassphrase,
     });
   } catch (error) {
-    throw buildCausedError('SIGNING_FAILED', error, 'UNKNOWN');
+    const errorClass = classifyCause(error, 'UNKNOWN');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: errorClass,
+      cause: error,
+      message: SIGNING_ERROR_MESSAGES[errorClass],
+    });
   }
 
   if (!signedXdr) {
-    throw buildError('SIGNING_FAILED', 'Freighter did not return a signed transaction.');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: 'USER_REJECTED',
+      message: 'Freighter did not return a signed transaction.',
+    });
   }
 
   const signedTransaction = decodeSignedTransaction(signedXdr, config.networkPassphrase);
@@ -407,6 +478,38 @@ export async function submitFreighterClaim(params: {
 }
 
 export async function submitFreighterPledge(params: {
+  campaignId: string;
+  contributor: string;
+  amount: number;
+  assetCode: string;
+  config: AppConfig;
+  onPreview?: (preview: {
+    operation: string;
+    amount?: number;
+    assetCode?: string;
+    contract: string;
+    xdr: string;
+    estimatedFee?: EstimatedFee;
+  }) => Promise<boolean>;
+}): Promise<PledgeTransactionResult> {
+  const { campaignId, contributor, amount, config, assetCode } = params;
+  const lockKey = getInFlightSubmissionKey('pledge', campaignId, contributor);
+  if (inFlightSubmissions.has(lockKey)) {
+    throw createSigningError('TRANSACTION_IN_FLIGHT', {
+      signingErrorClass: 'USER_REJECTED',
+      message:
+        'A pledge transaction is already in progress for this campaign. Please wait for it to complete.',
+    });
+  }
+  inFlightSubmissions.add(lockKey);
+  try {
+    return await executeFreighterPledge(params);
+  } finally {
+    inFlightSubmissions.delete(lockKey);
+  }
+}
+
+async function executeFreighterPledge(params: {
   campaignId: string;
   contributor: string;
   amount: number;
@@ -458,13 +561,18 @@ export async function submitFreighterPledge(params: {
     ),
   );
 
-  const transaction = new TransactionBuilder(sourceAccount, {
-    fee: BASE_FEE,
-    networkPassphrase: config.networkPassphrase,
-  })
-    .addOperation(operation)
-    .setTimeout(60)
-    .build();
+  let transaction;
+  try {
+    transaction = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: config.networkPassphrase,
+    })
+      .addOperation(operation)
+      .setTimeout(60)
+      .build();
+  } catch (error) {
+    throw buildCausedError('INVALID_TRANSACTION_PARAMS', error, 'MALFORMED_TRANSACTION');
+  }
 
   const simulation = await server.simulateTransaction(transaction).catch((error) => {
     throw createSigningError('SIMULATION_FAILED', {
@@ -474,7 +582,16 @@ export async function submitFreighterPledge(params: {
   });
 
   if ('error' in simulation) {
-    throw buildCausedError('SIMULATION_FAILED', simulation.error, 'MALFORMED_TRANSACTION');
+    const errorClass = classifyCause(simulation.error, 'CONTRACT_REJECTED');
+    const userMessage =
+      errorClass === 'CONTRACT_REJECTED'
+        ? SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED
+        : SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION;
+    throw createSigningError('SIMULATION_FAILED', {
+      signingErrorClass: errorClass,
+      cause: simulation.error,
+      message: `${userMessage} Preflight check failed before signing.`,
+    });
   }
 
   if ('restorePreamble' in simulation) {
@@ -512,11 +629,19 @@ export async function submitFreighterPledge(params: {
       networkPassphrase: config.networkPassphrase,
     });
   } catch (error) {
-    throw buildCausedError('SIGNING_FAILED', error, 'UNKNOWN');
+    const errorClass = classifyCause(error, 'UNKNOWN');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: errorClass,
+      cause: error,
+      message: SIGNING_ERROR_MESSAGES[errorClass],
+    });
   }
 
   if (!signedXdr) {
-    throw buildError('SIGNING_FAILED', 'Freighter did not return a signed transaction.');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: 'USER_REJECTED',
+      message: 'Freighter did not return a signed transaction.',
+    });
   }
 
   const signedTransaction = decodeSignedTransaction(signedXdr, config.networkPassphrase);

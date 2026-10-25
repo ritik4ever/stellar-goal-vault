@@ -13,7 +13,7 @@
  *   ✓ Existing search behaviour remains unchanged
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { CampaignsTable } from './CampaignsTable';
@@ -99,10 +99,11 @@ const mockCampaigns: Campaign[] = [
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -130,21 +131,21 @@ function renderTable(campaigns: Campaign[] = mockCampaigns) {
 
 describe('EmptyState – search produces zero results', () => {
   it('shows "No campaigns match your search." title', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderTable();
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'zzznomatch');
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByText('No campaigns match your search.')).toBeInTheDocument();
   });
 
   it('shows "Clear Search" CTA button', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderTable();
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'zzznomatch');
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByRole('button', { name: 'Clear Search' })).toBeInTheDocument();
   });
@@ -233,21 +234,21 @@ describe('EmptyState – status filter produces zero results', () => {
 
 describe('EmptyState – multiple filters produce zero results', () => {
   it('search + asset filter → shows "No campaigns match the selected filters."', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderTable(mockCampaigns);
 
     const assetSelect = screen.getByDisplayValue('All Assets');
     fireEvent.change(assetSelect, { target: { value: 'XLM' } });
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'rocket');
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByText('No campaigns match the selected filters.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
   });
 
   it('search + status filter → shows "No campaigns match the selected filters."', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderTable(mockCampaigns);
 
     const fundedTab = screen.getByRole('button', { name: /Funded/ });
@@ -255,7 +256,7 @@ describe('EmptyState – multiple filters produce zero results', () => {
 
     // 'Book Club' is not funded → search won't match Solar Farm
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'book');
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByText('No campaigns match the selected filters.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
@@ -275,7 +276,7 @@ describe('EmptyState – multiple filters produce zero results', () => {
   });
 
   it('search + asset + status filter → shows "No campaigns match the selected filters."', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderTable(mockCampaigns);
 
     const assetSelect = screen.getByDisplayValue('All Assets');
@@ -285,7 +286,7 @@ describe('EmptyState – multiple filters produce zero results', () => {
     fireEvent.click(openTab);
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'anything');
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByText('No campaigns match the selected filters.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
@@ -298,16 +299,16 @@ describe('EmptyState – multiple filters produce zero results', () => {
 
 describe('Clear Filters / Clear Search button', () => {
   it('clicking "Clear Search" resets search and shows all campaigns', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderTable(mockCampaigns);
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'zzznomatch');
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByRole('button', { name: 'Clear Search' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear Search' }));
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByText('Rocket Ship')).toBeInTheDocument();
     expect(screen.getByText('Solar Farm')).toBeInTheDocument();
@@ -324,7 +325,7 @@ describe('Clear Filters / Clear Search button', () => {
     expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear Filters' }));
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByText('Rocket Ship')).toBeInTheDocument();
     expect(screen.getByText('Solar Farm')).toBeInTheDocument();
@@ -333,7 +334,7 @@ describe('Clear Filters / Clear Search button', () => {
   });
 
   it('clicking "Clear Filters" with multiple active filters resets all axes', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderTable(mockCampaigns);
 
     const assetSelect = screen.getByDisplayValue('All Assets');
@@ -343,12 +344,12 @@ describe('Clear Filters / Clear Search button', () => {
     fireEvent.click(openTab);
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'xyz');
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear Filters' }));
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByText('Rocket Ship')).toBeInTheDocument();
     expect(screen.getByText('Solar Farm')).toBeInTheDocument();
@@ -362,11 +363,11 @@ describe('Clear Filters / Clear Search button', () => {
 
 describe('Existing search behaviour – unchanged', () => {
   it('filters campaigns by title after debounce', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderTable(mockCampaigns);
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'rocket');
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(screen.getByText('Rocket Ship')).toBeInTheDocument();
     expect(screen.queryByText('Solar Farm')).not.toBeInTheDocument();
@@ -374,7 +375,7 @@ describe('Existing search behaviour – unchanged', () => {
   });
 
   it('does not filter before debounce delay elapses', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderTable(mockCampaigns);
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'rocket');
@@ -386,7 +387,7 @@ describe('Existing search behaviour – unchanged', () => {
   });
 
   it('calls onSearchChange with the debounced query', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onSearchChange = vi.fn();
 
     render(
@@ -403,13 +404,13 @@ describe('Existing search behaviour – unchanged', () => {
     );
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'solar');
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     expect(onSearchChange).toHaveBeenCalledWith('solar');
   });
 
   it('calls onSearchChange with "" when search is cleared', async () => {
-    const user = userEvent.setup({ delay: null });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onSearchChange = vi.fn();
 
     render(
@@ -426,10 +427,10 @@ describe('Existing search behaviour – unchanged', () => {
     );
 
     await user.type(screen.getByPlaceholderText('Search campaigns...'), 'solar');
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
-    vi.advanceTimersByTime(350);
+    act(() => { vi.advanceTimersByTime(350); });
 
     const calls = onSearchChange.mock.calls;
     expect(calls[calls.length - 1][0]).toBe('');

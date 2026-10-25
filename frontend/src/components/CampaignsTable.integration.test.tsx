@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { CampaignsTable } from './CampaignsTable';
 import type { Campaign } from '../types/campaign';
+import { BASE_TEST_TIME_SEC } from '../test/timeTestUtils';
 
 describe('CampaignsTable Search Integration', () => {
   const mockCampaigns: Campaign[] = [
@@ -25,7 +26,7 @@ describe('CampaignsTable Search Integration', () => {
         canRefund: false,
       },
       acceptedTokens: ['USDC'],
-      createdAt: Math.floor(Date.now() / 1000),
+      createdAt: BASE_TEST_TIME_SEC,
     },
     {
       id: 'camp-002',
@@ -45,7 +46,7 @@ describe('CampaignsTable Search Integration', () => {
         canRefund: false,
       },
       acceptedTokens: ['USDC'],
-      createdAt: Math.floor(Date.now() / 1000),
+      createdAt: BASE_TEST_TIME_SEC,
     },
     {
       id: 'camp-003',
@@ -65,15 +66,16 @@ describe('CampaignsTable Search Integration', () => {
         canRefund: false,
       },
       acceptedTokens: ['USDC'],
-      createdAt: Math.floor(Date.now() / 1000),
+      createdAt: BASE_TEST_TIME_SEC,
     },
   ];
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -113,17 +115,8 @@ describe('CampaignsTable Search Integration', () => {
 
   describe('Search Functionality', () => {
     it('should filter campaigns by title when searching', async () => {
-      const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-          error={null}
-          error={null}
-        />,
-      );
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
@@ -131,7 +124,9 @@ describe('CampaignsTable Search Integration', () => {
       await user.type(searchInput, 'rocket');
 
       // Advance past debounce delay (300ms)
-      vi.advanceTimersByTime(350);
+      act(() => {
+        vi.advanceTimersByTime(350);
+      });
 
       // Should only show "Build a Rocket Ship"
       expect(screen.getByText('Build a Rocket Ship')).toBeInTheDocument();
@@ -140,31 +135,24 @@ describe('CampaignsTable Search Integration', () => {
     });
 
     it('should filter campaigns by creator address', async () => {
-      const user = userEvent.setup({ delay: null });
-      render(
-        <CampaignsTable
-          campaigns={mockCampaigns}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-          error={null}
-          error={null}
-        />,
-      );
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
       // Search for creator
       await user.type(searchInput, 'writer');
 
-      vi.advanceTimersByTime(350);
+      act(() => {
+        vi.advanceTimersByTime(350);
+      });
 
       expect(screen.getByText('Write a Book')).toBeInTheDocument();
       expect(screen.queryByText('Build a Rocket Ship')).not.toBeInTheDocument();
     });
 
     it('should filter campaigns by campaign ID', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
@@ -172,7 +160,7 @@ describe('CampaignsTable Search Integration', () => {
       // Search for ID
       await user.type(searchInput, 'camp-002');
 
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       expect(screen.getByText('Create a Game')).toBeInTheDocument();
       expect(screen.queryByText('Build a Rocket Ship')).not.toBeInTheDocument();
@@ -180,7 +168,7 @@ describe('CampaignsTable Search Integration', () => {
     });
 
     it('should be case-insensitive', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
@@ -188,20 +176,20 @@ describe('CampaignsTable Search Integration', () => {
       // Search with uppercase
       await user.type(searchInput, 'BUILD');
 
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       expect(screen.getByText('Build a Rocket Ship')).toBeInTheDocument();
     });
 
     it('should update results when search input changes', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...') as HTMLInputElement;
 
       // First search
       await user.type(searchInput, 'game');
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       expect(screen.getByText('Create a Game')).toBeInTheDocument();
 
@@ -209,7 +197,7 @@ describe('CampaignsTable Search Integration', () => {
       await user.clear(searchInput);
       await user.type(searchInput, 'book');
 
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       expect(screen.getByText('Write a Book')).toBeInTheDocument();
       expect(screen.queryByText('Create a Game')).not.toBeInTheDocument();
@@ -218,7 +206,7 @@ describe('CampaignsTable Search Integration', () => {
 
   describe('Debouncing Behavior', () => {
     it('should not update results before debounce delay', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
@@ -232,17 +220,17 @@ describe('CampaignsTable Search Integration', () => {
     });
 
     it('should debounce rapid search inputs', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
       // Type quickly: r, o, c, k, e, t
       await user.type(searchInput, 'ro');
-      vi.advanceTimersByTime(100);
+      act(() => { vi.advanceTimersByTime(100); });
 
       await user.type(searchInput, 'cke');
-      vi.advanceTimersByTime(100);
+      act(() => { vi.advanceTimersByTime(100); });
 
       // Timer should still be pending
       expect(screen.getByText('Build a Rocket Ship')).toBeInTheDocument();
@@ -252,7 +240,7 @@ describe('CampaignsTable Search Integration', () => {
       await user.type(searchInput, 't');
 
       // Complete the debounce
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       // Now should filter
       expect(screen.getByText('Build a Rocket Ship')).toBeInTheDocument();
@@ -262,7 +250,7 @@ describe('CampaignsTable Search Integration', () => {
 
   describe('Clear Button Integration', () => {
     it('should show clear button when search text is present', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
@@ -278,14 +266,14 @@ describe('CampaignsTable Search Integration', () => {
     });
 
     it('should clear search and show all campaigns when clear button clicked', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
       // Search for something
       await user.type(searchInput, 'rocket');
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       expect(screen.getByText('Build a Rocket Ship')).toBeInTheDocument();
       expect(screen.queryByText('Create a Game')).not.toBeInTheDocument();
@@ -294,7 +282,7 @@ describe('CampaignsTable Search Integration', () => {
       const clearButton = screen.getByRole('button', { name: 'Clear search' });
       await user.click(clearButton);
 
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       // All campaigns should be visible again
       expect(screen.getByText('Build a Rocket Ship')).toBeInTheDocument();
@@ -305,7 +293,7 @@ describe('CampaignsTable Search Integration', () => {
 
   describe('Composition with Asset Filter', () => {
     it('should apply search AND asset filter together', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
@@ -314,7 +302,7 @@ describe('CampaignsTable Search Integration', () => {
       // First filter by asset
       await user.selectOptions(assetFilter, 'USDC');
 
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       // Should show "Build a Rocket Ship" and "Write a Book" (both USDC)
       expect(screen.getByText('Build a Rocket Ship')).toBeInTheDocument();
@@ -323,7 +311,7 @@ describe('CampaignsTable Search Integration', () => {
 
       // Now search within USDC campaigns
       await user.type(searchInput, 'rocket');
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       // Should only show "Build a Rocket Ship"
       expect(screen.getByText('Build a Rocket Ship')).toBeInTheDocument();
@@ -335,7 +323,7 @@ describe('CampaignsTable Search Integration', () => {
     it('should show counts per status and a clear active filter', () => {
       renderTable();
 
-      const statusTabs = screen.getByRole('tablist', {
+      const statusTabs = screen.getByRole('group', {
         name: /Filter campaigns by status/i,
       });
 
@@ -365,7 +353,7 @@ describe('CampaignsTable Search Integration', () => {
     it('should filter to one status at a time and allow returning to all', () => {
       renderTable();
 
-      const statusTabs = screen.getByRole('tablist', {
+      const statusTabs = screen.getByRole('group', {
         name: /Filter campaigns by status/i,
       });
       const fundedTab = within(statusTabs).getByRole('button', {
@@ -392,14 +380,14 @@ describe('CampaignsTable Search Integration', () => {
 
   describe('Empty State Messages', () => {
     it('should show appropriate message when search finds no results', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
       // Search for non-existent campaign
       await user.type(searchInput, 'nonexistent');
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       // Should show no results message
       // Note: Exact message depends on component implementation
@@ -407,19 +395,19 @@ describe('CampaignsTable Search Integration', () => {
     });
 
     it('should show all campaigns when search is cleared and no other filters active', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
       // Type and then clear
       await user.type(searchInput, 'rocket');
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       const clearButton = screen.getByRole('button', { name: 'Clear search' });
       await user.click(clearButton);
 
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       // All campaigns should be visible
       expect(screen.getByText('Build a Rocket Ship')).toBeInTheDocument();
@@ -430,7 +418,7 @@ describe('CampaignsTable Search Integration', () => {
 
   describe('Performance', () => {
     it('should handle large campaign lists efficiently', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
       // Create 100 campaigns
       const largeCampaignList: Campaign[] = Array.from({ length: 100 }, (_, i) => ({
@@ -452,20 +440,13 @@ describe('CampaignsTable Search Integration', () => {
         },
       }));
 
-      render(
-        <CampaignsTable
-          campaigns={largeCampaignList}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-        />,
-      );
+      renderTable({ campaigns: largeCampaignList });
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
 
       // Search should still work smoothly
       await user.type(searchInput, 'campaign 50');
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       // Should find "Campaign 50"
       expect(screen.getByText('Campaign 50')).toBeInTheDocument();
@@ -481,7 +462,7 @@ describe('CampaignsTable Search Integration', () => {
     });
 
     it('should allow keyboard navigation', async () => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderTable();
 
       const searchInput = screen.getByPlaceholderText('Search campaigns...');
@@ -493,7 +474,7 @@ describe('CampaignsTable Search Integration', () => {
       // Type with keyboard
       await user.keyboard('rocket');
 
-      vi.advanceTimersByTime(350);
+      act(() => { vi.advanceTimersByTime(350); });
 
       // Should work as expected
       expect(screen.getByText('Build a Rocket Ship')).toBeInTheDocument();

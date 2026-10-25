@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearInFlightSubmissions } from './freighter';
 import type { AppConfig } from '../types/campaign';
 
 // Use vi.hoisted for all mock factories to avoid hoisting issues
@@ -116,6 +117,7 @@ function expectNoSecretLeak(error: { message?: string; detail?: string }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  clearInFlightSubmissions();
 
   stellarSdkMock.rpc.assembleTransaction.mockImplementation(() => ({
     build: vi.fn().mockReturnValue({
@@ -304,5 +306,116 @@ describe('signing failure classes (#931)', () => {
       signingErrorClass: 'USER_REJECTED',
       message: SIGNING_ERROR_MESSAGES.USER_REJECTED,
     });
+  });
+
+  it('surfaces simulation failure as CONTRACT_REJECTED before signing during preflight (#925)', async () => {
+    mockServer.simulateTransaction.mockResolvedValue({
+      error: 'HostError: Error(Contract, #1) campaign deadline reached',
+    });
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIMULATION_FAILED',
+      signingErrorClass: 'CONTRACT_REJECTED',
+    });
+    expect(error.message).toContain(SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED);
+    expect(error.message).toContain('Preflight check failed before signing.');
+    expect(freighterMocks.signTransaction).not.toHaveBeenCalled();
+    expectNoSecretLeak(error);
+  });
+
+  it('surfaces RPC simulation transport failure as RPC_FAILURE before signing (#925)', async () => {
+    mockServer.simulateTransaction.mockRejectedValue(
+      new Error(`rpc simulation timed out ${FAKE_SECRET}`),
+    );
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIMULATION_FAILED',
+      signingErrorClass: 'RPC_FAILURE',
+    });
+    expect(freighterMocks.signTransaction).not.toHaveBeenCalled();
+    expectNoSecretLeak(error);
+  });
+
+  it('blocks duplicate concurrent submissions while a transaction is pending (#924)', async () => {
+    // Hang the first transaction in pending state
+    mockServer.getTransaction.mockImplementation(() => new Promise(() => {}));
+
+    const firstPromise = pledge();
+
+    // Attempt second submission with same logical action
+    const secondError = await pledge().catch((e) => e);
+
+    expect(secondError).toMatchObject({
+      code: 'TRANSACTION_IN_FLIGHT',
+      signingErrorClass: 'USER_REJECTED',
+    });
+    expect(secondError.message).toMatch(/already in progress/i);
+    expectNoSecretLeak(secondError);
+  });
+
+  it('separates malformed transaction error during signing as MALFORMED_TRANSACTION (#926)', async () => {
+    freighterMocks.signTransaction.mockRejectedValue(
+      new Error(`malformed transaction envelope: invalid xdr ${FAKE_SECRET}`),
+    );
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIGNING_FAILED',
+      signingErrorClass: 'MALFORMED_TRANSACTION',
+      message: SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION,
+    });
+    expectNoSecretLeak(error);
+    expect(error.detail).toContain('[REDACTED_SECRET]');
+  });
+
+  it('separates RPC failure during signing as RPC_FAILURE (#926)', async () => {
+    freighterMocks.signTransaction.mockRejectedValue(
+      new Error(`network error: connection timed out ${FAKE_SECRET}`),
+    );
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIGNING_FAILED',
+      signingErrorClass: 'RPC_FAILURE',
+      message: SIGNING_ERROR_MESSAGES.RPC_FAILURE,
+    });
+    expectNoSecretLeak(error);
+  });
+
+  it('separates contract rejection during signing as CONTRACT_REJECTED (#926)', async () => {
+    freighterMocks.signTransaction.mockRejectedValue(
+      new Error(`contract call failed: host error tx_failed ${FAKE_SECRET}`),
+    );
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIGNING_FAILED',
+      signingErrorClass: 'CONTRACT_REJECTED',
+      message: SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED,
+    });
+    expectNoSecretLeak(error);
+  });
+
+  it('hardens TransactionBuilder construction failure as MALFORMED_TRANSACTION (#926)', async () => {
+    stellarSdkMock.TransactionBuilder.mockImplementationOnce(() => {
+      throw new Error(`invalid transaction builder arguments ${FAKE_SECRET}`);
+    });
+
+    const error = await pledge().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'INVALID_TRANSACTION_PARAMS',
+      signingErrorClass: 'MALFORMED_TRANSACTION',
+      message: SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION,
+    });
+    expect(freighterMocks.signTransaction).not.toHaveBeenCalled();
+    expectNoSecretLeak(error);
   });
 });

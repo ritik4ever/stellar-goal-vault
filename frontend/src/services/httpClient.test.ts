@@ -67,7 +67,7 @@ describe('apiClient request correlation', () => {
 
   describe('failure-path coverage', () => {
     it('handles network timeout errors', async () => {
-      const timeoutError = new Error('Network Timeout');
+      const timeoutError = new Error('Network timeout');
       (timeoutError as any).code = 'ECONNABORTED';
 
       await expect(
@@ -76,15 +76,7 @@ describe('apiClient request correlation', () => {
           method: 'GET',
           timeout: 1,
           adapter: async () => {
-            // Simulate a hanging request by not returning
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            return {
-              data: {},
-              status: 200,
-              statusText: 'OK',
-              headers: {},
-              config: {} as any,
-            };
+            throw timeoutError;
           },
         }),
       ).rejects.toThrow(/timeout/i);

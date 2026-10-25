@@ -76,6 +76,24 @@ describe.each(THEMES)('WalletWidget Accessibility (%s theme)', (theme: ThemeMode
     expect(results).toHaveNoViolations();
   });
 
+  it('has no accessibility violations when no wallet extension is detected', async () => {
+    const { container } = render(
+      <WalletWidget
+        status="unavailable"
+        publicKey={null}
+        walletName={null}
+        error={null}
+        network={null}
+        onConnect={() => {}}
+        onDisconnect={() => {}}
+        onSwitchWallet={() => {}}
+      />,
+    );
+
+    const results = await runAxeAudit(container, theme);
+    expect(results).toHaveNoViolations();
+  });
+
   it('has no accessibility violations when showing a connection error', async () => {
     const { container } = render(
       <WalletWidget

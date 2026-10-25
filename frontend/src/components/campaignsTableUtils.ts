@@ -33,6 +33,9 @@ export function searchCampaigns(campaigns: Campaign[], searchQuery: string): Cam
     // Check title (partial match)
     if (campaign.title.toLowerCase().includes(normalizedQuery)) return true;
 
+    // Check description (partial match)
+    if (campaign.description?.toLowerCase().includes(normalizedQuery)) return true;
+
     // Check creator address (case-insensitive)
     if (campaign.creator.toLowerCase().includes(normalizedQuery)) return true;
 
@@ -71,7 +74,7 @@ export function applyFilters(campaigns: Campaign[], assetCode: string, status: s
  * @param sortBy - Sort option (createdAt, deadline, pledgedAmount, targetAmount)
  * @returns Sorted array of campaigns
  */
-export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption): Campaign[] {
+export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption | string): Campaign[] {
   // Create a copy to avoid mutating the original array
   const sorted = [...campaigns];
 
@@ -79,6 +82,7 @@ export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption): Campai
     let comparison = 0;
 
     switch (sortBy) {
+      case 'newest':
       case 'createdAt':
         // Sort by createdAt descending (newest first)
         comparison = b.createdAt - a.createdAt;
@@ -89,9 +93,15 @@ export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption): Campai
         comparison = a.deadline - b.deadline;
         break;
 
+      case 'totalPledged':
       case 'pledgedAmount':
         // Sort by pledgedAmount descending (largest first)
         comparison = b.pledgedAmount - a.pledgedAmount;
+        break;
+
+      case 'percentFunded':
+        // Sort by percentFunded descending (highest first)
+        comparison = (b.progress?.percentFunded ?? 0) - (a.progress?.percentFunded ?? 0);
         break;
 
       case 'targetAmount':

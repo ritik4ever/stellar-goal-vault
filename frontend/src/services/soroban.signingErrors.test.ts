@@ -210,4 +210,49 @@ describe('refund submission signing failures (#931)', () => {
     });
     expect(freighterMocks.signTransaction).not.toHaveBeenCalled();
   });
+
+  it('separates malformed transaction error during refund signing as MALFORMED_TRANSACTION (#926)', async () => {
+    freighterMocks.signTransaction.mockRejectedValue(
+      new Error(`malformed xdr envelope in signing ${FAKE_SECRET}`),
+    );
+
+    const error = await refund().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIGNING_FAILED',
+      signingErrorClass: 'MALFORMED_TRANSACTION',
+      message: SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION,
+    });
+    expectNoSecretLeak(error);
+  });
+
+  it('separates RPC failure during refund signing as RPC_FAILURE (#926)', async () => {
+    freighterMocks.signTransaction.mockRejectedValue(
+      new Error(`rpc connection timed out during signing ${FAKE_SECRET}`),
+    );
+
+    const error = await refund().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIGNING_FAILED',
+      signingErrorClass: 'RPC_FAILURE',
+      message: SIGNING_ERROR_MESSAGES.RPC_FAILURE,
+    });
+    expectNoSecretLeak(error);
+  });
+
+  it('separates contract rejection during refund signing as CONTRACT_REJECTED (#926)', async () => {
+    freighterMocks.signTransaction.mockRejectedValue(
+      new Error(`contract rejected tx_failed during signing ${FAKE_SECRET}`),
+    );
+
+    const error = await refund().catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'SIGNING_FAILED',
+      signingErrorClass: 'CONTRACT_REJECTED',
+      message: SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED,
+    });
+    expectNoSecretLeak(error);
+  });
 });

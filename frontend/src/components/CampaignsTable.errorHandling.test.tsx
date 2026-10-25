@@ -284,18 +284,12 @@ describe('CampaignsTable Error Handling', () => {
     });
 
     it('should handle technical error messages gracefully', () => {
-      render(
-        <CampaignsTable
-          campaigns={[]}
-          selectedCampaignId={null}
-          onSelect={vi.fn()}
-          isLoading={false}
-          error={{
-            message: 'HTTP 500 Internal Server Error',
-            isRecoverable: true,
-          }}
-        />,
-      );
+      renderTable({
+        error: {
+          message: 'HTTP 500 Internal Server Error',
+          isRecoverable: true,
+        },
+      });
 
       // Should display the error message as-is (could be improved with translation)
       expect(screen.getByText('HTTP 500 Internal Server Error')).toBeInTheDocument();

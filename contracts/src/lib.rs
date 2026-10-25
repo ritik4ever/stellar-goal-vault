@@ -1,4 +1,7 @@
 #![no_std]
+#![allow(deprecated)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::len_zero)]
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token::Client as TokenClient, Address, Env,
@@ -153,6 +156,42 @@ pub struct CampaignCanceled {
     pub creator: Address,
 }
 
+/// Emitted when the contract is initialized with admin and min contribution floor.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractInitializedEvent {
+    pub admin: Address,
+    pub min_contribution: i128,
+    pub contract_version: String,
+}
+
+/// Emitted when the contract pause status changes, with stable fields for off-chain indexers.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractPausedEvent {
+    pub admin: Address,
+    pub paused: bool,
+    pub contract_version: String,
+}
+
+/// Emitted when the platform fee basis points are updated by the admin.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlatformFeeUpdatedEvent {
+    pub admin: Address,
+    pub old_fee_bps: i128,
+    pub new_fee_bps: i128,
+}
+
+/// Emitted when the platform fee recipient address is updated by the admin.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeRecipientUpdatedEvent {
+    pub admin: Address,
+    pub old_recipient: Option<Address>,
+    pub new_recipient: Address,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractPaused {
@@ -237,6 +276,25 @@ pub struct CampaignCreatedEvent {
     pub created_at: u64,
 }
 
+/// Emitted when a pledge is made to a campaign, with stable fields for off-chain
+/// indexers. Mirrors [`CampaignPledged`] but exposes campaign totals,
+/// token balances, contributor counts, and timestamp so indexers can reconstruct
+/// campaign and contributor pledge state without additional reads. Sensitive data
+/// (none exists here) is not duplicated.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CampaignPledgedEvent {
+    pub campaign_id: u64,
+    pub contributor: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub total_pledged: i128,
+    pub contributor_count: u32,
+    pub token_balance: i128,
+    pub contributor_total: i128,
+    pub pledged_at: u64,
+}
+
 /// Emitted when a campaign receives its final required approval and goes live.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -302,6 +360,16 @@ impl StellarGoalVaultContract {
         env.storage()
             .instance()
             .set(&DataKey::MinContribution, &min_contribution);
+
+        let version = String::from_str(&env, CONTRACT_VERSION);
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Init")),
+            ContractInitializedEvent {
+                admin: admin.clone(),
+                min_contribution,
+                contract_version: version,
+            },
+        );
     }
 
     /// Returns the current minimum contribution threshold in stroops.
@@ -322,17 +390,27 @@ impl StellarGoalVaultContract {
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Pause")),
                 ContractPaused {
-                    contract_version: version,
+                    contract_version: version.clone(),
                 },
             );
         } else {
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Unpause")),
                 ContractUnpaused {
-                    contract_version: version,
+                    contract_version: version.clone(),
                 },
             );
         }
+
+        // Structured contract paused event with stable topics and payload
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("CfgPause")),
+            ContractPausedEvent {
+                admin: caller.clone(),
+                paused,
+                contract_version: version,
+            },
+        );
     }
 
     pub fn get_paused(env: Env) -> bool {
@@ -363,7 +441,21 @@ impl StellarGoalVaultContract {
         if bps > 10000 {
             panic!("fee must not exceed 10000 basis points");
         }
+        let old_fee_bps = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(DEFAULT_PLATFORM_FEE_BPS);
         env.storage().instance().set(&DataKey::PlatformFeeBps, &bps);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("FeeSet")),
+            PlatformFeeUpdatedEvent {
+                admin: admin.clone(),
+                old_fee_bps,
+                new_fee_bps: bps,
+            },
+        );
     }
 
     /// Sets the address that receives platform fees on campaign claims.
@@ -373,9 +465,19 @@ impl StellarGoalVaultContract {
         if recipient == env.current_contract_address() {
             panic!("fee recipient cannot be the vault contract");
         }
+        let old_recipient: Option<Address> = env.storage().instance().get(&DataKey::FeeRecipient);
         env.storage()
             .instance()
             .set(&DataKey::FeeRecipient, &recipient);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("RecipSet")),
+            FeeRecipientUpdatedEvent {
+                admin: admin.clone(),
+                old_recipient,
+                new_recipient: recipient.clone(),
+            },
+        );
     }
 
     /// Returns the current platform fee in basis points. Defaults to
@@ -742,9 +844,29 @@ impl StellarGoalVaultContract {
             (symbol_short!("Goal"), symbol_short!("Pledge")),
             CampaignPledged {
                 campaign_id,
+                contributor: contributor.clone(),
+                token: token.clone(),
+                amount,
+            },
+        );
+
+        // Structured pledge event for off-chain indexers. Emitted only after
+        // all storage writes succeed, so a failed transaction never produces a
+        // misleading success event. Uses a distinct topic ("Pledged") so
+        // indexers can subscribe without ambiguity with the legacy "Pledge"
+        // event above.
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Pledged")),
+            CampaignPledgedEvent {
+                campaign_id,
                 contributor,
                 token,
                 amount,
+                total_pledged: campaign.pledged_amount,
+                contributor_count: campaign.contributor_count,
+                token_balance: current_balance + amount,
+                contributor_total: current_contribution + amount,
+                pledged_at: env.ledger().timestamp(),
             },
         );
     }
@@ -1218,7 +1340,7 @@ impl StellarGoalVaultContract {
         approver.require_auth();
         require_not_paused(&env);
 
-        let mut campaign = read_campaign(&env, campaign_id);
+        let campaign = read_campaign(&env, campaign_id);
 
         // Campaign must be in pending state (not yet approved)
         if campaign.claimed || campaign.canceled {

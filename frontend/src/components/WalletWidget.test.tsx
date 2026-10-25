@@ -142,7 +142,7 @@ describe('WalletWidget', () => {
     expect(onDisconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('shows error message alongside connect button', () => {
+  it('shows error message alongside an explicit retry action', () => {
     render(
       <WalletWidget
         status="available"
@@ -156,6 +156,7 @@ describe('WalletWidget', () => {
       />,
     );
     expect(screen.getByText(/Wallet error occurred/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Retry wallet connection/i })).toBeTruthy();
   });
 
   it('exposes a status role while checking', () => {
@@ -366,5 +367,150 @@ describe('WalletWidget', () => {
       />,
     );
     expect(screen.queryByRole('alert')).not.toBeTruthy();
+  });
+});
+
+describe('WalletWidget explicit states (issue #838)', () => {
+  it('shows an animated spinner while checking the wallet', () => {
+    render(
+      <WalletWidget
+        status="checking"
+        publicKey={null}
+        walletName={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.getByTestId('wallet-widget-spinner')).toBeTruthy();
+    expect(screen.getByText(/Detecting wallet/i)).toBeTruthy();
+  });
+
+  it('shows an animated spinner while connecting the wallet', () => {
+    render(
+      <WalletWidget
+        status="connecting"
+        publicKey={null}
+        walletName={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.getByTestId('wallet-widget-spinner')).toBeTruthy();
+    expect(screen.getByText(/Connecting wallet/i)).toBeTruthy();
+  });
+
+  it('announces an explicit empty state when no wallet is connected', () => {
+    render(
+      <WalletWidget
+        status="available"
+        publicKey={null}
+        walletName={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.getByText(/No wallet connected/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Connect Freighter wallet/i })).toBeTruthy();
+  });
+
+  it('keeps the error and retry action inside an alert after a recoverable failure', () => {
+    render(
+      <WalletWidget
+        status="available"
+        publicKey={null}
+        walletName={null}
+        error="User rejected the connection request"
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toMatch(/User rejected the connection request/i);
+    expect(screen.getByRole('button', { name: /Retry wallet connection/i })).toBeTruthy();
+  });
+
+  it('calls onConnect when the retry action is clicked', () => {
+    const onConnect = vi.fn();
+    render(
+      <WalletWidget
+        status="available"
+        publicKey={null}
+        walletName={null}
+        error="Wallet error occurred"
+        network={null}
+        onConnect={onConnect}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Retry wallet connection/i }));
+    expect(onConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render the plain connect button while showing the retry action', () => {
+    render(
+      <WalletWidget
+        status="available"
+        publicKey={null}
+        walletName={null}
+        error="Wallet error occurred"
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Connect Freighter wallet/i })).toBeNull();
+  });
+
+  it('explains when no wallet extension is detected and links to install one', () => {
+    render(
+      <WalletWidget
+        status="unavailable"
+        publicKey={null}
+        walletName={null}
+        error={null}
+        network={null}
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.getByText(/No Stellar wallet extension detected/i)).toBeTruthy();
+    const link = screen.getByRole('link', { name: /Install Freighter/i });
+    expect(link.getAttribute('href')).toBe('https://www.freighter.app/');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noreferrer');
+    // The connect action stays available so the panel never blocks recovery.
+    expect(screen.getByRole('button', { name: /Connect Freighter wallet/i })).toBeTruthy();
+  });
+
+  it('keeps the populated connected state distinguishable from loading and empty states', () => {
+    render(
+      <WalletWidget
+        status="connected"
+        publicKey={PUBLIC_KEY}
+        walletName="Freighter"
+        error={null}
+        network="Testnet"
+        onConnect={noop}
+        onDisconnect={noop}
+        onSwitchWallet={noop}
+      />,
+    );
+    expect(screen.queryByTestId('wallet-widget-spinner')).toBeNull();
+    expect(screen.queryByText(/No wallet connected/i)).toBeNull();
+    expect(screen.getByText(/GBBD…LFLA/)).toBeTruthy();
   });
 });

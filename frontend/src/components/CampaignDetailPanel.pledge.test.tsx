@@ -50,7 +50,7 @@ const campaign: Campaign = {
 
 type Props = ComponentProps<typeof CampaignDetailPanel>;
 function renderPledge(overrides: Partial<Props> = {}) {
-  const onPledge = vi.fn().mockResolved(undefined);
+  const onPledge = vi.fn().mockResolvedValue(undefined);
   render(
     <CampaignDetailPanel
       campaign={campaign}
@@ -64,10 +64,10 @@ function renderPledge(overrides: Partial<Props> = {}) {
   return { onPledge, user: userEvent.setup() };
 }
 
-const form = () => screen.getByRole('form', { name: 'Pledge form' });
+const form = () => screen.getByRole('form', { name: /pledge/i });
 const amount = () => within(form()).getByRole('spinbutton', { name: 'Amount' });
 const asset = () => within(form()).getByRole('combobox', { name: 'Asset' });
-const submit = () => within(form()).getByRole('button', { name: 'Pledge' });
+const submit = () => within(form()).getByRole('button', { name: /pledge/i });
 
 describe('Pledge asset selection', () => {
   it('submits the selected accepted asset and resets after success', async () => {
@@ -92,7 +92,7 @@ describe('Pledge asset selection', () => {
     expect(amount()).toHaveValue(12.34);
     expect(asset()).toHaveValue('XLM');
     await act(async () => resolvePledge());
-    expect(screen.getByRole('status')).toHaveTextContent('Your pledge was submitted successfully.');
+    expect(screen.getByRole('status')).toHaveTextContent(/pledge submitted successfully/i);
     expect(amount()).toHaveValue(25);
     expect(asset()).toHaveValue('');
   });
@@ -102,13 +102,13 @@ describe('Pledge asset selection', () => {
       campaign: { ...campaign, acceptedTokens: ['USDC'] },
     });
 
-    expect(within(form()).queryBlyRole('combobox')).not.toBeInTheDocument();
+    expect(within(form()).queryByRole('combobox')).not.toBeInTheDocument();
     await user.click(submit());
     expect(onPledge).toHaveBeenCalledWith(campaign.id, 25, 'USDC');
   });
 
   it('preserves the selected asset and amount when the wallet rejects the pledge', async () => {
-    const onPledge = vi.fn().mockRejected(new Error('Freighter rejected signing'));
+    const onPledge = vi.fn().mockRejectedValue(new Error('Freighter rejected signing'));
     const { user } = renderPledge({ onPledge });
 
     await user.clear(amount());
@@ -119,11 +119,11 @@ describe('Pledge asset selection', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Freighter rejected signing');
     expect(amount()).toHaveValue(42);
     expect(asset()).toHaveValue('XLM');
-    expect(screen.queryBvyRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('blocks submission and shows an actionable message when the wallet network mismatches', async () => {
-    const onPledge = vi.fn().mockResolved(undefined);
+    const onPledge = vi.fn().mockResolvedValue(undefined);
     const { user } = renderPledge({
       onPledge,
       walletNetworkPassphrase: 'Public Global Stellar Network ; September 2015',

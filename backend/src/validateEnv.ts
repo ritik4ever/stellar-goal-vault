@@ -62,11 +62,13 @@ export const envSchema = z
       .describe('default: 0 (no limit)'),
 
     // Request Input & Rate Limit configuration validation
+    // SECURITY: Default is 16kb. In production, configure appropriate body payload limits.
+    // Risk: Excessively large or unbounded body limits enable payload Denial of Service (DoS) attacks.
     MAX_BODY_SIZE: z
       .string()
       .regex(bodySizeRegex, 'MAX_BODY_SIZE must be a valid size string (e.g. 16kb, 1mb, 1024)')
       .optional()
-      .describe('default: 16kb'),
+      .describe('default: 16kb; safe limit for request body payload handling'),
     RATE_LIMIT_WINDOW_MS: z
       .string()
       .regex(nonNegativeIntRegex, 'RATE_LIMIT_WINDOW_MS must be a non-negative integer')

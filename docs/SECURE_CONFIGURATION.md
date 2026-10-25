@@ -59,6 +59,10 @@ local-development override.
   ambient/at-rest auth this enables cross-site abuse.
 - **Compatibility:** `CORS_ALLOWED_ORIGINS` is accepted as a backwards-compatible
   alias, but new deployments should use `ALLOWED_ORIGINS`.
+- **CORS abuse controls & preflight caching:**
+  - `CORS_MAX_AGE`: cache duration in seconds for preflight `OPTIONS` responses (default: `86400` / 24 hours). Prevents browsers from repeatedly flooding the API with preflight checks.
+  - `CORS_ABUSE_MAX_VIOLATIONS`: maximum allowed CORS policy rejections per client IP within the rate limit window (default: `20` violations per 60-second window). When exceeded, repeated unauthorized requests are bounded with `429 RATE_LIMITED` and a `Retry-After` header.
+  - **Local development:** CORS abuse throttling is skipped when `NODE_ENV=development` or non-production so developer iteration is not blocked.
 
 ### `API_KEYS`
 
@@ -111,6 +115,13 @@ local-development override.
   or when `NODE_ENV` is unset, so ordinary local workflows are not throttled.
 - **Risk of weakening:** high limits or disabling the middleware allows repeated
   mutations to consume backend and database resources.
+
+### Request input handling and payload limits (`MAX_BODY_SIZE`)
+
+- **Safe production default:** `16kb` (or conservative bounds tailored to expected payload size, e.g. `1mb` for file/metadata uploads). Configured via `MAX_BODY_SIZE`.
+- **Local development:** defaults to `16kb` if unset.
+- **Risk of weakening:** allowing unvalidated, unbounded, or excessively large request bodies exposes the backend server to Denial of Service (DoS) attacks via memory exhaustion and CPU resource starvation. Request bodies sent as unexpected content types or oversized payloads are rejected early.
+
 
 ### Secret material (`SECRET_KEY`, `SERVER_PRIVATE_KEY`)
 

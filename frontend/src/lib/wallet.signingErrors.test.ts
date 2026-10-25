@@ -160,4 +160,26 @@ describe('wallet adapter connection failures (#931)', () => {
     expect(classifySigningError(error)).toBe('MALFORMED_TRANSACTION');
     expectNoSecretLeak(error);
   });
+
+  it('blocks transaction submission and throws FREIGHTER_NETWORK_MISMATCH when network differs during signing (#928)', async () => {
+    walletApiMocks.freighter.getNetworkDetails.mockResolvedValue({
+      network: 'PUBLIC',
+      networkUrl: 'https://horizon.stellar.org',
+      networkPassphrase: 'Public Global Stellar Network ; September 2015',
+      sorobanRpcUrl: 'https://mainnet.rpc',
+    });
+
+    const error = await getAdapter('freighter')
+      .sign(FAKE_XDR, TESTNET, PUBLIC_KEY)
+      .catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'FREIGHTER_NETWORK_MISMATCH',
+      signingErrorClass: 'WALLET_UNAVAILABLE',
+    });
+    expect(error.message).toMatch(/stellar mainnet/i);
+    expect(error.message).toMatch(/stellar testnet/i);
+    expect(walletApiMocks.freighter.signTransaction).not.toHaveBeenCalled();
+    expectNoSecretLeak(error);
+  });
 });

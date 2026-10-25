@@ -12,6 +12,7 @@ import { SorobanRefundMetadata } from '../types/campaign';
 import { GoalVaultContract } from '../generated';
 import { verifyFreighterNetwork } from './freighter';
 import {
+  SIGNING_ERROR_MESSAGES,
   SigningErrorClass,
   classifyCause,
   createSigningError,
@@ -134,7 +135,16 @@ async function buildAndSubmitRefund(
     });
   });
   if (rpc.Api.isSimulationError(simulation)) {
-    throw causedError('SIMULATION_FAILED', simulation.error, 'MALFORMED_TRANSACTION');
+    const errorClass = classifyCause(simulation.error, 'CONTRACT_REJECTED');
+    const userMessage =
+      errorClass === 'CONTRACT_REJECTED'
+        ? SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED
+        : SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION;
+    throw createSigningError('SIMULATION_FAILED', {
+      signingErrorClass: errorClass,
+      cause: simulation.error,
+      message: `${userMessage} Preflight check failed before signing.`,
+    });
   }
 
   transaction = buildOperation(() => rpc.assembleTransaction(transaction, simulation).build());
@@ -146,7 +156,19 @@ async function buildAndSubmitRefund(
       networkPassphrase,
     });
   } catch (error) {
-    throw causedError('SIGNING_FAILED', error, 'UNKNOWN');
+    const errorClass = classifyCause(error, 'UNKNOWN');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: errorClass,
+      cause: error,
+      message: SIGNING_ERROR_MESSAGES[errorClass],
+    });
+  }
+
+  if (!signedXdr) {
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: 'USER_REJECTED',
+      message: 'Freighter did not return a signed transaction.',
+    });
   }
 
   const signedTransaction = parseTransaction(
