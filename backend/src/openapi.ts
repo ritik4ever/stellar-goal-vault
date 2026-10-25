@@ -355,7 +355,13 @@ const campaignAnalyticsListResponseSchema = z
   .openapi('CampaignAnalyticsListResponse');
 
 const campaignAnalyticsResponseSchema = z
-  .object({ data: campaignAnalyticsSchema })
+  .object({
+    requestId: z.string().openapi({
+      description: 'Correlation ID also returned in the X-Request-Id response header.',
+      example: 'req-123',
+    }),
+    data: campaignAnalyticsSchema,
+  })
   .openapi('CampaignAnalyticsResponse');
 
 const campaignHistoryResponseSchema = z
@@ -941,25 +947,16 @@ registry.registerPath({
   summary: 'Get campaign analytics',
   description:
     'Read-only analytics for one campaign. The path id must be a canonical positive integer ' +
-    '(no leading zeros, signs, or decimals). Pagination is deterministic: page defaults to 1 ' +
-    'and limit defaults to 10 when omitted, both must be integers, and limit is capped at 100. ' +
-    'Out-of-range values are rejected with 400 rather than clamped. The response includes ' +
-    'total, totalPages, hasPreviousPage, and hasNextPage so callers can navigate without ' +
-    'guessing where the collection ends. Missing campaigns return 404.',
+    '(no leading zeros, signs, or decimals). This endpoint accepts no query parameters. ' +
+    'Missing campaigns return 404. The request correlation ID is returned in both the ' +
+    'response body and the X-Request-Id response header.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
-    query: z.object({
-      page: z.coerce.number().int().min(1).optional().openapi({
-        description: '1-based page number (default 1).',
-      }),
-      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
-        description: 'Items per page, 1 to 100 (default 10).',
-      }),
-    }),
+    query: z.object({}).strict(),
   },
   responses: {
     200: {
-      description: 'Paginated campaign analytics',
+      description: 'Campaign analytics with request correlation metadata',
       content: {
         'application/json': { schema: registeredSchemas.CampaignAnalyticsListResponse },
       },

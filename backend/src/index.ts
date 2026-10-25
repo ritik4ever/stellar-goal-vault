@@ -780,6 +780,7 @@ app.get('/api/campaigns/:id/analytics', (req: Request, res: Response) => {
 
   res.setHeader('Cache-Control', 'max-age=30');
   res.json({
+    requestId: (req as RequestWithId).requestId,
     data: {
       campaignId: parsedId.value,
       ...analytics,
