@@ -156,6 +156,42 @@ pub struct CampaignCanceled {
     pub creator: Address,
 }
 
+/// Emitted when the contract is initialized with admin and min contribution floor.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractInitializedEvent {
+    pub admin: Address,
+    pub min_contribution: i128,
+    pub contract_version: String,
+}
+
+/// Emitted when the contract pause status changes, with stable fields for off-chain indexers.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractPausedEvent {
+    pub admin: Address,
+    pub paused: bool,
+    pub contract_version: String,
+}
+
+/// Emitted when the platform fee basis points are updated by the admin.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlatformFeeUpdatedEvent {
+    pub admin: Address,
+    pub old_fee_bps: i128,
+    pub new_fee_bps: i128,
+}
+
+/// Emitted when the platform fee recipient address is updated by the admin.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeRecipientUpdatedEvent {
+    pub admin: Address,
+    pub old_recipient: Option<Address>,
+    pub new_recipient: Address,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractPaused {
@@ -324,6 +360,16 @@ impl StellarGoalVaultContract {
         env.storage()
             .instance()
             .set(&DataKey::MinContribution, &min_contribution);
+
+        let version = String::from_str(&env, CONTRACT_VERSION);
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Init")),
+            ContractInitializedEvent {
+                admin: admin.clone(),
+                min_contribution,
+                contract_version: version,
+            },
+        );
     }
 
     /// Returns the current minimum contribution threshold in stroops.
@@ -344,17 +390,27 @@ impl StellarGoalVaultContract {
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Pause")),
                 ContractPaused {
-                    contract_version: version,
+                    contract_version: version.clone(),
                 },
             );
         } else {
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Unpause")),
                 ContractUnpaused {
-                    contract_version: version,
+                    contract_version: version.clone(),
                 },
             );
         }
+
+        // Structured contract paused event with stable topics and payload
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("CfgPause")),
+            ContractPausedEvent {
+                admin: caller.clone(),
+                paused,
+                contract_version: version,
+            },
+        );
     }
 
     pub fn get_paused(env: Env) -> bool {
@@ -385,7 +441,21 @@ impl StellarGoalVaultContract {
         if bps > 10000 {
             panic!("fee must not exceed 10000 basis points");
         }
+        let old_fee_bps = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(DEFAULT_PLATFORM_FEE_BPS);
         env.storage().instance().set(&DataKey::PlatformFeeBps, &bps);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("FeeSet")),
+            PlatformFeeUpdatedEvent {
+                admin: admin.clone(),
+                old_fee_bps,
+                new_fee_bps: bps,
+            },
+        );
     }
 
     /// Sets the address that receives platform fees on campaign claims.
@@ -395,9 +465,19 @@ impl StellarGoalVaultContract {
         if recipient == env.current_contract_address() {
             panic!("fee recipient cannot be the vault contract");
         }
+        let old_recipient: Option<Address> = env.storage().instance().get(&DataKey::FeeRecipient);
         env.storage()
             .instance()
             .set(&DataKey::FeeRecipient, &recipient);
+
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("RecipSet")),
+            FeeRecipientUpdatedEvent {
+                admin: admin.clone(),
+                old_recipient,
+                new_recipient: recipient.clone(),
+            },
+        );
     }
 
     /// Returns the current platform fee in basis points. Defaults to

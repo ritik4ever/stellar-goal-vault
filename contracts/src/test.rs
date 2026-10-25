@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 #[cfg(test)]
 #[allow(deprecated, irrefutable_let_patterns)]
 mod tests {

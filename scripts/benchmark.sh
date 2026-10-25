@@ -36,6 +36,10 @@ ENTRY_POINTS=(
   "get_version"
   "get_next_campaign_id"
   "get_campaign_count"
+  "initialize"
+  "set_paused"
+  "set_fee"
+  "set_fee_recipient"
 )
 
 # Parse args
