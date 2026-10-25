@@ -379,4 +379,10 @@ export function ensurePledgesIntegrityConstraints(database: SQLiteDatabase = get
       END;
     END;
   `);
+
+  // Performance indexes for deadline-based and date-based queries (#319)
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_campaigns_deadline ON campaigns(deadline);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_created_at ON campaigns(created_at);
+  `);
 }
