@@ -3198,6 +3198,369 @@ mod tests {
         client.set_fee(&admin, &(-1_i128));
     }
 
+    // =====================================================================
+    // Pledge-path lifecycle invariants (table-driven)
+    // =====================================================================
+    // Each row runs on a fresh ledger so a failure names the exact inputs.
+    // After every accepted step the pledge books must balance:
+    //   (1) pledged_amount == Σ contributions over {contributor, token}
+    //   (2) pledged_amount == Σ CampaignTokenBalance(campaign, token)
+    //   (3) CampaignTokenBalance(campaign, token) == vault's real holdings
+    // Rejected transitions must leave (1)–(3) untouched: invalid transitions
+    // neither create nor destroy value. See contracts/PROPERTY_TESTS.md.
+
+    fn balance_of(env: &Env, token: &Address, who: &Address) -> i128 {
+        TokenClient::new(env, token).balance(who)
+    }
+
+    /// Deploys a token and mints `amount` to every address in `holders`.
+    fn deploy_token_minting(
+        env: &Env,
+        admin: &Address,
+        holders: &[Address],
+        amount: i128,
+    ) -> Address {
+        let token = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let minter = StellarAssetClient::new(env, &token);
+        for holder in holders {
+            minter.mint(holder, &amount);
+        }
+        token
+    }
+
+    /// Asserts the three pledge-book identities hold for one campaign.
+    fn assert_pledge_books(
+        env: &Env,
+        client: &StellarGoalVaultContractClient<'_>,
+        campaign_id: u64,
+        tokens: &[Address],
+        contributors: &[Address],
+    ) {
+        let campaign = client.get_campaign(&campaign_id);
+        let mut ledger = 0_i128;
+        let mut recorded = 0_i128;
+        for token in tokens {
+            for contributor in contributors {
+                ledger += client.get_contribution(&campaign_id, contributor, token);
+            }
+            let campaign_balance = client.get_campaign_token_balance(&campaign_id, token);
+            assert_eq!(
+                campaign_balance,
+                balance_of(env, token, &client.address),
+                "recorded campaign balance diverged from the vault's token holdings"
+            );
+            recorded += campaign_balance;
+        }
+        assert_eq!(
+            campaign.pledged_amount, ledger,
+            "pledged_amount must equal the sum of per-contributor contributions"
+        );
+        assert_eq!(
+            campaign.pledged_amount, recorded,
+            "pledged_amount must equal the sum of per-campaign token balances"
+        );
+    }
+
+    #[test]
+    fn test_pledge_lifecycle_refund_preserves_accounting_invariants() {
+        // (target, cap, deadline_offset, [a, b, c] pledges); every sum < target.
+        let cases: [(i128, i128, u64, [i128; 3]); 4] = [
+            (5_000, 0, 100, [100, 200, 300]),
+            (1_000, 500, 10, [100, 400, 0]),
+            (2_000, 1_000, 1, [500, 500, 500]),
+            (3_000, 0, 250, [1_000, 500, 100]),
+        ];
+
+        for (target, cap, offset, pledges) in cases {
+            let env = test_env();
+            env.mock_all_auths();
+
+            let creator = Address::generate(&env);
+            let admin = Address::generate(&env);
+            let a = Address::generate(&env);
+            let b = Address::generate(&env);
+            let c = Address::generate(&env);
+            let contributors = [a.clone(), b.clone(), c.clone()];
+
+            let token = deploy_token_minting(&env, &admin, &contributors, 10_000);
+            let client = deploy_contract(&env);
+
+            let campaign_id = client.create_campaign(
+                &creator,
+                &soroban_sdk::vec![&env, token.clone()],
+                &target,
+                &(env.ledger().timestamp() + offset),
+                &String::from_str(&env, "lifecycle refund"),
+                &cap,
+                &soroban_sdk::vec![&env],
+                &0_u32,
+            );
+            let tokens = [token.clone()];
+
+            assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+
+            // Active, uncanceled and underfunded: every refund is rejected and
+            // the pledge books must not move.
+            for contributor in &contributors {
+                assert!(client.try_refund(&campaign_id, contributor).is_err());
+            }
+            assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+
+            // Pledge each non-zero amount; re-check the books after every step.
+            let mut expected = 0_i128;
+            for (i, amount) in pledges.iter().enumerate() {
+                if *amount == 0 {
+                    continue;
+                }
+                client.contribute(&campaign_id, &contributors[i], &token, amount);
+                expected += *amount;
+                assert_eq!(client.get_campaign(&campaign_id).pledged_amount, expected);
+                assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+            }
+
+            // A pledge that would breach the target is rejected and moves
+            // nothing (whether it trips the target cap or a per-contributor cap).
+            let over = target - expected + 1;
+            assert!(
+                client
+                    .try_contribute(&campaign_id, &a, &token, &over)
+                    .is_err()
+            );
+            assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+
+            // Past the deadline the campaign is underfunded, so each contributor
+            // is refunded exactly their own pledge.
+            advance_time(&env, offset + 1);
+            for (i, amount) in pledges.iter().enumerate() {
+                if *amount == 0 {
+                    continue;
+                }
+                let before = balance_of(&env, &token, &contributors[i]);
+                client.refund(&campaign_id, &contributors[i]);
+                assert_eq!(
+                    balance_of(&env, &token, &contributors[i]),
+                    before + amount,
+                    "refund must return exactly the contributor's own pledge"
+                );
+                assert_eq!(
+                    client.get_contribution(&campaign_id, &contributors[i], &token),
+                    0
+                );
+                assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+            }
+
+            assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+            assert_eq!(balance_of(&env, &token, &client.address), 0);
+
+            // A second refund destroys nothing and is rejected.
+            assert!(client.try_refund(&campaign_id, &a).is_err());
+            assert_eq!(balance_of(&env, &token, &client.address), 0);
+        }
+    }
+
+    #[test]
+    fn test_pledge_lifecycle_claim_preserves_accounting_invariants() {
+        // (target, cap, deadline_offset, [a, b, c] pledges); every sum == target.
+        let cases: [(i128, i128, u64, [i128; 3]); 3] = [
+            (1_000, 0, 100, [100, 400, 500]),
+            (2_000, 1_000, 10, [500, 500, 1_000]),
+            (600, 600, 5, [100, 250, 250]),
+        ];
+
+        for (target, cap, offset, pledges) in cases {
+            let env = test_env();
+            env.mock_all_auths();
+
+            let creator = Address::generate(&env);
+            let admin = Address::generate(&env);
+            let a = Address::generate(&env);
+            let b = Address::generate(&env);
+            let c = Address::generate(&env);
+            let contributors = [a.clone(), b.clone(), c.clone()];
+
+            let token = deploy_token_minting(&env, &admin, &contributors, 10_000);
+            let client = deploy_contract(&env);
+            let vault = client.address.clone();
+
+            let campaign_id = client.create_campaign(
+                &creator,
+                &soroban_sdk::vec![&env, token.clone()],
+                &target,
+                &(env.ledger().timestamp() + offset),
+                &String::from_str(&env, "lifecycle claim"),
+                &cap,
+                &soroban_sdk::vec![&env],
+                &0_u32,
+            );
+            let tokens = [token.clone()];
+
+            let mut expected = 0_i128;
+            for (i, amount) in pledges.iter().enumerate() {
+                client.contribute(&campaign_id, &contributors[i], &token, amount);
+                expected += *amount;
+                assert_eq!(client.get_campaign(&campaign_id).pledged_amount, expected);
+                assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+            }
+            assert_eq!(expected, target);
+
+            // Still active: neither the creator nor a stranger can claim, and
+            // the books stay put.
+            assert!(client.try_claim(&campaign_id, &creator).is_err());
+            assert!(client.try_claim(&campaign_id, &a).is_err());
+            assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+
+            advance_time(&env, offset + 1);
+            assert_eq!(balance_of(&env, &token, &vault), target);
+
+            client.claim(&campaign_id, &creator);
+            assert!(client.get_campaign(&campaign_id).claimed);
+
+            // The vault is drained by exactly the pledged amount, which the
+            // creator receives in full (no fee recipient is configured).
+            assert_eq!(balance_of(&env, &token, &vault), 0);
+            assert_eq!(balance_of(&env, &token, &creator), target);
+            assert_eq!(client.get_campaign(&campaign_id).pledged_amount, target);
+
+            // Claiming again, or pledging after the claim, cannot recreate or
+            // redirect any value.
+            assert!(client.try_claim(&campaign_id, &creator).is_err());
+            assert!(
+                client
+                    .try_contribute(&campaign_id, &a, &token, &100)
+                    .is_err()
+            );
+            assert_eq!(balance_of(&env, &token, &vault), 0);
+            assert_eq!(balance_of(&env, &token, &creator), target);
+        }
+    }
+
+    #[test]
+    fn test_canceled_campaign_refunds_conserve_value() {
+        // (target, deadline_offset, [a, b] pledges); every sum == target.
+        let cases: [(i128, u64, [i128; 2]); 3] = [
+            (1_000, 100, [400, 600]),
+            (500, 1, [100, 400]),
+            (2_000, 50, [1_500, 500]),
+        ];
+
+        for (target, offset, pledges) in cases {
+            let env = test_env();
+            env.mock_all_auths();
+
+            let creator = Address::generate(&env);
+            let admin = Address::generate(&env);
+            let a = Address::generate(&env);
+            let b = Address::generate(&env);
+            let contributors = [a.clone(), b.clone()];
+
+            let token = deploy_token_minting(&env, &admin, &contributors, 10_000);
+            let client = deploy_contract(&env);
+            let vault = client.address.clone();
+
+            let campaign_id = client.create_campaign(
+                &creator,
+                &soroban_sdk::vec![&env, token.clone()],
+                &target,
+                &(env.ledger().timestamp() + offset),
+                &String::from_str(&env, "lifecycle cancel"),
+                &0_i128,
+                &soroban_sdk::vec![&env],
+                &0_u32,
+            );
+            let tokens = [token.clone()];
+
+            for (i, amount) in pledges.iter().enumerate() {
+                client.contribute(&campaign_id, &contributors[i], &token, amount);
+                assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+            }
+
+            // Active: claim and a non-creator cancel are both rejected.
+            assert!(client.try_claim(&campaign_id, &creator).is_err());
+            assert!(client.try_cancel_campaign(&campaign_id, &a).is_err());
+            assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+
+            // Cancelling is not a value transition: the books are untouched.
+            client.cancel_campaign(&campaign_id, &creator);
+            assert!(client.get_campaign(&campaign_id).canceled);
+            assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+
+            // A cancelled campaign cannot be claimed against, but refunds are
+            // allowed before the deadline.
+            assert!(client.try_claim(&campaign_id, &creator).is_err());
+
+            for (i, amount) in pledges.iter().enumerate() {
+                let before = balance_of(&env, &token, &contributors[i]);
+                client.refund(&campaign_id, &contributors[i]);
+                assert_eq!(balance_of(&env, &token, &contributors[i]), before + amount);
+                assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+            }
+            assert_eq!(balance_of(&env, &token, &vault), 0);
+            assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+
+            // Cancelling twice, and refunding twice, are both rejected.
+            assert!(client.try_cancel_campaign(&campaign_id, &creator).is_err());
+            assert!(client.try_refund(&campaign_id, &a).is_err());
+            assert_eq!(balance_of(&env, &token, &vault), 0);
+        }
+    }
+
+    #[test]
+    fn test_multi_token_pledge_lifecycle_conserves_value() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let contributors = [alice.clone(), bob.clone()];
+
+        let usdc = deploy_token_minting(&env, &admin, &contributors, 10_000);
+        let eurc = deploy_token_minting(&env, &admin, &contributors, 10_000);
+        let tokens = [usdc.clone(), eurc.clone()];
+        let client = deploy_contract(&env);
+        let vault = client.address.clone();
+
+        let target = 1_000_i128;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, usdc.clone(), eurc.clone()],
+            &target,
+            &(env.ledger().timestamp() + 100),
+            &String::from_str(&env, "multi-token lifecycle"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let steps: [(Address, Address, i128); 4] = [
+            (alice.clone(), usdc.clone(), 300),
+            (bob.clone(), eurc.clone(), 200),
+            (alice.clone(), eurc.clone(), 300),
+            (bob.clone(), usdc.clone(), 200),
+        ];
+        let mut pledged = 0_i128;
+        for (who, token, amount) in steps {
+            client.contribute(&campaign_id, &who, &token, &amount);
+            pledged += amount;
+            assert_eq!(client.get_campaign(&campaign_id).pledged_amount, pledged);
+            assert_pledge_books(&env, &client, campaign_id, &tokens, &contributors);
+        }
+        assert_eq!(pledged, target);
+
+        advance_time(&env, 101);
+        client.claim(&campaign_id, &creator);
+
+        // Each token ledger is drained to the creator; per-token totals hold.
+        assert_eq!(balance_of(&env, &usdc, &vault), 0);
+        assert_eq!(balance_of(&env, &eurc, &vault), 0);
+        assert_eq!(balance_of(&env, &usdc, &creator), 500);
+        assert_eq!(balance_of(&env, &eurc, &creator), 500);
+    }
+  
+  
     #[test]
     #[should_panic(expected = "fee must not exceed 10000 basis points")]
     fn test_set_fee_rejects_above_10000_bps() {

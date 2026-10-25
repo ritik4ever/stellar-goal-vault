@@ -2,9 +2,45 @@
 
 ## Overview
 
-This document describes the property-based test suite for the Stellar Goal Vault contract. These tests verify that core funding invariants hold after any sequence of operations, including campaign creation, contributions, claims, and refunds.
+This document describes the invariant test suite for the Stellar Goal Vault contract. These tests verify that core funding invariants hold after any sequence of operations, including campaign creation, contributions, claims, and refunds.
 
-The test suite uses the `proptest` framework to automatically generate random sequences of operations and verify that key invariants are maintained throughout.
+The current suite is deterministic and **table-driven**: each safeguard lives in
+`contracts/src/test.rs` and runs the whole pledge lifecycle over several
+independent rows of inputs (targets, per-contributor caps, deadlines and pledge
+splits) instead of a single fixed example. The invariants below are checked
+after every accepted step, and every rejected transition is asserted to leave
+the books untouched.
+
+### Table-driven lifecycle invariants
+
+| Test | Path exercised | Invariants checked |
+|------|----------------|--------------------|
+| `test_pledge_lifecycle_refund_preserves_accounting_invariants` | contribute → refund (underfunded) | pledged sum, token ledgers, exact refunds, no double refund |
+| `test_pledge_lifecycle_claim_preserves_accounting_invariants` | contribute → claim (funded) | vault drained by exactly the pledge, creator made whole, claim frozen |
+| `test_canceled_campaign_refunds_conserve_value` | contribute → cancel → refund | cancel moves no value, refunds exact, claim rejected after cancel |
+| `test_multi_token_pledge_lifecycle_conserves_value` | contribute (2 tokens) → claim | per-token ledger conservation across tokens |
+
+The shared helper `assert_pledge_books` pins three accounting identities on
+every step:
+
+```
+pledged_amount == Σ Contribution(campaign, contributor, token)
+pledged_amount == Σ CampaignTokenBalance(campaign, token)
+CampaignTokenBalance(campaign, token) == vault's real token balance
+```
+
+Run them directly:
+
+```bash
+cd contracts
+cargo test --features testutils test_pledge_lifecycle
+cargo test --features testutils test_canceled_campaign_refunds_conserve_value
+cargo test --features testutils test_multi_token_pledge_lifecycle_conserves_value
+```
+
+The `proptest`-style invariant descriptions further down document the
+properties these table rows assert; the `proptest` dependency remains available
+for extending the suite with generated inputs.
 
 ## Key Invariants
 
