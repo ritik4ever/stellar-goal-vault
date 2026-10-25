@@ -1,6 +1,7 @@
 import { LayoutGrid, RefreshCw, AlertCircle } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDebounce } from '../hooks/useDebounce';
+import { formatAmount } from '../utils/formatCurrency';
 import { useSearchParams } from 'react-router-dom';
 import { Campaign, CampaignStatus } from '../types/campaign';
 import { EmptyState } from './EmptyState';
@@ -453,7 +454,8 @@ export function CampaignsTable({
                         </td>
                         <td>
                           <div className="progress-copy">
-                            {campaign.pledgedAmount} / {campaign.targetAmount} {campaign.assetCode}
+                            {formatAmount(campaign.pledgedAmount)} / {formatAmount(campaign.targetAmount)}{" "}
+                            {campaign.assetCode}
                           </div>
                           <div className="progress-bar" aria-hidden>
                             <div
@@ -539,7 +541,8 @@ export function CampaignsTable({
                       </div>
                       <div className="campaign-progress">
                         <div className="progress-copy">
-                          {campaign.pledgedAmount} / {campaign.targetAmount} {campaign.assetCode}
+                          {formatAmount(campaign.pledgedAmount)} / {formatAmount(campaign.targetAmount)}{" "}
+                          {campaign.assetCode}
                         </div>
                         <div className="progress-bar" aria-hidden>
                           <div
