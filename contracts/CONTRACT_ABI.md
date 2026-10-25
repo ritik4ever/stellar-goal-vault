@@ -403,7 +403,9 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 | Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; investigate |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 
-**Emits:** `CampaignRefunded` (one per token the contributor used)
+**Emits:** `CampaignRefunded` (one per token the contributor used), then exactly one `RefundCompleted`
+
+**Indexer note:** A successful `refund` emits one `("Goal", "Refund")` event per token refunded, followed by exactly one `("Goal", "Refunded")` summary emitted after all transfers and storage writes complete. Any rejected call (paused, auth failure, still active, funded, nothing to refund) emits no event. Use `RefundCompleted.pledged_amount` as the campaign's post-refund total; per-token amounts are only on the `CampaignRefunded` events.
 
 **Gas estimate:** 22,000 + 12,000 per token contributed ≈ base 22,000 + 12,000 per token + 20% headroom: **40,800** (1 token) / **74,400** (3 tokens)
 
@@ -434,7 +436,11 @@ fn refund_all(env: Env, campaign_id: u64)
 | Contract not initialized | `"not initialized"` | High | Call `initialize` to set an admin first |
 | Caller not authorized | Soroban auth failure | High | Ensure the stored `admin` signs the transaction |
 
-**Emits:** `CampaignRefunded` (one per contributor per token)
+**Emits:** `CampaignRefunded` (one per contributor per token), then exactly one `RefundAllCompleted`
+
+**Indexer note:** A successful `refund_all` emits one `("Goal", "Refund")` event per contributor per token, followed by exactly one `("Goal", "RefundAll")` summary emitted after all transfers and storage writes complete. Contributors who already reclaimed their pledge with `refund` get no event and are not counted. Any rejected call emits no event.
+
+**Capacity limit:** the call is all-or-nothing, and each refunded (contributor, token) pair emits about 512 bytes of events. At about 31 single-token contributors (fewer with more tokens) it exceeds the mainnet 16 KiB per-transaction event limit and fails. Larger campaigns must be refunded per contributor with `refund`. Measured in [BENCHMARKS.md](./BENCHMARKS.md#refund-path-benchmark-refund--refund_all).
 
 **Gas estimate:** 15,000 base + 25,000 per contributor ≈ highly variable. For 10 contributors with 1 token each: **290,000** + 20% headroom = **348,000**
 
@@ -874,6 +880,46 @@ committed only if the full claim transaction succeeds.
 
 ---
 
+### `RefundCompleted`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Refunded"` |
+
+**Data** (`RefundCompleted`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `contributor` | `Address` | Contributor refunded |
+| `total_refunded` | `i128` | Sum refunded across all tokens in this call |
+| `pledged_amount` | `i128` | Campaign `pledged_amount` after the refund |
+
+**Emitted by:** `refund` (exactly once, after the per-token `CampaignRefunded` events)
+
+---
+
+### `RefundAllCompleted`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"RefundAll"` |
+
+**Data** (`RefundAllCompleted`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `contributors_refunded` | `u32` | Contributors that received a non-zero refund in this call |
+| `total_refunded` | `i128` | Sum refunded across all contributors and tokens in this call |
+| `pledged_amount` | `i128` | Campaign `pledged_amount` after the refunds |
+
+**Emitted by:** `refund_all` (exactly once, after the per-contributor `CampaignRefunded` events)
+
+---
+
 ### `CampaignCanceled`
 
 | Topic | Type | Value |
@@ -1123,6 +1169,7 @@ Create a campaign, contribute, cancel before deadline, and refund.
 //   → Tokens transferred back to GEFG...
 //   → Campaign(1).pledged_amount = 0
 //   Event: CampaignRefunded { campaign_id: 1, contributor: GEFG..., ... }
+//   Event: RefundCompleted { campaign_id: 1, contributor: GEFG..., total_refunded: ..., pledged_amount: 0 }
 ```
 
 ### Example 3: Deadline Extension Governance

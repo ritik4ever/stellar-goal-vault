@@ -149,6 +149,37 @@ pub struct CampaignRefunded {
     pub amount: i128,
 }
 
+/// Emitted exactly once per successful `refund`, after every transfer and
+/// storage write completes, so an indexer can close out a contributor's
+/// position from one event. Per-token amounts stay on the [`CampaignRefunded`]
+/// events emitted in the same call and are not duplicated here.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefundCompleted {
+    pub campaign_id: u64,
+    pub contributor: Address,
+    /// Sum refunded across all tokens in this call.
+    pub total_refunded: i128,
+    /// Campaign `pledged_amount` after the refund.
+    pub pledged_amount: i128,
+}
+
+/// Emitted exactly once per successful `refund_all`, after every transfer and
+/// storage write completes. Per-contributor, per-token amounts stay on the
+/// [`CampaignRefunded`] events emitted in the same call and are not
+/// duplicated here.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefundAllCompleted {
+    pub campaign_id: u64,
+    /// Number of contributors that received a non-zero refund in this call.
+    pub contributors_refunded: u32,
+    /// Sum refunded across all contributors and tokens in this call.
+    pub total_refunded: i128,
+    /// Campaign `pledged_amount` after the refunds.
+    pub pledged_amount: i128,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CampaignCanceled {
@@ -296,6 +327,16 @@ mod test_pledge_auth;
 // setter must be driven by the stored admin's signature, and nobody else's.
 #[cfg(test)]
 mod test_admin_auth;
+
+// Indexer events on the refund path: exact event sequence on success, and no
+// event at all when a refund is rejected.
+#[cfg(test)]
+mod test_refund_events;
+
+// Repeatable resource benchmark for the refund path against the release WASM.
+// Ignored by default; run via `scripts/bench-refund.sh`.
+#[cfg(test)]
+mod bench_refund;
 
 // Governance module for multi-sig campaign approval
 mod governance;
@@ -1071,6 +1112,19 @@ impl StellarGoalVaultContract {
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        // Summary event for off-chain indexers, emitted only after all
+        // transfers and storage writes succeed. Distinct topic ("Refunded")
+        // so it cannot be confused with the per-token "Refund" events.
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Refunded")),
+            RefundCompleted {
+                campaign_id,
+                contributor,
+                total_refunded,
+                pledged_amount: campaign.pledged_amount,
+            },
+        );
     }
 
     /// Refund every contributor of a failed or canceled campaign in one call.
@@ -1108,21 +1162,34 @@ impl StellarGoalVaultContract {
             .get(&contributors_key)
             .unwrap_or_else(|| Vec::new(&env));
 
-        let mut any_refunded = false;
+        let mut contributors_refunded = 0_u32;
+        let mut total_refunded = 0_i128;
         for contributor in contributors.iter() {
             let refunded = refund_contributor(&env, &mut campaign, campaign_id, &contributor);
             if refunded > 0 {
-                any_refunded = true;
+                contributors_refunded += 1;
+                total_refunded += refunded;
             }
         }
 
-        if !any_refunded {
+        if contributors_refunded == 0 {
             panic!("nothing to refund");
         }
 
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        // Summary event for off-chain indexers; see `refund`.
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("RefundAll")),
+            RefundAllCompleted {
+                campaign_id,
+                contributors_refunded,
+                total_refunded,
+                pledged_amount: campaign.pledged_amount,
+            },
+        );
     }
 
     pub fn get_campaign(env: Env, campaign_id: u64) -> Campaign {
