@@ -31,3 +31,30 @@ npm run test tests/pledgeScale.test.ts
 ```
 
 The output will log the elapsed duration and the throughput rate, verifying that the cached statements keep the path within an acceptable range.
+
+## Campaign Detail Loading Benchmark
+
+This section documents a repeatable benchmark for **campaign detail loading** — the read path that resolves a single campaign together with its aggregate pledge totals and contributor count for the campaign detail view.
+
+### Input Size
+
+The benchmark seeds a deterministic fixture of **1 campaign with 1,000 pledges across 100 distinct contributors**. The fixture is generated in-process from a fixed seed, so no external or mutable data source is required and results are comparable across runs.
+
+### Output Metrics
+
+- **Wall-clock duration (ms):** total time to load the campaign detail payload.
+- **Throughput (loads/second):** derived from the measured duration over the fixed fixture.
+- **Row counts:** pledges and contributors read, to confirm the fixture size is stable.
+
+The benchmark logs these metrics and asserts the duration stays under a deliberately generous threshold, so it flags algorithmic regressions (e.g. N+1 queries or missing indexes) without being flaky on slower CI runners.
+
+### How to Run
+
+Locally and in CI/manual workflows, using the same deterministic fixture (no network or external mutable data):
+
+```bash
+cd backend
+npm run test tests/campaignDetailBenchmark.test.ts
+```
+
+The run prints the duration, throughput, and row counts, and fails only if the campaign detail load exceeds the regression threshold. Existing campaign lifecycle and accounting tests are unaffected and continue to run as before.
