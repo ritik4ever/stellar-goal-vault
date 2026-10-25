@@ -20,6 +20,11 @@ import {
   createSigningError,
   describeErrorForLog,
 } from '../lib/signingErrors';
+import {
+  submitTransactionOnce,
+  type TransactionStatusListener,
+  type TransactionStatusReporter,
+} from '../lib/transactionSubmission';
 
 type AppErrorLike = Error & { code?: string };
 
@@ -163,6 +168,33 @@ export interface EstimatedFee {
   xlm: string;
 }
 
+interface FreighterTransactionPreview {
+  operation: string;
+  amount?: number;
+  assetCode?: string;
+  contract: string;
+  xdr: string;
+  estimatedFee?: EstimatedFee;
+}
+
+interface FreighterClaimParams {
+  campaignId: string;
+  creator: string;
+  config: AppConfig;
+  onPreview?: (preview: FreighterTransactionPreview) => Promise<boolean>;
+  onStatusChange?: TransactionStatusListener;
+}
+
+interface FreighterPledgeParams {
+  campaignId: string;
+  contributor: string;
+  amount: number;
+  assetCode: string;
+  config: AppConfig;
+  onPreview?: (preview: FreighterTransactionPreview) => Promise<boolean>;
+  onStatusChange?: TransactionStatusListener;
+}
+
 function formatStroopsAsXlm(stroops: number): string {
   return (stroops / STROOPS_PER_XLM).toFixed(7).replace(/\.?0+$/, '');
 }
@@ -296,19 +328,20 @@ async function waitForTransaction(
   );
 }
 
-export async function submitFreighterClaim(params: {
-  campaignId: string;
-  creator: string;
-  config: AppConfig;
-  onPreview?: (preview: {
-    operation: string;
-    amount?: number;
-    assetCode?: string;
-    contract: string;
-    xdr: string;
-    estimatedFee?: EstimatedFee;
-  }) => Promise<boolean>;
-}): Promise<PledgeTransactionResult> {
+export function submitFreighterClaim(
+  params: FreighterClaimParams,
+): Promise<PledgeTransactionResult> {
+  return submitTransactionOnce(
+    `claim:${params.campaignId}:${params.creator.trim().toUpperCase()}`,
+    (reportStatus) => performFreighterClaim(params, reportStatus),
+    params.onStatusChange,
+  );
+}
+
+async function performFreighterClaim(
+  params: FreighterClaimParams,
+  reportStatus: TransactionStatusReporter,
+): Promise<PledgeTransactionResult> {
   const { campaignId, creator, config } = params;
   const lockKey = getInFlightSubmissionKey('claim', campaignId, creator);
   if (inFlightSubmissions.has(lockKey)) {
@@ -474,24 +507,24 @@ async function executeFreighterClaim(params: {
     );
   }
 
+  reportStatus({ status: 'pending', transactionHash: sendResult.hash });
   return waitForTransaction(server, sendResult.hash);
 }
 
-export async function submitFreighterPledge(params: {
-  campaignId: string;
-  contributor: string;
-  amount: number;
-  assetCode: string;
-  config: AppConfig;
-  onPreview?: (preview: {
-    operation: string;
-    amount?: number;
-    assetCode?: string;
-    contract: string;
-    xdr: string;
-    estimatedFee?: EstimatedFee;
-  }) => Promise<boolean>;
-}): Promise<PledgeTransactionResult> {
+export function submitFreighterPledge(
+  params: FreighterPledgeParams,
+): Promise<PledgeTransactionResult> {
+  return submitTransactionOnce(
+    `pledge:${params.campaignId}:${params.contributor.trim().toUpperCase()}:${params.assetCode.trim().toUpperCase()}:${params.amount}`,
+    (reportStatus) => performFreighterPledge(params, reportStatus),
+    params.onStatusChange,
+  );
+}
+
+async function performFreighterPledge(
+  params: FreighterPledgeParams,
+  reportStatus: TransactionStatusReporter,
+): Promise<PledgeTransactionResult> {
   const { campaignId, contributor, amount, config, assetCode } = params;
   const lockKey = getInFlightSubmissionKey('pledge', campaignId, contributor);
   if (inFlightSubmissions.has(lockKey)) {
@@ -673,6 +706,7 @@ async function executeFreighterPledge(params: {
     );
   }
 
+  reportStatus({ status: 'pending', transactionHash: sendResult.hash });
   return waitForTransaction(server, sendResult.hash);
 }
 

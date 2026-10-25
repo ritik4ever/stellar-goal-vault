@@ -18,6 +18,11 @@ import {
   createSigningError,
   toSigningError,
 } from '../lib/signingErrors';
+import {
+  submitTransactionOnce,
+  type TransactionStatusListener,
+  type TransactionStatusReporter,
+} from '../lib/transactionSubmission';
 
 function causedError(
   code: string,
@@ -61,17 +66,25 @@ function buildOperation<T>(build: () => T): T {
 export async function submitRefundTransaction(
   campaignId: string,
   contributor: string,
+  onStatusChange?: TransactionStatusListener,
 ): Promise<SorobanRefundMetadata> {
-  try {
-    return await buildAndSubmitRefund(campaignId, contributor);
-  } catch (error) {
-    throw toSigningError(error, 'REFUND_FAILED');
-  }
+  return submitTransactionOnce(
+    `refund:${campaignId}:${contributor.trim().toUpperCase()}`,
+    async (reportStatus) => {
+      try {
+        return await buildAndSubmitRefund(campaignId, contributor, reportStatus);
+      } catch (error) {
+        throw toSigningError(error, 'REFUND_FAILED');
+      }
+    },
+    onStatusChange,
+  );
 }
 
 async function buildAndSubmitRefund(
   campaignId: string,
   contributor: string,
+  reportStatus: TransactionStatusReporter,
 ): Promise<SorobanRefundMetadata> {
   const config = await getAppConfig();
   const { contractId, networkPassphrase, rpcUrl } = config.soroban;
@@ -190,6 +203,7 @@ async function buildAndSubmitRefund(
     });
   }
 
+  reportStatus({ status: 'pending', transactionHash: sendResponse.hash });
   const finalResponse = await server
     .pollTransaction(sendResponse.hash, { attempts: 15 })
     .catch((error) => {
