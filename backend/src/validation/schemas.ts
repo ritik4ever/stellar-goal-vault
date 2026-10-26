@@ -671,6 +671,42 @@ export function parseCampaignAnalyticsQuery(
 }
 
 /**
+ * Validates the request boundary for the shallow health endpoint.
+ *
+ * Health is a parameterless probe. Rejecting query or JSON body fields keeps
+ * misspelled options from being silently ignored and gives clients a stable
+ * 400 response instead of accidentally changing probe semantics later.
+ */
+export function parseHealthRequest(
+  query: Record<string, unknown>,
+  body: unknown,
+): { ok: true } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const issues: z.core.$ZodIssue[] = Object.keys(query)
+    .sort()
+    .map((key) => ({
+      code: 'custom' as const,
+      message: `Unsupported query parameter: ${key}. This endpoint accepts no parameters.`,
+      path: ['query'],
+    }));
+
+  const isEmptyJsonObject =
+    typeof body === 'object' &&
+    body !== null &&
+    !Array.isArray(body) &&
+    Object.keys(body as Record<string, unknown>).length === 0;
+
+  if (body !== undefined && body !== null && !isEmptyJsonObject) {
+    issues.push({
+      code: 'custom',
+      message: 'This endpoint accepts no request body.',
+      path: ['body'],
+    });
+  }
+
+  return issues.length > 0 ? { ok: false, issues } : { ok: true };
+}
+
+/**
  * Parses optional `page` and `limit` for `GET /api/health/deep`.
  *
  * The deep health response exposes an ordered `components` collection
