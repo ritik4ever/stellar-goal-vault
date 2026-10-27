@@ -1,12 +1,23 @@
+/**
+ * Security regression tests for write-route protection and malformed payloads.
+ *
+ * These are negative tests by design: the request is expected to fail if the
+ * boundary is weakened or bypassed. A passing result for a disallowed request
+ * indicates the protected boundary was removed.
+ */
+
 import request from 'supertest';
 import { describe, it, expect } from 'vitest';
 
-// Set env before importing app so body parser limits and test DB are applied
+// Set env before importing app so the app boots with the intended security guard
+// and the body parser limit is active for the malformed-payload checks below.
 process.env.DB_PATH = ':memory:';
-process.env.NODE_ENV = 'test';
+process.env.NODE_ENV = 'production';
 process.env.CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
-process.env.SOROBAN_RPC_URL = 'http://localhost:8000';
-// Make the JSON body limit small so we can trigger the 413 path reliably
+process.env.SOROBAN_RPC_URL = 'https://horizon.example.com';
+process.env.SOROBAN_NETWORK_PASSPHRASE = 'Test SDF Network ; September 2015';
+process.env.API_KEYS = 'prod-write-key';
+process.env.ALLOWED_ORIGINS = 'https://app.example.com';
 process.env.MAX_BODY_SIZE = '1kb';
 
 import { app } from './index';
@@ -23,6 +34,36 @@ function validCampaignPayload(overrides = {}) {
   };
 }
 
+describe('Security regression — write-route boundary', () => {
+  it('rejects create requests without an Authorization header', async () => {
+    const res = await request(app).post('/api/campaigns').send(validCampaignPayload());
+
+    expect(res.status).toBe(401);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('rejects create requests that use a malformed or wrong API key', async () => {
+    const res = await request(app)
+      .post('/api/campaigns')
+      .set('Authorization', 'Token prod-write-key')
+      .send(validCampaignPayload());
+
+    expect(res.status).toBe(401);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+
+    const invalidKey = await request(app)
+      .post('/api/campaigns')
+      .set('Authorization', 'Bearer wrong-key')
+      .send(validCampaignPayload());
+
+    expect(invalidKey.status).toBe(403);
+    expect(invalidKey.body.success).toBe(false);
+    expect(invalidKey.body.error.code).toBe('FORBIDDEN');
+  });
+});
+
 describe('Security regression — request input handling', () => {
   it('rejects attempts to bypass JSON validation by sending JSON as text/plain', async () => {
     const payload = validCampaignPayload();
@@ -30,11 +71,11 @@ describe('Security regression — request input handling', () => {
 
     const res = await request(app)
       .post('/api/campaigns')
+      .set('Authorization', 'Bearer prod-write-key')
       .set('Content-Type', 'text/plain')
       .send(raw);
 
     expect(res.status).toBe(400);
-    // validateBody now uses the structured error envelope via next(AppError)
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(Array.isArray(res.body.error.details)).toBe(true);
@@ -45,7 +86,10 @@ describe('Security regression — request input handling', () => {
       metadata: { imageUrl: 'http://127.0.0.1/unsafe.png' },
     });
 
-    const res = await request(app).post('/api/campaigns').send(payload);
+    const res = await request(app)
+      .post('/api/campaigns')
+      .set('Authorization', 'Bearer prod-write-key')
+      .send(payload);
 
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
@@ -59,7 +103,10 @@ describe('Security regression — request input handling', () => {
       metadata: { imageUrl: 'https://127.0.0.1/secret' },
     });
 
-    const res = await request(app).post('/api/campaigns').send(payload);
+    const res = await request(app)
+      .post('/api/campaigns')
+      .set('Authorization', 'Bearer prod-write-key')
+      .send(payload);
 
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
@@ -71,27 +118,30 @@ describe('Security regression — request input handling', () => {
   });
 
   it('returns 413 Payload Too Large for oversized request bodies', async () => {
-    // Build a payload with a very large description to exceed the 1kb limit
     const largeDescription = 'A'.repeat(2 * 1024);
     const payload = validCampaignPayload({ description: largeDescription });
 
-    const res = await request(app).post('/api/campaigns').send(payload);
+    const res = await request(app)
+      .post('/api/campaigns')
+      .set('Authorization', 'Bearer prod-write-key')
+      .send(payload);
 
     expect(res.status).toBe(413);
     expect(res.body).toHaveProperty('error');
     expect(res.body.error).toHaveProperty('code', 'PAYLOAD_TOO_LARGE');
+  });
+
   it('returns 400 for malformed JSON input', async () => {
     const raw = '{"title": "test", '; // Unterminated JSON
 
     const res = await request(app)
       .post('/api/campaigns')
+      .set('Authorization', 'Bearer prod-write-key')
       .set('Content-Type', 'application/json')
       .send(raw);
 
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
-    // express.json() throws a SyntaxError with status 400 which is mapped
-    // to a generic format by the error handler, but it should definitely be 400.
   });
 
   it('rejects JSON array instead of object (type coercion bypass)', async () => {
@@ -100,6 +150,7 @@ describe('Security regression — request input handling', () => {
 
     const res = await request(app)
       .post('/api/campaigns')
+      .set('Authorization', 'Bearer prod-write-key')
       .set('Content-Type', 'application/json')
       .send(raw);
 
@@ -111,11 +162,10 @@ describe('Security regression — request input handling', () => {
   it('rejects urlencoded body when JSON is expected', async () => {
     const res = await request(app)
       .post('/api/campaigns')
+      .set('Authorization', 'Bearer prod-write-key')
       .set('Content-Type', 'application/x-www-form-urlencoded')
       .send('title=test&targetAmount=100');
 
-    // express.json() ignores non-JSON, so req.body is undefined or empty.
-    // validateBody will fail because required fields are missing.
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
