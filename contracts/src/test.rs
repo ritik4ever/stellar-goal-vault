@@ -1570,6 +1570,89 @@ mod tests {
         assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
     }
 
+    // ---- pledge path boundary validation --------------------------------
+    // Amount, state, and address preconditions must reject at the boundary
+    // with stable errors and leave storage untouched.
+
+    #[test]
+    #[should_panic(expected = "contribution below minimum")]
+    fn test_contribute_rejects_zero_amount() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "zero pledge"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "contribution below minimum")]
+    fn test_contribute_rejects_negative_amount() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "negative pledge"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &(-1_i128));
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign canceled")]
+    fn test_contribute_rejects_canceled_campaign() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "canceled pledge"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        client.cancel_campaign(&campaign_id, &creator);
+        client.contribute(&campaign_id, &contributor, &token, &500);
+    }
+
     // ── #185: update_metadata tests ───────────────────────────────────────────
 
     #[test]

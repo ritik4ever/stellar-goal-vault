@@ -726,6 +726,9 @@ impl StellarGoalVaultContract {
         if contributor == env.current_contract_address() {
             panic!("contributor cannot be the vault contract");
         }
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
         contributor.require_auth();
 
         let min_contribution: i128 = env
@@ -735,6 +738,9 @@ impl StellarGoalVaultContract {
             .unwrap_or(MIN_CONTRIBUTION);
         if amount < min_contribution {
             panic!("contribution below minimum");
+        }
+        if campaign_id == 0 {
+            panic!("campaign not found");
         }
 
         let mut campaign = read_campaign(&env, campaign_id);
@@ -761,6 +767,9 @@ impl StellarGoalVaultContract {
         if campaign.pledged_amount + amount > campaign.target_amount {
             panic!("campaign funding cap exceeded");
         }
+        if campaign.pledged_amount < 0 {
+            panic!("invalid campaign state");
+        }
         if !campaign.accepted_tokens.iter().any(|t| t == token) {
             panic!("token not accepted by this campaign");
         }
@@ -785,6 +794,9 @@ impl StellarGoalVaultContract {
                 .sum();
             if already + amount > cap {
                 panic!("per-contributor cap exceeded");
+            }
+            if already < 0 {
+                panic!("invalid contribution state");
             }
         }
 

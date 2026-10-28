@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd backend
-          npm ci
+          npm ci --legacy-peer-deps
 
       - name: Run integration tests (with coverage)
         run: |
