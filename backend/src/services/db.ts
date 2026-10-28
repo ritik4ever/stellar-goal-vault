@@ -379,29 +379,4 @@ export function ensurePledgesIntegrityConstraints(database: SQLiteDatabase = get
       END;
     END;
   `);
-
-  // Seed-workflow indexes: support FK child discovery during wipe/reseed,
-  // pledged_amount accounting checks, and post-seed listing by created_at.
-  // Only indexes backed by concrete seed + migrate query plans.
-  ensureSeedWorkflowIndexes(database);
-}
-
-/**
- * Indexes used by the deterministic seed wipe/reseed path and the accounting
- * queries that validate seed output. Safe to call repeatedly (IF NOT EXISTS).
- */
-export function ensureSeedWorkflowIndexes(database: SQLiteDatabase = getDb()): void {
-  database.exec(`
-    CREATE INDEX IF NOT EXISTS idx_notifications_campaign_id
-      ON notifications(campaign_id);
-
-    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_refunded
-      ON pledges(campaign_id, refunded_at);
-
-    CREATE INDEX IF NOT EXISTS idx_pledges_campaign_created_id
-      ON pledges(campaign_id, created_at DESC, id DESC);
-
-    CREATE INDEX IF NOT EXISTS idx_campaigns_created_at
-      ON campaigns(created_at);
-  `);
 }

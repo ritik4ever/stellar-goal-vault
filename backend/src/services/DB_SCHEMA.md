@@ -27,7 +27,6 @@ and must not be used against production data.
 - `campaigns_fts` is a derived search index maintained by triggers. It can be
   rebuilt from `campaigns` and is never the source of truth.
 
-
 Use `CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS` for new objects and guarded
 `ALTER TABLE` changes for existing objects, following the patterns in
 `db.ts`. Additive changes must account for databases created by older
