@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "build:analyze": "tsc && ANALYZE=true vite build",
+    "dev": "node init && vite",
+    "build": "node init && tsc && vite build",
+    "build:analyze": "node init && tsc && ANALYZE=true vite build",
     "preview": "vite preview",
     "test": "vitest",
     "bench": "vitest bench --run",

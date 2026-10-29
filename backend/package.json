@@ -22,10 +22,10 @@
     "zod": "^4.6.5"
   },
   "scripts": {
-    "dev": "ts-node-dev --respawn src/index.ts",
-    "start": "node dist/index.js",
-    "build": "tsc && npm run build:openapi",
-    "build:openapi": "ts-node src/scripts/generateOpenApi.ts",
+    "dev": "node init && ts-node-dev --respawn src/index.ts",
+    "start": "node init && node dist/index.js",
+    "build": "node init && tsc && npm run build:openapi",
+    "build:openapi": "node init && ts-node src/scripts/generateOpenApi.ts",
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest run",
     "test:watch": "vitest",
