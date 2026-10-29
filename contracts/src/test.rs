@@ -7,6 +7,7 @@ mod tests {
     };
 
     use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
+
     // Keep contract tests independent of the machine clock and local timezone.
     // Soroban timestamps are UTC Unix seconds; epoch zero preserves the mock
     // ledger's historical test behavior while making the chosen time explicit.

@@ -50,6 +50,16 @@ fn require_valid_metadata(metadata: &String) {
     }
 }
 
+/// Boundary check for the contract-level validation path used by the pledge
+/// flow. Ensures the metadata length is within bounds and that the accepted
+/// token list does not exceed [`MAX_ACCEPTED_TOKENS`].
+fn require_pledge_boundaries(metadata: &String, accepted_tokens: &Vec<Address>) {
+    require_valid_metadata(metadata);
+    if accepted_tokens.len() > MAX_ACCEPTED_TOKENS {
+        panic!("accepted_tokens must not exceed the maximum allowed count");
+    }
+}
+
 /// Default platform fee in basis points (50 = 0.5%). Admin can override
 /// via [`set_fee`]. Set to 0 to disable the fee mechanism entirely.
 const DEFAULT_PLATFORM_FEE_BPS: i128 = 50;

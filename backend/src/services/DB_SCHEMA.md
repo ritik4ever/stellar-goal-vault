@@ -27,7 +27,6 @@ and must not be used against production data.
 - `campaigns_fts` is a derived search index maintained by triggers. It can be
   rebuilt from `campaigns` and is never the source of truth.
 
-
 Use `CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS` for new objects and guarded
 `ALTER TABLE` changes for existing objects, following the patterns in
 `db.ts`. Additive changes must account for databases created by older
@@ -48,7 +47,9 @@ be persisted even if application validation is bypassed:
 | Timestamps | positive `created_at`; `refunded_at > 0` when NOT NULL |
 
 Fresh databases receive these as `BEFORE INSERT / BEFORE UPDATE` triggers
-(`pledges_persistence_integrity_*`, migration 005). Legacy databases receive the
+(`pledges_persistence_integrity_*`, migration 005). Boundary validation for the
+pledge contract path rejects zero or negative amounts, empty contributor or
+asset identifiers, and non-positive timestamps at the database layer. Legacy databases receive the
 same triggers via `ensurePledgesIntegrityConstraints()` on every startup.
 No historical data repair is needed because all valid data already satisfies
 these rules — the triggers only block future invalid inserts or updates.
