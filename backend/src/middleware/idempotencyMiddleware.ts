@@ -23,7 +23,19 @@ export function idempotencyMiddleware(
 
   const apiKey = (req as unknown as RequestWithApiKey).apiKey ?? 'anonymous';
   const campaignId = req.params.id as string;
-  const cacheKey = buildIdempotencyCacheKey(apiKey, campaignId, idempotencyKey);
+
+  // This route is not authenticated, so `apiKey` is 'anonymous' for every
+  // caller. Scope the key by the payload's contributor as well: otherwise two
+  // different users who happen to send the same Idempotency-Key header share one
+  // cache entry, and the second user is replayed the first user's pledge instead
+  // of writing their own.
+  const contributor = (req.body as { contributor?: unknown } | undefined)?.contributor;
+  const requestKey =
+    typeof contributor === 'string' && contributor !== ''
+      ? `${idempotencyKey}:${contributor}`
+      : idempotencyKey;
+
+  const cacheKey = buildIdempotencyCacheKey(apiKey, campaignId, requestKey);
 
   getIdempotencyCacheEntry(cacheKey).then(
     (cached) => {

@@ -65,7 +65,11 @@ describe('eventIndexer observability', () => {
       expect.objectContaining({
         lastSuccessfulPollTime: null,
         lastKnownLedger: expect.any(Number),
-        isHealthy: false,
+        // An indexer that has not polled yet is "starting", not failing: it only
+        // becomes unhealthy once a poll fails (>0 consecutive failures, asserted
+        // below) or the last successful poll goes stale. Treating startup as
+        // unhealthy made `/api/health` return 503 on every fresh boot.
+        isHealthy: true,
         consecutiveFailures: 0,
         lagMs: null,
         freshness: 'never',

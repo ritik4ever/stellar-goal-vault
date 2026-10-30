@@ -46,13 +46,17 @@ export async function setIdempotencyCacheEntry(
 ): Promise<void> {
   const serialized = JSON.stringify(entry);
 
+  // Populate the in-process cache *first*. It used to be written only after the
+  // (awaited) Redis write, so a replay that arrived before the Redis round-trip
+  // finished — or while Redis was slow/unreachable — still executed the original
+  // write a second time, which is exactly what an Idempotency-Key must prevent.
+  memoryCache.set(key, entry);
+
   if (isCacheAvailable()) {
     await setCacheValue(key, serialized, IDEMPOTENCY_TTL_SECONDS).catch(() => {
       // Silently fail Redis writes; memory cache still works
     });
   }
-
-  memoryCache.set(key, entry);
 }
 
 export function clearIdempotencyCache(): void {

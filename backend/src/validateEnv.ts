@@ -223,12 +223,9 @@ export function validateEnv(env: Record<string, string | undefined> = process.en
       (issue) => `  - ${issue.path.join('.')}: ${issue.message}`,
     );
     const errorMessage = `[startup] Environment validation failed. Fix the following before starting:\n${missing.join('\n')}`;
-    try {
-      const { logger } = require('./logger');
-      logger.error(`\n${errorMessage}\n`);
-    } catch {
-      console.error(errorMessage);
-    }
+    // Written straight to stderr: this runs during startup validation, and a
+    // static import of `./logger` here would create a config <-> logger cycle.
+    process.stderr.write(`\n${errorMessage}\n`);
     if (env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'test') {
       process.exit(1);
     }

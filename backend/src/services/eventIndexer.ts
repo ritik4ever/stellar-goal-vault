@@ -53,7 +53,8 @@ function getLastProcessedLedger(): number {
   try {
     const db = getDb();
     const row = db.prepare(`SELECT value FROM kv_store WHERE key = ?`).get(LAST_LEDGER_KEY) as
-      { value: string } | undefined;
+      | { value: string }
+      | undefined;
     return row ? Number(row.value) : 0;
   } catch {
     return 0;
@@ -420,8 +421,15 @@ export function getIndexerStatus() {
     running,
   });
   // Failure or unbounded lag → not healthy. Idle/fresh with a running poller is OK.
+  // An indexer that has never polled yet (lagMs === null) is "starting", not
+  // broken: without this, every freshly booted instance reports unhealthy until
+  // its first poll completes, so `/api/health` returns 503 on startup and any
+  // readiness probe kills the pod before it can ever become ready.
   const isHealthy =
-    consecutiveFailures === 0 && running && freshness !== 'stale' && freshness !== 'never';
+    consecutiveFailures === 0 &&
+    freshness !== 'stale' &&
+    freshness !== 'failing' &&
+    (running || lagMs === null);
 
   return {
     lastSuccessfulPollTime,

@@ -94,7 +94,8 @@ describe('useWallet hook', () => {
       expectedNetwork: 'Test SDF Network ; September 2015',
     });
 
-    let checkResult: { match: boolean; currentNetwork?: string; expectedNetwork?: string } | null = null;
+    let checkResult: { match: boolean; currentNetwork?: string; expectedNetwork?: string } | null =
+      null;
     await act(async () => {
       checkResult = await result.current.checkNetwork('Test SDF Network ; September 2015');
     });
@@ -113,7 +114,8 @@ describe('useWallet hook', () => {
       expect(result.current.status).toBe('available');
     });
 
-    let checkResult: { match: boolean; currentNetwork?: string; expectedNetwork?: string } | null = null;
+    let checkResult: { match: boolean; currentNetwork?: string; expectedNetwork?: string } | null =
+      null;
     await act(async () => {
       checkResult = await result.current.checkNetwork('Test SDF Network ; September 2015');
     });
@@ -146,7 +148,8 @@ describe('useWallet hook', () => {
       expectedNetwork: 'Test SDF Network ; September 2015',
     });
 
-    let checkResult: { match: boolean; currentNetwork?: string; expectedNetwork?: string } | null = null;
+    let checkResult: { match: boolean; currentNetwork?: string; expectedNetwork?: string } | null =
+      null;
     await act(async () => {
       checkResult = await result.current.checkNetwork('Test SDF Network ; September 2015');
     });

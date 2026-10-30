@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { sql } from 'drizzle-orm';
 import { getDb, initDb, resetDbForTests } from './db';
 import {
   initCampaignStore,

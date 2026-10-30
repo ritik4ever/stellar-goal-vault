@@ -197,7 +197,7 @@ export const logger = pino({
       'address',
       'creator',
     ],
-    censor: (value: any, path: string[]) => {
+    censor: (value: unknown, path: string[]) => {
       if (
         typeof value === 'string' &&
         (path.includes('address') || path.includes('creator')) &&

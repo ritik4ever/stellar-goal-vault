@@ -13,13 +13,10 @@ export const BASE_TEST_TIME_SEC = Math.floor(BASE_TEST_TIME / 1000); // 17672256
 /**
  * Configure fake timers with system time pinned to a deterministic baseline.
  */
-export function setupDeterministicTime(
-  baseline: Date | number | string = BASE_TEST_TIME,
-): void {
+export function setupDeterministicTime(baseline: Date | number | string = BASE_TEST_TIME): void {
   vi.useFakeTimers();
-  const time = typeof baseline === 'string' || typeof baseline === 'number'
-    ? new Date(baseline)
-    : baseline;
+  const time =
+    typeof baseline === 'string' || typeof baseline === 'number' ? new Date(baseline) : baseline;
   vi.setSystemTime(time);
 }
 
@@ -62,9 +59,7 @@ export function advanceTimeByDays(days: number): void {
  * Set the system time to a specific target without advancing past intermediate timers.
  */
 export function setTestSystemTime(target: Date | number | string): void {
-  const time = typeof target === 'string' || typeof target === 'number'
-    ? new Date(target)
-    : target;
+  const time = typeof target === 'string' || typeof target === 'number' ? new Date(target) : target;
   vi.setSystemTime(time);
 }
 
@@ -119,9 +114,7 @@ export const defaultDeterministicProgress: CampaignProgress = {
  * Factory for creating deterministic Campaign entities for unit tests.
  * Default values use fixed timestamps rather than wall-clock Date.now().
  */
-export function createDeterministicCampaign(
-  overrides: Partial<Campaign> = {},
-): Campaign {
+export function createDeterministicCampaign(overrides: Partial<Campaign> = {}): Campaign {
   const createdAt = overrides.createdAt ?? createDeterministicTimestampSec(-86400); // 1 day ago
   const deadline = overrides.deadline ?? createDeterministicTimestampSec(86400); // 1 day in the future
 
@@ -152,9 +145,7 @@ export function createDeterministicCampaign(
 /**
  * Factory for creating deterministic Pledge entities.
  */
-export function createDeterministicPledge(
-  overrides: Partial<Pledge> = {},
-): Pledge {
+export function createDeterministicPledge(overrides: Partial<Pledge> = {}): Pledge {
   return {
     id: 1,
     campaignId: 'campaign-deterministic-1',

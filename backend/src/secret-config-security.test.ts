@@ -510,7 +510,9 @@ describe('Secret config — .env.example files must not contain real secrets', (
     const content = fs.readFileSync(path.join(BACKEND, '.env.example'), 'utf-8');
     // CONTRACT_ID should appear and its value should be blank (not a real contract address)
     expect(content).toMatch(/CONTRACT_ID\s*=/);
-    const match = content.match(/^CONTRACT_ID\s*=\s*(.*)$/m);
+    // `[ \t]*` (not `\s*`) so the match cannot run past the newline and capture
+    // the comment banner that follows an intentionally empty value.
+    const match = content.match(/^CONTRACT_ID[ \t]*=[ \t]*(.*)$/m);
     const value = (match?.[1] ?? '').trim();
     expect(
       value,
@@ -520,7 +522,7 @@ describe('Secret config — .env.example files must not contain real secrets', (
 
   it('backend .env.example has SERVER_PRIVATE_KEY absent or empty', () => {
     const content = fs.readFileSync(path.join(BACKEND, '.env.example'), 'utf-8');
-    const match = content.match(/^[^#\n]*SERVER_PRIVATE_KEY\s*=\s*(.*)$/m);
+    const match = content.match(/^[^#\n]*SERVER_PRIVATE_KEY[ \t]*=[ \t]*(.*)$/m);
     if (match) {
       const value = match[1].trim();
       expect(value, 'SERVER_PRIVATE_KEY in .env.example must not have a real value').toBe('');
@@ -530,7 +532,7 @@ describe('Secret config — .env.example files must not contain real secrets', (
 
   it('root .env.example has SERVER_PRIVATE_KEY absent or empty', () => {
     const content = fs.readFileSync(path.join(ROOT, '.env.example'), 'utf-8');
-    const match = content.match(/^[^#\n]*SERVER_PRIVATE_KEY\s*=\s*(.*)$/m);
+    const match = content.match(/^[^#\n]*SERVER_PRIVATE_KEY[ \t]*=[ \t]*(.*)$/m);
     if (match) {
       const value = match[1].trim();
       expect(value, 'SERVER_PRIVATE_KEY in root .env.example must not have a real value').toBe('');
@@ -732,12 +734,11 @@ describe('Secret config — validateEnv additional edge cases', () => {
     // This is a known limitation: whitespace-padded API_KEYS passes validateEnv.
     // The security risk: no real key, but auth middleware will receive those whitespace keys
     // and only reject them at runtime (the key in the Bearer token won't match).
-    // We document this as a known gap by asserting the CURRENT behavior:
+    // validateEnv was strengthened: tokens are trimmed before the emptiness
+    // check, so a comma list made only of spaces now yields zero usable keys and
+    // production startup is refused.
     const env = { ...VALID_PROD_ENV, API_KEYS: '  ,   ,  ' };
-    // Current: filter(Boolean) keeps whitespace-only tokens → 3 entries → does NOT throw
-    // This test is a DOCUMENTATION test. If validateEnv is strengthened to trim tokens,
-    // update this test to expect a throw.
-    expect(() => validateEnv(env)).not.toThrow();
+    expect(() => validateEnv(env)).toThrow(/API_KEYS is required in production/);
   });
 
   it('rejects production when API_KEYS is only commas (filter produces empty array)', () => {
