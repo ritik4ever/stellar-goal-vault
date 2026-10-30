@@ -671,6 +671,69 @@ export function parseCampaignAnalyticsQuery(
 }
 
 /**
+ * Parses the query string of `GET /api/campaigns/:id` (issue #848).
+ *
+ * The campaign detail read model takes no query parameters: it always returns
+ * the campaign, its progress and a bounded pledge preview. Silently ignoring
+ * unknown keys makes a caller believe a filter, expansion or pagination option
+ * was applied when it was not (for example `?includeHistory=true` or
+ * `?pledgeLimit=50`), so every supplied key is rejected at the API boundary
+ * with a deterministic 400 instead of being dropped.
+ *
+ * Keys are reported in sorted order so two identical requests always produce
+ * byte-identical error details.
+ */
+export function parseCampaignDetailQuery(
+  query: Record<string, unknown>,
+): { ok: true } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const unsupportedKeys = Object.keys(query).sort();
+  if (unsupportedKeys.length === 0) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    issues: unsupportedKeys.map((key) => ({
+      code: 'custom' as const,
+      message: `Unsupported query parameter: ${key}. This endpoint accepts no query parameters.`,
+      path: ['query'],
+    })),
+  };
+}
+
+/**
+ * Rejects a request payload on a read-only endpoint (issue #848).
+ *
+ * `GET /api/campaigns/:id` reads nothing from the request body. Accepting one
+ * silently would let a caller send a filter/target object that looks applied
+ * but is discarded, so a non-empty body is a client error. An absent body and
+ * the empty object the JSON body parser produces for body-less requests (or
+ * for `{}`) are both accepted, which keeps normal GET clients unaffected.
+ */
+export function parseEmptyBody(
+  body: unknown,
+): { ok: true } | { ok: false; issues: z.core.$ZodIssue[] } {
+  if (body === undefined || body === null) {
+    return { ok: true };
+  }
+
+  if (typeof body === 'object' && !Array.isArray(body) && Object.keys(body).length === 0) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    issues: [
+      {
+        code: 'custom' as const,
+        message: 'This endpoint does not accept a request body.',
+        path: ['body'],
+      },
+    ],
+  };
+}
+
+/**
  * Parses optional `page` and `limit` for `GET /api/health/deep`.
  *
  * The deep health response exposes an ordered `components` collection
