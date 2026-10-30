@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Express } from 'express';
 
 /**
- * Integration coverage for `GET /api/campaigns/:id` (issue #852).
+ * Integration coverage for `GET /api/campaigns/:id` (issues #852 and #848).
  *
  * These tests drive the endpoint over HTTP against an isolated SQLite file so
  * they exercise the real middleware chain: path validation, the campaign
@@ -219,5 +219,90 @@ describe('GET /api/campaigns/:id', () => {
     expect(secondMiss.body.data.id).toBe(second.id);
     expect(firstHit.body.data.title).toBe('Cache isolation one');
     expect(secondMiss.body.data.title).toBe('Cache isolation two');
+  });
+});
+
+/**
+ * Strict request validation at the API boundary (issue #848).
+ *
+ * The detail read model takes a path id and nothing else. Anything a caller
+ * adds (query keys, a JSON payload) is either applied or rejected — never
+ * silently dropped — so these tests pin the 400 for each invalid input shape
+ * and prove valid requests keep the pre-existing 200/404 behaviour.
+ */
+describe('GET /api/campaigns/:id strict request validation', () => {
+  it('rejects unknown query parameters with a deterministic 400', async () => {
+    const campaign = seedCampaign();
+
+    const first = await request(app).get(`/api/campaigns/${campaign.id}?pledgeLimit=50`);
+    const second = await request(app).get(`/api/campaigns/${campaign.id}?pledgeLimit=50`);
+
+    expect(first.status).toBe(400);
+    expect(first.body.error.code).toBe('VALIDATION_ERROR');
+    expect(first.body.error.message).toContain('Unsupported query parameter: pledgeLimit');
+    expect(first.body.error.details).toEqual([expect.objectContaining({ field: 'query' })]);
+    expect(typeof first.body.error.requestId).toBe('string');
+
+    // Same input, same body (apart from the per-request correlation id), and
+    // no response was cached for an invalid request.
+    expect({ ...second.body.error, requestId: undefined }).toEqual({
+      ...first.body.error,
+      requestId: undefined,
+    });
+    expect(second.headers['x-cache']).toBeUndefined();
+  });
+
+  it('reports every unknown query parameter in sorted order', async () => {
+    const campaign = seedCampaign();
+
+    const response = await request(app).get(`/api/campaigns/${campaign.id}?page=1&expand=history`);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.details.map((detail: { field: string }) => detail.field)).toEqual([
+      'query',
+      'query',
+    ]);
+    expect(response.body.error.message).toBe(
+      'query: Unsupported query parameter: expand. This endpoint accepts no query parameters.; ' +
+        'query: Unsupported query parameter: page. This endpoint accepts no query parameters.',
+    );
+  });
+
+  it('rejects a non-empty request body on this read-only endpoint', async () => {
+    const campaign = seedCampaign();
+
+    const response = await request(app)
+      .get(`/api/campaigns/${campaign.id}`)
+      .send({ includeHistory: true });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(response.body.error.message).toContain('does not accept a request body');
+    expect(response.body.error.details).toEqual([expect.objectContaining({ field: 'body' })]);
+  });
+
+  it('validates the path before the query and the body', async () => {
+    const response = await request(app).get('/api/campaigns/not-an-id?page=2').send({ a: 1 });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.message).toContain('Campaign ID');
+    expect(response.body.error.details).toEqual([expect.objectContaining({ field: 'id' })]);
+  });
+
+  it('keeps current behaviour for valid requests', async () => {
+    const campaign = seedCampaign();
+
+    // No query string, an explicitly empty one, an empty JSON object body and
+    // an empty query value list all remain valid GET requests.
+    const plain = await request(app).get(`/api/campaigns/${campaign.id}`);
+    const trailingQuestionMark = await request(app).get(`/api/campaigns/${campaign.id}?`);
+    const emptyBody = await request(app).get(`/api/campaigns/${campaign.id}`).send({});
+    const missing = await request(app).get('/api/campaigns/999999?');
+
+    expect(plain.status).toBe(200);
+    expect(trailingQuestionMark.status).toBe(200);
+    expect(emptyBody.status).toBe(200);
+    expect(plain.body.data.id).toBe(campaign.id);
+    expect(missing.status).toBe(404);
   });
 });

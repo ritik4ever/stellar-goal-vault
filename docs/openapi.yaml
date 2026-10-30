@@ -1603,6 +1603,11 @@ paths:
       tags:
         - Campaigns
       summary: Get campaign details
+      description: "Returns one campaign with its progress and a bounded, newest-first
+        pledge preview. The id must be a canonical positive integer. This read
+        model accepts no query parameters and no request body: any supplied
+        query key or non-empty body is rejected with a 400 VALIDATION_ERROR
+        rather than silently ignored."
       parameters:
         - schema:
             type: string

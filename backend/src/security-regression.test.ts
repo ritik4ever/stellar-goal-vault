@@ -80,6 +80,8 @@ describe('Security regression — request input handling', () => {
     expect(res.status).toBe(413);
     expect(res.body).toHaveProperty('error');
     expect(res.body.error).toHaveProperty('code', 'PAYLOAD_TOO_LARGE');
+  });
+
   it('returns 400 for malformed JSON input', async () => {
     const raw = '{"title": "test", '; // Unterminated JSON
 

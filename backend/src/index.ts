@@ -69,6 +69,8 @@ import {
   createCampaignPayloadSchema,
   createPledgePayloadSchema,
   parseCampaignAnalyticsQuery,
+  parseCampaignDetailQuery,
+  parseEmptyBody,
   parseHistoryPaginationQuery,
   parsePledgeListPaginationQuery,
   parseTimelineQuery,
@@ -464,127 +466,133 @@ app.get('/api/health', (req: Request, res: Response, next: express.NextFunction)
   }
 });
 
-app.get('/api/health/deep', applyRateLimit(1000), async (req: Request, res: Response, next: express.NextFunction) => {
-  const start = process.hrtime();
-  try {
-    // The deep response exposes an ordered `components` collection, so it
-    // supports bounded pagination via page/limit (defaults 1 / 20, limit capped
-    // at 100). Invalid values are rejected with 400 rather than silently
-    // clamped. The default limit exceeds the number of components, so a request
-    // without parameters returns every component exactly as before.
-    const paginationResult = parseHealthPaginationQuery({
-      page: req.query.page,
-      limit: req.query.limit,
-    });
-    if (!paginationResult.ok) {
-      sendValidationError(paginationResult.issues);
-    }
-
-    const database = checkDbHealth();
-    const hasContractId = !!config.contractId;
-    let sorobanHealthy = false;
-
+app.get(
+  '/api/health/deep',
+  applyRateLimit(1000),
+  async (req: Request, res: Response, next: express.NextFunction) => {
+    const start = process.hrtime();
     try {
-      if (config.sorobanRpcUrl) {
-        const response = await fetch(config.sorobanRpcUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'getHealth',
-            id: 1,
-          }),
-          signal: AbortSignal.timeout(5000),
-        });
-        sorobanHealthy = response.ok || response.status < 500;
+      // The deep response exposes an ordered `components` collection, so it
+      // supports bounded pagination via page/limit (defaults 1 / 20, limit capped
+      // at 100). Invalid values are rejected with 400 rather than silently
+      // clamped. The default limit exceeds the number of components, so a request
+      // without parameters returns every component exactly as before.
+      const paginationResult = parseHealthPaginationQuery({
+        page: req.query.page,
+        limit: req.query.limit,
+      });
+      if (!paginationResult.ok) {
+        sendValidationError(paginationResult.issues);
       }
-    } catch {
-      sorobanHealthy = false;
+
+      const database = checkDbHealth();
+      const hasContractId = !!config.contractId;
+      let sorobanHealthy = false;
+
+      try {
+        if (config.sorobanRpcUrl) {
+          const response = await fetch(config.sorobanRpcUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'getHealth',
+              id: 1,
+            }),
+            signal: AbortSignal.timeout(5000),
+          });
+          sorobanHealthy = response.ok || response.status < 500;
+        }
+      } catch {
+        sorobanHealthy = false;
+      }
+
+      const indexer = getIndexerStatus();
+      // Align overall with component.indexer.status (isHealthy includes freshness/lag).
+      const allHealthy = database.reachable && hasContractId && sorobanHealthy && indexer.isHealthy;
+
+      const end = process.hrtime(start);
+      const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+
+      logInfo('health_check', {
+        operation: 'health_check_deep',
+        outcome: allHealthy ? 'success' : 'failure',
+        latency_ms: latencyMs,
+        db_reachable: database.reachable,
+        soroban_healthy: sorobanHealthy,
+        indexer_healthy: indexer.isHealthy,
+        indexer_freshness: indexer.freshness,
+        indexer_lag_ms: indexer.lagMs,
+        has_contract_id: hasContractId,
+      });
+
+      const memUsage = process.memoryUsage();
+      const memory = {
+        rss: memUsage.rss,
+        heapUsed: memUsage.heapUsed,
+        heapTotal: memUsage.heapTotal,
+        external: memUsage.external,
+      };
+
+      // Canonical, stable component order so a slice is deterministic across
+      // pages: page 1 + page 2 cover the set exactly once with no overlap.
+      const allComponents: Record<string, { status: 'up' | 'down'; details: unknown }> = {
+        db: {
+          status: database.reachable ? 'up' : 'down',
+          details: database.reachable ? 'SQLite database reachable' : database.error,
+        },
+        soroban: {
+          status: sorobanHealthy ? 'up' : 'down',
+          details: config.sorobanRpcUrl
+            ? 'Soroban RPC reachable'
+            : 'Soroban RPC URL not configured',
+        },
+        contract: {
+          status: hasContractId ? 'up' : 'down',
+          details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
+        },
+        indexer: {
+          status: indexer.isHealthy ? 'up' : 'down',
+          details: indexer,
+        },
+      };
+
+      const componentNames = Object.keys(allComponents);
+      const total = componentNames.length;
+      const { page, limit } = paginationResult;
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const pageNames = componentNames.slice((page - 1) * limit, (page - 1) * limit + limit);
+      const components = Object.fromEntries(pageNames.map((name) => [name, allComponents[name]]));
+
+      res.status(allHealthy ? 200 : 503).json({
+        overall: allHealthy ? 'up' : 'down',
+        timestamp: new Date().toISOString(),
+        uptimeSeconds: Number(process.uptime().toFixed(3)),
+        memory,
+        components,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages,
+          hasPreviousPage: page > 1 && total > 0,
+          hasNextPage: page < totalPages,
+        },
+      });
+    } catch (error) {
+      const end = process.hrtime(start);
+      const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
+      logError(error, {
+        event: 'health_check_error',
+        operation: 'health_check_deep',
+        outcome: 'failure',
+        latency_ms: latencyMs,
+        requestId: (req as RequestWithId).requestId,
+      });
+      return next(error);
     }
-
-    const indexer = getIndexerStatus();
-    // Align overall with component.indexer.status (isHealthy includes freshness/lag).
-    const allHealthy = database.reachable && hasContractId && sorobanHealthy && indexer.isHealthy;
-
-    const end = process.hrtime(start);
-    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
-
-    logInfo('health_check', {
-      operation: 'health_check_deep',
-      outcome: allHealthy ? 'success' : 'failure',
-      latency_ms: latencyMs,
-      db_reachable: database.reachable,
-      soroban_healthy: sorobanHealthy,
-      indexer_healthy: indexer.isHealthy,
-      indexer_freshness: indexer.freshness,
-      indexer_lag_ms: indexer.lagMs,
-      has_contract_id: hasContractId,
-    });
-
-    const memUsage = process.memoryUsage();
-    const memory = {
-      rss: memUsage.rss,
-      heapUsed: memUsage.heapUsed,
-      heapTotal: memUsage.heapTotal,
-      external: memUsage.external,
-    };
-
-    // Canonical, stable component order so a slice is deterministic across
-    // pages: page 1 + page 2 cover the set exactly once with no overlap.
-    const allComponents: Record<string, { status: 'up' | 'down'; details: unknown }> = {
-      db: {
-        status: database.reachable ? 'up' : 'down',
-        details: database.reachable ? 'SQLite database reachable' : database.error,
-      },
-      soroban: {
-        status: sorobanHealthy ? 'up' : 'down',
-        details: config.sorobanRpcUrl ? 'Soroban RPC reachable' : 'Soroban RPC URL not configured',
-      },
-      contract: {
-        status: hasContractId ? 'up' : 'down',
-        details: hasContractId ? 'CONTRACT_ID configured' : 'CONTRACT_ID not set',
-      },
-      indexer: {
-        status: indexer.isHealthy ? 'up' : 'down',
-        details: indexer,
-      },
-    };
-
-    const componentNames = Object.keys(allComponents);
-    const total = componentNames.length;
-    const { page, limit } = paginationResult;
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-    const pageNames = componentNames.slice((page - 1) * limit, (page - 1) * limit + limit);
-    const components = Object.fromEntries(pageNames.map((name) => [name, allComponents[name]]));
-
-    res.status(allHealthy ? 200 : 503).json({
-      overall: allHealthy ? 'up' : 'down',
-      timestamp: new Date().toISOString(),
-      uptimeSeconds: Number(process.uptime().toFixed(3)),
-      memory,
-      components,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages,
-        hasPreviousPage: page > 1 && total > 0,
-        hasNextPage: page < totalPages,
-      },
-    });
-  } catch (error) {
-    const end = process.hrtime(start);
-    const latencyMs = Number(((end[0] * 1e9 + end[1]) / 1e6).toFixed(3));
-    logError(error, {
-      event: 'health_check_error',
-      operation: 'health_check_deep',
-      outcome: 'failure',
-      latency_ms: latencyMs,
-      requestId: (req as RequestWithId).requestId,
-    });
-    return next(error);
-  }
-});
+  },
+);
 
 app.get('/api/campaigns', async (req: Request, res: Response, next: express.NextFunction) => {
   try {
@@ -709,9 +717,24 @@ app.get('/api/campaigns/trending', (req: Request, res: Response) => {
 
 app.get('/api/campaigns/:id', async (req: Request, res: Response, next: express.NextFunction) => {
   try {
+    // Validate the whole boundary before touching the cache or storage: the
+    // path id must be a canonical positive integer, and this read model takes
+    // no query parameters and no request body. Rejecting unknown query keys
+    // (instead of ignoring them) keeps `?pledgeLimit=50`-style requests from
+    // looking like they did something when they did not (issue #848).
     const parsedId = parseCampaignId(req.params.id);
     if (!parsedId.ok) {
       sendValidationError(parsedId.issues);
+    }
+
+    const parsedQuery = parseCampaignDetailQuery(req.query as Record<string, unknown>);
+    if (!parsedQuery.ok) {
+      sendValidationError(parsedQuery.issues);
+    }
+
+    const parsedBody = parseEmptyBody(req.body);
+    if (!parsedBody.ok) {
+      sendValidationError(parsedBody.issues);
     }
 
     const requestId =
