@@ -386,9 +386,10 @@ describe('Versioned SQL migrations', () => {
 
         migrate(db);
 
-        expect(getAppliedMigrations(db).map((m) => m.version)).toEqual(
-          [...Array.from({ length: LEGACY_BASELINE_VERSION }, (_, i) => i + 1), 5],
-        );
+        expect(getAppliedMigrations(db).map((m) => m.version)).toEqual([
+          ...Array.from({ length: LEGACY_BASELINE_VERSION }, (_, i) => i + 1),
+          5,
+        ]);
         expect(snapshotSchema(db)).toEqual(expected);
 
         // Pre-existing campaigns become searchable.

@@ -84,7 +84,7 @@ describe('CampaignDetailPanel - Mobile Touch Targets', () => {
 
     // Check that button has proper class for styling
     expect(pledgeButton).toHaveClass('btn-primary');
-    
+
     // Verify button is in form-actions container for mobile styling
     const formActions = pledgeButton.closest('.form-actions');
     expect(formActions).toBeInTheDocument();
@@ -158,7 +158,7 @@ describe('CampaignDetailPanel - Mobile Touch Targets', () => {
     // Amount field should have description
     const amountInput = screen.getByLabelText(/amount/i);
     expect(amountInput).toHaveAttribute('aria-description', 'pledge-amount-help');
-    
+
     const amountHelp = screen.getByText(/enter the amount you want to pledge/i);
     expect(amountHelp).toBeInTheDocument();
     expect(amountHelp).toHaveAttribute('id', 'pledge-amount-help');

@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload backend audit report
         if: always()
-        run: npm audit --json --audit-level=none > /tmp/backend-audit.json 2>&1 || true
+        run: npm audit --json > /tmp/backend-audit.json 2>&1 || true
         working-directory: backend
 
       - name: Upload backend audit artifact

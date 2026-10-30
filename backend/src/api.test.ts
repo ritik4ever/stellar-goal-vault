@@ -13,6 +13,7 @@ vi.hoisted(() => {
 
 import { app } from './index';
 import { createCampaign, initCampaignStore } from './services/campaignStore';
+import { invalidateCampaignCache } from './services/campaignCache';
 import { getDb } from './services/db';
 
 // Deterministic baseline timestamp for integration testing.
@@ -20,7 +21,6 @@ import { getDb } from './services/db';
 // and test flakes across execution environments.
 // 1_700_000_000_000 ms corresponds to 2023-11-14T22:13:20.000Z (1_700_000_000 s).
 const BASE_MOCK_TIME_MS = 1_700_000_000_000;
-const BASE_MOCK_TIME_SEC = Math.floor(BASE_MOCK_TIME_MS / 1000);
 
 let currentMockTimeMs = BASE_MOCK_TIME_MS;
 let dateNowSpy: ReturnType<typeof vi.spyOn> | undefined;
@@ -96,10 +96,13 @@ beforeEach(() => {
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR = `G${'B'.repeat(55)}`;
 
-async function post(apiPath: string, body: unknown) {
+// `headers` must be forwarded: the Idempotency-Key tests call `post(path, body,
+// { 'Idempotency-Key': ... })`, and dropping the third argument silently sent no
+// key, so the middleware never cached and both requests wrote a pledge.
+async function post(apiPath: string, body: unknown, headers: Record<string, string> = {}) {
   const response = await fetch(`${baseUrl}${apiPath}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => null);
@@ -193,7 +196,7 @@ describe('Campaign Lifecycle API', () => {
 
     // Verify no duplicate claim event in history
     const historyRes = await get(`/api/campaigns/${campaignId}/history`);
-    const claimEvents = historyRes.data.events?.filter(
+    const claimEvents = historyRes.data.data?.filter(
       (e: { eventType: string }) => e.eventType === 'claimed',
     );
     expect(claimEvents?.length).toBe(1);
@@ -210,7 +213,7 @@ describe('Campaign Lifecycle API', () => {
 
     // Verify claim event still not duplicated
     const historyRes2 = await get(`/api/campaigns/${campaignId}/history`);
-    const claimEvents2 = historyRes2.data.events?.filter(
+    const claimEvents2 = historyRes2.data.data?.filter(
       (e: { eventType: string }) => e.eventType === 'claimed',
     );
     expect(claimEvents2?.length).toBe(1);
@@ -619,6 +622,10 @@ describe('Campaign maxPerContributor Field', () => {
     expect(secondListedCampaign?.progress.status).toBe('open');
 
     setMockTimeMs(fixedNow + 1);
+    // Progress is derived from the clock, so a 30s-cached list body would still
+    // report "open" here; drop the cache as any real caller would after a
+    // deadline transition.
+    await invalidateCampaignCache();
 
     const oneMillisecondLater = await get('/api/campaigns?page=1&limit=10');
     expect(oneMillisecondLater.status).toBe(200);
@@ -1087,6 +1094,9 @@ describe('Campaign Deadline and Lifecycle Time Invariance', () => {
 
     // Advance time to 1 second past deadline (7201 total from start)
     advanceMockTimeSeconds(3601);
+    // The detail response cached just before this advance still has canClaim
+    // false; invalidate so the recomputed progress is what gets asserted.
+    await invalidateCampaignCache();
     detailRes = await get(`/api/campaigns/${campaignId}`);
     expect(detailRes.data.data.progress.canClaim).toBe(true);
 
@@ -1189,6 +1199,7 @@ describe('Campaign Deadline and Lifecycle Time Invariance', () => {
 
     // Advance time past Campaign A's deadline (advance 1001s)
     advanceMockTimeSeconds(1001);
+    await invalidateCampaignCache();
 
     // Campaign A is now failed; Campaign B is still open
     openList = await get('/api/campaigns?status=open');
