@@ -351,6 +351,7 @@ export function parseCampaignListFilters(query: {
   search?: unknown;
   includeDeleted?: unknown;
   sort?: unknown;
+  sortBy?: unknown;
   order?: unknown;
 }): {
   asset?: string;
@@ -365,9 +366,10 @@ export function parseCampaignListFilters(query: {
     'deadline',
     'pledgedAmount',
     'targetAmount',
+    'percentFunded',
   ];
   const VALID_ORDERS: SortOrder[] = ['asc', 'desc'];
-  const rawSort = normalizeQueryValue(query.sort);
+  const rawSort = normalizeQueryValue(query.sortBy) ?? normalizeQueryValue(query.sort);
   const rawOrder = normalizeQueryValue(query.order);
 
   if (rawSort && !VALID_SORT_FIELDS.includes(rawSort as CampaignSortField)) {

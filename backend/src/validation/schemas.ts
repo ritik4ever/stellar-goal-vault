@@ -508,23 +508,36 @@ export function parseCampaignListQuery(
     }
   }
 
-  const sortValue = normalizeQueryValue(query.sort);
+  const sortByRaw = normalizeQueryValue(query.sortBy);
+  const sortRaw = normalizeQueryValue(query.sort);
   const sortFields: CampaignSortField[] = [
     'createdAt',
     'deadline',
     'pledgedAmount',
     'targetAmount',
+    'percentFunded',
   ];
   let sort: CampaignSortField | undefined;
-  if (sortValue !== undefined) {
-    if (!sortFields.includes(sortValue as CampaignSortField)) {
+  if (sortByRaw !== undefined) {
+    if (!sortFields.includes(sortByRaw as CampaignSortField)) {
+      issues.push({
+        code: 'custom',
+        message: `sortBy must be one of: ${sortFields.join(', ')}`,
+        path: ['sortBy'],
+      });
+    } else {
+      sort = sortByRaw as CampaignSortField;
+    }
+  }
+  if (sortRaw !== undefined) {
+    if (!sortFields.includes(sortRaw as CampaignSortField)) {
       issues.push({
         code: 'custom',
         message: `sort must be one of: ${sortFields.join(', ')}`,
         path: ['sort'],
       });
-    } else {
-      sort = sortValue as CampaignSortField;
+    } else if (sort === undefined) {
+      sort = sortRaw as CampaignSortField;
     }
   }
 
