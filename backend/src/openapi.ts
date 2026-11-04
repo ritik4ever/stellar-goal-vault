@@ -689,7 +689,11 @@ registry.registerPath({
       search: z.string().optional().openapi({ description: 'Alias for q.' }),
       asset: z.string().optional().openapi({ description: 'Comma-separated list of asset codes.' }),
       status: z.enum(['open', 'funded', 'claimed', 'failed']).optional(),
-      sort: z.enum(['createdAt', 'deadline', 'pledgedAmount', 'targetAmount']).optional(),
+      sort: z.enum(['createdAt', 'deadline', 'pledgedAmount', 'targetAmount', 'percentFunded']).optional(),
+      sortBy: z
+        .enum(['createdAt', 'deadline', 'pledgedAmount', 'targetAmount', 'percentFunded'])
+        .optional()
+        .openapi({ description: "Alias for 'sort'." }),
       order: z.enum(['asc', 'desc']).optional(),
       includeDeleted: z.enum(['true', 'false']).optional().openapi({
         description: "Include archived (soft-deleted) campaigns. Alias: 'include_archived'.",

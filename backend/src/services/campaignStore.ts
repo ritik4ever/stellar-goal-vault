@@ -504,7 +504,7 @@ export function calculateProgress(
   };
 }
 
-export type CampaignSortField = 'createdAt' | 'deadline' | 'pledgedAmount' | 'targetAmount';
+export type CampaignSortField = 'createdAt' | 'deadline' | 'pledgedAmount' | 'targetAmount' | 'percentFunded';
 export type SortOrder = 'asc' | 'desc';
 
 export interface ListCampaignsOptions {
@@ -696,6 +696,9 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
       break;
     case 'targetAmount':
       primaryOrder = `campaigns.target_amount ${orderDir}`;
+      break;
+    case 'percentFunded':
+      primaryOrder = `CASE WHEN campaigns.target_amount > 0 THEN (CAST(campaigns.pledged_amount AS REAL) / campaigns.target_amount) ELSE 0 END ${orderDir}`;
       break;
     case 'createdAt':
     default:
