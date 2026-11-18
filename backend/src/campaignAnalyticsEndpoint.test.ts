@@ -31,7 +31,7 @@ let getDb: (typeof import('./services/db'))['getDb'];
 
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR_A = `G${'B'.repeat(55)}`;
-const CONTRIBUTOR_B = `G${'C'.repeat(55)}`;
+const CONTRIBUTOR_P = `G${'D'.repeat(55)}`;
 
 function nowInSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -49,7 +49,7 @@ function seedCampaign(overrides: { targetAmount?: number } = {}) {
 }
 
 beforeAll(async () => {
-  fs.rmpSync(TEST_DB_PATH, { force: true });
+  fs.rmSync(TEST_DB_PATH, { force: true });
 
   ({ createCampaign, addPledge, initCampaignStore } = await import('./services/campaignStore'));
   ({ getDb } = await import('./services/db'));
@@ -59,7 +59,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  fs.rmpSync(TEST_DB_PATH, { force: true });
+  fs.rmSync(TEST_DB_PATH, { force: true });
 });
 
 beforeEach(() => {
@@ -89,14 +89,9 @@ describe('GET /api/campaigns/:id/analytics', () => {
       pledgeCount: 3,
       contributorCount: 2,
     });
-    expect(response.body.meta.pagination).toEqual({
-      page: 1,
-      limit: 20,
-      total: 2,
-      totalPages: 1,
-      hasNextPage: false,
-      hasPreviousPage: false,
-    });
+    // This endpoint is a single aggregate with no paginated collections and it
+    // accepts no query parameters, so it must not advertise pagination metadata.
+    expect(response.body.meta).toBeUndefined();
   });
 
   it('reports the full gap and zero counts for a campaign without pledges', async () => {
@@ -112,77 +107,36 @@ describe('GET /api/campaigns/:id/analytics', () => {
       contributorCount: 0,
       status: 'open',
     });
-    expect(response.body.meta.pagination).toMatchObject({
-      page: 1,
-      limit: 20,
-      total: 0,
-      totalPages: 0,
-      hasNextPage: false,
-      hasPreviousPage: false,
-    });
+    expect(response.body.meta).toBeUndefined();
   });
 
-  it('paginates the contributor list deterministically', async () => {
+  it('rejects pagination parameters because the payload has no paginated collections', async () => {
     const campaign = seedCampaign();
     addPledge(campaign.id, { contributor: CONTRIBUTOR_A, amount: 50 });
     addPledge(campaign.id, { contributor: CONTRIBUTOR_P, amount: 75 });
     addPledge(campaign.id, { contributor: CONTRIBUTOR_A, amount: 100 });
 
-    const first = await request(app).get(
-      `/api/campaigns/${campaign.id}/analytics?page=1&limit=`,
-    );
-    expect(first.status).toBe(200);
-    expect(first.body.data.contributors).toHaveLength(1);
-    expect(first.body.meta.pagination).toEqual({
-      page: 1,
-      limit: 1,
-      total: 2,
-      totalPages: 2,
-      hasNextPage: true,
-      hasPreviousPage: false,
-    });
+    // `?page`/`?limit` used to paginate a contributor list that this read model
+    // no longer returns; silently ignoring them would fake pagination, so they
+    // are rejected — including an oversized limit, which is never clamped.
+    for (const query of ['page=1&limit=', 'page=2&limit=1', 'limit=100000']) {
+      const response = await request(app).get(`/api/campaigns/${campaign.id}/analytics?${query}`);
+      expect(response.status, query).toBe(400);
+      expect(response.body.error.code).toBe('VALIDATION_ERROR');
+      expect(response.body.error.message).toContain('Unsupported query parameter');
+    }
 
-    const second = await request(app).get(
-      `/api/campaigns/${campaign.id}/analytics?page=2&limit=`,
-    );
-    expect(second.status).toBe(200);
-    expect(second.body.data.contributors).toHaveLength(1);
-    expect(second.body.meta.pagination).toEqual({
-      page: 2,
-      limit: 1,
-      total: 2,
-      totalPages: 2,
-      hasNextPage: false,
-      hasPreviousPage: true,
-    });
-
-    // Deterministic ordering: page 1 + page 2 cover the full set with no overlap.
-    const ids = [
-      ...first.body.data.contributors.map((c: { contributor: string }) => c.contributor),
-      ...second.body.data.contributors.map((c: { contributor: string }) => c.contributor),
-    ];
-    expect(new Set(ids).size).toBe(2);
-  });
-
-  it('clamps oversized limits to the maximum page size', async () => {
-    const campaign = seedCampaign();
-    addPledge(campaign.id, { contributor: CONTRIBUTOR_A, amount: 50 });
-
-    const response = await request(app).get(
-      `/api/campaigns/${campaign.id}/analytics?limit=100000`,
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.body.meta.pagination.limit).toBe(100);
+    const ok = await request(app).get(`/api/campaigns/${campaign.id}/analytics`);
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.contributorCount).toBe(2);
+    expect(ok.body.data.pledgeCount).toBe(3);
   });
 
   it('rejects malformed pagination parameters with a 400', async () => {
     const campaign = seedCampaign();
 
     for (const query of ['page=0', 'page=-1', 'page=abc', 'limit=0', 'limit=-5', 'limit=abc']) {
-      const response = await request(app).get(
-        `/api/campaigns/${campaign.id}/analytics?${query}`,
-      );
+      const response = await request(app).get(`/api/campaigns/${campaign.id}/analytics?${query}`);
       expect(response.status, query).toBe(400);
       expect(response.body.error.code).toBe('VALIDATION_ERROR');
     }
@@ -203,9 +157,7 @@ describe('GET /api/campaigns/:id/analytics', () => {
   it('rejects unsupported query parameters instead of silently ignoring them', async () => {
     const campaign = seedCampaign();
 
-    const response = await request(app).get(
-      `/api/campaigns/${campaign.id}/analytics?sort=desc`,
-    );
+    const response = await request(app).get(`/api/campaigns/${campaign.id}/analytics?sort=desc`);
 
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe('VALIDATION_ERROR');

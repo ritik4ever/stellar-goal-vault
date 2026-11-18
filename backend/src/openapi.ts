@@ -92,34 +92,36 @@ const analyticsPaginationSchema = z
   })
   .openapi('AnalyticsPagination');
 
-const apiErrorSchema = z.object({
-  success: z.literal(false),
-  error: z.object({
-    code: z.string().openapi({
-      description: 'Stable machine-readable error code.',
-      example: 'VALIDATION_ERROR',
+const apiErrorSchema = z
+  .object({
+    success: z.literal(false),
+    error: z.object({
+      code: z.string().openapi({
+        description: 'Stable machine-readable error code.',
+        example: 'VALIDATION_ERROR',
+      }),
+      message: z.string().openapi({
+        description: 'Client-safe message; unexpected failures use a generic message.',
+        example: 'page must be a positive integer.',
+      }),
+      details: z
+        .array(
+          z.object({
+            field: z.string().openapi({ example: 'page' }),
+            message: z.string().openapi({ example: 'page must be a positive integer.' }),
+          }),
+        )
+        .optional(),
+      requestId: z.string().optional().openapi({
+        description: 'Correlation ID also returned in the X-Request-Id response header.',
+        example: 'req-123',
+      }),
     }),
-    message: z.string().openapi({
-      description: 'Client-safe message; unexpected failures use a generic message.',
-      example: 'page must be a positive integer.',
-    }),
-    details: z
-      .array(
-        z.object({
-          field: z.string().openapi({ example: 'page' }),
-          message: z.string().openapi({ example: 'page must be a positive integer.' }),
-        }),
-      )
-      .optional(),
-    requestId: z.string().optional().openapi({
-      description: 'Correlation ID also returned in the X-Request-Id response header.',
-      example: 'req-123',
-    }),
-  }),
-}).openapi({
-  description:
-    'Standard error envelope. Internal exception messages, stacks, and secret material are not returned.',
-});
+  })
+  .openapi({
+    description:
+      'Standard error envelope. Internal exception messages, stacks, and secret material are not returned.',
+  });
 
 // ---------------------------------------------------------------------------
 // Domain schemas

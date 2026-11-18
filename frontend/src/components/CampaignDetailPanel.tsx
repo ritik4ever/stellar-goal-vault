@@ -100,12 +100,13 @@ export function CampaignDetailPanel({
   // configured passphrase we must block submission and surface a recovery path.
   const appNetworkPassphrase =
     appConfig?.networkPassphrase ?? appConfig?.soroban?.networkPassphrase ?? null;
-  const activeWalletNetworkPassphrase = walletNetworkPassphrase ?? appConfig?.walletNetworkPassphrase ?? null;
+  const activeWalletNetworkPassphrase =
+    walletNetworkPassphrase ?? appConfig?.walletNetworkPassphrase ?? null;
   const hasNetworkMismatch = Boolean(
     connectedWallet &&
-      appNetworkPassphrase &&
-      activeWalletNetworkPassphrase &&
-      appNetworkPassphrase !== activeWalletNetworkPassphrase,
+    appNetworkPassphrase &&
+    activeWalletNetworkPassphrase &&
+    appNetworkPassphrase !== activeWalletNetworkPassphrase,
   );
   const networkMismatchMessage = hasNetworkMismatch
     ? `Network mismatch: your wallet is on ${networkName({ ...(appConfig ?? {}), networkPassphrase: activeWalletNetworkPassphrase } as AppConfig)} but this app uses ${networkName(appConfig)}. Switch your Freighter network to ${networkName(appConfig)} and reconnect.`
@@ -189,8 +190,7 @@ export function CampaignDetailPanel({
         <div className="section-heading">
           <h2>Campaign not found</h2>
           <p className="muted">
-            The campaign <code>#{notFoundCampaignId}</code> does not exist or may have been
-            removed.
+            The campaign <code>#{notFoundCampaignId}</code> does not exist or may have been removed.
           </p>
         </div>
         <div style={{ marginTop: 24 }}>
@@ -220,7 +220,7 @@ export function CampaignDetailPanel({
   // pledge button instead of only relying on the toast.
   const selectedToken = pledgeToken || activeCampaign.assetCode;
   const availableTokens = Array.from(
-    new Set([ ...(activeCampaign.acceptedTokens ?? []), activeCampaign.assetCode ]),
+    new Set([...(activeCampaign.acceptedTokens ?? []), activeCampaign.assetCode]),
   );
 
   async function submitPledge() {
@@ -442,11 +442,7 @@ export function CampaignDetailPanel({
           <button
             className="btn-primary"
             type="submit"
-            disabled={
-              isSubmitting ||
-              isPledgePending ||
-              !activeCampaign.progress.canPledge
-            }
+            disabled={isSubmitting || isPledgePending || !activeCampaign.progress.canPledge}
           >
             {isSubmitting || isPledgePending ? 'Submitting...' : 'Pledge'}
           </button>

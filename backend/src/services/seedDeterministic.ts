@@ -77,6 +77,16 @@ const BASE_PLEDGES: SeedPledge[] = [
     assetCode: 'XLM',
     createdAt: FIXED_NOW - 150,
   },
+  // Campaign 3 is the claimed fixture (pledged_amount 300); without a matching
+  // pledge row the seed violates the pledged_amount = SUM(non-refunded pledges)
+  // invariant that the accounting tests assert.
+  {
+    campaignId: '3',
+    contributor: `G${'F'.repeat(55)}`,
+    amount: 300,
+    assetCode: 'USDC',
+    createdAt: FIXED_NOW - 800,
+  },
 ];
 
 // Deterministic status/asset rotation used to extend past the 3 base campaigns.

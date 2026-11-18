@@ -50,7 +50,7 @@ const HEALTH_FIELDS = {
 } as const;
 
 /** Keys of the nested `indexer` object on GET /api/health (issue #1024). */
-const INDEXER_HEALTH_FIELDS = {
+const _INDEXER_HEALTH_FIELDS = {
   lastSuccessfulPollTime: 'number_or_null',
   lastKnownLedger: 'number',
   isHealthy: 'boolean',

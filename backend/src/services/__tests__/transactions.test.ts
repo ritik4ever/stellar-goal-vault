@@ -35,7 +35,6 @@ type EventHistoryModule = typeof import('../eventHistory');
 // ── Module references populated in beforeAll ──────────────────────────────────
 let createCampaign: CampaignStoreModule['createCampaign'];
 let initCampaignStore: CampaignStoreModule['initCampaignStore'];
-let addPledge: CampaignStoreModule['addPledge'];
 let getCampaign: CampaignStoreModule['getCampaign'];
 let getPledges: CampaignStoreModule['getPledges'];
 let refundContributor: CampaignStoreModule['refundContributor'];
@@ -53,7 +52,7 @@ const past = (offset = 86400) => Math.floor(Date.now() / 1000) - offset;
 beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
 
-  ({ createCampaign, initCampaignStore, addPledge, getCampaign, getPledges, refundContributor } =
+  ({ createCampaign, initCampaignStore, getCampaign, getPledges, refundContributor } =
     await import('../campaignStore'));
   ({ getDb } = await import('../db'));
   ({ getCampaignHistory } = await import('../eventHistory'));
@@ -107,7 +106,6 @@ function createFailedCampaignWithPledge() {
 describe('refundContributor — transaction atomicity', () => {
   it('commits pledge rows, campaign balance, and event in a single step', () => {
     const campaign = createFailedCampaignWithPledge();
-    const db = getDb();
 
     const before = getCampaign(campaign.id)!;
     expect(before.pledgedAmount).toBe(50);
@@ -135,13 +133,11 @@ describe('refundContributor — transaction atomicity', () => {
 
   it('rolls back pledge and campaign changes when the event insert fails mid-transaction', () => {
     const campaign = createFailedCampaignWithPledge();
-    const db = getDb();
 
     const snapshotPledgedAmount = getCampaign(campaign.id)!.pledgedAmount;
 
     // Inject a fault: make recordEvent throw after the pledge/campaign UPDATEs
     // have executed but before the transaction is committed.
-    const originalRecordEvent = eventHistoryModule.recordEvent;
     vi.spyOn(eventHistoryModule, 'recordEvent').mockImplementationOnce(() => {
       throw new Error('Simulated event insert failure');
     });
@@ -196,8 +192,7 @@ describe('refundContributor — transaction atomicity', () => {
         callCount++;
         if (callCount === 1) {
           // Wrap the real run() to throw once
-          const originalRun = stmt.run.bind(stmt);
-          stmt.run = (...args: Parameters<typeof stmt.run>) => {
+          stmt.run = (..._args: Parameters<typeof stmt.run>) => {
             throw new Error('Simulated campaign balance update failure');
           };
         }

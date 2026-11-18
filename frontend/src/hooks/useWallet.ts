@@ -27,7 +27,9 @@ export interface UseWalletResult {
   isPickerOpen: boolean;
   closePicker: () => void;
   /** Verify the connected wallet's current network matches the expected network. */
-  checkNetwork: (expectedNetworkPassphrase: string) => Promise<{ match: boolean; currentNetwork?: string; expectedNetwork?: string }>;
+  checkNetwork: (
+    expectedNetworkPassphrase: string,
+  ) => Promise<{ match: boolean; currentNetwork?: string; expectedNetwork?: string }>;
 }
 
 export function useWallet(): UseWalletResult {

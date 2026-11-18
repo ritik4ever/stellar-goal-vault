@@ -9,7 +9,6 @@ type DbModule = typeof import('./db');
 type SeedModule = typeof import('./seedDeterministic');
 
 let getDb: DbModule['getDb'];
-let resetDbForTests: DbModule['resetDbForTests'];
 let seedDeterministicState: SeedModule['seedDeterministicState'];
 let parseCountArg: SeedModule['parseCountArg'];
 
@@ -17,7 +16,7 @@ beforeAll(async () => {
   fs.rmSync(TEST_DB_PATH, { force: true });
   fs.rmSync(`${TEST_DB_PATH}-wal`, { force: true });
   fs.rmSync(`${TEST_DB_PATH}-shm`, { force: true });
-  ({ getDb, resetDbForTests } = await import('./db'));
+  ({ getDb } = await import('./db'));
   ({ seedDeterministicState, parseCountArg } = await import('./seedDeterministic'));
 });
 

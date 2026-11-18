@@ -22,7 +22,6 @@ const parseOrigins = (originsStr: string): string[] => {
 // `ALLOWED_ORIGINS` is the documented variable; `CORS_ALLOWED_ORIGINS` is kept
 // as a backwards-compatible alias so existing deployments keep working. See
 // docs/SECURE_CONFIGURATION.md for the secure production default.
-const configuredOrigins = process.env.ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS || '';
 
 const parseInteger = (value: string | undefined, fallback: number): number => {
   if (!value) {
@@ -47,9 +46,14 @@ export const config = {
     .map((value) => value.trim().toUpperCase())
     .filter(Boolean),
 
+  // `||`, not `??`: an empty string (the shape every .env / compose file uses for
+  // "not set") must fall back to the development defaults exactly like an absent
+  // variable. With `??` an empty SOROBAN_RPC_URL stayed empty, so
+  // walletIntegrationReady flipped to false in local development even though the
+  // testnet defaults were supposed to apply.
   sorobanNetworkPassphrase:
-    configuredNetworkPassphrase ?? (useDevelopmentDefaults ? DEFAULT_NETWORK_PASSPHRASE : ''),
-  sorobanRpcUrl: configuredRpcUrl ?? (useDevelopmentDefaults ? DEFAULT_SOROBAN_RPC_URL : ''),
+    configuredNetworkPassphrase || (useDevelopmentDefaults ? DEFAULT_NETWORK_PASSPHRASE : ''),
+  sorobanRpcUrl: configuredRpcUrl || (useDevelopmentDefaults ? DEFAULT_SOROBAN_RPC_URL : ''),
   contractId: process.env.CONTRACT_ID ?? '',
   redisUrl: process.env.REDIS_URL ?? '',
   webhookUrl: process.env.WEBHOOK_URL ?? '',

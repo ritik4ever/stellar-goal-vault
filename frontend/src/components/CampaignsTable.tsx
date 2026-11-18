@@ -290,7 +290,11 @@ export function CampaignsTable({
           </label>
           <label className="field-group" style={{ minWidth: 180 }}>
             <span>Status:</span>
-            <div className="status-filter-tabs" role="group" aria-label="Filter campaigns by status">
+            <div
+              className="status-filter-tabs"
+              role="group"
+              aria-label="Filter campaigns by status"
+            >
               {STATUS_FILTERS.map((filter) => {
                 const isActive = statusFilter === filter.value;
                 const count = filter.value === '' ? statusCounts.all : statusCounts[filter.value];

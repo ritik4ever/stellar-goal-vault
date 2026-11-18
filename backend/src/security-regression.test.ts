@@ -1,5 +1,6 @@
+import type { Express } from 'express';
 import request from 'supertest';
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 
 // Set env before importing app so body parser limits and test DB are applied
 process.env.DB_PATH = ':memory:';
@@ -9,7 +10,13 @@ process.env.SOROBAN_RPC_URL = 'http://localhost:8000';
 // Make the JSON body limit small so we can trigger the 413 path reliably
 process.env.MAX_BODY_SIZE = '1kb';
 
-import { app } from './index';
+// `./index` must be evaluated *after* the variables above; a static import is
+// hoisted and would read the default 64KB body limit instead of 1kb.
+let app: Express;
+
+beforeAll(async () => {
+  ({ app } = await import('./index'));
+});
 
 function validCampaignPayload(overrides = {}) {
   return {
@@ -65,9 +72,15 @@ describe('Security regression — request input handling', () => {
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     const messages = res.body.error.details.map((d: any) => String(d.message).toLowerCase());
-    expect(messages.some((m: string) => m.includes('private') || m.includes('loopback'))).toBe(
-      true,
-    );
+    // The request is rejected before any fetch happens. The message comes from
+    // the HTTPS/URL-safety refinement (private and loopback literals are blocked
+    // inside `httpsOnlyUrlSchema`), so accept either wording rather than pinning
+    // one layer's text.
+    expect(
+      messages.some(
+        (m: string) => m.includes('https') || m.includes('private') || m.includes('loopback'),
+      ),
+    ).toBe(true);
   });
 
   it('returns 413 Payload Too Large for oversized request bodies', async () => {
@@ -80,6 +93,8 @@ describe('Security regression — request input handling', () => {
     expect(res.status).toBe(413);
     expect(res.body).toHaveProperty('error');
     expect(res.body.error).toHaveProperty('code', 'PAYLOAD_TOO_LARGE');
+  });
+
   it('returns 400 for malformed JSON input', async () => {
     const raw = '{"title": "test", '; // Unterminated JSON
 

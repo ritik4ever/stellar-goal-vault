@@ -10,7 +10,7 @@ vi.mock('./ContributorSummary', () => ({ ContributorSummary: () => null }));
 
 const wallet = `G${'B'.repeat(55)}`;
 const appConfig: AppConfig = {
-  allowedAssets: ['USDC', 'XLM',],
+  allowedAssets: ['USDC', 'XLM'],
   soroban: {
     enabled: true,
     contractId: `C${'C'.repeat(55)}`,
@@ -30,7 +30,7 @@ const campaign: Campaign = {
   description: 'Fund a community garden',
   creator: `G${'A'.repeat(55)}`,
   assetCode: 'USDC',
-  acceptedTokens: ['USDC', 'XLM',],
+  acceptedTokens: ['USDC', 'XLM'],
   targetAmount: 1000,
   pledgedAmount: 0,
   deadline: 4102444800,
@@ -78,11 +78,11 @@ describe('Pledge asset selection', () => {
     const onPledge = vi.fn().mockReturnValue(pendingPledge);
     const { user } = renderPledge({ onPledge });
 
-    expect(within(asset()).getAllByRole('option').map((option) => option.textContent)).toEqual([
-      'Default (USDC)',
-      'USDC',
-      'XLM',
-    ]);
+    expect(
+      within(asset())
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['Default (USDC)', 'USDC', 'XLM']);
     await user.clear(amount());
     await user.type(amount(), '12.34');
     await user.selectOptions(asset(), 'XLM');

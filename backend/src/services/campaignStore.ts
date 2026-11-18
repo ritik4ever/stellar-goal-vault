@@ -1,11 +1,11 @@
 import { getDb, initDb } from './db';
-import { getCampaignHistory, recordEvent, BlockchainMetadata } from './eventHistory';
 import { createNotification } from './notificationService';
 import { dispatchWebhook } from './webhookService';
+import { recordEvent, BlockchainMetadata } from './eventHistory';
 
 interface Statement {
-  get(...params: any[]): any;
-  run(...params: any[]): { changes: number };
+  get(...params: unknown[]): unknown;
+  run(...params: unknown[]): { changes: number };
 }
 
 let getCampaignPledgedAmountStmt: Statement | undefined;
@@ -429,7 +429,8 @@ export function initCampaignStore(): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_pledges_transaction_hash ON pledges(transaction_hash);');
 }
 
-function checkContributorLimit(
+// Kept for reference: `addPledge` performs the same limit check inline.
+function _checkContributorLimit(
   campaign: CampaignRecord,
   contributor: string,
   amount: number,

@@ -1,13 +1,30 @@
+import type { Express } from 'express';
 import request from 'supertest';
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect, vi } from 'vitest';
 
-// Set environment before importing app
+// Environment must be in place before `./index` is evaluated. A static import
+// would be hoisted above these assignments, so the app is imported dynamically
+// in `beforeAll` (the same pattern the other HTTP suites use) — otherwise
+// CONTRACT_ID/DB_PATH are read as empty and every health assertion sees a
+// service that looks misconfigured.
 process.env.DB_PATH = ':memory:';
 process.env.NODE_ENV = 'test';
 process.env.CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 process.env.SOROBAN_RPC_URL = 'http://localhost:8000';
 
-import { app } from './index';
+let app: Express;
+
+beforeAll(async () => {
+  // The deep health probe calls Soroban RPC; stub the network so this suite is
+  // deterministic and offline-safe.
+  vi.stubGlobal('fetch', async () => ({ ok: true, status: 200 }));
+  ({ app } = await import('./index'));
+  // `checkDbHealth()` probes the schema, so the store must be initialised here:
+  // in a fresh process without this the database reads as unreachable and the
+  // deep health endpoint answers 503 even though every component is fine.
+  const { initCampaignStore } = await import('./services/campaignStore');
+  initCampaignStore();
+});
 
 describe('Security Headers (Helmet)', () => {
   it('should set Content-Security-Policy header', async () => {

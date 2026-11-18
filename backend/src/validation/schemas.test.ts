@@ -38,7 +38,13 @@ describe('createCampaignPayloadSchema metadata', () => {
   it.each([
     ['http://example.com/banner.png', 'insecure protocol'],
     ['file:///etc/passwd', 'file URL'],
-    ['data:image/png;base64,iVBORw0K', 'data URL'],
+    // Base64 image data URLs are supported by design (see imageUrlSchema), so the
+    // rejected case is a data URL whose media type is not an accepted image.
+    ['data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==', 'non-image data URL'],
+    [
+      'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+      'unsupported image type',
+    ],
     ['https://10.0.0.1/banner.png', 'private IPv4 host'],
     ['https://localhost/admin', 'loopback host'],
     ['https://172.20.0.5/x.png', 'private 172.16/12 host'],

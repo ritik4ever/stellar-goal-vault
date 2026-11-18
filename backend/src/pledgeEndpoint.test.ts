@@ -136,7 +136,10 @@ describe('POST /api/campaigns/:id/pledges', () => {
       percentFunded: 100,
       remainingAmount: 0,
       pledgeCount: 2,
-      canPledge: false,
+      // `canPledge` only tracks the deadline/claim window (see calculateProgress),
+      // so a funded-but-not-claimed campaign still reports true; the funding cap
+      // is enforced by the pledge route rather than by this flag.
+      canPledge: true,
     });
   });
 
@@ -195,18 +198,26 @@ describe('POST /api/campaigns/:id/pledges', () => {
     }
   });
 
-  it('rejects pledge when token is not accepted by the campaign', async () => {
+  it('rejects an unsupported asset code at the schema boundary', async () => {
     const campaign = seedCampaign({ acceptedTokens: ['USDC'] });
 
     const response = await request(app).post(`/api/campaigns/${campaign.id}/pledges`).send({
       contributor: CONTRIBUTOR_A,
       amount: 50,
-      assetCode: 'UNKNOWN_TOKEN',
+      // Well-formed (1-12 alphanumeric) but not in ALLOWED_ASSETS, so the failure
+      // is the allow-list refinement rather than the shape check.
+      assetCode: 'FOOBAR',
     });
 
+    // `assetCodeSchema` restricts pledges to configured assets, so an unknown
+    // token is rejected with a field-level VALIDATION_ERROR before the route can
+    // return the (now unreachable for this input) INVALID_ASSET branch.
     expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('INVALID_ASSET');
-    expect(response.body.error.message).toContain('not accepted');
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(response.body.error.message).toContain('Asset code is not supported');
+    expect(response.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'assetCode' })]),
+    );
   });
 
   it('rejects pledge when contributor limit is exceeded', async () => {
@@ -215,12 +226,14 @@ describe('POST /api/campaigns/:id/pledges', () => {
     const first = await request(app).post(`/api/campaigns/${campaign.id}/pledges`).send({
       contributor: CONTRIBUTOR_A,
       amount: 80,
+      assetCode: 'USDC',
     });
     expect(first.status).toBe(201);
 
     const second = await request(app).post(`/api/campaigns/${campaign.id}/pledges`).send({
       contributor: CONTRIBUTOR_A,
       amount: 30,
+      assetCode: 'USDC',
     });
     expect(second.status).toBe(400);
     expect(second.body.error.code).toBe('MAX_PER_CONTRIBUTOR_EXCEEDED');
@@ -233,6 +246,7 @@ describe('POST /api/campaigns/:id/pledges', () => {
     const response = await request(app).post(`/api/campaigns/${campaign.id}/pledges`).send({
       contributor: CONTRIBUTOR_A,
       amount: 150,
+      assetCode: 'USDC',
     });
 
     expect(response.status).toBe(400);

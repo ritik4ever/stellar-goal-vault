@@ -22,7 +22,7 @@ describe('Countdown with deterministic time control', () => {
 
   it('renders normal countdown when deadline is more than 24 hours away', () => {
     // 3 days, 2 hours, 15 minutes, 30 seconds
-    const deadline = BASE_TEST_TIME_SEC + (3 * 86400) + (2 * 3600) + (15 * 60) + 30;
+    const deadline = BASE_TEST_TIME_SEC + 3 * 86400 + 2 * 3600 + 15 * 60 + 30;
 
     const { container } = render(<Countdown deadline={deadline} />);
     const countdownEl = container.querySelector('.countdown');
@@ -35,7 +35,7 @@ describe('Countdown with deterministic time control', () => {
 
   it('renders urgent countdown when deadline is less than 24 hours away', () => {
     // 12 hours, 30 minutes, 15 seconds
-    const deadline = BASE_TEST_TIME_SEC + (12 * 3600) + (30 * 60) + 15;
+    const deadline = BASE_TEST_TIME_SEC + 12 * 3600 + 30 * 60 + 15;
 
     const { container } = render(<Countdown deadline={deadline} />);
     const countdownEl = container.querySelector('.countdown-urgent');
