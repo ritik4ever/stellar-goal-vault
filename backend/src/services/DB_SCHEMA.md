@@ -115,6 +115,37 @@ It also re-asserts the query-plan indexes and campaign integrity triggers with
 Update the focused database tests (`src/db/versionedMigrations.test.ts`) when a
 schema object or invariant changes.
 
+## Event indexer cursor (`kv_store`)
+
+Migration 006 creates `kv_store (key TEXT PRIMARY KEY, value TEXT NOT NULL)`.
+The Soroban event indexer keeps its resume position there, in two keys:
+
+| Key | Value | Meaning |
+|-----|-------|---------|
+| `soroban_indexer_cursor` | `{"ledger": N, "eventIndex": I}` | Position of the last event fully processed. |
+| `soroban_indexer_last_ledger` | `N` | Kept in sync for older readers. On a database that has only this key, `N` is the next ledger to fetch. |
+
+An event's position is its ledger plus its index within that ledger, so several
+events that share a ledger or a transaction hash each get their own position and
+are indexed once, in chain order. When the RPC omits `event_index`, the indexer
+uses the event's ordinal within the ledger.
+
+`processSorobanEvents()` writes each event and the cursor advance in one
+transaction. A restart therefore cannot leave an event recorded with the cursor
+still behind it, or the cursor past an event that was never recorded. If an
+event cannot be stored, the batch stops, the cursor stays on the last committed
+event, and the next poll resumes from there. Each poll fetches from the cursor's
+own ledger and skips events at or before the cursor, so a batch that stopped
+part-way through a ledger loses nothing.
+
+A database that has only the legacy key has not recorded which events inside
+its ledger were consumed, so the indexer processes that ledger in full; events
+already recorded are recognised by `(txHash, eventIndex)` and skipped.
+
+Known limit: the RPC returns at most 200 events per request. If one ledger holds
+more than 200 events for the contract, polling from that ledger cannot reach the
+rest, because the request has no pagination token yet.
+
 ## Index Strategy
 
 Indexes are added based on concrete query plans for common read/write patterns.
