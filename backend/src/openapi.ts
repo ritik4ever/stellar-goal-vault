@@ -841,7 +841,7 @@ registry.registerPath({
   tags: ['Pledges'],
   summary: 'Create a pledge',
   description:
-    'Creates a pledge for a campaign. Use the Idempotency-Key header to make the request idempotent. Cached responses are returned for 24 hours. Errors use the ApiError envelope with stable codes: VALIDATION_ERROR, NOT_FOUND, INVALID_ASSET, INVALID_CAMPAIGN_STATE, MAX_PER_CONTRIBUTOR_EXCEEDED, CAMPAIGN_FUNDING_CAP_EXCEEDED, RATE_LIMITED, and INTERNAL_SERVER_ERROR. Unexpected failures are logged without exposing internal details.',
+    'Creates a pledge for a campaign. Send an Idempotency-Key header to make the request safe to retry: repeating the same request with the same key replays the original response (X-Idempotency-Cache: HIT) and records no second pledge. The key is scoped to the API key, campaign and contributor, and a response is replayable for 24 hours. Only successful responses are stored, so a failed request can be retried with the same key. Reusing a key with a different request body returns 422 IDEMPOTENCY_KEY_REUSED. An identical request that arrives while the first is still being processed waits for it, and returns 409 IDEMPOTENCY_REQUEST_IN_PROGRESS if the first does not finish within 10 seconds. Without a shared cache (Redis), stored keys are held in memory and are lost when the server restarts. Errors use the ApiError envelope with stable codes: VALIDATION_ERROR, NOT_FOUND, INVALID_ASSET, INVALID_CAMPAIGN_STATE, MAX_PER_CONTRIBUTOR_EXCEEDED, CAMPAIGN_FUNDING_CAP_EXCEEDED, IDEMPOTENCY_REQUEST_IN_PROGRESS, IDEMPOTENCY_KEY_REUSED, RATE_LIMITED, and INTERNAL_SERVER_ERROR. Unexpected failures are logged without exposing internal details.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
     body: {
@@ -856,7 +856,17 @@ registry.registerPath({
     },
     400: validationErrorResponse,
     404: notFoundResponse,
+    409: {
+      description:
+        'An identical request with this Idempotency-Key is still being processed (IDEMPOTENCY_REQUEST_IN_PROGRESS). Retry shortly.',
+      content: { 'application/json': { schema: registeredSchemas.ApiError } },
+    },
     413: payloadTooLargeResponse,
+    422: {
+      description:
+        'The Idempotency-Key was already used with a different request body (IDEMPOTENCY_KEY_REUSED).',
+      content: { 'application/json': { schema: registeredSchemas.ApiError } },
+    },
     429: rateLimitedResponse,
     500: internalServerErrorResponse,
   },

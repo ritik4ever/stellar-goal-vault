@@ -14,6 +14,7 @@ vi.hoisted(() => {
 import { app } from './index';
 import { createCampaign, initCampaignStore } from './services/campaignStore';
 import { getDb } from './services/db';
+import { clearIdempotencyCache } from './services/idempotencyCache';
 
 // Deterministic baseline timestamp for integration testing.
 // Using a fixed epoch timestamp eliminates wall-clock drift, timezone dependencies,
@@ -85,6 +86,10 @@ beforeEach(() => {
     dateNowSpy.mockImplementation(() => currentMockTimeMs);
   }
 
+  // Campaign ids restart at 1 after the deletes below, so a stored response
+  // from an earlier test would otherwise replay against a different campaign.
+  clearIdempotencyCache();
+
   const db = getDb();
   db.prepare(`DELETE FROM campaign_events`).run();
   db.prepare(`DELETE FROM notifications`).run();
@@ -96,10 +101,14 @@ beforeEach(() => {
 const CREATOR = `G${'A'.repeat(55)}`;
 const CONTRIBUTOR = `G${'B'.repeat(55)}`;
 
-async function post(apiPath: string, body: unknown) {
+/**
+ * Extra headers are forwarded. Tests that pass an `Idempotency-Key` here relied
+ * on this; without it the header was dropped and every "replay" was a new request.
+ */
+async function post(apiPath: string, body: unknown, headers: Record<string, string> = {}) {
   const response = await fetch(`${baseUrl}${apiPath}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => null);

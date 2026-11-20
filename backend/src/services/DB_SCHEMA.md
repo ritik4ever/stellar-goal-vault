@@ -146,6 +146,59 @@ Known limit: the RPC returns at most 200 events per request. If one ledger holds
 more than 200 events for the contract, polling from that ledger cannot reach the
 rest, because the request has no pagination token yet.
 
+## Pledge write boundary
+
+`addPledge()` (`campaignStore.ts`) writes three things in one
+`db.transaction(...).immediate()`:
+
+1. the `pledges` row,
+2. the `campaigns.pledged_amount` total, and
+3. the `pledged` row in `campaign_events`, plus a `pledge_limit_reached` row when
+   the pledge reaches the contributor limit.
+
+If any write fails, including the second event after the first succeeded, the
+whole transaction rolls back: no pledge, no change to the total, no history. The
+funding cap, the contributor limit and the campaign state are re-checked inside
+the transaction, so a pledge that loses a race writes nothing. A retry after a
+failure therefore commits exactly once, and a pledge that was rolled back leaves
+nothing to duplicate.
+
+Databases created before versioned migrations keep this behaviour after the
+upgrade. Existing pledges and totals are untouched (old pledges keep `NULL`
+`transaction_hash`), and the first new pledge on an upgraded database commits the
+same three writes together. `schemaUpgradeTransactions.test.ts` covers each
+failure point on a fresh database and on one upgraded from the legacy schema.
+
+### Idempotent pledge requests
+
+`POST /api/campaigns/:id/pledges` accepts an `Idempotency-Key` header
+(`middleware/idempotencyMiddleware.ts`, `services/idempotencyCache.ts`):
+
+| Situation | Result |
+|-----------|--------|
+| Same key, same body, after the first succeeded | Original response replayed (`X-Idempotency-Cache: HIT`); no second pledge. |
+| Same key, different body | `422 IDEMPOTENCY_KEY_REUSED`; the stored response is not replayed. |
+| Same key, same body, first request still running | Waits for it, then replays its response. `409 IDEMPOTENCY_REQUEST_IN_PROGRESS` if it takes longer than 10 s. |
+| Same key from a different contributor | Independent request, so it gets its own pledge. |
+| First request failed (non-2xx) | Nothing is stored; the retry runs normally. |
+| Repeat at 24 h or later | A new request. The age is checked against the stored timestamp, so the boundary is exact (`now - storedAt >= 24 h`). |
+
+The key is scoped to API key, campaign and contributor. Request bodies are
+compared by a hash that ignores field order.
+
+Limits:
+
+- **Restart.** Without Redis the stored keys live in an in-process LRU cache and
+  are lost on restart, so a repeat after a restart is a new request. With Redis
+  the entry survives and is replayed.
+- **Several workers.** Waiting on an in-progress request is per process. Two
+  workers that receive the same key at the same moment do not see each other
+  unless they share a Redis cache, and even then there is a short window before
+  the first response is stored. A durable store written in the same transaction
+  as the pledge would close both gaps.
+- The cache key format changed when the contributor scope was added, so a key
+  stored before the upgrade is not matched afterwards.
+
 ## Index Strategy
 
 Indexes are added based on concrete query plans for common read/write patterns.
