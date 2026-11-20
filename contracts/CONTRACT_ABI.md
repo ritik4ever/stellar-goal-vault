@@ -576,6 +576,8 @@ fn approve_extension(env: Env, campaign_id: u64, caller: Address)
 | No pending request | `"no extension request"` | Low | Call `request_deadline_extension()` first |
 | Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
 
+**Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither.
+
 **Gas estimate:** 20,000 + storage write + conditional deadline apply + event ≈ 30,000 units + 20% headroom = **36,000**
 
 ---
@@ -1072,6 +1074,46 @@ committed only if the full claim transaction succeeds.
 | `new_deadline` | `u64` | Proposed new deadline |
 
 **Emitted by:** `request_deadline_extension`
+
+---
+
+### `ExtensionApproved`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"ExtAppr"` |
+
+**Data** (`ExtensionApproved`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `approver` | `Address` | Contributor who approved |
+| `approval_count` | `u32` | Total approvals after this vote |
+
+**Emitted by:** `approve_extension` (every successful call)
+
+---
+
+### `DeadlineExtended`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Extended"` |
+
+**Data** (`DeadlineExtended`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `old_deadline` | `u64` | Deadline before the change |
+| `new_deadline` | `u64` | Deadline now stored on the campaign |
+
+Emitted once per extension, immediately after the `ExtensionApproved` event for the vote that reached a majority. The deadline decides whether a campaign still accepts pledges or can be claimed or refunded, so a consumer rebuilding campaign availability from events needs this event to see the change.
+
+**Emitted by:** `approve_extension` (only when the vote reaches a majority)
 
 ---
 

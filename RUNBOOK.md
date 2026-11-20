@@ -281,3 +281,41 @@ systemctl status vector
 2. **Rotate and Purge:** If credentials leak into logs, consider them compromised. Rotate them in the vault, restart the services using them, and purge the leaked logs from the aggregation system.
 3. **Patch Redaction Lists:** If a new feature introduces sensitive data, update the `SENSITIVE_HEADERS` and `SENSITIVE_QUERY_PARAMS` sets in `backend/src/middleware/requestId.ts` and deploy a hotfix.
 4. **Fix Route Order:** Ensure that no application routes or body parsers are placed before `requestIdMiddleware` in `index.ts`, as they could short-circuit and miss logging.
+
+---
+
+## 7. Event Indexer Cursor Troubleshooting
+
+### Symptoms
+
+- Campaign history is missing events that exist on-chain.
+- The indexer reports `failing` freshness and the same ledger keeps appearing in errors.
+- After a restart, events appear to be re-read or skipped.
+
+### Normal Signals
+
+- Each indexed event emits one `soroban_event_outcome` log with `outcome` set to `committed`, `rejected`, or `pending`, plus `ledger` and `eventIndex`.
+- Campaign and transaction identifiers appear only in redacted form (`campaignRef`, `txRef`, e.g. `camp...3456`).
+- Each poll ends with a `soroban_indexer_batch` log carrying the `committed`, `rejected`, `recovered`, `skipped` and `pending` counts and the new `cursor`.
+
+### Reading the outcomes
+
+| Log | Meaning | Action |
+|---|---|---|
+| `outcome: committed` | The event was recorded and the cursor moved past it in one transaction. | None. |
+| `outcome: committed`, `reason: recovered_after_restart` | A worker stopped after recording the event but before the cursor update. The event was recognised, not duplicated, and the cursor now moves past it. | None. Expected once after an unclean restart. |
+| `outcome: rejected` with a `reason` | The event can never apply (`unknown_campaign`, `already_reconciled`, `reconcile_failed`). It is skipped so it cannot block the queue. | For `unknown_campaign`, check the campaign exists locally. For `reconcile_failed`, check the preceding `soroban_reconcile_error`. |
+| `outcome: pending` and `soroban_indexer_batch_interrupted` | A storage error stopped the batch. The cursor stays on the last committed event (`resumeLedger`, `resumeEventIndex`) and the next poll retries from there. | Fix the underlying storage error (see section 1 for locks). No data is lost. |
+
+### Diagnosis Commands
+
+```bash
+journalctl -u stellar-goal-vault-backend --since "10 minutes ago" | grep soroban_event_outcome | jq
+sqlite3 "$DB_PATH" "SELECT key, value FROM kv_store WHERE key LIKE 'soroban_indexer%';"
+```
+
+### Remediation Steps
+
+1. **Read the cursor:** `soroban_indexer_cursor` holds the last fully processed `{ledger, eventIndex}`.
+2. **Do not edit the cursor to skip an event.** A `pending` event is retried automatically once the storage error clears. Moving the cursor forward by hand drops that event permanently.
+3. **Replaying a range:** lower the cursor to just before the range. Events already recorded are recognised by `(txHash, eventIndex)` and skipped, so a replay does not duplicate history.

@@ -2,6 +2,15 @@ import axios from 'axios';
 import { getDb } from './db';
 import { recordEvent, BlockchainMetadata, CampaignEventType } from './eventHistory';
 import { reconcileOnChainPledge, getCampaign, updateCampaignMetadata } from './campaignStore';
+import {
+  IndexerCursor,
+  compareCursor,
+  getIndexerCursor,
+  hasCompoundCursor,
+  isAfterCursor,
+  writeIndexerCursor,
+} from './eventIndexerCursor';
+import { redactReference } from './indexerBackfill';
 import dotenv from 'dotenv';
 import { config } from '../config';
 import { logError, logInfo } from '../logger';
@@ -32,13 +41,15 @@ const STALE_LAG_MS = Number(process.env.SOROBAN_INDEXER_STALE_LAG_MS ?? 5 * 60 *
  */
 const FRESH_LAG_MS = Number(process.env.SOROBAN_INDEXER_FRESH_LAG_MS ?? POLL_INTERVAL_MS * 2);
 
-/** Key used to store the last-processed ledger in the kv_store table. */
-const LAST_LEDGER_KEY = 'soroban_indexer_last_ledger';
-
 // ---------------------------------------------------------------------------
 // KV store helpers (persists indexer state across restarts)
 // ---------------------------------------------------------------------------
 
+/**
+ * Migration 006 creates kv_store for new databases. This stays as a guard for
+ * databases opened without running migrations (e.g. a worker pointed at an
+ * older file), where the cursor would otherwise silently fail to persist.
+ */
 function ensureKvStore(): void {
   const db = getDb();
   db.exec(`
@@ -50,33 +61,14 @@ function ensureKvStore(): void {
 }
 
 function getLastProcessedLedger(): number {
-  try {
-    const db = getDb();
-    const row = db.prepare(`SELECT value FROM kv_store WHERE key = ?`).get(LAST_LEDGER_KEY) as
-      { value: string } | undefined;
-    return row ? Number(row.value) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function setLastProcessedLedger(ledger: number): void {
-  try {
-    const db = getDb();
-    db.prepare(
-      `INSERT INTO kv_store (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    ).run(LAST_LEDGER_KEY, String(ledger));
-  } catch (err) {
-    logError(err, { event: 'kv_store_write_error' }, config.logLevel);
-  }
+  return getIndexerCursor().ledger;
 }
 
 // ---------------------------------------------------------------------------
 // Soroban RPC helpers
 // ---------------------------------------------------------------------------
 
-interface SorobanEvent {
+export interface SorobanEvent {
   type?: string;
   contract_id?: string;
   txHash?: string;
@@ -119,27 +111,44 @@ async function fetchSorobanEvents(startLedger: number): Promise<SorobanEvent[]> 
 // Deduplication
 // ---------------------------------------------------------------------------
 
-function isDuplicateEvent(db: ReturnType<typeof getDb>, event: SorobanEvent): boolean {
-  // Primary: deduplicate by transaction hash
+/**
+ * An event is identified by where it sits in the chain, not by its transaction
+ * alone: one transaction can emit several contract events, and all of them
+ * share a txHash. `eventIndex` is the event's position within its ledger.
+ */
+function isDuplicateEvent(
+  db: ReturnType<typeof getDb>,
+  event: SorobanEvent,
+  eventIndex: number,
+): boolean {
   if (event.txHash) {
+    // Indexer rows written before event positions were recorded have a ledger
+    // but no eventIndex, so they can only be matched by txHash. Rows with
+    // neither are not indexer rows: reconcileOnChainPledge records its own
+    // `pledged` row with just a txHash, and that must not hide the other events
+    // in the same transaction.
     const row = db
       .prepare(
         `SELECT 1 FROM campaign_events
-         WHERE json_extract(blockchain_metadata, '$.txHash') = ? LIMIT 1`,
+         WHERE json_extract(blockchain_metadata, '$.txHash') = ?
+           AND (json_extract(blockchain_metadata, '$.eventIndex') = ?
+                OR (json_extract(blockchain_metadata, '$.eventIndex') IS NULL
+                    AND json_extract(blockchain_metadata, '$.ledgerNumber') IS NOT NULL))
+         LIMIT 1`,
       )
-      .get(event.txHash);
+      .get(event.txHash, eventIndex);
     if (row) return true;
   }
 
   // Fallback: deduplicate by ledger + event index
-  if (event.ledger != null && event.event_index != null) {
+  if (event.ledger != null) {
     const row = db
       .prepare(
         `SELECT 1 FROM campaign_events
          WHERE json_extract(blockchain_metadata, '$.ledgerNumber') = ?
            AND json_extract(blockchain_metadata, '$.eventIndex') = ? LIMIT 1`,
       )
-      .get(event.ledger, event.event_index);
+      .get(event.ledger, eventIndex);
     if (row) return true;
   }
 
@@ -179,7 +188,7 @@ interface ParsedEvent {
   ledger: number;
 }
 
-function parseSorobanEvent(event: SorobanEvent): ParsedEvent | null {
+function parseSorobanEvent(event: SorobanEvent, eventIndex: number): ParsedEvent | null {
   if (!event?.type || !event?.contract_id) return null;
   if (event.type !== 'contract' || event.contract_id !== CONTRACT_ID) return null;
 
@@ -229,7 +238,7 @@ function parseSorobanEvent(event: SorobanEvent): ParsedEvent | null {
     txHash: event.txHash,
     ledgerNumber: event.ledger,
     ledgerCloseTime: event.ledgerCloseTime,
-    eventIndex: event.event_index,
+    eventIndex,
     contractId: event.contract_id,
     source: 'soroban',
   };
@@ -254,7 +263,18 @@ function parseSorobanEvent(event: SorobanEvent): ParsedEvent | null {
 // Record upserts — idempotently create/update campaign/pledge records
 // ---------------------------------------------------------------------------
 
-function handleParsedEvent(parsed: ParsedEvent): void {
+export type EventOutcome = 'pending' | 'committed' | 'rejected';
+
+type HandleResult = { outcome: 'committed' } | { outcome: 'rejected'; reason: string };
+
+/**
+ * Applies one parsed event. Returns `committed` once it is recorded, or
+ * `rejected` for events that can never apply (unknown campaign, an already
+ * reconciled pledge). Rejected events are final, so the cursor may move past
+ * them. Storage failures are rethrown instead: the caller rolls the event back
+ * and retries it, so a transient error never turns into a silently dropped event.
+ */
+function handleParsedEvent(parsed: ParsedEvent): HandleResult {
   try {
     if (parsed.eventType === 'metadata_updated') {
       const newMetadata = String(
@@ -287,7 +307,7 @@ function handleParsedEvent(parsed: ParsedEvent): void {
           },
           config.logLevel,
         );
-        return;
+        return { outcome: 'rejected', reason: 'unknown_campaign' };
       }
 
       if (parsed.blockchainMetadata.txHash) {
@@ -301,14 +321,19 @@ function handleParsedEvent(parsed: ParsedEvent): void {
         } catch (reconcileErr: unknown) {
           // TRANSACTION_HASH_CONFLICT means already reconciled — that's fine
           const errorWithCode = reconcileErr as { code?: string };
-          if (errorWithCode?.code !== 'TRANSACTION_HASH_CONFLICT') {
-            logError(
-              reconcileErr,
-              { event: 'soroban_reconcile_error', campaignId: parsed.campaignId },
-              config.logLevel,
-            );
+          if (errorWithCode?.code === 'TRANSACTION_HASH_CONFLICT') {
+            return { outcome: 'rejected', reason: 'already_reconciled' }; // Don't double-record
           }
-          return; // Don't double-record the event
+          // Storage errors (locked database, I/O) are transient: retry the event.
+          if (typeof errorWithCode?.code === 'string' && errorWithCode.code.startsWith('SQLITE_')) {
+            throw reconcileErr;
+          }
+          logError(
+            reconcileErr,
+            { event: 'soroban_reconcile_error', campaignId: parsed.campaignId },
+            config.logLevel,
+          );
+          return { outcome: 'rejected', reason: 'reconcile_failed' };
         }
       }
     }
@@ -336,16 +361,19 @@ function handleParsedEvent(parsed: ParsedEvent): void {
       },
       config.logLevel,
     );
+    return { outcome: 'committed' };
   } catch (err) {
     logError(
       err,
       {
         event: 'soroban_event_handle_error',
-        campaignId: parsed.campaignId,
+        campaignRef: redactReference(parsed.campaignId),
         eventType: parsed.eventType,
       },
       config.logLevel,
     );
+    // Rethrow so the caller's transaction rolls back and the cursor stays put.
+    throw err;
   }
 }
 
@@ -353,34 +381,177 @@ function handleParsedEvent(parsed: ParsedEvent): void {
 // Main poll cycle
 // ---------------------------------------------------------------------------
 
-async function indexSorobanEvents(): Promise<void> {
-  if (!CONTRACT_ID) return;
+export interface BatchResult {
+  /** Events recorded in this batch. */
+  committed: number;
+  /** Events that can never apply and were passed over (see handleParsedEvent). */
+  rejected: number;
+  /** Events already recorded by an earlier run, e.g. before a restart. */
+  recovered: number;
+  /** Events at or before the cursor, or not campaign events. Nothing to do. */
+  skipped: number;
+  /** Events not processed because the batch stopped early; retried next poll. */
+  pending: number;
+  cursor: IndexerCursor;
+}
 
+interface PositionedEvent {
+  event: SorobanEvent;
+  position: IndexerCursor;
+}
+
+/**
+ * Places every event in chain order. RPC events that carry no `event_index`
+ * get their ordinal within the ledger, which is stable because each poll
+ * re-fetches from the start of the cursor's ledger.
+ */
+function positionEvents(events: SorobanEvent[]): PositionedEvent[] {
+  const ordinals = new Map<number, number>();
+  const positioned = events.map((event) => {
+    const ledger = Number(event.ledger ?? 0);
+    const ordinal = ordinals.get(ledger) ?? 0;
+    ordinals.set(ledger, ordinal + 1);
+    const eventIndex = event.event_index != null ? Number(event.event_index) : ordinal;
+    return { event, position: { ledger, eventIndex } };
+  });
+  return positioned.sort((a, b) => compareCursor(a.position, b.position));
+}
+
+function logOutcome(
+  outcome: EventOutcome,
+  position: IndexerCursor,
+  fields: { campaignId?: string; txHash?: string; reason?: string } = {},
+): void {
+  logInfo(
+    'soroban_event_outcome',
+    {
+      outcome,
+      ledger: position.ledger,
+      eventIndex: position.eventIndex,
+      campaignRef: fields.campaignId ? redactReference(fields.campaignId) : undefined,
+      txRef: fields.txHash ? redactReference(fields.txHash) : undefined,
+      reason: fields.reason,
+    },
+    config.logLevel,
+  );
+}
+
+/**
+ * Processes one fetched batch in chain order.
+ *
+ * Each event and its cursor advance are written in a single transaction, so a
+ * restart can never leave an event recorded with the cursor still behind it, or
+ * the cursor ahead of an event that was not recorded. If an event cannot be
+ * stored, the batch stops there, the remaining events are reported as pending,
+ * and the error is rethrown so the scheduler backs off and retries from the
+ * unchanged cursor.
+ *
+ * Events are identified by (ledger, eventIndex), so several events that share
+ * a ledger or a transaction are each indexed exactly once, in chain order.
+ */
+export function processSorobanEvents(events: SorobanEvent[]): BatchResult {
   const db = getDb();
-  const startLedger = getLastProcessedLedger();
+  let cursor = getIndexerCursor();
+  // Legacy databases only remember the next ledger to fetch, not which events
+  // inside it were consumed, so that ledger must be processed in full.
+  const compound = hasCompoundCursor(db);
+  const ordered = positionEvents(events);
 
-  const events = await fetchSorobanEvents(startLedger);
-  if (events.length === 0) return;
+  const result: BatchResult = {
+    committed: 0,
+    rejected: 0,
+    recovered: 0,
+    skipped: 0,
+    pending: 0,
+    cursor,
+  };
 
-  let maxLedger = startLedger;
+  const advance = (position: IndexerCursor): void => {
+    db.transaction(() => writeIndexerCursor(db, position))();
+    cursor = position;
+  };
 
-  for (const event of events) {
-    if (isDuplicateEvent(db, event)) continue;
+  for (let i = 0; i < ordered.length; i += 1) {
+    const { event, position } = ordered[i];
 
-    const parsed = parseSorobanEvent(event);
-    if (!parsed) continue;
+    const alreadyConsumed = compound
+      ? !isAfterCursor(position, cursor)
+      : position.ledger < cursor.ledger;
+    if (alreadyConsumed) {
+      result.skipped += 1;
+      continue;
+    }
 
-    handleParsedEvent(parsed);
+    try {
+      const parsed = parseSorobanEvent(event, position.eventIndex);
+      if (!parsed) {
+        // Not an event this indexer records; step over it so it is not re-read.
+        advance(position);
+        result.skipped += 1;
+        continue;
+      }
 
-    if (parsed.ledger > maxLedger) {
-      maxLedger = parsed.ledger;
+      if (isDuplicateEvent(db, event, position.eventIndex)) {
+        // Recorded by an earlier run that stopped before moving the cursor.
+        advance(position);
+        result.recovered += 1;
+        logOutcome('committed', position, {
+          campaignId: parsed.campaignId,
+          txHash: event.txHash,
+          reason: 'recovered_after_restart',
+        });
+        continue;
+      }
+
+      const handled = db.transaction(() => {
+        const outcome = handleParsedEvent(parsed);
+        writeIndexerCursor(db, position);
+        return outcome;
+      })();
+      cursor = position;
+
+      if (handled.outcome === 'committed') {
+        result.committed += 1;
+        logOutcome('committed', position, { campaignId: parsed.campaignId, txHash: event.txHash });
+      } else {
+        result.rejected += 1;
+        logOutcome('rejected', position, {
+          campaignId: parsed.campaignId,
+          txHash: event.txHash,
+          reason: handled.reason,
+        });
+      }
+    } catch (err) {
+      result.pending = ordered.length - i;
+      result.cursor = cursor;
+      logOutcome('pending', position, {
+        txHash: event.txHash,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      logInfo(
+        'soroban_indexer_batch_interrupted',
+        { ...result, resumeLedger: cursor.ledger, resumeEventIndex: cursor.eventIndex },
+        config.logLevel,
+      );
+      throw err;
     }
   }
 
-  // Persist the highest ledger we processed so we don't re-fetch it next poll
-  if (maxLedger > startLedger) {
-    setLastProcessedLedger(maxLedger + 1); // +1 so next poll starts after this ledger
-  }
+  result.cursor = cursor;
+  logInfo('soroban_indexer_batch', { ...result }, config.logLevel);
+  return result;
+}
+
+async function indexSorobanEvents(): Promise<void> {
+  if (!CONTRACT_ID) return;
+
+  // Start at the cursor's own ledger, not the one after it: the previous batch
+  // may have stopped part-way through that ledger. Events already consumed are
+  // skipped by position inside processSorobanEvents.
+  const events = await fetchSorobanEvents(getLastProcessedLedger());
+  if (events.length === 0) return;
+
+  processSorobanEvents(events);
 }
 
 // ---------------------------------------------------------------------------

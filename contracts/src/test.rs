@@ -9,8 +9,8 @@ mod tests {
     };
 
     use crate::{
-        CampaignClaimed, FeeCollected, StellarGoalVaultContract,
-        StellarGoalVaultContractClient,
+        CampaignClaimed, DeadlineExtended, ExtensionApproved, FeeCollected,
+        StellarGoalVaultContract, StellarGoalVaultContractClient,
     };
     // Keep contract tests independent of the machine clock and local timezone.
     // Soroban timestamps are UTC Unix seconds; epoch zero preserves the mock
@@ -39,6 +39,32 @@ mod tests {
         env.ledger().with_mut(|info| {
             info.timestamp += seconds;
         });
+    }
+
+    /// Events with topics ("Goal", `name`) from the most recent contract call,
+    /// as (position among all of that call's events, data payload). The position
+    /// lets a test assert emission order across different topics.
+    fn goal_events(
+        env: &Env,
+        name: soroban_sdk::Symbol,
+    ) -> std::vec::Vec<(usize, soroban_sdk::xdr::ScVal)> {
+        let topics_vec: soroban_sdk::Vec<soroban_sdk::Val> =
+            (soroban_sdk::symbol_short!("Goal"), name).into_val(env);
+        let topics: soroban_sdk::xdr::ScVec = topics_vec.into();
+        env.events()
+            .all()
+            .events()
+            .iter()
+            .enumerate()
+            .filter_map(|(position, e)| {
+                if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = e.body {
+                    if body.topics == *topics {
+                        return Some((position, body.data.clone()));
+                    }
+                }
+                None
+            })
+            .collect()
     }
 
     /// Builds a synthetic metadata String of `len` bytes for boundary tests.
@@ -1834,6 +1860,145 @@ mod tests {
         assert!(client.get_extension_request(&campaign_id).is_none());
     }
 
+    // ---- #1529: committed deadline changes must be reconstructable from events
+
+    #[test]
+    fn test_approve_extension_emits_approval_then_deadline_extended() {
+        use soroban_sdk::FromVal;
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor1 = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token_id);
+        asset_client.mint(&contributor1, &300);
+        asset_client.mint(&contributor2, &300);
+
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_id.clone()],
+            &600_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "extension events"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor1, &token_id, &300);
+        client.contribute(&campaign_id, &contributor2, &token_id, &300);
+
+        let original_deadline = client.get_campaign(&campaign_id).deadline;
+        let new_deadline = original_deadline + 500;
+        client.request_deadline_extension(&campaign_id, &contributor1, &new_deadline);
+
+        // 2 of 2 contributors approve: majority, so the deadline is committed.
+        client.approve_extension(&campaign_id, &contributor2);
+        let approvals = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        let extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+
+        assert_eq!(approvals.len(), 1, "one approval event is expected");
+        assert_eq!(extended.len(), 1, "one deadline-extended event is expected");
+        assert!(
+            approvals[0].0 < extended[0].0,
+            "the approval is reported before the deadline change it triggers"
+        );
+
+        let expected_approval: soroban_sdk::Val = ExtensionApproved {
+            campaign_id,
+            approver: contributor2.clone(),
+            approval_count: 2,
+        }
+        .into_val(&env);
+        assert_eq!(
+            approvals[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_approval)
+        );
+
+        let expected_extended: soroban_sdk::Val = DeadlineExtended {
+            campaign_id,
+            old_deadline: original_deadline,
+            new_deadline,
+        }
+        .into_val(&env);
+        assert_eq!(
+            extended[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_extended)
+        );
+
+        // The event describes state that is actually committed.
+        assert_eq!(client.get_campaign(&campaign_id).deadline, new_deadline);
+    }
+
+    #[test]
+    fn test_approve_extension_without_majority_emits_only_approval() {
+        use soroban_sdk::FromVal;
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contributors = [
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+        ];
+
+        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token_id);
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_id.clone()],
+            &400_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "no majority"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        for contributor in contributors.iter() {
+            asset_client.mint(contributor, &100);
+            client.contribute(&campaign_id, contributor, &token_id, &100);
+        }
+
+        let original_deadline = client.get_campaign(&campaign_id).deadline;
+        client.request_deadline_extension(
+            &campaign_id,
+            &contributors[0],
+            &(original_deadline + 500),
+        );
+
+        // 2 of 4 is exactly half, not a majority: the vote is recorded, nothing changes.
+        client.approve_extension(&campaign_id, &contributors[1]);
+        let approvals = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        let extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+
+        assert_eq!(approvals.len(), 1);
+        assert!(extended.is_empty(), "no deadline change was committed");
+
+        let expected_approval: soroban_sdk::Val = ExtensionApproved {
+            campaign_id,
+            approver: contributors[1].clone(),
+            approval_count: 2,
+        }
+        .into_val(&env);
+        assert_eq!(
+            approvals[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_approval)
+        );
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            original_deadline
+        );
+        assert!(client.get_extension_request(&campaign_id).is_some());
+    }
+
     #[test]
     #[should_panic(expected = "already voted")]
     fn test_approve_extension_rejects_double_vote() {
@@ -3258,6 +3423,13 @@ mod tests {
 
         assert!(client.get_fee_recipient().is_none());
 
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.set_fee_recipient(&admin, &client.address);
+        }));
+        assert!(result.is_err());
+        assert!(client.get_fee_recipient().is_none());
+    }
+
     #[test]
     fn test_campaign_storage_lifetime_and_availability() {
         let env = test_env();
@@ -3268,8 +3440,11 @@ mod tests {
         client.initialize(&admin, &100_i128);
 
         // Verify storage instance health and availability across settlement and auth boundaries
-        assert_eq!(client.get_version(), 1);
-        assert!(!client.is_paused());
+        assert_eq!(
+            client.get_version(),
+            String::from_str(&env, env!("CARGO_PKG_VERSION"))
+        );
+        assert!(!client.get_paused());
         assert_eq!(client.get_min_contribution(), 100_i128);
     }
 }

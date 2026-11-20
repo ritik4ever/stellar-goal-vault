@@ -232,6 +232,29 @@ pub struct ExtensionRequested {
     pub new_deadline: u64,
 }
 
+/// Emitted for every committed approval of a pending deadline extension.
+/// `approval_count` is the total after this vote, so consumers can rebuild the
+/// tally from events alone.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExtensionApproved {
+    pub campaign_id: u64,
+    pub approver: Address,
+    pub approval_count: u32,
+}
+
+/// Emitted once, when approvals reach a majority and the new deadline is
+/// committed to the campaign. Deadline changes decide whether a campaign still
+/// accepts contributions or can be claimed or refunded, so they must be
+/// reconstructable from events.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeadlineExtended {
+    pub campaign_id: u64,
+    pub old_deadline: u64,
+    pub new_deadline: u64,
+}
+
 /// Emitted when a platform fee is deducted from a campaign claim.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1007,8 +1030,10 @@ impl StellarGoalVaultContract {
         request.approval_count += 1;
 
         // Majority threshold: approval_count * 2 > contributor_count
-        if campaign.contributor_count > 0 && request.approval_count * 2 > campaign.contributor_count
-        {
+        let old_deadline = campaign.deadline;
+        let extended = campaign.contributor_count > 0
+            && request.approval_count * 2 > campaign.contributor_count;
+        if extended {
             campaign.deadline = request.new_deadline;
             env.storage()
                 .persistent()
@@ -1016,6 +1041,28 @@ impl StellarGoalVaultContract {
             env.storage().persistent().remove(&request_key);
         } else {
             env.storage().persistent().set(&request_key, &request);
+        }
+
+        // Events are emitted only after every storage write above, so a failed
+        // transaction never leaves an event for state that was not committed.
+        // The approval is always reported; the deadline change follows it, once.
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("ExtAppr")),
+            ExtensionApproved {
+                campaign_id,
+                approver: caller,
+                approval_count: request.approval_count,
+            },
+        );
+        if extended {
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Extended")),
+                DeadlineExtended {
+                    campaign_id,
+                    old_deadline,
+                    new_deadline: campaign.deadline,
+                },
+            );
         }
     }
 
