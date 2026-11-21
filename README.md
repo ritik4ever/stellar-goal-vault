@@ -432,7 +432,7 @@ Open:
 
 ### Seed the dev database
 
-Wipes and repopulates the local SQLite database with deterministic campaigns and pledges — useful for a fresh, reproducible local state.
+Wipes and repopulates the local SQLite database with deterministic campaigns and pledges — useful for a fresh, reproducible local state. See the [seed runbook](./docs/SEED_RUNBOOK.md) for open / funded / claimed outcomes, double-run behaviour, and failure signals.
 
 ```bash
 cd backend
@@ -446,26 +446,10 @@ Seeded campaign IDs are printed to stdout. The first 3 campaigns always match a 
 set (open, funded, claimed status). Any additional campaigns beyond that cycle
 deterministically through open/funded/claimed statuses so the seed is reproducible run to run.
 
-Build:eed the dev database
-+
-+Wipes and repopulates the local SQLite database with deterministic campaigns and pledges — useful for a fresh, reproducible local state.
-+
-+```bash
-+cd backend
-+npm run seed
-+
-+# Seed a custom number of campaigns (default: 3)
-+npm run seed -- --count 10
-+```
-+
-+Seeded campaign IDs are printed to stdout. The first 3 campaigns always match a fixed
-+set (open, funded, claimed status). Any additional campaigns beyond that cycle
-+deterministically through open/funded/claimed statuses so the seed is reproducible run to run.
-+
- Build:
- 
+Build:
+
 ```bash
- npm run build
+npm run build
 ```
 
 ### Local development with Docker (hot-reload)
