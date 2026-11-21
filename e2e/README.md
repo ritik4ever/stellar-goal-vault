@@ -43,8 +43,12 @@ keys and never require funded accounts.
 
 ```bash
 # Fixture reliability only (no app servers / no live funds):
-npx playwright test --config=playwright.fixtures.config.ts
+npm run test:e2e:fixtures
+# equivalent: npx playwright test --config=playwright.fixtures.config.ts
 
 # Full E2E suite (starts backend + frontend via playwright.config.ts):
 npm run test:e2e
 ```
+
+`playwright.fixtures.config.ts` uses the installed Chrome channel so these
+tests do not depend on downloading Playwright’s Chromium build.

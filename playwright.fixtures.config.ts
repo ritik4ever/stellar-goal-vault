@@ -18,7 +18,9 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // Prefer the locally installed Chrome channel so fixture-only runs do not
+      // require downloading Playwright's Chromium build (flaky on some networks).
+      use: { ...devices['Desktop Chrome'], channel: 'chrome' },
     },
   ],
 });
