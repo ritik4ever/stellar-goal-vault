@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { applyRateLimit, clearRateLimitCache } from './index';
+import { applyRateLimit, clearRateLimitCache, pruneRateLimitBuckets } from './index';
 import { Request, Response } from 'express';
 
 describe('Rate Limiter Middleware', () => {
@@ -22,6 +22,21 @@ describe('Rate Limiter Middleware', () => {
         return mockRes as Response;
       }),
     };
+  });
+
+  it('removes expired buckets before accepting new client keys', () => {
+    const now = Date.now();
+    const middleware = applyRateLimit(2);
+    middleware(mockReq as Request, mockRes as Response, next);
+
+    vi.spyOn(Date, 'now').mockReturnValue(now + 61_000);
+    pruneRateLimitBuckets();
+    vi.restoreAllMocks();
+
+    // The same client receives a fresh window after expiry.
+    nextCalled = false;
+    middleware(mockReq as Request, mockRes as Response, next);
+    expect(nextCalled).toBe(true);
   });
 
   const next = () => {
