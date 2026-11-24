@@ -222,6 +222,54 @@ fn claim_without_signature_fails_and_keeps_funds_in_the_vault() {
 }
 
 #[test]
+fn claim_signed_by_a_non_creator_fails_and_changes_nothing() {
+    let f = fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &TARGET);
+    past_deadline(&f.env);
+    // Alice signs a claim that would pay out to the creator.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.alice,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "claim",
+            args: (f.campaign_id, f.creator.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = f.client.try_claim(&f.campaign_id, &f.creator);
+    assert!(result.is_err(), "a claim signed by a non-creator must fail");
+
+    // No partial payout: campaign, vault balance and creator balance intact.
+    assert!(!f.client.get_campaign(&f.campaign_id).claimed);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, TARGET);
+    assert_eq!(balance(&f, &f.client.address), TARGET);
+    assert_eq!(balance(&f, &f.creator), 0);
+}
+
+#[test]
+fn duplicate_claim_fails_and_leaves_the_post_claim_state_intact() {
+    let f = fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &TARGET);
+    past_deadline(&f.env);
+
+    f.client.claim(&f.campaign_id, &f.creator);
+    assert!(f.client.get_campaign(&f.campaign_id).claimed);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(balance(&f, &f.creator), TARGET);
+
+    // A second claim by the creator must fail without moving any tokens.
+    let result = f.client.try_claim(&f.campaign_id, &f.creator);
+    assert!(result.is_err(), "a duplicate claim must fail");
+
+    assert!(f.client.get_campaign(&f.campaign_id).claimed);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(balance(&f, &f.creator), TARGET);
+}
+
+#[test]
 fn cancel_campaign_requires_exactly_the_creator_signature() {
     let f = fixture();
     f.client.cancel_campaign(&f.campaign_id, &f.creator);
