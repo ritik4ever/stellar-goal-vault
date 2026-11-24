@@ -120,4 +120,55 @@ describe('Environment & Request Input Configuration Validation', () => {
     };
     expect(() => validateEnv(devEnv)).not.toThrow();
   });
+
+  describe('Contract ID & Network Alignment Validation', () => {
+    it('rejects placeholder CONTRACT_ID in any environment', () => {
+      const placeholders = [
+        'YOUR_CONTRACT_ID',
+        'YOUR_DEPLOYED_CONTRACT_ID',
+        'YOUR_MAINNET_CONTRACT_ID',
+      ];
+      for (const placeholder of placeholders) {
+        expect(() => validateEnv({ ...validDevEnv, CONTRACT_ID: placeholder })).toThrow(
+          /CONTRACT_ID cannot be placeholder/,
+        );
+      }
+    });
+
+    it('rejects malformed CONTRACT_ID format', () => {
+      const badIds = [
+        'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN', // Stellar account, not contract
+        'C123', // too short
+        'c' + 'A'.repeat(55), // lowercase c
+        'C' + '0'.repeat(55), // invalid base32 (0 is not in base32 alphabet)
+      ];
+      for (const bad of badIds) {
+        expect(() => validateEnv({ ...validDevEnv, CONTRACT_ID: bad })).toThrow(
+          /is not a valid Soroban contract ID/,
+        );
+      }
+    });
+
+    it('rejects network mismatch when testnet passphrase is used with mainnet RPC URL', () => {
+      const mismatched = {
+        ...validDevEnv,
+        SOROBAN_NETWORK_PASSPHRASE: 'Test SDF Network ; September 2015',
+        SOROBAN_RPC_URL: 'https://soroban-mainnet.stellar.org:443',
+      };
+      expect(() => validateEnv(mismatched)).toThrow(
+        /Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for testnet, but SOROBAN_RPC_URL points to mainnet/,
+      );
+    });
+
+    it('rejects network mismatch when mainnet passphrase is used with testnet RPC URL', () => {
+      const mismatched = {
+        ...validDevEnv,
+        SOROBAN_NETWORK_PASSPHRASE: 'Public Global Stellar Network ; September 2015',
+        SOROBAN_RPC_URL: 'https://soroban-testnet.stellar.org:443',
+      };
+      expect(() => validateEnv(mismatched)).toThrow(
+        /Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for mainnet, but SOROBAN_RPC_URL points to testnet/,
+      );
+    });
+  });
 });

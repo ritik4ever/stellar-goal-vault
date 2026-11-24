@@ -18,6 +18,36 @@ const RECOVERY =
   'Recovery: set CONTRACT_ID, or deploy with `npm run deploy:contract` so ' +
   'contracts/contract_id.txt holds the deployed ID, then rerun `npm run gen:bindings`.';
 
+export const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
+export const MAINNET_PASSPHRASE = 'Public Global Stellar Network ; September 2015';
+export const FUTURENET_PASSPHRASE = 'Test SDF Future Network ; October 2022';
+
+export const DEFAULT_TESTNET_RPC = 'https://soroban-testnet.stellar.org';
+export const DEFAULT_MAINNET_RPC = 'https://soroban-rpc.mainnet.stellar.org';
+export const DEFAULT_FUTURENET_RPC = 'https://rpc-futurenet.stellar.org';
+
+export const SUPPORTED_NETWORKS = [
+  'testnet',
+  'mainnet',
+  'public',
+  'futurenet',
+  'standalone',
+  'local',
+] as const;
+export type SupportedNetwork = (typeof SUPPORTED_NETWORKS)[number];
+
+export interface NetworkConfigInput {
+  network?: string;
+  networkPassphrase?: string;
+  rpcUrl?: string;
+}
+
+export interface ResolvedNetworkConfig {
+  network: string;
+  networkPassphrase: string;
+  rpcUrl: string;
+}
+
 export class BindingsError extends Error {
   constructor(message: string) {
     super(message);
@@ -27,6 +57,80 @@ export class BindingsError extends Error {
 
 export function isValidContractId(id: string): boolean {
   return CONTRACT_ID_PATTERN.test(id);
+}
+
+/**
+ * Validates and resolves network parameters to guarantee consistent network,
+ * passphrase, and RPC endpoint alignment before any network action.
+ */
+export function resolveNetworkConfig(input: NetworkConfigInput = {}): ResolvedNetworkConfig {
+  const rawNetwork = (input.network || 'testnet').trim().toLowerCase();
+  const network = rawNetwork === 'public' ? 'mainnet' : rawNetwork;
+
+  if (!SUPPORTED_NETWORKS.includes(rawNetwork as SupportedNetwork)) {
+    throw new BindingsError(
+      `Unsupported network "${input.network}". Supported networks: testnet, mainnet, futurenet, standalone, local.`,
+    );
+  }
+
+  const passphrase = input.networkPassphrase?.trim();
+  const rpcUrl = input.rpcUrl?.trim();
+
+  if (network === 'testnet') {
+    if (passphrase === MAINNET_PASSPHRASE) {
+      throw new BindingsError(
+        'Network mismatch: testnet was selected but mainnet passphrase was provided.',
+      );
+    }
+    if (rpcUrl && (rpcUrl.includes('mainnet') || rpcUrl.includes('publicnode'))) {
+      throw new BindingsError(
+        'Network mismatch: testnet was selected but a mainnet RPC URL was provided.',
+      );
+    }
+    return {
+      network: 'testnet',
+      networkPassphrase: passphrase || TESTNET_PASSPHRASE,
+      rpcUrl: rpcUrl || DEFAULT_TESTNET_RPC,
+    };
+  }
+
+  if (network === 'mainnet') {
+    if (passphrase === TESTNET_PASSPHRASE) {
+      throw new BindingsError(
+        'Network mismatch: mainnet was selected but testnet passphrase was provided.',
+      );
+    }
+    if (rpcUrl && rpcUrl.includes('testnet')) {
+      throw new BindingsError(
+        'Network mismatch: mainnet was selected but a testnet RPC URL was provided.',
+      );
+    }
+    return {
+      network: 'mainnet',
+      networkPassphrase: passphrase || MAINNET_PASSPHRASE,
+      rpcUrl: rpcUrl || DEFAULT_MAINNET_RPC,
+    };
+  }
+
+  if (network === 'futurenet') {
+    if (passphrase === TESTNET_PASSPHRASE || passphrase === MAINNET_PASSPHRASE) {
+      throw new BindingsError(
+        'Network mismatch: futurenet was selected but a conflicting passphrase was provided.',
+      );
+    }
+    return {
+      network: 'futurenet',
+      networkPassphrase: passphrase || FUTURENET_PASSPHRASE,
+      rpcUrl: rpcUrl || DEFAULT_FUTURENET_RPC,
+    };
+  }
+
+  // standalone / local
+  return {
+    network,
+    networkPassphrase: passphrase || 'Standalone Network ; February 2017',
+    rpcUrl: rpcUrl || 'http://localhost:8000',
+  };
 }
 
 /** First non-empty, non-comment line of an ID file, or null. */
