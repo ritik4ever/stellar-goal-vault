@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDb, initDb, resetDbForTests } from '../db';
 import { addPledge, createCampaign } from '../campaignStore';
 import { clearIdempotencyCache, IDEMPOTENCY_TTL_SECONDS } from '../idempotencyCache';
-import { idempotencyMiddleware } from '../../middleware/idempotencyMiddleware';
+import {
+  createIdempotencyMiddleware,
+  idempotencyMiddleware,
+} from '../../middleware/idempotencyMiddleware';
+import * as loggerModule from '../../logger';
 
 // A stand-in for Redis: the store that survives a process restart.
 const shared = vi.hoisted(() => ({ available: false, map: new Map<string, string>() }));
@@ -32,11 +36,11 @@ let campaignId: string;
 let executions: number;
 let gate: Promise<void> | null;
 
-function buildApp() {
+function buildApp(middleware: express.RequestHandler = idempotencyMiddleware) {
   const app = express();
   app.use(express.json());
   // The same chain as the pledge route: idempotency first, then the real write.
-  app.post('/api/campaigns/:id/pledges', idempotencyMiddleware, async (req, res) => {
+  app.post('/api/campaigns/:id/pledges', middleware, async (req, res) => {
     if (gate) await gate;
     executions += 1;
     try {
@@ -344,5 +348,161 @@ describe('pledge idempotency: across a restart', () => {
     expect(afterRestart.headers['x-idempotency-cache']).toBe('MISS');
     expect(executions).toBe(2);
     expect(pledgeCount()).toBe(2);
+  });
+});
+
+describe('pledge idempotency: observability and multi-worker concurrency (SGV-2026-174)', () => {
+  beforeEach(setup);
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetDbForTests();
+  });
+
+  it('logs pending and committed outcomes with redacted campaign and key references', async () => {
+    const infoSpy = vi.spyOn(loggerModule, 'logInfo');
+    const errorSpy = vi.spyOn(loggerModule, 'logError');
+    const app = buildApp();
+    const rawKey = 'obs-idempotency-key-12345';
+    const body = { contributor: ALICE, amount: 100 };
+
+    await pledge(app, rawKey, body);
+    await pledge(app, rawKey, body);
+
+    const events = infoSpy.mock.calls.filter(
+      ([event]) =>
+        event === 'pledge_idempotency_pending' || event === 'pledge_idempotency_committed',
+    );
+    expect(events).toHaveLength(3);
+
+    const [pendingEvent, pendingMeta] = events[0];
+    expect(pendingEvent).toBe('pledge_idempotency_pending');
+    expect(pendingMeta).toMatchObject({
+      outcome: 'pending',
+      inFlightWait: false,
+    });
+    expect(String((pendingMeta as Record<string, unknown>).campaignRef)).not.toBe(campaignId);
+    expect(String((pendingMeta as Record<string, unknown>).keyRef)).not.toBe(rawKey);
+    expect(JSON.stringify(pendingMeta)).not.toContain(campaignId);
+    expect(JSON.stringify(pendingMeta)).not.toContain(rawKey);
+
+    const [committedEvent, committedMeta] = events[1];
+    expect(committedEvent).toBe('pledge_idempotency_committed');
+    expect(committedMeta).toMatchObject({
+      outcome: 'committed',
+      statusCode: 201,
+      replay: false,
+    });
+
+    const [replayEvent, replayMeta] = events[2];
+    expect(replayEvent).toBe('pledge_idempotency_committed');
+    expect(replayMeta).toMatchObject({
+      outcome: 'committed',
+      statusCode: 201,
+      replay: true,
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs rejected outcomes for key reuse and failed pledge requests', async () => {
+    const infoSpy = vi.spyOn(loggerModule, 'logInfo');
+    const errorSpy = vi.spyOn(loggerModule, 'logError');
+    const app = buildApp();
+
+    const failed = await pledge(app, 'obs-rejected-fail-9999', {
+      contributor: ALICE,
+      amount: 5000,
+    });
+    expect(failed.status).toBe(400);
+
+    await pledge(app, 'obs-rejected-reuse-9999', { contributor: ALICE, amount: 100 });
+    const reused = await pledge(app, 'obs-rejected-reuse-9999', {
+      contributor: ALICE,
+      amount: 250,
+    });
+    expect(reused.status).toBe(422);
+
+    const rejectedCalls = errorSpy.mock.calls.filter(
+      ([, meta]) => (meta as Record<string, unknown>)?.event === 'pledge_idempotency_rejected',
+    );
+    expect(rejectedCalls).toHaveLength(2);
+    expect(rejectedCalls[0][1]).toMatchObject({
+      event: 'pledge_idempotency_rejected',
+      outcome: 'rejected',
+      reason: 'request_failed',
+      statusCode: 400,
+    });
+    expect(rejectedCalls[1][1]).toMatchObject({
+      event: 'pledge_idempotency_rejected',
+      outcome: 'rejected',
+      reason: 'idempotency_key_reused',
+      statusCode: 422,
+    });
+    expect(
+      infoSpy.mock.calls.some(
+        ([event, meta]) =>
+          event === 'pledge_idempotency_committed' &&
+          (meta as Record<string, unknown>)?.keyRef === 'obs-...9999' &&
+          (meta as Record<string, unknown>)?.statusCode === 400,
+      ),
+    ).toBe(false);
+  });
+
+  it('logs two concurrent workers receiving the same key and distinguishes pending, committed, and rejected outcomes', async () => {
+    shared.available = true;
+    const infoSpy = vi.spyOn(loggerModule, 'logInfo');
+    const errorSpy = vi.spyOn(loggerModule, 'logError');
+
+    const workerA = buildApp(createIdempotencyMiddleware({ workerId: 'worker-a' }));
+    const workerB = buildApp(createIdempotencyMiddleware({ workerId: 'worker-b' }));
+
+    let open!: () => void;
+    gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+
+    const rawKey = 'concurrent-workers-key-7777';
+    // Target is 1000; two concurrent 600-USDC requests mean one commits and the other hits the cap.
+    const body = { contributor: ALICE, amount: 600 };
+
+    const reqA = pledge(workerA, rawKey, body).then((r) => r);
+    const reqB = pledge(workerB, rawKey, body).then((r) => r);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    open();
+
+    const [resA, resB] = await Promise.all([reqA, reqB]);
+    expect([resA.status, resB.status].sort()).toEqual([201, 400]);
+    expect(pledgeCount()).toBe(1);
+
+    const pendingWorkers = infoSpy.mock.calls
+      .filter(([event]) => event === 'pledge_idempotency_pending')
+      .map(([, meta]) => (meta as Record<string, unknown>).workerId)
+      .sort();
+    expect(pendingWorkers).toEqual(['worker-a', 'worker-b']);
+
+    const committedLogs = infoSpy.mock.calls.filter(
+      ([event]) => event === 'pledge_idempotency_committed',
+    );
+    expect(committedLogs).toHaveLength(1);
+    expect(committedLogs[0][1]).toMatchObject({
+      outcome: 'committed',
+      statusCode: 201,
+      replay: false,
+    });
+
+    const rejectedLogs = errorSpy.mock.calls.filter(
+      ([, meta]) => (meta as Record<string, unknown>)?.event === 'pledge_idempotency_rejected',
+    );
+    expect(rejectedLogs).toHaveLength(1);
+    expect(rejectedLogs[0][1]).toMatchObject({
+      outcome: 'rejected',
+      reason: 'request_failed',
+      statusCode: 400,
+    });
+
+    // Subsequent retry on workerB replays the committed response from shared storage.
+    const replay = await pledge(workerB, rawKey, body);
+    expect(replay.status).toBe(201);
+    expect(replay.headers['x-idempotency-cache']).toBe('HIT');
+    expect(pledgeCount()).toBe(1);
   });
 });
