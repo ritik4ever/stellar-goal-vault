@@ -1710,6 +1710,44 @@ mod tests {
     }
 
     #[test]
+    fn test_initialize_rejects_zero_min_contribution_atomically() {
+        let env = test_env();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+        let admin = Address::generate(&env);
+
+        let rejected = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.initialize(&admin, &0_i128);
+        }));
+
+        assert!(rejected.is_err(), "zero minimum must be rejected");
+        assert_eq!(client.get_min_contribution(), 100);
+        assert!(
+            env.events().all().events().is_empty(),
+            "invalid deployment must not emit an initialization event"
+        );
+    }
+
+    #[test]
+    fn test_initialize_rejects_negative_min_contribution_atomically() {
+        let env = test_env();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+        let admin = Address::generate(&env);
+
+        let rejected = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.initialize(&admin, &-1_i128);
+        }));
+
+        assert!(rejected.is_err(), "negative minimum must be rejected");
+        assert_eq!(client.get_min_contribution(), 100);
+        assert!(
+            env.events().all().events().is_empty(),
+            "invalid deployment must not emit an initialization event"
+        );
+    }
+
+    #[test]
     #[should_panic(expected = "contribution below minimum")]
     fn test_contribute_rejects_99_stroops() {
         let env = test_env();
@@ -1851,12 +1889,24 @@ mod tests {
 
         let token_client = TokenClient::new(&env, &token);
         let vault = client.address.clone();
+        let pledge_events_before = goal_events(&env, soroban_sdk::symbol_short!("Pledge")).len();
+        let pledged_events_before = goal_events(&env, soroban_sdk::symbol_short!("Pledged")).len();
 
         // One stroop below the configured minimum (500 - 1 = 499) is rejected.
         let rejected = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
             client.contribute(&campaign_id, &contributor, &token, &499);
         }));
         assert!(rejected.is_err());
+        assert_eq!(
+            goal_events(&env, soroban_sdk::symbol_short!("Pledge")).len(),
+            pledge_events_before,
+            "rejected contribution must not emit a pledge event"
+        );
+        assert_eq!(
+            goal_events(&env, soroban_sdk::symbol_short!("Pledged")).len(),
+            pledged_events_before,
+            "rejected contribution must not emit a structured pledge event"
+        );
 
         // The configured minimum survives and nothing was deducted or recorded.
         assert_eq!(client.get_min_contribution(), 500);

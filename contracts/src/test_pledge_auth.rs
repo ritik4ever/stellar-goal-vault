@@ -144,6 +144,35 @@ fn contribute_requires_exactly_the_contributor_signature() {
 }
 
 #[test]
+fn contribute_at_minimum_requires_the_contributor_signature() {
+    let f = fixture();
+    f.client.contribute(&f.campaign_id, &f.alice, &f.token, &1);
+    assert_sole_signer(&f, &f.alice, "contribute");
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 1);
+    assert_eq!(balance(&f, &f.alice), 9_999);
+}
+
+#[test]
+fn contribute_below_minimum_without_signature_changes_nothing() {
+    let f = fixture();
+    enforce_no_signatures(&f);
+
+    let result = f
+        .client
+        .try_contribute(&f.campaign_id, &f.alice, &f.token, &0);
+
+    assert!(result.is_err(), "unsigned below-minimum pledge must fail");
+    assert_eq!(f.client.get_min_contribution(), 1);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        0
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000);
+}
+
+#[test]
 fn contribute_without_signature_fails_and_changes_nothing() {
     let f = fixture();
     enforce_no_signatures(&f);
