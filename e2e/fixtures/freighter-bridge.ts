@@ -90,6 +90,34 @@ export async function installFreighterBridge(
   page: Page,
   options: FreighterBridgeOptions,
 ): Promise<void> {
+  // TypeScript types do not validate values loaded from env/JSON at runtime.
+  // Check before registering any script or cancelling an existing signature.
+  if (!/^G[A-Z2-7]{55}$/.test(options.publicKey)) {
+    throw new Error('Wallet fixture setup: publicKey must be a synthetic G-address.');
+  }
+  if (options.sign !== undefined && !['approve', 'reject', 'delay'].includes(options.sign)) {
+    throw new Error('Wallet fixture setup: sign must be approve, reject, or delay.');
+  }
+  if (options.access !== undefined && !['grant', 'deny'].includes(options.access)) {
+    throw new Error('Wallet fixture setup: access must be grant or deny.');
+  }
+  if (
+    options.networkPassphrase !== undefined &&
+    ![TESTNET_PASSPHRASE, MAINNET_PASSPHRASE].includes(options.networkPassphrase)
+  ) {
+    throw new Error('Wallet fixture setup: networkPassphrase must select testnet or public network.');
+  }
+  if (options.sorobanRpcUrl !== undefined) {
+    let url: URL;
+    try {
+      url = new URL(options.sorobanRpcUrl);
+    } catch {
+      throw new Error('Wallet fixture setup: sorobanRpcUrl must be an absolute HTTP(S) URL.');
+    }
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) {
+      throw new Error('Wallet fixture setup: sorobanRpcUrl must be a credential-free HTTP(S) URL.');
+    }
+  }
   const opts = {
     publicKey: options.publicKey,
     networkPassphrase: options.networkPassphrase ?? TESTNET_PASSPHRASE,

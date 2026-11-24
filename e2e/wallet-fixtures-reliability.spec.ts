@@ -218,6 +218,14 @@ test.describe('Wallet flow E2E fixtures (rerun-safe)', () => {
       .poll(async () => (await readWalletMockSnapshot(page)).pendingCount)
       .toBe(1);
 
+    // Invalid retry setup must fail before cancelling the parked signature
+    // or installing a new bridge that could approve the next request.
+    await expect(
+      mockFreighter(page, CONTRIBUTOR, { sorobanRpcUrl: 'file:///tmp/rpc' }),
+    ).rejects.toThrow('Wallet fixture setup:');
+    expect((await readWalletMockSnapshot(page)).status).toBe('awaiting_signature');
+    expect((await readWalletMockSnapshot(page)).pendingCount).toBe(1);
+
     await resetWalletMock(page);
 
     const response = await cancelled;
