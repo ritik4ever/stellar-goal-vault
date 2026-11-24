@@ -10,7 +10,7 @@ mod tests {
 
     use crate::{
         CampaignClaimed, DataKey, DeadlineExtended, ExtensionApproved, ExtensionRequested,
-        FeeCollected, StellarGoalVaultContract, StellarGoalVaultContractClient,
+        FeeCollected, MetadataUpdated, StellarGoalVaultContract, StellarGoalVaultContractClient,
         CAMPAIGN_STORAGE_TTL_EXTEND_TO,
     };
     // Keep contract tests independent of the machine clock and local timezone.
@@ -2081,6 +2081,205 @@ mod tests {
             &creator,
             &String::from_str(&env, "update on canceled"),
         );
+    }
+
+    // ── #1524: metadata update events describe committed state ────────────────
+    // A consumer that only sees the event log must be able to replay campaign
+    // metadata: `create_campaign` seeds the value, every successful
+    // `update_metadata` publishes exactly one `MetadataUpdated` carrying the
+    // value it replaced (`old_metadata`) and the value now stored
+    // (`new_metadata`), and a rejected call publishes nothing.
+
+    /// The `MetadataUpdated` events published by the most recent contract
+    /// invocation, in publish order.
+    fn metadata_update_events(env: &Env) -> std::vec::Vec<(usize, soroban_sdk::xdr::ScVal)> {
+        goal_events(env, soroban_sdk::symbol_short!("MetaUpd"))
+    }
+
+    #[test]
+    fn test_update_metadata_emits_one_event_with_old_and_new_values() {
+        use soroban_sdk::FromVal;
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let original = String::from_str(&env, "original metadata");
+        let updated = String::from_str(&env, "updated metadata");
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &original,
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        client.update_metadata(&campaign_id, &creator, &updated);
+
+        // `all()` describes the most recent invocation only, so read the log
+        // before any further contract call (the assertions below are calls).
+        let emitted = env.events().all().filter_by_contract(&client.address);
+        assert_eq!(
+            emitted.events().len(),
+            1,
+            "a committed metadata update must publish exactly one event"
+        );
+
+        let updates = metadata_update_events(&env);
+        assert_eq!(updates.len(), 1, "one (\"Goal\", \"MetaUpd\") event");
+        let expected: Val = MetadataUpdated {
+            campaign_id,
+            creator: creator.clone(),
+            old_metadata: original,
+            new_metadata: updated.clone(),
+        }
+        .into_val(&env);
+        assert_eq!(
+            updates[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected)
+        );
+
+        // The event is published after the record is written: `new_metadata`
+        // is what reads back from storage now that the call has succeeded.
+        assert_eq!(client.get_campaign(&campaign_id).metadata, updated);
+    }
+
+    #[test]
+    fn test_metadata_update_events_replay_to_committed_metadata() {
+        use soroban_sdk::FromVal;
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let created_metadata = String::from_str(&env, "v1");
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &created_metadata.clone(),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        // A replay starts from the metadata seeded by the creation event and
+        // applies each committed update in order.
+        let mut replayed = created_metadata;
+
+        for next in [String::from_str(&env, "v2"), String::from_str(&env, "v3")] {
+            client.update_metadata(&campaign_id, &creator, &next);
+
+            let updates = metadata_update_events(&env);
+            assert_eq!(updates.len(), 1, "one event per committed update");
+
+            let expected: Val = MetadataUpdated {
+                campaign_id,
+                creator: creator.clone(),
+                old_metadata: replayed.clone(),
+                new_metadata: next.clone(),
+            }
+            .into_val(&env);
+            assert_eq!(
+                updates[0].1,
+                soroban_sdk::xdr::ScVal::from_val(&env, &expected),
+                "old_metadata must be the value the event chain already holds"
+            );
+
+            replayed = next;
+        }
+
+        // Replaying every event lands exactly on the committed state.
+        assert_eq!(replayed, client.get_campaign(&campaign_id).metadata);
+    }
+
+    #[test]
+    fn test_rejected_metadata_update_commits_nothing_and_emits_no_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let original = String::from_str(&env, "original metadata");
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &original.clone(),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        // A non-creator caller is rejected before any write.
+        assert!(
+            client
+                .try_update_metadata(&campaign_id, &attacker, &String::from_str(&env, "hacked"))
+                .is_err(),
+            "a non-creator must not update metadata"
+        );
+        assert!(
+            env.events()
+                .all()
+                .filter_by_contract(&client.address)
+                .events()
+                .is_empty(),
+            "a rejected update must not publish a metadata event"
+        );
+        assert_eq!(client.get_campaign(&campaign_id).metadata, original);
+
+        // The deadline ledger is already past eligibility, so the update is
+        // rejected and the previous value stays committed.
+        let deadline = client.get_campaign(&campaign_id).deadline;
+        env.ledger().set_timestamp(deadline);
+        assert!(
+            client
+                .try_update_metadata(&campaign_id, &creator, &String::from_str(&env, "too late"))
+                .is_err(),
+            "metadata must not change once the deadline is reached"
+        );
+        assert!(
+            env.events()
+                .all()
+                .filter_by_contract(&client.address)
+                .events()
+                .is_empty(),
+            "a rejected update must not publish a metadata event"
+        );
+        assert_eq!(client.get_campaign(&campaign_id).metadata, original);
+
+        // A canceled campaign is frozen: the stored value is unchanged.
+        client.cancel_campaign(&campaign_id, &creator);
+        assert!(
+            client
+                .try_update_metadata(&campaign_id, &creator, &String::from_str(&env, "canceled"))
+                .is_err(),
+            "a canceled campaign must not accept metadata updates"
+        );
+        assert!(
+            env.events()
+                .all()
+                .filter_by_contract(&client.address)
+                .events()
+                .is_empty(),
+            "a rejected update must not publish a metadata event"
+        );
+        assert_eq!(client.get_campaign(&campaign_id).metadata, original);
     }
 
     // ── #192: deadline extension governance tests ─────────────────────────────
