@@ -393,6 +393,13 @@ accepted tokens plus the new contribution amount cannot exceed the cap:
 - Atomic rollback ensures no tokens move, balances remain unchanged, and no pledge events are emitted.
 - The contributor's cumulative recorded pledge remains strictly within the cap.
 
+**Per-contributor cap authority enforcement (SGV-2026-118):**
+Pledges made to a capped campaign strictly require the contributor's explicit authorization (`contributor.require_auth()`).
+- Neither the campaign creator nor the contract administrator may sign on behalf of a contributor or bypass the per-contributor cap.
+- Unsigned calls and calls signed by unauthorized parties are rejected before any balance deduction, storage update, or token movement.
+- Multiple contributions summing exactly to the cap require valid contributor authorization for each pledge.
+- Over-cap attempts following prior failures or boundary pledges are atomically rejected, preserving contributor balances, vault escrow, and campaign valuation without releasing funds.
+
 **Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
 
 **Indexer note:** The `CampaignPledgedEvent` event is emitted exactly once per successful `contribute` call, after all validations, token transfer, and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Pledged")` and use `campaign_id` + `contributor` + `pledged_at` for deduplication and reconstructing pledge state without auxiliary contract reads.
@@ -672,6 +679,14 @@ fn approve_extension(env: Env, campaign_id: u64, caller: Address)
 **Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither. When the extension is committed, the votes recorded for that request are cleared so the next request starts a fresh tally.
 
 **Gas estimate:** 20,000 + storage write + conditional deadline apply + event ≈ 30,000 units + 20% headroom = **36,000**
+
+#### Deadline Extension Vote Boundaries (SGV-2026-126)
+
+- **Smallest Strict Majority Threshold:** An extension proposal is approved when `approval_count * 2 > contributor_count` ($\lfloor N/2 \rfloor + 1$ distinct contributor votes).
+  - For $N=3$ contributors, 2 approvals commit the extension (1 approval leaves the proposal pending).
+  - For $N=4$ contributors, 3 approvals commit the extension (2 approvals is a 50% tie and remains pending).
+- **Checked Arithmetic on Governance Counters:** Calculation of vote majorities (`checked_mul`), approval counts (`checked_add`), and maximum allowed extension durations (`checked_add`) use checked integer arithmetic to eliminate overflow and wrapping risks.
+- **Auditable Unique Votes & Single Extension:** Each distinct contributor can vote at most once per proposal round (`ExtensionVote` deduplication). Once the smallest majority is reached, the extension commits immediately, the pending request is removed, and subsequent approvals are rejected with `"no extension request"`, preserving exactly one valid extension per round.
 
 ---
 
@@ -1438,6 +1453,12 @@ Campaign accepts multiple token types.
 - **Different Precision Support:** Tokens with different precisions (e.g., native XLM at 7 decimals and USDC at 6/7 decimals) are managed in their exact native integer base units (stroops/units).
 - **Checked Integer Arithmetic:** All pledge additions, valuation sums, contributor cap checks, platform fee deductions, and refund calculations use checked arithmetic (`checked_add`, `checked_sub`, `checked_mul`), eliminating overflow and underflow vulnerabilities.
 - **Exact Transfers:** Claims and refunds operate on per-token balance boundaries, transferring exact integer amounts with zero rounding loss.
+
+#### Multi-Token Failure Atomicity (SGV-2026-122)
+
+- **Atomic Rejection of Unaccepted Assets:** Any attempt to pledge in an unaccepted token (`!campaign.accepted_tokens.contains(token)`) fails atomically with `"token not accepted by this campaign"` before storage writes or token transfers occur.
+- **Isolated State Integrity:** Injecting an unaccepted asset payment before, between, or after valid pledges in accepted tokens leaves contributor balances, accepted token escrows, campaign pledged valuation, and contributor counts unchanged.
+- **Zero Partial Pledge or Payout:** Failed unaccepted asset invocations create no partial pledge entries and leave no unaccepted funds in the vault. Campaign settlement (`claim` and `refund`) operates exclusively over accepted tokens, ensuring exact payouts and fee deductions with zero leakage or stranded assets.
 
 ### Example 5: Read-Only Queries
 

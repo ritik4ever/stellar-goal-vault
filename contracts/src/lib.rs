@@ -813,7 +813,7 @@ impl StellarGoalVaultContract {
                     .checked_add(prev_c)
                     .unwrap_or_else(|| panic!("per-contributor cap exceeded"));
             }
-            if already.checked_add(amount).map_or(true, |sum| sum > cap) {
+            if already.checked_add(amount).is_none_or(|sum| sum > cap) {
                 panic!("per-contributor cap exceeded");
             }
         }
@@ -834,7 +834,10 @@ impl StellarGoalVaultContract {
             .get(&has_contributed_key)
             .unwrap_or(false);
         if !has_contributed {
-            campaign.contributor_count += 1;
+            campaign.contributor_count = campaign
+                .contributor_count
+                .checked_add(1)
+                .unwrap_or_else(|| panic!("arithmetic overflow"));
             env.storage().persistent().set(&has_contributed_key, &true);
             // Track contributor for refund_all
             let contributors_key = DataKey::Contributors(campaign_id);
@@ -968,7 +971,11 @@ impl StellarGoalVaultContract {
         if new_deadline <= campaign.deadline {
             panic!("new deadline must be after current deadline");
         }
-        if new_deadline > campaign.created_at + MAX_CAMPAIGN_DURATION_SECONDS {
+        let max_deadline = match campaign.created_at.checked_add(MAX_CAMPAIGN_DURATION_SECONDS) {
+            Some(max) => max,
+            None => panic!("new deadline exceeds maximum campaign duration"),
+        };
+        if new_deadline > max_deadline {
             panic!("new deadline exceeds maximum campaign duration");
         }
 
@@ -1005,7 +1012,10 @@ impl StellarGoalVaultContract {
         // reaches the threshold so the emitted events match stored state.
         let old_deadline = campaign.deadline;
         let extended = campaign.contributor_count > 0
-            && request.approval_count * 2 > campaign.contributor_count;
+            && request
+                .approval_count
+                .checked_mul(2)
+                .is_none_or(|doubled| doubled > campaign.contributor_count);
         if extended {
             campaign.deadline = request.new_deadline;
             env.storage()
@@ -1088,12 +1098,18 @@ impl StellarGoalVaultContract {
             .unwrap_or_else(|| panic!("no extension request"));
 
         env.storage().persistent().set(&vote_key, &true);
-        request.approval_count += 1;
+        request.approval_count = request
+            .approval_count
+            .checked_add(1)
+            .unwrap_or_else(|| panic!("arithmetic overflow"));
 
         // Majority threshold: approval_count * 2 > contributor_count
         let old_deadline = campaign.deadline;
         let extended = campaign.contributor_count > 0
-            && request.approval_count * 2 > campaign.contributor_count;
+            && request
+                .approval_count
+                .checked_mul(2)
+                .is_none_or(|doubled| doubled > campaign.contributor_count);
         if extended {
             campaign.deadline = request.new_deadline;
             env.storage()

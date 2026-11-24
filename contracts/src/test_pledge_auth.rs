@@ -847,3 +847,204 @@ fn unauthorized_update_metadata_around_pledge_and_settlement_leaves_balances_and
     assert_eq!(balance(&f, &f.client.address), 0);
     assert_eq!(balance(&f, &f.creator), TARGET);
 }
+
+// ── SGV-2026-118: per-contributor cap authority enforcement ──────────────────
+// Scope:
+// - Verify creator, contributor, or admin authority relevant to two contributions
+//   that sum exactly to the cap and a third contribution exceeding the cap after
+//   a previous failure.
+// - Verify unauthorized calls cannot change campaigns or release funds.
+#[test]
+fn contribute_with_per_contributor_cap_enforces_contributor_authority_at_boundaries() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StellarGoalVaultContract, ());
+    let client = StellarGoalVaultContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    let token = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let minter = StellarAssetClient::new(&env, &token);
+    minter.mint(&alice, &10_000);
+    minter.mint(&bob, &10_000);
+
+    client.initialize(&admin, &1);
+
+    let cap = 500_i128;
+    let campaign_id = client.create_campaign(
+        &creator,
+        &soroban_sdk::vec![&env, token.clone()],
+        &2_000_i128,
+        &(env.ledger().timestamp() + DURATION),
+        &String::from_str(&env, "capped auth"),
+        &cap,
+        &soroban_sdk::vec![&env],
+        &0_u32,
+    );
+
+    let f = Fixture {
+        env,
+        client,
+        admin,
+        creator,
+        alice,
+        bob,
+        token,
+        campaign_id,
+    };
+
+    // 1. Unauthorized unsigned pledge attempt fails and changes nothing.
+    enforce_no_signatures(&f);
+    assert!(
+        f.client
+            .try_contribute(&f.campaign_id, &f.alice, &f.token, &200)
+            .is_err(),
+        "unsigned contribute must fail"
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+
+    // 2. Unauthorized attempt: Creator signs on behalf of Alice. Fails and changes nothing.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.creator,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "contribute",
+            args: (f.campaign_id, f.alice.clone(), f.token.clone(), 200_i128).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        f.client
+            .try_contribute(&f.campaign_id, &f.alice, &f.token, &200)
+            .is_err(),
+        "creator cannot sign Alice's pledge"
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+
+    // 3. Unauthorized attempt: Admin signs on behalf of Alice. Fails and changes nothing.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.admin,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "contribute",
+            args: (f.campaign_id, f.alice.clone(), f.token.clone(), 200_i128).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        f.client
+            .try_contribute(&f.campaign_id, &f.alice, &f.token, &200)
+            .is_err(),
+        "admin cannot sign Alice's pledge"
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+
+    // 4. First contribution: Alice contributes 200 with valid signature.
+    f.env.mock_all_auths();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &200);
+    assert_sole_signer(&f, &f.alice, "contribute");
+    assert_eq!(balance(&f, &f.alice), 9_800);
+    assert_eq!(balance(&f, &f.client.address), 200);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 200);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        200
+    );
+
+    // 5. Prior failure: Attempting a pledge that exceeds the cap (200 + 400 = 600 > 500) fails atomically.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.alice,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "contribute",
+            args: (f.campaign_id, f.alice.clone(), f.token.clone(), 400_i128).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        f.client
+            .try_contribute(&f.campaign_id, &f.alice, &f.token, &400)
+            .is_err(),
+        "contribution exceeding cap must fail"
+    );
+    assert_eq!(balance(&f, &f.alice), 9_800);
+    assert_eq!(balance(&f, &f.client.address), 200);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 200);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        200
+    );
+
+    // 6. Second contribution: Alice contributes 300, summing exactly to the cap (200 + 300 = 500 == cap).
+    f.env.mock_all_auths();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &300);
+    assert_sole_signer(&f, &f.alice, "contribute");
+    assert_eq!(balance(&f, &f.alice), 9_500);
+    assert_eq!(balance(&f, &f.client.address), 500);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 500);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        500
+    );
+
+    // 7. Third contribution exceeding cap after previous failure: Alice tries to pledge 1 (500 + 1 = 501 > 500).
+    f.env.mock_auths(&[MockAuth {
+        address: &f.alice,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "contribute",
+            args: (f.campaign_id, f.alice.clone(), f.token.clone(), 1_i128).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        f.client
+            .try_contribute(&f.campaign_id, &f.alice, &f.token, &1)
+            .is_err(),
+        "pledge exceeding cap must fail atomically"
+    );
+    assert_eq!(balance(&f, &f.alice), 9_500);
+    assert_eq!(balance(&f, &f.client.address), 500);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 500);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        500
+    );
+
+    // 8. Unauthorized calls cannot release funds or change campaigns.
+    // E.g. Creator cannot claim an active/underfunded campaign.
+    f.env.mock_all_auths();
+    assert!(
+        f.client.try_claim(&f.campaign_id, &f.creator).is_err(),
+        "active campaign cannot be claimed"
+    );
+    // Non-creator/admin cannot claim.
+    assert!(
+        f.client.try_claim(&f.campaign_id, &f.admin).is_err(),
+        "admin cannot claim campaign"
+    );
+    // Non-contributor cannot refund.
+    assert!(
+        f.client.try_refund(&f.campaign_id, &f.bob).is_err(),
+        "bob has not contributed"
+    );
+    assert_eq!(balance(&f, &f.client.address), 500);
+}

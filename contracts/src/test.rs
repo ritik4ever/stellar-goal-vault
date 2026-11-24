@@ -4613,4 +4613,459 @@ mod tests {
         // The contributor funded the campaign but is not its creator
         client.claim(&campaign_id, &contributor);
     }
+
+    // ── SGV-2026-122: Multi-token accounting failure atomicity ────────────────
+    // Scope:
+    // - Inject a payment in an unaccepted asset around storage and token calls.
+    // - Failed calls leave valid storage and balances with no partial pledge or payout.
+    // - Verify atomicity across active multi-token accounting during pledges, claim,
+    //   and refund settlement flows.
+    #[test]
+    fn test_multi_token_accounting_failures_are_atomic_when_injecting_unaccepted_asset() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let eve = Address::generate(&env);
+
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let xlm_amount = 40_000_000_i128;
+        let usdc_amount = 60_000_000_i128;
+        let unaccepted_amount = 15_000_000_i128;
+
+        let xlm_token = deploy_token(&env, &admin, &alice, xlm_amount);
+        let usdc_token = deploy_token(&env, &admin, &bob, usdc_amount);
+        let unaccepted_token = deploy_token(&env, &admin, &eve, unaccepted_amount);
+
+        let target_amount = 100_000_000_i128;
+        let deadline = env.ledger().timestamp() + 1_000;
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, xlm_token.clone(), usdc_token.clone()],
+            &target_amount,
+            &deadline,
+            &String::from_str(&env, "Multi-token atomicity test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let xlm_client = TokenClient::new(&env, &xlm_token);
+        let usdc_client = TokenClient::new(&env, &usdc_token);
+        let unaccepted_client = TokenClient::new(&env, &unaccepted_token);
+        let vault = client.address.clone();
+
+        // 1. Inject unaccepted asset payment BEFORE any accepted pledges
+        let fail_pre = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &eve, &unaccepted_token, &unaccepted_amount);
+        }));
+        assert!(fail_pre.is_err(), "Payment in unaccepted asset must fail");
+        assert_eq!(unaccepted_client.balance(&eve), unaccepted_amount);
+        assert_eq!(unaccepted_client.balance(&vault), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_contributor_count(&campaign_id), 0);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &unaccepted_token),
+            0
+        );
+
+        // 2. Alice pledges valid accepted token (XLM)
+        client.contribute(&campaign_id, &alice, &xlm_token, &xlm_amount);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &xlm_token),
+            xlm_amount
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &usdc_token),
+            0
+        );
+        assert_eq!(
+            client.get_campaign(&campaign_id).pledged_amount,
+            xlm_amount
+        );
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+        assert_eq!(xlm_client.balance(&vault), xlm_amount);
+
+        // 3. Inject unaccepted asset payment BETWEEN valid accepted pledges
+        let fail_mid = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &eve, &unaccepted_token, &5_000_000_i128);
+        }));
+        assert!(
+            fail_mid.is_err(),
+            "Payment in unaccepted asset between pledges must fail"
+        );
+        assert_eq!(unaccepted_client.balance(&eve), unaccepted_amount);
+        assert_eq!(unaccepted_client.balance(&vault), 0);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &unaccepted_token),
+            0
+        );
+        assert_eq!(
+            client.get_contribution(&campaign_id, &eve, &unaccepted_token),
+            0
+        );
+        // Valid accounting remains strictly untouched
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &xlm_token),
+            xlm_amount
+        );
+        assert_eq!(
+            client.get_campaign(&campaign_id).pledged_amount,
+            xlm_amount
+        );
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+
+        // 4. Bob pledges valid accepted token (USDC), reaching target
+        client.contribute(&campaign_id, &bob, &usdc_token, &usdc_amount);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &xlm_token),
+            xlm_amount
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &usdc_token),
+            usdc_amount
+        );
+        assert_eq!(
+            client.get_campaign(&campaign_id).pledged_amount,
+            target_amount
+        );
+        assert_eq!(client.get_contributor_count(&campaign_id), 2);
+
+        // 5. Inject unaccepted asset payment AFTER funding target is reached
+        let fail_post = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &eve, &unaccepted_token, &1_000_000_i128);
+        }));
+        assert!(
+            fail_post.is_err(),
+            "Payment in unaccepted asset after target must fail"
+        );
+        assert_eq!(unaccepted_client.balance(&eve), unaccepted_amount);
+        assert_eq!(unaccepted_client.balance(&vault), 0);
+        assert_eq!(
+            client.get_campaign(&campaign_id).pledged_amount,
+            target_amount
+        );
+
+        // 6. Settle via claim: payout occurs strictly on accepted tokens
+        advance_time(&env, 1_001);
+        client.claim(&campaign_id, &creator);
+
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &xlm_token),
+            0
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &usdc_token),
+            0
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &unaccepted_token),
+            0
+        );
+        assert_eq!(unaccepted_client.balance(&vault), 0);
+        assert_eq!(unaccepted_client.balance(&creator), 0); // No unaccepted asset payout
+
+        assert_eq!(xlm_client.balance(&creator), xlm_amount);
+        assert_eq!(usdc_client.balance(&creator), usdc_amount);
+    }
+
+    #[test]
+    fn test_multi_token_accounting_refund_atomicity_with_unaccepted_asset_injection() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let eve = Address::generate(&env);
+
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let xlm_amount = 20_000_000_i128;
+        let usdc_amount = 30_000_000_i128;
+        let unaccepted_amount = 10_000_000_i128;
+
+        let xlm_token = deploy_token(&env, &admin, &alice, xlm_amount);
+        let usdc_token = deploy_token(&env, &admin, &bob, usdc_amount);
+        let unaccepted_token = deploy_token(&env, &admin, &eve, unaccepted_amount);
+
+        let target_amount = 100_000_000_i128;
+        let deadline = env.ledger().timestamp() + 1_000;
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, xlm_token.clone(), usdc_token.clone()],
+            &target_amount,
+            &deadline,
+            &String::from_str(&env, "Refund atomicity test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        client.contribute(&campaign_id, &alice, &xlm_token, &xlm_amount);
+        client.contribute(&campaign_id, &bob, &usdc_token, &usdc_amount);
+
+        // Cancel campaign so refund is enabled
+        client.cancel_campaign(&campaign_id, &creator);
+
+        // Attempt injecting unaccepted token payment on canceled campaign
+        let fail_canceled =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.contribute(&campaign_id, &eve, &unaccepted_token, &unaccepted_amount);
+            }));
+        assert!(
+            fail_canceled.is_err(),
+            "Payment on canceled campaign with unaccepted token must fail"
+        );
+
+        // Alice refunds XLM
+        client.refund(&campaign_id, &alice);
+        assert_eq!(
+            TokenClient::new(&env, &xlm_token).balance(&alice),
+            xlm_amount
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &xlm_token),
+            0
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &usdc_token),
+            usdc_amount
+        );
+
+        // Bob refunds USDC
+        client.refund(&campaign_id, &bob);
+        assert_eq!(
+            TokenClient::new(&env, &usdc_token).balance(&bob),
+            usdc_amount
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &usdc_token),
+            0
+        );
+
+        // All campaign balances cleanly zeroed with no partial payout or stranded state
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(
+            TokenClient::new(&env, &unaccepted_token).balance(&client.address),
+            0
+        );
+    }
+
+    // ── SGV-2026-126: Deadline extension vote boundaries ──────────────────────
+    // Scope:
+    // - Exercise the smallest majority of distinct contributors with checked integer
+    //   arithmetic where amounts are involved.
+    // - Assert defined result preserves one valid extension and auditable unique votes.
+    #[test]
+    fn test_deadline_extension_vote_boundaries_smallest_majority_odd_contributors() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor1 = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
+        let contributor3 = Address::generate(&env);
+        let non_contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &contributor1, 10_000);
+        let minter = StellarAssetClient::new(&env, &token);
+        minter.mint(&contributor2, &10_000);
+        minter.mint(&contributor3, &10_000);
+
+        let client = deploy_contract(&env);
+
+        let initial_deadline = env.ledger().timestamp() + 1_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &5_000_i128,
+            &initial_deadline,
+            &String::from_str(&env, "Odd majority boundary test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        // 3 distinct contributors contribute distinct amounts using checked arithmetic
+        let amount1 = 500_i128;
+        let amount2 = 1_250_i128;
+        let amount3 = 2_000_i128;
+        client.contribute(&campaign_id, &contributor1, &token, &amount1);
+        client.contribute(&campaign_id, &contributor2, &token, &amount2);
+        client.contribute(&campaign_id, &contributor3, &token, &amount3);
+
+        assert_eq!(client.get_contributor_count(&campaign_id), 3);
+        let total_pledged = amount1
+            .checked_add(amount2)
+            .unwrap()
+            .checked_add(amount3)
+            .unwrap();
+        assert_eq!(
+            client.get_campaign(&campaign_id).pledged_amount,
+            total_pledged
+        );
+
+        let proposed_deadline = initial_deadline + 500;
+
+        // Step 1: Contributor 1 requests deadline extension.
+        // Auto-approval gives approval_count = 1.
+        // 1 * 2 = 2 <= 3: Not a majority yet!
+        client.request_deadline_extension(&campaign_id, &contributor1, &proposed_deadline);
+
+        let req_events = goal_events(&env, soroban_sdk::symbol_short!("ExtReq"));
+        let req_approvals = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        assert_eq!(req_events.len(), 1, "Exactly one extension request event");
+        assert_eq!(req_approvals.len(), 1, "Auto-approval emitted for requester");
+
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            initial_deadline
+        );
+        let request = client.get_extension_request(&campaign_id).unwrap();
+        assert_eq!(request.approval_count, 1);
+        assert_eq!(request.requested_by, contributor1);
+        assert_eq!(request.new_deadline, proposed_deadline);
+
+        // Step 2: Non-contributor cannot approve
+        let non_contrib_err =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.approve_extension(&campaign_id, &non_contributor);
+            }));
+        assert!(
+            non_contrib_err.is_err(),
+            "Non-contributor must not be able to vote"
+        );
+
+        // Step 3: Requester cannot double-vote
+        let double_vote_err =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.approve_extension(&campaign_id, &contributor1);
+            }));
+        assert!(
+            double_vote_err.is_err(),
+            "Duplicate vote in same round must be rejected"
+        );
+
+        // Step 4: Contributor 2 approves (reaching smallest majority: 2 out of 3, 2 * 2 = 4 > 3).
+        // This commits the extension immediately.
+        client.approve_extension(&campaign_id, &contributor2);
+
+        let appr_events = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        let extended_events = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+        assert_eq!(appr_events.len(), 1, "Approval event for contributor2");
+        assert_eq!(extended_events.len(), 1, "Exactly one deadline extended event");
+
+        // Verify exactly one extension applied
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            proposed_deadline
+        );
+        assert!(
+            client.get_extension_request(&campaign_id).is_none(),
+            "Request cleared after commit"
+        );
+
+        // Step 5: Contributor 3 attempts to vote after extension is committed.
+        // Must panic with "no extension request", preserving one valid extension.
+        let late_vote_err =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.approve_extension(&campaign_id, &contributor3);
+            }));
+        assert!(
+            late_vote_err.is_err(),
+            "Approval after committed extension must fail"
+        );
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            proposed_deadline
+        );
+    }
+
+    #[test]
+    fn test_deadline_extension_vote_boundaries_smallest_majority_even_contributors() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let c1 = Address::generate(&env);
+        let c2 = Address::generate(&env);
+        let c3 = Address::generate(&env);
+        let c4 = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &c1, 10_000);
+        let minter = StellarAssetClient::new(&env, &token);
+        minter.mint(&c2, &10_000);
+        minter.mint(&c3, &10_000);
+        minter.mint(&c4, &10_000);
+
+        let client = deploy_contract(&env);
+
+        let initial_deadline = env.ledger().timestamp() + 1_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &5_000_i128,
+            &initial_deadline,
+            &String::from_str(&env, "Even majority boundary test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        // 4 distinct contributors pledge
+        client.contribute(&campaign_id, &c1, &token, &200);
+        client.contribute(&campaign_id, &c2, &token, &300);
+        client.contribute(&campaign_id, &c3, &token, &400);
+        client.contribute(&campaign_id, &c4, &token, &500);
+        assert_eq!(client.get_contributor_count(&campaign_id), 4);
+
+        let new_deadline = initial_deadline + 200;
+
+        // 1. C1 requests: 1 / 4 votes (1 * 2 = 2 <= 4, not majority)
+        client.request_deadline_extension(&campaign_id, &c1, &new_deadline);
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            initial_deadline
+        );
+
+        // 2. C2 approves: 2 / 4 votes (2 * 2 = 4 <= 4: exact 50% tie, NOT a majority)
+        client.approve_extension(&campaign_id, &c2);
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            initial_deadline
+        );
+        assert_eq!(
+            client.get_extension_request(&campaign_id).unwrap().approval_count,
+            2
+        );
+
+        // 3. C3 approves: 3 / 4 votes (3 * 2 = 6 > 4: SMALLEST MAJORITY for 4 contributors)
+        // Extension commits!
+        client.approve_extension(&campaign_id, &c3);
+        assert_eq!(client.get_campaign(&campaign_id).deadline, new_deadline);
+        assert!(client.get_extension_request(&campaign_id).is_none());
+
+        // 4. C4 tries to approve after commit: rejected, only 1 extension preserved
+        let late_err =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.approve_extension(&campaign_id, &c4);
+            }));
+        assert!(
+            late_err.is_err(),
+            "Late vote after majority commit rejected"
+        );
+        assert_eq!(client.get_campaign(&campaign_id).deadline, new_deadline);
+    }
 }
