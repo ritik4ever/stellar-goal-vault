@@ -5410,4 +5410,202 @@ mod tests {
         );
         assert_eq!(client.get_campaign(&campaign_id).deadline, new_deadline);
     }
+
+    // ── Deadline extension vote failure atomicity ─────────────────────────────
+
+    #[test]
+    fn test_duplicate_extension_vote_around_pledge_and_claim_leaves_state_and_balances_valid() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let c1 = Address::generate(&env);
+        let c2 = Address::generate(&env);
+        let c3 = Address::generate(&env);
+        let c4 = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &c1, 1_000);
+        let minter = StellarAssetClient::new(&env, &token);
+        minter.mint(&c2, &1_000);
+        minter.mint(&c3, &1_000);
+        minter.mint(&c4, &1_000);
+        let token_client = TokenClient::new(&env, &token);
+
+        let client = deploy_contract(&env);
+
+        let initial_deadline = env.ledger().timestamp() + 1_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &initial_deadline,
+            &String::from_str(&env, "Duplicate vote atomicity"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        // Initial pledges (storage + token transfers)
+        client.contribute(&campaign_id, &c1, &token, &250);
+        client.contribute(&campaign_id, &c2, &token, &250);
+        client.contribute(&campaign_id, &c3, &token, &250);
+
+        let proposed_deadline = initial_deadline + 500;
+        client.request_deadline_extension(&campaign_id, &c1, &proposed_deadline);
+
+        // Inject duplicate vote from requester (c1 already auto-voted)
+        let dup_requester =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.approve_extension(&campaign_id, &c1);
+            }));
+        assert!(dup_requester.is_err(), "duplicate vote by requester must fail");
+
+        // Storage and token balances must remain intact
+        let req = client.get_extension_request(&campaign_id).unwrap();
+        assert_eq!(req.approval_count, 1);
+        assert_eq!(req.new_deadline, proposed_deadline);
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(campaign.deadline, initial_deadline);
+        assert_eq!(campaign.pledged_amount, 750);
+        assert_eq!(campaign.contributor_count, 3);
+        assert_eq!(token_client.balance(&client.address), 750);
+        assert_eq!(token_client.balance(&c1), 750);
+        assert_eq!(token_client.balance(&creator), 0);
+
+        // Interleave another pledge (token + storage call) while extension is pending
+        client.contribute(&campaign_id, &c4, &token, &250);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_000);
+        assert_eq!(client.get_campaign(&campaign_id).contributor_count, 4);
+        assert_eq!(token_client.balance(&client.address), 1_000);
+
+        // c2 approves (2/4 = 50%, still pending)
+        client.approve_extension(&campaign_id, &c2);
+        assert_eq!(
+            client.get_extension_request(&campaign_id).unwrap().approval_count,
+            2
+        );
+
+        // Inject duplicate vote from c2
+        let dup_approver =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.approve_extension(&campaign_id, &c2);
+            }));
+        assert!(dup_approver.is_err(), "duplicate vote by approver must fail");
+
+        // Pending tally, deadline, and balances remain completely unchanged
+        let req_after_dup = client.get_extension_request(&campaign_id).unwrap();
+        assert_eq!(req_after_dup.approval_count, 2);
+        assert_eq!(client.get_campaign(&campaign_id).deadline, initial_deadline);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_000);
+        assert_eq!(token_client.balance(&client.address), 1_000);
+        assert_eq!(token_client.balance(&c2), 750);
+
+        // c3 approves (3/4 > 50% majority): extension commits
+        client.approve_extension(&campaign_id, &c3);
+        assert_eq!(client.get_campaign(&campaign_id).deadline, proposed_deadline);
+        assert!(client.get_extension_request(&campaign_id).is_none());
+
+        // Settlement via claim after the extended deadline transfers exact full amount
+        advance_time(&env, 1_501);
+        client.claim(&campaign_id, &creator);
+        assert!(client.get_campaign(&campaign_id).claimed);
+        assert_eq!(token_client.balance(&creator), 1_000);
+        assert_eq!(token_client.balance(&client.address), 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+    }
+
+    #[test]
+    fn test_extension_after_max_duration_around_pledge_and_refund_leaves_state_and_balances_valid()
+    {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let c1 = Address::generate(&env);
+        let c2 = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &c1, 1_000);
+        StellarAssetClient::new(&env, &token).mint(&c2, &1_000);
+        let token_client = TokenClient::new(&env, &token);
+
+        let client = deploy_contract(&env);
+
+        let created_at = env.ledger().timestamp();
+        let initial_deadline = created_at + 1_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &2_000_i128,
+            &initial_deadline,
+            &String::from_str(&env, "Max duration atomicity"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        // First pledge
+        client.contribute(&campaign_id, &c1, &token, &400);
+
+        // Inject extension request past MAX_CAMPAIGN_DURATION_SECONDS (180 days + 1s)
+        let max_duration: u64 = 60 * 60 * 24 * 180;
+        let over_max_deadline = created_at + max_duration + 1;
+        let fail_over_max =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.request_deadline_extension(&campaign_id, &c1, &over_max_deadline);
+            }));
+        assert!(
+            fail_over_max.is_err(),
+            "extension beyond maximum duration must fail"
+        );
+
+        // Verify no request was stored and campaign/token state is intact
+        assert!(client.get_extension_request(&campaign_id).is_none());
+        assert_eq!(client.get_campaign(&campaign_id).deadline, initial_deadline);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 400);
+        assert_eq!(client.get_contribution(&campaign_id, &c1, &token), 400);
+        assert_eq!(token_client.balance(&client.address), 400);
+        assert_eq!(token_client.balance(&c1), 600);
+
+        // Second pledge succeeds cleanly
+        client.contribute(&campaign_id, &c2, &token, &500);
+
+        // Valid extension request (1/2 pending)
+        let valid_deadline = initial_deadline + 500;
+        client.request_deadline_extension(&campaign_id, &c1, &valid_deadline);
+        assert_eq!(
+            client.get_extension_request(&campaign_id).unwrap().new_deadline,
+            valid_deadline
+        );
+
+        // Inject another over-max extension (and u64::MAX) while a valid request is pending
+        let fail_over_max_pending =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.request_deadline_extension(&campaign_id, &c2, &u64::MAX);
+            }));
+        assert!(
+            fail_over_max_pending.is_err(),
+            "u64::MAX extension must fail"
+        );
+
+        // Existing pending request, deadline, and balances remain untouched
+        let pending = client.get_extension_request(&campaign_id).unwrap();
+        assert_eq!(pending.new_deadline, valid_deadline);
+        assert_eq!(pending.approval_count, 1);
+        assert_eq!(client.get_campaign(&campaign_id).deadline, initial_deadline);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 900);
+        assert_eq!(token_client.balance(&client.address), 900);
+
+        // Campaign misses target after initial_deadline; refunds return exact balances
+        advance_time(&env, 1_001);
+        client.refund(&campaign_id, &c1);
+        client.refund(&campaign_id, &c2);
+
+        assert_eq!(token_client.balance(&c1), 1_000);
+        assert_eq!(token_client.balance(&c2), 1_000);
+        assert_eq!(token_client.balance(&client.address), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+    }
 }
