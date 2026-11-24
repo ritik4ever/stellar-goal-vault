@@ -2,6 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
+  // Keep API-writing wallet/campaign specs on the validated full E2E runner.
+  testMatch: '**/*.visual.spec.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
