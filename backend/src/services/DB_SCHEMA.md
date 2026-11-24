@@ -181,7 +181,7 @@ failure point on a fresh database and on one upgraded from the legacy schema.
 | Same key, same body, first request still running | Waits for it, then replays its response. `409 IDEMPOTENCY_REQUEST_IN_PROGRESS` if it takes longer than 10 s. |
 | Same key from a different contributor | Independent request, so it gets its own pledge. |
 | First request failed (non-2xx) | Nothing is stored; the retry runs normally. |
-| Repeat at 24 h or later | A new request. The age is checked against the stored timestamp, so the boundary is exact (`now - storedAt >= 24 h`). |
+| Repeat at 24 h or later | A new request. The age is checked against the stored timestamp, so the boundary is exact (`now - storedAt >= 24 h`). Expired entries encountered in shared storage are actively purged to maintain clean worker boundaries. |
 
 The key is scoped to API key, campaign and contributor. Request bodies are
 compared by a hash that ignores field order.
