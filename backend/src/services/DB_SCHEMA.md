@@ -221,6 +221,24 @@ Limits:
 - The cache key format changed when the contributor scope was added, so a key
   stored before the upgrade is not matched afterwards.
 
+#### Pledge idempotency observability (SGV-2026-174)
+
+`createIdempotencyMiddleware()` (`middleware/idempotencyMiddleware.ts`) emits
+structured operator logs with redacted `campaignRef` and `keyRef` (never the raw
+campaign ID or raw `Idempotency-Key`), plus optional `workerId` when configured:
+
+| Event | `outcome` | Meaning |
+| --- | --- | --- |
+| `pledge_idempotency_pending` | `pending` | Worker claimed the key in-flight (`inFlightWait: false`) or is waiting on an in-process leader (`inFlightWait: true`). |
+| `pledge_idempotency_committed` | `committed` | 2xx pledge response stored (`replay: false`) or replayed from cache (`replay: true`). |
+| `pledge_idempotency_rejected` | `rejected` | Request rejected or not stored (`reason`: `idempotency_key_reused` for 422, `in_flight_timeout` for 409, `request_failed` for non-2xx responses). |
+
+When two separate workers receive the same `Idempotency-Key` concurrently, each
+worker logs `pledge_idempotency_pending` with its `workerId`; if one commits and
+the other fails a persistence guard (such as funding cap), operators see distinct
+`committed` and `rejected` outcomes, while subsequent retries replay the
+committed entry from shared cache.
+
 ## Index Strategy
 
 Indexes are added based on concrete query plans for common read/write patterns.
