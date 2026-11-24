@@ -91,6 +91,7 @@ beforeEach(() => {
   clearIdempotencyCache();
 
   const db = getDb();
+  db.prepare(`DELETE FROM idempotency_keys`).run();
   db.prepare(`DELETE FROM campaign_events`).run();
   db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM pledges`).run();
