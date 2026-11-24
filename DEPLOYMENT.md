@@ -50,6 +50,7 @@ The deployment script enforces strict configuration validation before any compil
 - `SECRET_KEY`: Must be a valid 56-character Stellar secret key (starting with `S`, base32 encoded). Placeholder keys like `"S..."` are rejected immediately.
 - `NETWORK`: Supported networks are `testnet` (default), `mainnet` (or `public`), `futurenet`, and `standalone`/`local`.
 - `NETWORK_PASSPHRASE` & `RPC_URL`: Must align with the selected `NETWORK`. Mismatches (e.g. `testnet` with mainnet passphrase or RPC URL) fail immediately before building or deploying.
+- **Rerun safety & recovery paths**: Missing or conflicting network environment variables stop execution early with an actionable `Recovery: ...` path. Repeated runs preserve the exact startup error before any compilation or signed transaction occurs. Existing deployment artifacts (such as `contracts/contract_id.txt`) are preserved on failed reruns.
 
 If deploy succeeds, the script will:
 

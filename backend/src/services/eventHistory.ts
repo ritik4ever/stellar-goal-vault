@@ -38,7 +38,7 @@ export interface BlockchainMetadata {
   ledgerCloseTime?: number;
   eventIndex?: number;
   contractId?: string;
-  source?: 'local' | 'soroban';
+  source?: 'local' | 'soroban' | 'soroban_backfill';
 }
 
 export interface CampaignEvent {

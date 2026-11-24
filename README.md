@@ -549,6 +549,8 @@ The script validates configuration upfront (secret key format, network/passphras
 3. Output the contract ID
 4. Save the ID to `contracts/contract_id.txt`
 
+Missing or conflicting network environment variables immediately halt execution with clear stop and recovery instructions (`Recovery: ...`). Repeated runs preserve the startup error without creating partial artifacts or executing signed transactions. Existing `contracts/contract_id.txt` files are left unmodified if a rerun fails.
+
 ## Environment variables
 
 See [docs/SECURE_CONFIGURATION.md](./docs/SECURE_CONFIGURATION.md) for the safe

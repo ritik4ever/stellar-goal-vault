@@ -5,9 +5,11 @@ import {
   BindingsError,
   checkBindingsDrift,
   isValidContractId,
+  isValidSecretKey,
   parseContractIdFile,
   renderStamp,
   resolveContractId,
+  resolveDeploymentConfig,
   resolveNetworkConfig,
   TESTNET_PASSPHRASE,
   MAINNET_PASSPHRASE,
@@ -19,6 +21,7 @@ import {
 
 const DEPLOYED = `C${'A'.repeat(55)}`;
 const OTHER = `C${'B'.repeat(55)}`;
+const VALID_SECRET = `S${'A'.repeat(55)}`;
 const ID_FILE = `# populated after contract deployment\n\n${DEPLOYED}\n`;
 
 describe('parseContractIdFile', () => {
@@ -183,5 +186,148 @@ describe('resolveNetworkConfig', () => {
       networkPassphrase: TESTNET_PASSPHRASE,
       rpcUrl: customRpc,
     });
+  });
+
+  describe('Recovery Paths for Network Mismatches', () => {
+    it('includes recovery message when unsupported network is provided', () => {
+      expect(() => resolveNetworkConfig({ network: 'bad-net' })).toThrow(/Recovery: set NETWORK to one of/);
+    });
+
+    it('includes recovery message when testnet has mainnet passphrase', () => {
+      expect(() =>
+        resolveNetworkConfig({ network: 'testnet', networkPassphrase: MAINNET_PASSPHRASE }),
+      ).toThrow(/Recovery: set NETWORK=mainnet, or unset NETWORK_PASSPHRASE/);
+    });
+
+    it('includes recovery message when testnet has mainnet RPC URL', () => {
+      expect(() =>
+        resolveNetworkConfig({ network: 'testnet', rpcUrl: 'https://soroban-mainnet.stellar.org' }),
+      ).toThrow(/Recovery: set NETWORK=mainnet, or unset RPC_URL/);
+    });
+
+    it('includes recovery message when mainnet has testnet passphrase', () => {
+      expect(() =>
+        resolveNetworkConfig({ network: 'mainnet', networkPassphrase: TESTNET_PASSPHRASE }),
+      ).toThrow(/Recovery: set NETWORK=testnet, or unset NETWORK_PASSPHRASE/);
+    });
+
+    it('includes recovery message when mainnet has testnet RPC URL', () => {
+      expect(() =>
+        resolveNetworkConfig({ network: 'mainnet', rpcUrl: 'https://soroban-testnet.stellar.org' }),
+      ).toThrow(/Recovery: set NETWORK=testnet, or unset RPC_URL/);
+    });
+
+    it('rejects futurenet with conflicting RPC URL and provides recovery path', () => {
+      expect(() =>
+        resolveNetworkConfig({ network: 'futurenet', rpcUrl: 'https://soroban-testnet.stellar.org' }),
+      ).toThrow(/Recovery: unset RPC_URL to use the futurenet default/);
+    });
+
+    it('rejects standalone with public network passphrase and provides recovery path', () => {
+      expect(() =>
+        resolveNetworkConfig({ network: 'standalone', networkPassphrase: MAINNET_PASSPHRASE }),
+      ).toThrow(/Recovery: unset NETWORK_PASSPHRASE to use the standalone default/);
+    });
+
+    it('rejects local network with public RPC URL and provides recovery path', () => {
+      expect(() =>
+        resolveNetworkConfig({ network: 'local', rpcUrl: 'https://soroban-testnet.stellar.org' }),
+      ).toThrow(/Recovery: unset RPC_URL to use the local default/);
+    });
+  });
+});
+
+describe('isValidSecretKey', () => {
+  it('accepts valid 56-character base32 secret key', () => {
+    expect(isValidSecretKey(VALID_SECRET)).toBe(true);
+  });
+
+  it('rejects invalid or placeholder secret keys', () => {
+    expect(isValidSecretKey('')).toBe(false);
+    expect(isValidSecretKey('S...')).toBe(false);
+    expect(isValidSecretKey('YOUR_SECRET_KEY')).toBe(false);
+    expect(isValidSecretKey(`G${'A'.repeat(55)}`)).toBe(false); // account public key
+    expect(isValidSecretKey(`C${'A'.repeat(55)}`)).toBe(false); // contract strkey
+    expect(isValidSecretKey('S123')).toBe(false); // too short
+    expect(isValidSecretKey(`s${'A'.repeat(55)}`)).toBe(false); // lowercase
+    expect(isValidSecretKey(`S${'0'.repeat(55)}`)).toBe(false); // invalid base32 (0 is not base32)
+  });
+});
+
+describe('resolveDeploymentConfig', () => {
+  it('resolves valid deployment configuration for testnet', () => {
+    const config = resolveDeploymentConfig({
+      secretKey: VALID_SECRET,
+      network: 'testnet',
+    });
+    expect(config).toEqual({
+      secretKey: VALID_SECRET,
+      network: 'testnet',
+      networkPassphrase: TESTNET_PASSPHRASE,
+      rpcUrl: DEFAULT_TESTNET_RPC,
+    });
+  });
+
+  it('resolves valid deployment configuration for mainnet', () => {
+    const config = resolveDeploymentConfig({
+      secretKey: VALID_SECRET,
+      network: 'mainnet',
+    });
+    expect(config).toEqual({
+      secretKey: VALID_SECRET,
+      network: 'mainnet',
+      networkPassphrase: MAINNET_PASSPHRASE,
+      rpcUrl: DEFAULT_MAINNET_RPC,
+    });
+  });
+
+  it('rejects missing or empty SECRET_KEY with actionable recovery path', () => {
+    expect(() => resolveDeploymentConfig({ secretKey: '' })).toThrow(
+      /Missing required deployment environment variable: SECRET_KEY/,
+    );
+    expect(() => resolveDeploymentConfig({ secretKey: '   ' })).toThrow(/Recovery: set SECRET_KEY/);
+    expect(() => resolveDeploymentConfig({})).toThrow(/Recovery: set SECRET_KEY/);
+  });
+
+  it('rejects placeholder SECRET_KEY with recovery path', () => {
+    expect(() => resolveDeploymentConfig({ secretKey: 'S...' })).toThrow(/Invalid SECRET_KEY format/);
+    expect(() => resolveDeploymentConfig({ secretKey: 'YOUR_SECRET_KEY' })).toThrow(
+      /Recovery: provide a valid 56-character base32 secret key/,
+    );
+  });
+
+  it('rejects malformed SECRET_KEY with recovery path', () => {
+    expect(() => resolveDeploymentConfig({ secretKey: `G${'A'.repeat(55)}` })).toThrow(
+      /Invalid SECRET_KEY format/,
+    );
+    expect(() => resolveDeploymentConfig({ secretKey: 'S123' })).toThrow(
+      /Recovery: provide a valid 56-character base32 secret key/,
+    );
+  });
+
+  it('preserves startup error across repeated runs before any transaction is signed', () => {
+    const badInput = {
+      secretKey: VALID_SECRET,
+      network: 'testnet',
+      networkPassphrase: MAINNET_PASSPHRASE,
+    };
+
+    // First run fails with startup error
+    expect(() => resolveDeploymentConfig(badInput)).toThrow(
+      /Network mismatch: testnet was selected but mainnet passphrase was provided/,
+    );
+
+    // Repeated run preserves the identical startup error
+    expect(() => resolveDeploymentConfig(badInput)).toThrow(
+      /Network mismatch: testnet was selected but mainnet passphrase was provided/,
+    );
+
+    // Missing key repeatedly throws the identical error
+    expect(() => resolveDeploymentConfig({})).toThrow(
+      /Missing required deployment environment variable: SECRET_KEY/,
+    );
+    expect(() => resolveDeploymentConfig({})).toThrow(
+      /Missing required deployment environment variable: SECRET_KEY/,
+    );
   });
 });
