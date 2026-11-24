@@ -368,6 +368,19 @@ fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, 
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 | Contributor is the vault contract | `"contributor cannot be the vault contract"` | High | Pledge from a real account; the vault cannot fund itself |
 
+**Minimum contribution boundary:** `amount` is compared as an `i128` against
+`get_min_contribution()`. The accepted range is `amount >= minimum`:
+
+- `amount == minimum` is accepted.
+- `amount == minimum - 1` (one stroop below) is rejected with
+  `"contribution below minimum"`.
+
+The floor defaults to 100 stroops when `initialize()` has not been called and
+can be changed with `initialize()`. The minimum check runs before the campaign
+is read, before the token transfer, and before any storage write, so a rejected
+call leaves the contributor balance, the campaign pledge, and the vault balance
+unchanged.
+
 **Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
 
 **Indexer note:** The `CampaignPledgedEvent` event is emitted exactly once per successful `contribute` call, after all validations, token transfer, and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Pledged")` and use `campaign_id` + `contributor` + `pledged_at` for deduplication and reconstructing pledge state without auxiliary contract reads.

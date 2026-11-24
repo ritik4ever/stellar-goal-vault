@@ -1596,6 +1596,69 @@ mod tests {
         assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
     }
 
+    // ── SGV-2026-111: minimum contribution boundary contract ─────────────────
+    // The accepted range is `amount >= get_min_contribution()`. Exactly at the
+    // configured minimum is accepted; one stroop below is rejected. A rejection
+    // must be total: no tokens move, no pledge is recorded, and the configured
+    // minimum and campaign accounting are unchanged.
+
+    #[test]
+    fn test_min_contribution_boundary_rejects_below_and_accepts_exactly_at_min() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &500_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "minimum boundary contract"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let token_client = TokenClient::new(&env, &token);
+        let vault = client.address.clone();
+
+        // One stroop below the configured minimum (500 - 1 = 499) is rejected.
+        let rejected = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &contributor, &token, &499);
+        }));
+        assert!(rejected.is_err());
+
+        // The configured minimum survives and nothing was deducted or recorded.
+        assert_eq!(client.get_min_contribution(), 500);
+        assert_eq!(token_client.balance(&contributor), 1_000);
+        assert_eq!(token_client.balance(&vault), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            0
+        );
+        assert_eq!(client.get_contributor_count(&campaign_id), 0);
+
+        // Exactly at the configured minimum is accepted.
+        client.contribute(&campaign_id, &contributor, &token, &500);
+        assert_eq!(client.get_min_contribution(), 500);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 500);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            500
+        );
+        assert_eq!(token_client.balance(&contributor), 500);
+        assert_eq!(token_client.balance(&vault), 500);
+    }
+
     // ── #185: update_metadata tests ───────────────────────────────────────────
 
     #[test]
