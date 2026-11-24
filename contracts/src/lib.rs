@@ -781,7 +781,11 @@ impl StellarGoalVaultContract {
         if env.ledger().timestamp() >= campaign.deadline {
             panic!("campaign deadline reached");
         }
-        if campaign.pledged_amount + amount > campaign.target_amount {
+        let new_pledged = campaign
+            .pledged_amount
+            .checked_add(amount)
+            .expect("amount overflow");
+        if new_pledged > campaign.target_amount {
             panic!("campaign funding cap exceeded");
         }
         if !campaign.accepted_tokens.iter().any(|t| t == token) {
@@ -806,7 +810,8 @@ impl StellarGoalVaultContract {
                         .unwrap_or(0)
                 })
                 .sum();
-            if already + amount > cap {
+            let total_contrib = already.checked_add(amount).expect("cap calculation overflow");
+            if total_contrib > cap {
                 panic!("per-contributor cap exceeded");
             }
         }
@@ -815,8 +820,11 @@ impl StellarGoalVaultContract {
         let contract_address = env.current_contract_address();
         token_client.transfer(&contributor, &contract_address, &amount);
 
-        // Update campaign pledged amount (valuation)
-        campaign.pledged_amount += amount;
+        // Update campaign pledged amount (valuation) using checked arithmetic
+        campaign.pledged_amount = campaign
+            .pledged_amount
+            .checked_add(amount)
+            .expect("campaign pledged amount overflow");
 
         // Only increment contributor_count on first-time pledge
         let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
@@ -848,9 +856,12 @@ impl StellarGoalVaultContract {
 
         let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
         let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        let new_token_balance = current_balance
+            .checked_add(amount)
+            .expect("token balance overflow");
         env.storage()
             .persistent()
-            .set(&balance_key, &(current_balance + amount));
+            .set(&balance_key, &new_token_balance);
 
         let contribution_key =
             DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
@@ -859,9 +870,12 @@ impl StellarGoalVaultContract {
             .persistent()
             .get(&contribution_key)
             .unwrap_or(0);
+        let new_contrib = current_contribution
+            .checked_add(amount)
+            .expect("contribution amount overflow");
         env.storage()
             .persistent()
-            .set(&contribution_key, &(current_contribution + amount));
+            .set(&contribution_key, &new_contrib);
 
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("Pledge")),
@@ -1252,6 +1266,60 @@ impl StellarGoalVaultContract {
             .set(&DataKey::Campaign(campaign_id), &campaign);
     }
 
+    /// Extends the persistent storage TTL of a campaign and its associated records
+    /// to ensure availability through settlement (claim or refund) (issue #1526).
+    pub fn extend_campaign_ttl(env: Env, campaign_id: u64, threshold: u32, extend_to: u32) {
+        let campaign_key = DataKey::Campaign(campaign_id);
+        if !env.storage().persistent().has(&campaign_key) {
+            panic!("campaign not found");
+        }
+        let campaign = read_campaign(&env, campaign_id);
+        env.storage()
+            .persistent()
+            .extend_ttl(&campaign_key, threshold, extend_to);
+
+        let cap_key = DataKey::ContributorCap(campaign_id);
+        if env.storage().persistent().has(&cap_key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&cap_key, threshold, extend_to);
+        }
+
+        let contributors_key = DataKey::Contributors(campaign_id);
+        if env.storage().persistent().has(&contributors_key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&contributors_key, threshold, extend_to);
+        }
+
+        for token in campaign.accepted_tokens.iter() {
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            if env.storage().persistent().has(&balance_key) {
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&balance_key, threshold, extend_to);
+            }
+        }
+    }
+
+    /// Extends the storage TTL for a specific contributor's pledge in a campaign (issue #1526).
+    pub fn extend_contribution_ttl(
+        env: Env,
+        campaign_id: u64,
+        contributor: Address,
+        token: Address,
+        threshold: u32,
+        extend_to: u32,
+    ) {
+        let contribution_key = DataKey::Contribution(campaign_id, contributor, token);
+        if !env.storage().persistent().has(&contribution_key) {
+            panic!("contribution not found");
+        }
+        env.storage()
+            .persistent()
+            .extend_ttl(&contribution_key, threshold, extend_to);
+    }
+
     pub fn get_campaign(env: Env, campaign_id: u64) -> Campaign {
         read_campaign(&env, campaign_id)
     }
@@ -1526,11 +1594,17 @@ fn refund_contributor(
             env.storage().persistent().set(&contribution_key, &0_i128);
             let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
             let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+            let new_balance = balance.checked_sub(amount).expect("token balance underflow");
             env.storage()
                 .persistent()
-                .set(&balance_key, &(balance - amount));
-            campaign.pledged_amount -= amount;
-            total_refunded += amount;
+                .set(&balance_key, &new_balance);
+            campaign.pledged_amount = campaign
+                .pledged_amount
+                .checked_sub(amount)
+                .expect("campaign pledged amount underflow");
+            total_refunded = total_refunded
+                .checked_add(amount)
+                .expect("total refunded overflow");
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Refund")),
                 CampaignRefunded {

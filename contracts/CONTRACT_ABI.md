@@ -273,6 +273,40 @@ fn cancel_campaign(env: Env, campaign_id: u64, creator: Address)
 
 ---
 
+### `extend_campaign_ttl`
+
+Extends the persistent storage TTL of a campaign, its token balances, caps, and contributor tracking to preserve entry availability through settlement (issue #1526).
+
+```
+fn extend_campaign_ttl(env: Env, campaign_id: u64, threshold: u32, extend_to: u32)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | ID of the campaign to extend |
+| `threshold` | `u32` | Minimum ledgers remaining before extension occurs |
+| `extend_to` | `u32` | Number of ledgers to extend the TTL to |
+
+---
+
+### `extend_contribution_ttl`
+
+Extends the persistent storage TTL for a specific contributor's pledge record to ensure individual contribution availability through settlement (issue #1526).
+
+```
+fn extend_contribution_ttl(env: Env, campaign_id: u64, contributor: Address, token: Address, threshold: u32, extend_to: u32)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | ID of the campaign |
+| `contributor` | `Address` | Address of the contributor |
+| `token` | `Address` | Address of the pledged token |
+| `threshold` | `u32` | Minimum ledgers remaining before extension occurs |
+| `extend_to` | `u32` | Number of ledgers to extend the TTL to |
+
+---
+
 ### `update_metadata`
 
 Updates the campaign metadata string. Creator only, before deadline.
@@ -446,9 +480,14 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 | Already claimed | `"campaign already claimed"` | Medium | Funds already withdrawn; no refunds possible |
 | Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or campaign cancellation |
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target; creator can claim |
-| Nothing to refund | `"nothing to refund"` | Low | Contributor had no contributions to this campaign |
+| Nothing to refund | `"nothing to refund"` | Low | Contributor had no contributions or all contributions have already been refunded |
 | Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; investigate |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
+
+**Guarantees & Accounting:**
+- Checked integer arithmetic ensures token balances and `pledged_amount` cannot overflow or underflow.
+- A partially refunded contributor receives only their remaining balance. Once zeroed, subsequent refund calls are rejected atomically.
+- No more than the contributor's refundable balance is paid out.
 
 **Emits:** `CampaignRefunded` (one per token the contributor used)
 

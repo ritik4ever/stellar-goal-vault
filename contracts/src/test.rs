@@ -3510,4 +3510,122 @@ mod tests {
         assert!(!client.get_paused());
         assert_eq!(client.get_min_contribution(), 100_i128);
     }
+
+    // ── SGV-2026-136: Contract refund boundaries ──────────────────────────────
+    // A failed campaign with partially refunded contributor balances uses checked
+    // integer arithmetic. A contributor cannot be refunded more than their balance,
+    // and re-refunding after balance depletion is rejected with "nothing to refund".
+    #[test]
+    fn test_contract_refund_boundaries_partial_and_re_refund() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor1 = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token_a = deploy_token(&env, &admin, &contributor1, 1_000);
+        let token_b = deploy_token(&env, &admin, &contributor1, 1_000);
+        let asset_a = StellarAssetClient::new(&env, &token_a);
+        asset_a.mint(&contributor2, &1_000);
+
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let deadline = env.ledger().timestamp() + 1_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_a.clone(), token_b.clone()],
+            &2_000_i128,
+            &deadline,
+            &String::from_str(&env, "refund boundaries"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        // Contributor 1 pledges across both tokens: 200 token_a and 300 token_b
+        client.contribute(&campaign_id, &contributor1, &token_a, &200);
+        client.contribute(&campaign_id, &contributor1, &token_b, &300);
+
+        // Contributor 2 pledges 150 token_a
+        client.contribute(&campaign_id, &contributor2, &token_a, &150);
+
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 650);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_a), 350);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_b), 300);
+
+        // Advance time past deadline: campaign is underfunded (650 < 2000)
+        advance_time(&env, 1_001);
+
+        // Contributor 1 refunds
+        client.refund(&campaign_id, &contributor1);
+
+        // Contributor 1's refundable balances are fully paid and zeroed out
+        assert_eq!(client.get_contribution(&campaign_id, &contributor1, &token_a), 0);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor1, &token_b), 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_a), 150);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_b), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 150);
+
+        // Re-refund attempt by contributor 1 must panic with "nothing to refund"
+        let re_refund = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.refund(&campaign_id, &contributor1);
+        }));
+        assert!(re_refund.is_err());
+
+        // Contributor 2's funds remain intact and can be refunded
+        assert_eq!(client.get_contribution(&campaign_id, &contributor2, &token_a), 150);
+        client.refund(&campaign_id, &contributor2);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor2, &token_a), 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_a), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+    }
+
+    // ── SGV-2026-146: Campaign storage lifetime boundaries ─────────────────────
+    // Active campaigns and contributions near TTL boundaries maintain storage
+    // availability through settlement with checked integer arithmetic.
+    #[test]
+    fn test_campaign_storage_lifetime_boundaries_and_ttl_extension() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 2_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let deadline = env.ledger().timestamp() + 2_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "storage lifetime campaign"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        // Initial contribution
+        client.contribute(&campaign_id, &contributor, &token, &500);
+
+        // Extend storage TTL for campaign and contribution records
+        client.extend_campaign_ttl(&campaign_id, &1_000, &5_000);
+        client.extend_contribution_ttl(&campaign_id, &contributor, &token, &1_000, &5_000);
+
+        // Contribute remaining amount to meet target (checked arithmetic)
+        client.contribute(&campaign_id, &contributor, &token, &500);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_000);
+
+        // Advance past deadline to settle
+        advance_time(&env, 2_001);
+
+        // Claim succeeds and settles campaign
+        client.claim(&campaign_id);
+        assert!(client.get_campaign(&campaign_id).claimed);
+    }
 }
