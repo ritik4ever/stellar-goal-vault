@@ -363,7 +363,8 @@ fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, 
 | Deadline passed | `"campaign deadline reached"` | Medium | Campaign funding period has ended |
 | Funding cap exceeded | `"campaign funding cap exceeded"` | Medium | Campaign has reached its `target_amount`; wait for next campaign |
 | Token not accepted | `"token not accepted by this campaign"` | Medium | Contribute one of `campaign.accepted_tokens` |
-| Per-contributor cap exceeded | Soroban arithmetic panic | Medium | Check `max_per_contributor` set at campaign creation |
+| Per-contributor cap exceeded | `"per-contributor cap exceeded"` | Medium | Check `max_per_contributor` set at campaign creation |
+| Amount overflows `i128` accounting | `"contribution amount overflow"` | High | Split the pledge or use a smaller amount |
 | Insufficient token balance | Soroban token transfer error | High | Ensure contributor has enough tokens and has approved transfer |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 | Contributor is the vault contract | `"contributor cannot be the vault contract"` | High | Pledge from a real account; the vault cannot fund itself |
@@ -386,6 +387,17 @@ unchanged.
 **Indexer note:** The `CampaignPledgedEvent` event is emitted exactly once per successful `contribute` call, after all validations, token transfer, and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Pledged")` and use `campaign_id` + `contributor` + `pledged_at` for deduplication and reconstructing pledge state without auxiliary contract reads.
 
 **Gas estimate:** 30,000 + token transfer cost (~10,000) + storage writes ≈ 50,000 units + 20% headroom = **60,000**
+
+**Per-contributor cap boundary:** `max_per_contributor` (set at campaign
+creation, `0` means no cap) limits a contributor's total across every accepted
+token. `already_contributed + amount == cap` is accepted;
+`already_contributed + amount > cap` is rejected with
+`"per-contributor cap exceeded"`. Accumulations use checked `i128` arithmetic,
+so an amount that would overflow panics with `"contribution amount overflow"`
+instead of wrapping past the funding and cap checks. All checks run before the
+token transfer and before any storage write, so a failed call leaves the
+campaign, contribution records, contributor count, and both token balances
+unchanged — no partial pledge or payout.
 
 ---
 

@@ -53,6 +53,15 @@ fn require_valid_metadata(metadata: &String) {
     }
 }
 
+/// Adds two non-negative pledge amounts, failing with a stable panic instead of
+/// wrapping when the result does not fit in an `i128`. Amounts are supplied by
+/// callers, so an overflow must reject the pledge before any token movement or
+/// storage write rather than corrupting the campaign accounting.
+fn checked_amount_add(a: i128, b: i128) -> i128 {
+    a.checked_add(b)
+        .unwrap_or_else(|| panic!("contribution amount overflow"))
+}
+
 /// Default platform fee in basis points (50 = 0.5%). Admin can override
 /// via [`set_fee`]. Set to 0 to disable the fee mechanism entirely.
 const DEFAULT_PLATFORM_FEE_BPS: i128 = 50;
@@ -781,7 +790,7 @@ impl StellarGoalVaultContract {
         if env.ledger().timestamp() >= campaign.deadline {
             panic!("campaign deadline reached");
         }
-        if campaign.pledged_amount + amount > campaign.target_amount {
+        if checked_amount_add(campaign.pledged_amount, amount) > campaign.target_amount {
             panic!("campaign funding cap exceeded");
         }
         if !campaign.accepted_tokens.iter().any(|t| t == token) {
@@ -806,7 +815,7 @@ impl StellarGoalVaultContract {
                         .unwrap_or(0)
                 })
                 .sum();
-            if already + amount > cap {
+            if checked_amount_add(already, amount) > cap {
                 panic!("per-contributor cap exceeded");
             }
         }
@@ -816,7 +825,7 @@ impl StellarGoalVaultContract {
         token_client.transfer(&contributor, &contract_address, &amount);
 
         // Update campaign pledged amount (valuation)
-        campaign.pledged_amount += amount;
+        campaign.pledged_amount = checked_amount_add(campaign.pledged_amount, amount);
 
         // Only increment contributor_count on first-time pledge
         let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
@@ -848,9 +857,8 @@ impl StellarGoalVaultContract {
 
         let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
         let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&balance_key, &(current_balance + amount));
+        let new_balance = checked_amount_add(current_balance, amount);
+        env.storage().persistent().set(&balance_key, &new_balance);
 
         let contribution_key =
             DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
@@ -859,9 +867,10 @@ impl StellarGoalVaultContract {
             .persistent()
             .get(&contribution_key)
             .unwrap_or(0);
+        let new_contribution = checked_amount_add(current_contribution, amount);
         env.storage()
             .persistent()
-            .set(&contribution_key, &(current_contribution + amount));
+            .set(&contribution_key, &new_contribution);
 
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("Pledge")),
@@ -887,8 +896,8 @@ impl StellarGoalVaultContract {
                 amount,
                 total_pledged: campaign.pledged_amount,
                 contributor_count: campaign.contributor_count,
-                token_balance: current_balance + amount,
-                contributor_total: current_contribution + amount,
+                token_balance: new_balance,
+                contributor_total: new_contribution,
                 pledged_at: env.ledger().timestamp(),
             },
         );
