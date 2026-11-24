@@ -327,6 +327,47 @@ export function ensureQueryLayerIndexes(database: SQLiteDatabase = getDb()): voi
 }
 
 /**
+ * Create the seed metadata marker table used by the development seed command to
+ * detect prior runs. Safe to call repeatedly (IF NOT EXISTS).
+ *
+ * This lives in the DB module so the seed service does not own schema concerns
+ * and tests can inspect the marker directly.
+ */
+export function ensureSeedMetadataTable(database: SQLiteDatabase = getDb()): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS seed_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+}
+
+/**
+ * Read all seed metadata markers as a key/value map. Returns an empty object
+ * when the marker table does not exist yet (no seed has ever run).
+ */
+export function getSeedMetadata(database: SQLiteDatabase = getDb()): Record<string, string> {
+  const tableExists = database
+    .prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'seed_metadata'`)
+    .get();
+
+  if (!tableExists) {
+    return {};
+  }
+
+  const rows = database
+    .prepare('SELECT key, value FROM seed_metadata')
+    .all() as Array<{ key: string; value: string }>;
+
+  const metadata: Record<string, string> = {};
+  for (const row of rows) {
+    metadata[row.key] = row.value;
+  }
+
+  return metadata;
+}
+
+/**
  * Install pledges-persistence integrity enforcement for existing databases.
  *
  * SQLite cannot ADD CHECK via ALTER TABLE, so these BEFORE INSERT / BEFORE UPDATE

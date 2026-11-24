@@ -140,6 +140,111 @@ describe('deterministic seed state', () => {
   });
 });
 
+describe('seed rerun safety', () => {
+  it('returns the same ids and rows on a repeated run with the same count without throwing', () => {
+    const firstIds = seedDeterministicState(6);
+    const firstRows = readCampaignScenarios();
+
+    let secondIds: string[] = [];
+    expect(() => {
+      secondIds = seedDeterministicState(6);
+    }).not.toThrow();
+    const secondRows = readCampaignScenarios();
+
+    expect(secondIds).toEqual(firstIds);
+    expect(secondRows).toEqual(firstRows);
+    expect(secondRows.map((row) => row.scenario)).toEqual([
+      'open',
+      'funded',
+      'claimed',
+      'open',
+      'funded',
+      'claimed',
+    ]);
+  });
+
+  it('reports already-seeded on the second run instead of re-wiping', () => {
+    const first = seedDeterministicState(3);
+    expect(first).toEqual(['1', '2', '3']);
+
+    const db = getDb();
+    // A row that a re-wipe would delete; it must survive the guarded rerun.
+    db.prepare(
+      `INSERT INTO notifications (campaign_id, type, title, body, target_wallet, actor_wallet, is_read, created_at)
+       VALUES (?, 'new_pledge', 't', 'b', ?, NULL, 0, ?)`,
+    ).run('1', `G${'S'.repeat(55)}`, 1_750_000_000);
+
+    const second = seedDeterministicState(3);
+    expect(second).toEqual(first);
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM notifications`).get() as { n: number }).n).toBe(
+      1,
+    );
+  });
+
+  it('performs a clean deterministic reset when the count changes', () => {
+    seedDeterministicState(3);
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO notifications (campaign_id, type, title, body, target_wallet, actor_wallet, is_read, created_at)
+       VALUES (?, 'new_pledge', 't', 'b', ?, NULL, 0, ?)`,
+    ).run('1', `G${'T'.repeat(55)}`, 1_750_000_000);
+
+    const ids = seedDeterministicState(6);
+    expect(ids).toEqual(['1', '2', '3', '4', '5', '6']);
+    expect(readCampaignScenarios().map((row) => row.scenario)).toEqual([
+      'open',
+      'funded',
+      'claimed',
+      'open',
+      'funded',
+      'claimed',
+    ]);
+    // The reset wiped dependent rows rather than leaving stale data behind.
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM notifications`).get() as { n: number }).n).toBe(
+      0,
+    );
+  });
+
+  it('bypasses the guard and re-seeds when force is set', () => {
+    seedDeterministicState(3);
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO notifications (campaign_id, type, title, body, target_wallet, actor_wallet, is_read, created_at)
+       VALUES (?, 'new_pledge', 't', 'b', ?, NULL, 0, ?)`,
+    ).run('1', `G${'F'.repeat(55)}`, 1_750_000_000);
+
+    const ids = seedDeterministicState(3, { force: true });
+    expect(ids).toEqual(['1', '2', '3']);
+    expect(readCampaignScenarios().map((row) => row.scenario)).toEqual([
+      'open',
+      'funded',
+      'claimed',
+    ]);
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM notifications`).get() as { n: number }).n).toBe(
+      0,
+    );
+  });
+
+  it('records a seed marker after seeding and leaves none on a fresh database', () => {
+    fs.rmSync(TEST_DB_PATH, { force: true });
+    fs.rmSync(`${TEST_DB_PATH}-wal`, { force: true });
+    fs.rmSync(`${TEST_DB_PATH}-shm`, { force: true });
+    resetDbForTests();
+
+    const db = getDb();
+    expect(
+      db.prepare(`SELECT COUNT(*) AS n FROM seed_markers`).get() as { n: number },
+    ).toEqual({ n: 0 });
+
+    seedDeterministicState(3);
+    const marker = db.prepare(`SELECT count FROM seed_markers LIMIT 1`).get() as
+      | { count: number }
+      | undefined;
+    expect(marker).toBeDefined();
+    expect(marker?.count).toBe(3);
+  });
+});
+
 describe('seed workflow database regression', () => {
   it('returns campaign ids in insertion order', () => {
     const ids = seedDeterministicState(5);

@@ -24,10 +24,20 @@ CLI: `cd backend && npm run seed` (optional `--count N`)
 | `2` | **Funded** | `claimed_at` is null; `pledged_amount` ≥ `target_amount` |
 | `3` | **Claimed** | `claimed_at` is set |
 
-Running the command **twice on the same database** is safe: the seed wipes
-notifications, comments, events, pledges, campaigns, and `campaigns_fts` inside
-one transaction, then re-inserts the same rows. Counts and amounts stay
-identical across reruns.
+Running the command **twice on the same database** is guarded: the seed detects
+the existing deterministic fixtures and stops with an `already seeded` message
+instead of wiping data. Counts and amounts stay identical across reruns.
+
+### Rerun guard and recovery
+
+A second `npm run seed` on an already-seeded local database exits non-zero with
+a clear `already seeded` message and makes no changes. To reseed:
+
+- `cd backend && npm run seed:force` — passes `--force` to the seed, which
+  wipes notifications, comments, events, pledges, campaigns, and `campaigns_fts`
+  inside one transaction, then re-inserts the same rows; or
+- delete the local DB file (`rm "${DB_PATH:-./data/campaigns.db}"`) and restart
+  the backend, then run `npm run seed` again.
 
 ## How to inspect outcomes
 
@@ -52,6 +62,8 @@ npm test -- src/services/seedDeterministic.test.ts
 | Signal | Likely cause | What to do |
 | --- | --- | --- |
 | `Invalid --count value` / `count must be a positive integer` | `--count` missing, `0`, or non-integer | Pass a positive integer, e.g. `--count 5` |
+| `already seeded` (non-zero exit) | Deterministic fixtures already exist in this DB | Reseed with `npm run seed:force`, or delete the DB file and restart the backend |
+| `--force` ignored / unknown flag | Older seed build without rerun guard | Update the backend, then use `npm run seed:force` |
 | `SQLITE_CANTOPEN` / cannot open DB | `DB_PATH` directory missing or not writable | Create the directory; see [TROUBLESHOOTING](./TROUBLESHOOTING.md) |
 | `FOREIGN KEY` / constraint errors mid-seed | Unexpected schema or partial manual edits | Re-run seed (atomic wipe) or delete the DB file and restart the backend |
 | Seed IDs or amounts change between two runs | Different `--count`, or not using this seed path | Re-run with the same `--count`; compare against the test file |
