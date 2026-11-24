@@ -1,13 +1,13 @@
-
 #[cfg(test)]
 mod tests {
     use soroban_sdk::{
-        testutils::{Address as _, Ledger},
+        symbol_short,
+        testutils::{Address as _, Events, Ledger},
         token::StellarAssetClient,
-        Address, Env, String,
+        Address, Env, String, Symbol, TryFromVal,
     };
 
-    use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
+    use crate::{MetadataUpdated, StellarGoalVaultContract, StellarGoalVaultContractClient};
 
     fn deploy_contract(env: &Env) -> StellarGoalVaultContractClient<'_> {
         let contract_id = env.register_contract(None, StellarGoalVaultContract);
@@ -15,7 +15,9 @@ mod tests {
     }
 
     fn deploy_token(env: &Env, admin: &Address, recipient: &Address, amount: i128) -> Address {
-        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_id = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let asset_client = StellarAssetClient::new(env, &token_id);
         asset_client.mint(recipient, &amount);
         token_id
@@ -27,6 +29,28 @@ mod tests {
         });
     }
 
+    /// Asserts that the most recently emitted contract event is a
+    /// `MetadataUpdated` event with the expected payload and topics.
+    fn assert_last_metadata_event(env: &Env, expected: &MetadataUpdated) {
+        let events = env.events().all();
+        let (_, topics, data) = events.last().expect("expected a MetadataUpdated event");
+
+        assert_eq!(topics.len(), 2, "MetadataUpdated must have two topics");
+        let topic_0 = topics.get(0).unwrap();
+        let topic_1 = topics.get(1).unwrap();
+        assert_eq!(
+            Symbol::try_from_val(env, &topic_0).unwrap(),
+            symbol_short!("Goal")
+        );
+        assert_eq!(
+            Symbol::try_from_val(env, &topic_1).unwrap(),
+            symbol_short!("MetaUpd")
+        );
+
+        let event = MetadataUpdated::try_from_val(env, &data)
+            .expect("event data must decode as MetadataUpdated");
+        assert_eq!(&event, expected);
+    }
 
     #[test]
     fn test_claim_success() {
@@ -293,7 +317,9 @@ mod tests {
         let admin = Address::generate(&env);
 
         // Mint tokens to each contributor separately
-        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_id = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let asset_client = StellarAssetClient::new(&env, &token_id);
         asset_client.mint(&contributor1, &200);
         asset_client.mint(&contributor2, &200);
@@ -727,7 +753,6 @@ mod tests {
         assert_eq!(client.get_contributor_count(&campaign_id), 1);
     }
 
-
     #[test]
     fn test_contributor_count_no_double_count_multiple_tokens() {
         let env = Env::default();
@@ -882,10 +907,134 @@ mod tests {
         assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
     }
 
-    // ── #185: update_metadata tests ───────────────────────────────────────────
+    // ── #185 / #1521: update_metadata boundary tests ──────────────────────────
+    //
+    // Metadata updates are creator-only and are accepted only while the
+    // campaign is active (not claimed, not canceled, and strictly before the
+    // deadline). A successful update emits `MetadataUpdated` with both the old
+    // and the new value.
 
     #[test]
     fn test_update_metadata_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline = env.ledger().timestamp() + 1_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &deadline,
+            &String::from_str(&env, "original metadata"),
+            &0_i128,
+        );
+
+        client.update_metadata(
+            &campaign_id,
+            &creator,
+            &String::from_str(&env, "updated metadata"),
+        );
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(
+            campaign.metadata,
+            String::from_str(&env, "updated metadata")
+        );
+        // An update must not touch any other campaign field.
+        assert_eq!(campaign.creator, creator);
+        assert_eq!(campaign.target_amount, 1_000);
+        assert_eq!(campaign.deadline, deadline);
+        assert!(!campaign.claimed);
+        assert!(!campaign.canceled);
+
+        assert_last_metadata_event(
+            &env,
+            &MetadataUpdated {
+                campaign_id,
+                creator: creator.clone(),
+                old_metadata: String::from_str(&env, "original metadata"),
+                new_metadata: String::from_str(&env, "updated metadata"),
+            },
+        );
+    }
+
+    #[test]
+    fn test_update_metadata_last_moment_before_deadline_succeeds() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 100;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "before deadline"),
+            &0_i128,
+        );
+
+        // The last accepted moment is deadline - 1.
+        advance_time(&env, deadline_offset - 1);
+        client.update_metadata(
+            &campaign_id,
+            &creator,
+            &String::from_str(&env, "last moment update"),
+        );
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert_eq!(
+            campaign.metadata,
+            String::from_str(&env, "last moment update")
+        );
+        assert_last_metadata_event(
+            &env,
+            &MetadataUpdated {
+                campaign_id,
+                creator,
+                old_metadata: String::from_str(&env, "before deadline"),
+                new_metadata: String::from_str(&env, "last moment update"),
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign deadline reached")]
+    fn test_update_metadata_rejects_exactly_at_deadline() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 100;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "at deadline"),
+            &0_i128,
+        );
+
+        // The deadline itself is closed: timestamp >= deadline is rejected.
+        advance_time(&env, deadline_offset);
+        client.update_metadata(&campaign_id, &creator, &String::from_str(&env, "too late"));
+    }
+
+    #[test]
+    fn test_update_metadata_records_chained_old_and_new_values() {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -899,18 +1048,91 @@ mod tests {
             &soroban_sdk::vec![&env, token.clone()],
             &1_000_i128,
             &(env.ledger().timestamp() + 1_000),
-            &String::from_str(&env, "original metadata"),
+            &String::from_str(&env, "v0"),
             &0_i128,
         );
 
-        client.update_metadata(
-            &campaign_id,
-            &creator,
-            &String::from_str(&env, "updated metadata"),
+        client.update_metadata(&campaign_id, &creator, &String::from_str(&env, "v1"));
+        assert_last_metadata_event(
+            &env,
+            &MetadataUpdated {
+                campaign_id,
+                creator: creator.clone(),
+                old_metadata: String::from_str(&env, "v0"),
+                new_metadata: String::from_str(&env, "v1"),
+            },
         );
 
-        let campaign = client.get_campaign(&campaign_id);
-        assert_eq!(campaign.metadata, String::from_str(&env, "updated metadata"));
+        client.update_metadata(&campaign_id, &creator, &String::from_str(&env, "v2"));
+        assert_last_metadata_event(
+            &env,
+            &MetadataUpdated {
+                campaign_id,
+                creator,
+                old_metadata: String::from_str(&env, "v1"),
+                new_metadata: String::from_str(&env, "v2"),
+            },
+        );
+
+        assert_eq!(
+            client.get_campaign(&campaign_id).metadata,
+            String::from_str(&env, "v2")
+        );
+    }
+
+    #[test]
+    fn test_update_metadata_allows_empty_string() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "clearable metadata"),
+            &0_i128,
+        );
+
+        client.update_metadata(&campaign_id, &creator, &String::from_str(&env, ""));
+        assert_eq!(
+            client.get_campaign(&campaign_id).metadata,
+            String::from_str(&env, "")
+        );
+    }
+
+    #[test]
+    fn test_update_metadata_rejected_call_leaves_metadata_unchanged() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "unchanged"),
+            &0_i128,
+        );
+
+        let result =
+            client.try_update_metadata(&campaign_id, &attacker, &String::from_str(&env, "hacked"));
+        assert!(result.is_err(), "non-creator update must fail");
+        assert_eq!(
+            client.get_campaign(&campaign_id).metadata,
+            String::from_str(&env, "unchanged")
+        );
     }
 
     #[test]
@@ -934,11 +1156,7 @@ mod tests {
             &0_i128,
         );
 
-        client.update_metadata(
-            &campaign_id,
-            &attacker,
-            &String::from_str(&env, "hacked"),
-        );
+        client.update_metadata(&campaign_id, &attacker, &String::from_str(&env, "hacked"));
     }
 
     #[test]
@@ -964,10 +1182,68 @@ mod tests {
 
         advance_time(&env, deadline_offset + 1);
 
+        client.update_metadata(&campaign_id, &creator, &String::from_str(&env, "too late"));
+    }
+
+    #[test]
+    #[should_panic(expected = "campaign already claimed")]
+    fn test_update_metadata_rejects_claimed_campaign() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 100;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "claimed metadata test"),
+            &0_i128,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &1_000);
+        advance_time(&env, deadline_offset + 1);
+        client.claim(&campaign_id, &creator);
+
         client.update_metadata(
             &campaign_id,
             &creator,
-            &String::from_str(&env, "too late"),
+            &String::from_str(&env, "update after claim"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_update_metadata_blocked_when_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &creator, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "paused metadata test"),
+            &0_i128,
+        );
+
+        client.set_paused(&admin, &true);
+        client.update_metadata(
+            &campaign_id,
+            &creator,
+            &String::from_str(&env, "blocked while paused"),
         );
     }
 
@@ -1097,7 +1373,9 @@ mod tests {
         let contributor2 = Address::generate(&env);
         let admin = Address::generate(&env);
 
-        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_id = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let asset_client = StellarAssetClient::new(&env, &token_id);
         asset_client.mint(&contributor1, &300);
         asset_client.mint(&contributor2, &300);
@@ -1147,7 +1425,9 @@ mod tests {
         let contributor3 = Address::generate(&env);
         let admin = Address::generate(&env);
 
-        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_id = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let asset_client = StellarAssetClient::new(&env, &token_id);
         asset_client.mint(&contributor1, &200);
         asset_client.mint(&contributor2, &200);
@@ -1206,5 +1486,4 @@ mod tests {
         let new_deadline = env.ledger().timestamp() + 500;
         client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
     }
-
 }

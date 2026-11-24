@@ -119,7 +119,7 @@ stellar contract invoke --id $CONTRACT_ID -- initialize \
 
 Contributions below the minimum are rejected with `"contribution below minimum"`.
 
-### Metadata updates (issue #185)
+### Metadata updates (issues #185, #1521)
 
 A campaign creator can update the campaign metadata before the deadline:
 
@@ -131,6 +131,8 @@ stellar contract invoke --id $CONTRACT_ID -- update_metadata \
 ```
 
 The contract emits a `MetadataUpdated` event containing both the old and new metadata values. The backend event indexer processes this event and updates local state automatically.
+
+Boundaries: only the campaign creator can update metadata, the contract must not be paused, and the campaign must not be claimed or canceled. Updates are accepted while `ledger timestamp < deadline`, so `deadline - 1` is the last valid moment and the deadline itself is closed. `new_metadata` may be empty, which clears the value. Rejected calls leave storage untouched and emit no event. The full specification, event schema, and test matrix are in [`contracts/METADATA_UPDATE_BOUNDARIES.md`](contracts/METADATA_UPDATE_BOUNDARIES.md).
 
 ### Multi-token campaigns (issue #191)
 

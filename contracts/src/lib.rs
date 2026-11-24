@@ -1,7 +1,5 @@
 #![no_std]
 
-
-
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token::Client as TokenClient, Address, Env,
     String, Vec,
@@ -45,13 +43,16 @@ pub enum DataKey {
     CampaignTokenBalance(u64, Address),  // (campaign_id, token)
     /// Maximum total contribution any single contributor may make to a
     /// campaign across all tokens. Absent (or zero) means no cap.
-    ContributorCap(u64),               // campaign_id → i128
+    ContributorCap(u64), // campaign_id → i128
     Admin,
     Paused,
     MinContribution,
     ExtensionRequest(u64),
     ExtensionVote(u64, Address),
     HasContributed(u64, Address), // (campaign_id, contributor)
+    /// Ordered list of distinct contributor addresses for a campaign.
+    /// Used by `refund_all` to iterate refunds in a single call.
+    Contributors(u64), // campaign_id
     /// Tracks which (old_contract_id, campaign_id) pairs have already been migrated.
     MigratedId(Address, u64),
 }
@@ -167,7 +168,9 @@ impl StellarGoalVaultContract {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.storage().instance().set(&DataKey::MinContribution, &min_contribution);
+        env.storage()
+            .instance()
+            .set(&DataKey::MinContribution, &min_contribution);
     }
 
     /// Returns the current minimum contribution threshold in stroops.
@@ -195,18 +198,25 @@ impl StellarGoalVaultContract {
         if paused {
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Pause")),
-                ContractPaused { contract_version: version },
+                ContractPaused {
+                    contract_version: version,
+                },
             );
         } else {
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Unpause")),
-                ContractUnpaused { contract_version: version },
+                ContractUnpaused {
+                    contract_version: version,
+                },
             );
         }
     }
 
     pub fn get_paused(env: Env) -> bool {
-        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -236,7 +246,10 @@ impl StellarGoalVaultContract {
             .set(&DataKey::Campaign(campaign_id), &campaign);
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("Cancel")),
-            CampaignCanceled { campaign_id, creator },
+            CampaignCanceled {
+                campaign_id,
+                creator,
+            },
         );
     }
 
@@ -260,7 +273,7 @@ impl StellarGoalVaultContract {
         if deadline - env.ledger().timestamp() > MAX_CAMPAIGN_DURATION_SECONDS {
             panic!("deadline exceeds maximum campaign duration");
         }
-        if accepted_tokens.len() == 0 {
+        if accepted_tokens.is_empty() {
             panic!("accepted_tokens must not be empty");
         }
 
@@ -335,7 +348,13 @@ impl StellarGoalVaultContract {
         next_id
     }
 
-    pub fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, amount: i128) {
+    pub fn contribute(
+        env: Env,
+        campaign_id: u64,
+        contributor: Address,
+        token: Address,
+        amount: i128,
+    ) {
         require_not_paused(&env);
         contributor.require_auth();
 
@@ -374,13 +393,37 @@ impl StellarGoalVaultContract {
 
         // Only increment contributor_count on first-time pledge
         let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
-        let has_contributed: bool = env.storage().persistent().get(&has_contributed_key).unwrap_or(false);
+        let has_contributed: bool = env
+            .storage()
+            .persistent()
+            .get(&has_contributed_key)
+            .unwrap_or(false);
         if !has_contributed {
             campaign.contributor_count += 1;
             env.storage().persistent().set(&has_contributed_key, &true);
         }
 
+        // Track distinct contributors so refund_all can iterate over them.
+        let contributors_key = DataKey::Contributors(campaign_id);
+        let mut contributors: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&contributors_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        if !contributors.iter().any(|c| c == contributor) {
+            contributors.push_back(contributor.clone());
+            env.storage()
+                .persistent()
+                .set(&contributors_key, &contributors);
+        }
 
+        let contribution_key =
+            DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+        let current_contribution: i128 = env
+            .storage()
+            .persistent()
+            .get(&contribution_key)
+            .unwrap_or(0);
 
         // Write updated campaign back to storage
         env.storage()
@@ -408,9 +451,20 @@ impl StellarGoalVaultContract {
         );
     }
 
-    /// Updates the campaign metadata. Only the original creator can call this,
-    /// and only before the campaign deadline. Emits a MetadataUpdated event
-    /// containing both old and new values (issue #185).
+    /// Updates the campaign metadata (issues #185, #1521).
+    ///
+    /// Boundaries:
+    /// - Caller must be the campaign creator and provide authorization.
+    /// - The contract must not be paused.
+    /// - The campaign must not be claimed or canceled.
+    /// - The ledger timestamp must be strictly before the deadline; the
+    ///   deadline itself is closed (`deadline - 1` is the last valid moment).
+    /// - `new_metadata` may be any string, including the empty string.
+    ///
+    /// On success the metadata is replaced and a `MetadataUpdated` event is
+    /// emitted with both the previous and the new value. Rejected calls panic
+    /// before writing storage and emit no event. See
+    /// `contracts/METADATA_UPDATE_BOUNDARIES.md` for the full specification.
     pub fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: String) {
         require_not_paused(&env);
         creator.require_auth();
@@ -544,7 +598,8 @@ impl StellarGoalVaultContract {
         request.approval_count += 1;
 
         // Majority threshold: approval_count * 2 > contributor_count
-        if campaign.contributor_count > 0 && request.approval_count * 2 > campaign.contributor_count {
+        if campaign.contributor_count > 0 && request.approval_count * 2 > campaign.contributor_count
+        {
             campaign.deadline = request.new_deadline;
             env.storage()
                 .persistent()
@@ -683,7 +738,12 @@ impl StellarGoalVaultContract {
         read_campaign(&env, campaign_id)
     }
 
-    pub fn get_contribution(env: Env, campaign_id: u64, contributor: Address, token: Address) -> i128 {
+    pub fn get_contribution(
+        env: Env,
+        campaign_id: u64,
+        contributor: Address,
+        token: Address,
+    ) -> i128 {
         env.storage()
             .persistent()
             .get(&DataKey::Contribution(campaign_id, contributor, token))
@@ -797,7 +857,9 @@ impl StellarGoalVaultContract {
             Some(ts) => ts,
             None => {
                 let ts = env.ledger().timestamp();
-                env.storage().instance().set(&DataKey::DeploymentTimestamp, &ts);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::DeploymentTimestamp, &ts);
                 ts
             }
         };
@@ -826,3 +888,56 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .unwrap_or_else(|| panic!("campaign not found"))
 }
 
+fn refund_contributor(
+    env: &Env,
+    campaign: &mut Campaign,
+    campaign_id: u64,
+    contributor: &Address,
+) -> i128 {
+    let contract_address = env.current_contract_address();
+    let mut total_refunded = 0;
+
+    for token in campaign.accepted_tokens.iter() {
+        let contribution_key =
+            DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+        let contribution: i128 = env
+            .storage()
+            .persistent()
+            .get(&contribution_key)
+            .unwrap_or(0);
+
+        if contribution > 0 {
+            // Transfer back to contributor
+            let token_client = TokenClient::new(env, &token);
+            token_client.transfer(&contract_address, contributor, &contribution);
+
+            // Update campaign and per-token balances
+            campaign.pledged_amount -= contribution;
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&balance_key, &(balance - contribution));
+
+            // Reset user contribution for this token
+            env.storage().persistent().set(&contribution_key, &0_i128);
+
+            total_refunded += contribution;
+
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Refund")),
+                CampaignRefunded {
+                    campaign_id,
+                    contributor: contributor.clone(),
+                    token: token.clone(),
+                    amount: contribution,
+                },
+            );
+        }
+    }
+
+    total_refunded
+}
+
+#[cfg(test)]
+mod test;
