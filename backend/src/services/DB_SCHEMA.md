@@ -91,8 +91,27 @@ Column additions must precede dependent partial and composite indexes.
 Backfill only when the existing data has a clear default, and avoid rewriting
 lifecycle or accounting history.
 
-To roll back, call `rollbackMigrations(db, targetVersion)`. It runs the down
-scripts newest first and removes their `schema_migrations` rows.
+### Interrupted upgrades
+
+A migration is applied inside a single transaction, and the `schema_migrations`
+row for that version is written in the same transaction. The version therefore
+advances only if the migration's DDL and bookkeeping both commit. If the process
+is killed, the power fails, or a statement fails before commit, SQLite rolls the
+whole transaction back: the schema stays at the previous version, the migration
+has no `schema_migrations` row, and no committed campaign, pledge, or event data
+is dropped or duplicated.
+
+Rerunning `migrate()` after an interruption is safe. Migrations already recorded
+are skipped, and the interrupted one is applied again from its start. Because its
+prior attempt rolled back, the rerun begins from a clean state and does not stack
+duplicate columns, indexes, or triggers. Migrations that create objects use
+`IF NOT EXISTS`, and column additions run only when the column is absent. The
+legacy upgrade (`upgradeLegacySchema()`) follows the same rule: it is idempotent,
+so an interruption part-way through it can be recovered by rerunning startup.
+
+Regression coverage for this behaviour lives in
+`src/db/versionedMigrations.test.ts` (interrupted migration recovery) and must
+stay green when migrations change.
 
 ### Databases created before versioned migrations
 
@@ -104,6 +123,9 @@ Databases created before the runner existed have tables but no
 transaction hashes, and backfills `campaigns_fts`. Migrations 001–004 are then
 recorded as applied. That module is frozen, so new schema work goes in
 migration files.
+
+To roll back, call `rollbackMigrations(db, targetVersion)`. It runs the down
+scripts newest first and removes their `schema_migrations` rows.
 
 ### Startup invariants
 
@@ -231,43 +253,4 @@ history, campaign pledge lists, and active-pledge accounting). All use
 - `idx_pledges_transaction_hash` unique partial on `pledges(transaction_hash)`
   where `transaction_hash IS NOT NULL`.
 
-### Seed-workflow / FK child indexes
-
-- `idx_notifications_campaign_id` on `notifications(campaign_id)` — speeds
-  foreign-key child discovery when the seed wipe deletes campaigns (and any
-  campaign-scoped notification lookups).
-- `idx_campaign_comments_campaign_id` on `campaign_comments(campaign_id)`.
-- `idx_campaign_events_campaign_id` on `campaign_events(campaign_id)`.
-- `idx_webhook_dlq_campaign_id` on `webhook_dead_letter_queue(campaign_id)`.
-
-### Query-layer composite indexes (#889)
-
-Installed by `ensureQueryLayerIndexes()` for concrete application read plans:
-
-- `idx_pledges_campaign_contributor` on `pledges(campaign_id, contributor, refunded_at)` —
-  contributor totals and refund lookups (`WHERE campaign_id AND contributor AND refunded_at IS NULL`).
-- `idx_campaign_events_campaign_timestamp` on `campaign_events(campaign_id, timestamp, id)` —
-  ordered campaign history pages.
-- `idx_campaign_comments_campaign_created` on `campaign_comments(campaign_id, deleted_at, created_at DESC)` —
-  soft-deleted comment lists per campaign.
-- `idx_campaign_events_source` on `json_extract(blockchain_metadata, '$.source')` —
-  filtering local vs soroban history events.
-
-### Migration-runner query indexes
-
-Created by migration 004 and re-asserted by `ensureMigrationRunnerIndexes()` to accelerate backfill, deduplication, and cached accounting query plans during schema upgrades:
-
-- `idx_pledges_token_id_null` partial index on `pledges(token_id)` where `token_id IS NULL` — speeds legacy `token_id` backfill (`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`).
-- `idx_pledges_campaign_refunded` covering index on `pledges(campaign_id, refunded_at)` — accelerates campaign `pledged_amount` recomputation (`UPDATE campaigns SET pledged_amount = ...`).
-- `idx_pledges_tx_hash_migration` partial index on `pledges(transaction_hash)` where `transaction_hash IS NOT NULL` — accelerates `transaction_hash` deduplication (`GROUP BY transaction_hash`).
-
-### Pledge query invariants (#891)
-
-Pledge writes use an SQLite `IMMEDIATE` transaction before reading contributor
-totals or campaign accounting. This reserves the writer before the cap checks,
-then re-reads campaign lifecycle and cap data inside the transaction. A second
-writer therefore cannot validate against the same stale pledged total. Pledge
-amounts must be finite, positive, and remain at least `0.01` after currency
-rounding. Rejected writes leave the pledge row, cached campaign total, and event
-history unchanged. Contributor summaries break equal-total ties by contributor
-address so query results are deterministic.
+### Seed-workflo
