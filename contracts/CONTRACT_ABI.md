@@ -1430,6 +1430,13 @@ Campaign accepts multiple token types.
 //   → 3 CampaignClaimed events emitted (one per token)
 ```
 
+#### Multi-Token Accounting Boundaries (SGV-2026-121)
+
+- **Independent Token Ledgers:** Each accepted token maintains its own isolated escrow balance in `CampaignTokenBalance(campaign_id, token)` and per-contributor accounting in `Contribution(campaign_id, contributor, token)`.
+- **Different Precision Support:** Tokens with different precisions (e.g., native XLM at 7 decimals and USDC at 6/7 decimals) are managed in their exact native integer base units (stroops/units).
+- **Checked Integer Arithmetic:** All pledge additions, valuation sums, contributor cap checks, platform fee deductions, and refund calculations use checked arithmetic (`checked_add`, `checked_sub`, `checked_mul`), eliminating overflow and underflow vulnerabilities.
+- **Exact Transfers:** Claims and refunds operate on per-token balance boundaries, transferring exact integer amounts with zero rounding loss.
+
 ### Example 5: Read-Only Queries
 
 Checking campaign state without mutation.

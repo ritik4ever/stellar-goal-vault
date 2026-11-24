@@ -4374,4 +4374,132 @@ mod tests {
         );
         assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_000);
     }
+
+    // ── SGV-2026-121: Multi-token accounting boundaries (XLM & USDC) ────────────
+    #[test]
+    fn test_multi_token_accounting_xlm_and_usdc_boundaries_preserve_exact_balances_and_claims() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_recipient = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128); // 1% platform fee
+        client.set_fee_recipient(&admin, &fee_recipient);
+
+        // XLM (7 decimals: 10_000_000 per XLM) and USDC (6/7 decimals)
+        // Alice has XLM funds; Bob has USDC funds
+        let xlm_amount = 25_000_000_i128; // 2.5 XLM (stroops)
+        let usdc_amount = 75_000_000_i128; // 75 USDC (units)
+        let xlm_token = deploy_token(&env, &admin, &alice, xlm_amount);
+        let usdc_token = deploy_token(&env, &admin, &bob, usdc_amount);
+
+        let target_amount = 100_000_000_i128;
+        let deadline = env.ledger().timestamp() + 1000;
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, xlm_token.clone(), usdc_token.clone()],
+            &target_amount,
+            &deadline,
+            &String::from_str(&env, "Multi-token XLM and USDC campaign"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        // 1. Alice pledges XLM
+        client.contribute(&campaign_id, &alice, &xlm_token, &xlm_amount);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &xlm_token), xlm_amount);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &usdc_token), 0);
+        assert_eq!(client.get_contribution(&campaign_id, &alice, &xlm_token), xlm_amount);
+        assert_eq!(client.get_contribution(&campaign_id, &alice, &usdc_token), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, xlm_amount);
+
+        // 2. Bob pledges USDC
+        client.contribute(&campaign_id, &bob, &usdc_token, &usdc_amount);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &xlm_token), xlm_amount);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &usdc_token), usdc_amount);
+        assert_eq!(client.get_contribution(&campaign_id, &bob, &usdc_token), usdc_amount);
+        assert_eq!(client.get_contribution(&campaign_id, &bob, &xlm_token), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, target_amount);
+        assert_eq!(client.get_contributor_count(&campaign_id), 2);
+
+        // 3. Fast forward past deadline and claim
+        advance_time(&env, 1001);
+        client.claim(&campaign_id, &creator);
+
+        // Per-token balances in vault are cleared to 0 exactly
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &xlm_token), 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &usdc_token), 0);
+
+        // Platform fee calculated with exact integer arithmetic
+        let fee_bps = client.get_platform_fee_bps();
+        let xlm_fee = xlm_amount * fee_bps / 10000;
+        let usdc_fee = usdc_amount * fee_bps / 10000;
+        let creator_xlm = xlm_amount - xlm_fee;
+        let creator_usdc = usdc_amount - usdc_fee;
+
+        assert_eq!(TokenClient::new(&env, &xlm_token).balance(&creator), creator_xlm);
+        assert_eq!(TokenClient::new(&env, &usdc_token).balance(&creator), creator_usdc);
+        assert_eq!(TokenClient::new(&env, &xlm_token).balance(&fee_recipient), xlm_fee);
+        assert_eq!(TokenClient::new(&env, &usdc_token).balance(&fee_recipient), usdc_fee);
+    }
+
+    #[test]
+    fn test_multi_token_accounting_xlm_and_usdc_refund_preserves_exact_per_token_balances() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let xlm_amount = 15_500_000_i128;
+        let usdc_amount = 45_250_000_i128;
+        let xlm_token = deploy_token(&env, &admin, &alice, xlm_amount);
+        let usdc_token = deploy_token(&env, &admin, &bob, usdc_amount);
+
+        let target_amount = 100_000_000_i128;
+        let deadline = env.ledger().timestamp() + 1000;
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, xlm_token.clone(), usdc_token.clone()],
+            &target_amount,
+            &deadline,
+            &String::from_str(&env, "Refund test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        client.contribute(&campaign_id, &alice, &xlm_token, &xlm_amount);
+        client.contribute(&campaign_id, &bob, &usdc_token, &usdc_amount);
+
+        // Cancel campaign so contributors can refund
+        client.cancel_campaign(&campaign_id, &creator);
+
+        // Alice refunds her XLM
+        client.refund(&campaign_id, &alice);
+        assert_eq!(TokenClient::new(&env, &xlm_token).balance(&alice), xlm_amount);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &xlm_token), 0);
+        // Bob's USDC remains untouched in escrow
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &usdc_token), usdc_amount);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, usdc_amount);
+
+        // Bob refunds his USDC
+        client.refund(&campaign_id, &bob);
+        assert_eq!(TokenClient::new(&env, &usdc_token).balance(&bob), usdc_amount);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &usdc_token), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+    }
 }
