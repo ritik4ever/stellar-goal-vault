@@ -678,3 +678,172 @@ fn partially_refunded_campaign_lets_only_each_contributor_release_their_own_pled
         0
     );
 }
+
+// --- update_metadata (SGV-2026-142) ------------------------------------------
+
+#[test]
+fn update_metadata_requires_exactly_the_creator_signature() {
+    let f = fixture();
+    let updated = String::from_str(&f.env, "updated metadata");
+
+    f.client
+        .update_metadata(&f.campaign_id, &f.creator, &updated);
+    assert_sole_signer(&f, &f.creator, "update_metadata");
+    assert_eq!(f.client.get_campaign(&f.campaign_id).metadata, updated);
+}
+
+#[test]
+fn update_metadata_without_signature_fails_and_leaves_storage_and_balances_intact() {
+    let f = fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+    enforce_no_signatures(&f);
+
+    let result = f.client.try_update_metadata(
+        &f.campaign_id,
+        &f.creator,
+        &String::from_str(&f.env, "unsigned update"),
+    );
+    assert!(result.is_err(), "unsigned update_metadata must fail");
+
+    let campaign = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(campaign.metadata, String::from_str(&f.env, "auth"));
+    assert_eq!(campaign.pledged_amount, PLEDGE);
+    assert_eq!(campaign.contributor_count, 1);
+    assert!(!campaign.claimed);
+    assert!(!campaign.canceled);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        PLEDGE
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+}
+
+#[test]
+fn update_metadata_signed_by_another_account_fails_and_changes_nothing() {
+    let f = fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+
+    let hacked = String::from_str(&f.env, "hacked metadata");
+
+    // Case 1: Bob signs an update_metadata call purporting to act as creator.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.bob,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "update_metadata",
+            args: (f.campaign_id, f.creator.clone(), hacked.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    let result = f
+        .client
+        .try_update_metadata(&f.campaign_id, &f.creator, &hacked);
+    assert!(
+        result.is_err(),
+        "update_metadata signed by a non-creator must fail"
+    );
+
+    // Case 2: Bob signs an update_metadata call with his own address as creator.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.bob,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "update_metadata",
+            args: (f.campaign_id, f.bob.clone(), hacked.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    let result = f
+        .client
+        .try_update_metadata(&f.campaign_id, &f.bob, &hacked);
+    assert!(
+        result.is_err(),
+        "update_metadata by a non-creator caller must fail"
+    );
+
+    let campaign = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(campaign.metadata, String::from_str(&f.env, "auth"));
+    assert_eq!(campaign.pledged_amount, PLEDGE);
+    assert_eq!(campaign.contributor_count, 1);
+    assert!(!campaign.claimed);
+    assert!(!campaign.canceled);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        PLEDGE
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.bob), 10_000);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+}
+
+#[test]
+fn unauthorized_update_metadata_around_pledge_and_settlement_leaves_balances_and_state_valid() {
+    let f = fixture();
+    let original = String::from_str(&f.env, "auth");
+    let tampered = String::from_str(&f.env, "tampered");
+
+    // First pledge moves tokens into the vault.
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+
+    // Contributor Alice tries to overwrite metadata after pledging.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.alice,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "update_metadata",
+            args: (f.campaign_id, f.alice.clone(), tampered.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(f
+        .client
+        .try_update_metadata(&f.campaign_id, &f.alice, &tampered)
+        .is_err());
+
+    let mid_campaign = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(mid_campaign.metadata, original);
+    assert_eq!(mid_campaign.pledged_amount, PLEDGE);
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+
+    // Second pledge completes the funding target.
+    f.env.mock_all_auths();
+    let remainder = TARGET - PLEDGE;
+    f.client
+        .contribute(&f.campaign_id, &f.bob, &f.token, &remainder);
+
+    // Unauthorized caller attempts unsigned metadata update before settlement.
+    enforce_no_signatures(&f);
+    assert!(f
+        .client
+        .try_update_metadata(&f.campaign_id, &f.creator, &tampered)
+        .is_err());
+
+    let pre_claim = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(pre_claim.metadata, original);
+    assert_eq!(pre_claim.pledged_amount, TARGET);
+    assert!(!pre_claim.claimed);
+    assert_eq!(balance(&f, &f.client.address), TARGET);
+    assert_eq!(balance(&f, &f.creator), 0);
+
+    // Settlement still succeeds cleanly for the creator with full payout.
+    f.env.mock_all_auths();
+    past_deadline(&f.env);
+    f.client.claim(&f.campaign_id, &f.creator);
+
+    let post_claim = f.client.get_campaign(&f.campaign_id);
+    assert!(post_claim.claimed);
+    assert_eq!(post_claim.metadata, original);
+    assert_eq!(post_claim.pledged_amount, TARGET);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(balance(&f, &f.creator), TARGET);
+}
