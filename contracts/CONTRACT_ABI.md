@@ -359,6 +359,16 @@ whatever state the campaign is in. Covered by `src/test_pledge_auth.rs`.
 | `refund` | `contributor` | refunds only that contributor's own pledges |
 | `refund_all` | stored `admin` | contract must be initialized |
 
+For multi-token campaigns accepting assets with different decimal precision
+(such as 7-decimal XLM stroops and 6-decimal USDC units), these authority
+guarantees apply uniformly across all accepted tokens and rejected unaccepted
+assets: unauthorized calls cannot mutate campaign state or release escrowed
+funds, and payments in unaccepted assets fail atomically without altering
+accepted-token balances. Covered by
+`multi_token_xlm_usdc_and_unaccepted_asset_contribute_and_claim_authority` and
+`multi_token_xlm_usdc_and_unaccepted_asset_cancel_and_refund_authority` in
+`src/test_pledge_auth.rs`.
+
 ### `contribute`
 
 Contribute tokens to a campaign. Tokens are transferred from the contributor to the contract.
@@ -735,6 +745,7 @@ fn approve_extension(env: Env, campaign_id: u64, caller: Address)
   - For $N=4$ contributors, 3 approvals commit the extension (2 approvals is a 50% tie and remains pending).
 - **Checked Arithmetic on Governance Counters:** Calculation of vote majorities (`checked_mul`), approval counts (`checked_add`), and maximum allowed extension durations (`checked_add`) use checked integer arithmetic to eliminate overflow and wrapping risks.
 - **Auditable Unique Votes & Single Extension:** Each distinct contributor can vote at most once per proposal round (`ExtensionVote` deduplication). Once the smallest majority is reached, the extension commits immediately, the pending request is removed, and subsequent approvals are rejected with `"no extension request"`, preserving exactly one valid extension per round.
+- **Failure Atomicity Around Pledges and Settlement:** Injecting a duplicate vote (`"already voted"`) or an extension request beyond `MAX_CAMPAIGN_DURATION_SECONDS` (`"new deadline exceeds maximum campaign duration"`) fails before any storage writes or event emissions. Pending extension state, campaign deadlines, contribution records, and vault/contributor token balances remain unchanged with no partial pledge or payout.
 
 ---
 
