@@ -400,7 +400,14 @@ The floor defaults to 100 stroops when `initialize()` has not been called and
 can be changed with `initialize()`. The minimum check runs before the campaign
 is read, before the token transfer, and before any storage write, so a rejected
 call leaves the contributor balance, the campaign pledge, and the vault balance
-unchanged.
+unchanged. A rejection emits neither the legacy `"Pledge"` event nor the
+structured `"Pledged"` event.
+
+`initialize()` rejects `0` and negative minimum values with
+`"min_contribution must be positive"` before persisting deployment state or
+publishing an initialization event. Valid deployments require a positive
+minimum in stroops; invalid deployment attempts leave the default minimum
+(100 stroops) observable.
 
 **Per-contributor cap boundary & cumulative enforcement (SGV-2026-120):**
 When `max_per_contributor > 0`, the sum of existing contributions across all
