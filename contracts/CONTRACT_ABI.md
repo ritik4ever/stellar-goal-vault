@@ -287,7 +287,7 @@ fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: S
 | `creator` | `Address` | Must match the campaign's stored creator |
 | `new_metadata` | `String` | Replacement metadata string |
 
-**Authorization:** Requires `creator.require_auth()` and verifies `campaign.creator == creator` before mutating campaign storage. Unsigned calls or calls signed by any non-creator fail atomically, leaving campaign metadata, pledges, and token balances unchanged.
+**Authorization & deadline boundary:** Requires `creator.require_auth()` and verifies `campaign.creator == creator` before mutating campaign storage. Updates are permitted strictly before the deadline (`ledger.timestamp < deadline`, including the last second `deadline - 1`) and rejected once `ledger.timestamp >= deadline`. Unsigned calls, calls signed by any non-creator, or calls at/after the deadline fail atomically, emitting no events and leaving campaign metadata, pledges, and token balances unchanged.
 
 **Errors:**
 
@@ -319,7 +319,9 @@ twice. Covered by
 `test_update_metadata_emits_one_event_with_old_and_new_values`,
 `test_metadata_update_events_replay_to_committed_metadata`, and
 `test_rejected_metadata_update_commits_nothing_and_emits_no_event` in
-`src/test.rs`.
+`src/test.rs`, and
+`update_metadata_at_last_moment_before_deadline_enforces_creator_auth_and_emits_event`
+in `src/test_pledge_auth.rs`.
 
 **Gas estimate:** 16,000 + storage write + event ≈ 22,000 units + 20% headroom = **26,400**
 

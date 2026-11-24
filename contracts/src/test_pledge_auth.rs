@@ -14,12 +14,13 @@
 //!   `refund_all` is admin-only (it used to be callable by anyone).
 
 use soroban_sdk::{
-    testutils::{Address as _, AuthorizedFunction, Ledger, MockAuth, MockAuthInvoke},
+    symbol_short,
+    testutils::{Address as _, AuthorizedFunction, Events as _, Ledger, MockAuth, MockAuthInvoke},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, IntoVal, String, Symbol,
+    Address, Env, FromVal, IntoVal, String, Symbol, Val,
 };
 
-use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
+use crate::{MetadataUpdated, StellarGoalVaultContract, StellarGoalVaultContractClient};
 
 const TARGET: i128 = 1_000;
 const PLEDGE: i128 = 400;
@@ -846,6 +847,143 @@ fn unauthorized_update_metadata_around_pledge_and_settlement_leaves_balances_and
     assert_eq!(post_claim.pledged_amount, TARGET);
     assert_eq!(balance(&f, &f.client.address), 0);
     assert_eq!(balance(&f, &f.creator), TARGET);
+}
+
+#[test]
+fn update_metadata_at_last_moment_before_deadline_enforces_creator_auth_and_emits_event() {
+    let f = fixture();
+    let original = String::from_str(&f.env, "auth");
+    let hacked = String::from_str(&f.env, "unauthorized at deadline-1");
+    let updated = String::from_str(&f.env, "last-second creator update");
+    let too_late = String::from_str(&f.env, "at exact deadline");
+
+    // Seed an active pledge so vault and contributor balances are non-zero.
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+
+    // Move to the exact last second before the deadline (`deadline - 1`).
+    let deadline = f.client.get_campaign(&f.campaign_id).deadline;
+    f.env.ledger().set_timestamp(deadline - 1);
+
+    // Unauthorized caller (non-creator Bob) tries to change metadata at `deadline - 1`.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.bob,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "update_metadata",
+            args: (f.campaign_id, f.bob.clone(), hacked.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        f.client
+            .try_update_metadata(&f.campaign_id, &f.bob, &hacked)
+            .is_err(),
+        "non-creator update_metadata at deadline - 1 must fail"
+    );
+    assert!(
+        f.env
+            .events()
+            .all()
+            .filter_by_contract(&f.client.address)
+            .events()
+            .is_empty(),
+        "rejected non-creator update must emit no events"
+    );
+
+    // Unsigned call purporting to be creator at `deadline - 1` must also fail.
+    enforce_no_signatures(&f);
+    assert!(
+        f.client
+            .try_update_metadata(&f.campaign_id, &f.creator, &hacked)
+            .is_err(),
+        "unsigned update_metadata at deadline - 1 must fail"
+    );
+    assert!(
+        f.env
+            .events()
+            .all()
+            .filter_by_contract(&f.client.address)
+            .events()
+            .is_empty(),
+        "rejected unsigned update must emit no events"
+    );
+
+    // Campaign state and all balances remain untouched after unauthorized attempts.
+    let before_valid = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(before_valid.metadata, original);
+    assert_eq!(before_valid.pledged_amount, PLEDGE);
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.bob), 10_000);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+
+    // Creator-only update at `deadline - 1` succeeds with creator as sole signer.
+    f.env.mock_all_auths();
+    f.client
+        .update_metadata(&f.campaign_id, &f.creator, &updated);
+    assert_sole_signer(&f, &f.creator, "update_metadata");
+
+    // Verify exactly one `MetadataUpdated` event with old and new metadata.
+    let emitted = f.env.events().all().filter_by_contract(&f.client.address);
+    let events = emitted.events();
+    assert_eq!(
+        events.len(),
+        1,
+        "creator update at deadline - 1 must emit exactly one event"
+    );
+    let soroban_sdk::xdr::ContractEventBody::V0(body) = &events[0].body;
+    let expected_topics: soroban_sdk::Vec<Val> =
+        soroban_sdk::vec![&f.env, symbol_short!("Goal").into_val(&f.env), symbol_short!("MetaUpd").into_val(&f.env)];
+    assert_eq!(body.topics.len(), expected_topics.len() as usize);
+    for (i, expected_topic) in expected_topics.iter().enumerate() {
+        assert_eq!(
+            body.topics[i],
+            soroban_sdk::xdr::ScVal::from_val(&f.env, &expected_topic)
+        );
+    }
+    let expected_data: Val = MetadataUpdated {
+        campaign_id: f.campaign_id,
+        creator: f.creator.clone(),
+        old_metadata: original,
+        new_metadata: updated.clone(),
+    }
+    .into_val(&f.env);
+    assert_eq!(
+        body.data,
+        soroban_sdk::xdr::ScVal::from_val(&f.env, &expected_data),
+        "MetadataUpdated event must carry both old and new metadata"
+    );
+
+    // Stored metadata is updated while pledges and token balances remain intact.
+    let after_valid = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(after_valid.metadata, updated);
+    assert_eq!(after_valid.pledged_amount, PLEDGE);
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.bob), 10_000);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+
+    // One second later (`timestamp == deadline`), even the creator is rejected.
+    f.env.ledger().set_timestamp(deadline);
+    assert!(
+        f.client
+            .try_update_metadata(&f.campaign_id, &f.creator, &too_late)
+            .is_err(),
+        "creator update_metadata at exact deadline must fail"
+    );
+    assert!(
+        f.env
+            .events()
+            .all()
+            .filter_by_contract(&f.client.address)
+            .events()
+            .is_empty(),
+        "rejected post-deadline update must emit no events"
+    );
+    assert_eq!(f.client.get_campaign(&f.campaign_id).metadata, updated);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
 }
 
 // ── SGV-2026-118: per-contributor cap authority enforcement ──────────────────
