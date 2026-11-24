@@ -45,10 +45,16 @@ From the repository root:
 SECRET_KEY="S..." npm run deploy:contract
 ```
 
+The deployment script enforces strict configuration validation before any compilation or deployment action:
+
+- `SECRET_KEY`: Must be a valid 56-character Stellar secret key (starting with `S`, base32 encoded). Placeholder keys like `"S..."` are rejected immediately.
+- `NETWORK`: Supported networks are `testnet` (default), `mainnet` (or `public`), `futurenet`, and `standalone`/`local`.
+- `NETWORK_PASSPHRASE` & `RPC_URL`: Must align with the selected `NETWORK`. Mismatches (e.g. `testnet` with mainnet passphrase or RPC URL) fail immediately before building or deploying.
+
 If deploy succeeds, the script will:
 
 1. Build the contract
-2. Deploy it to Stellar testnet
+2. Deploy it to Stellar testnet (or target `NETWORK`)
 3. Print the contract ID
 4. Save the contract ID to `contracts/contract_id.txt`
 
@@ -63,7 +69,7 @@ CONTRACT_ID=<your-contract-id>
 If you want to override the default RPC endpoint or network passphrase:
 
 ```bash
-SECRET_KEY="S..." NETWORK_PASSPHRASE="Test SDF Network ; September 2015" RPC_URL="https://soroban-testnet.stellar.org:443" npm run deploy:contract
+SECRET_KEY="S..." NETWORK="testnet" NETWORK_PASSPHRASE="Test SDF Network ; September 2015" RPC_URL="https://soroban-testnet.stellar.org:443" npm run deploy:contract
 ```
 
 ---
@@ -125,6 +131,7 @@ DEFAULT_MAX_PER_CONTRIBUTOR=0
 ### 2.5 SQLite Persistent Disk Setup on Render
 
 By default, Render's web service filesystem is ephemeral. To persist SQLite data across deployments, you must attach a Render Disk:
+
 1. In your Render Web Service settings, go to **Disks**.
 2. Click **Add Disk**.
 3. Name it `sqlite-data` (or similar).
@@ -133,6 +140,7 @@ By default, Render's web service filesystem is ephemeral. To persist SQLite data
 6. Save changes.
 
 Then, update your environment variables so the application uses the persistent disk:
+
 ```env
 DB_PATH=/var/data/campaigns.db
 ```
@@ -284,10 +292,7 @@ npx tsc -p ./tsconfig.json
 If these items pass, the deployment guide has been successfully applied.
 
 ## Related Documentation
+
 - [Runbook — Common Operational Tasks](./RUNBOOK.md) — step-by-step procedures for resetting the database, rotating API keys, redeploying contracts, rolling back the backend, and clearing the event cache.
 - [Architecture Diagrams](./ARCHITECTURE_DIAGRAMS.md)
 - [Contributing Guide](./CONTRIBUTING.md)
-
-
-
-

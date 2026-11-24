@@ -8,6 +8,13 @@ import {
   parseContractIdFile,
   renderStamp,
   resolveContractId,
+  resolveNetworkConfig,
+  TESTNET_PASSPHRASE,
+  MAINNET_PASSPHRASE,
+  FUTURENET_PASSPHRASE,
+  DEFAULT_TESTNET_RPC,
+  DEFAULT_MAINNET_RPC,
+  DEFAULT_FUTURENET_RPC,
 } from '../../scripts/bindings-guard';
 
 const DEPLOYED = `C${'A'.repeat(55)}`;
@@ -76,5 +83,105 @@ describe('checkBindingsDrift', () => {
     expect(result.message).toContain(OTHER);
     expect(result.message).toContain(DEPLOYED);
     expect(result.message).toContain('npm run gen:bindings');
+  });
+});
+
+describe('resolveNetworkConfig', () => {
+  it('resolves testnet defaults when no options are provided', () => {
+    const config = resolveNetworkConfig();
+    expect(config).toEqual({
+      network: 'testnet',
+      networkPassphrase: TESTNET_PASSPHRASE,
+      rpcUrl: DEFAULT_TESTNET_RPC,
+    });
+  });
+
+  it('resolves mainnet defaults when network is mainnet', () => {
+    const config = resolveNetworkConfig({ network: 'mainnet' });
+    expect(config).toEqual({
+      network: 'mainnet',
+      networkPassphrase: MAINNET_PASSPHRASE,
+      rpcUrl: DEFAULT_MAINNET_RPC,
+    });
+  });
+
+  it('normalizes public alias to mainnet', () => {
+    const config = resolveNetworkConfig({ network: 'public' });
+    expect(config.network).toBe('mainnet');
+    expect(config.networkPassphrase).toBe(MAINNET_PASSPHRASE);
+  });
+
+  it('resolves futurenet defaults when network is futurenet', () => {
+    const config = resolveNetworkConfig({ network: 'futurenet' });
+    expect(config).toEqual({
+      network: 'futurenet',
+      networkPassphrase: FUTURENET_PASSPHRASE,
+      rpcUrl: DEFAULT_FUTURENET_RPC,
+    });
+  });
+
+  it('rejects unsupported networks', () => {
+    expect(() => resolveNetworkConfig({ network: 'unknown-network' })).toThrow(
+      /Unsupported network "unknown-network"/,
+    );
+  });
+
+  it('rejects testnet network with mainnet passphrase', () => {
+    expect(() =>
+      resolveNetworkConfig({
+        network: 'testnet',
+        networkPassphrase: MAINNET_PASSPHRASE,
+      }),
+    ).toThrow(/Network mismatch: testnet was selected but mainnet passphrase was provided/);
+  });
+
+  it('rejects testnet network with mainnet RPC URL', () => {
+    expect(() =>
+      resolveNetworkConfig({
+        network: 'testnet',
+        rpcUrl: 'https://soroban-mainnet.stellar.org:443',
+      }),
+    ).toThrow(/Network mismatch: testnet was selected but a mainnet RPC URL was provided/);
+  });
+
+  it('rejects mainnet network with testnet passphrase', () => {
+    expect(() =>
+      resolveNetworkConfig({
+        network: 'mainnet',
+        networkPassphrase: TESTNET_PASSPHRASE,
+      }),
+    ).toThrow(/Network mismatch: mainnet was selected but testnet passphrase was provided/);
+  });
+
+  it('rejects mainnet network with testnet RPC URL', () => {
+    expect(() =>
+      resolveNetworkConfig({
+        network: 'mainnet',
+        rpcUrl: 'https://soroban-testnet.stellar.org:443',
+      }),
+    ).toThrow(/Network mismatch: mainnet was selected but a testnet RPC URL was provided/);
+  });
+
+  it('rejects futurenet network with mainnet or testnet passphrase', () => {
+    expect(() =>
+      resolveNetworkConfig({
+        network: 'futurenet',
+        networkPassphrase: MAINNET_PASSPHRASE,
+      }),
+    ).toThrow(/Network mismatch: futurenet was selected but a conflicting passphrase was provided/);
+  });
+
+  it('preserves valid custom RPC URL and passphrase matching the network', () => {
+    const customRpc = 'https://custom-testnet-rpc.example.com';
+    const config = resolveNetworkConfig({
+      network: 'testnet',
+      networkPassphrase: TESTNET_PASSPHRASE,
+      rpcUrl: customRpc,
+    });
+    expect(config).toEqual({
+      network: 'testnet',
+      networkPassphrase: TESTNET_PASSPHRASE,
+      rpcUrl: customRpc,
+    });
   });
 });
