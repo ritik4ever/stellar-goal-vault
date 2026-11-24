@@ -9,9 +9,9 @@ mod tests {
     };
 
     use crate::{
-        CampaignClaimed, DataKey, DeadlineExtended, ExtensionApproved, ExtensionRequested,
-        FeeCollected, StellarGoalVaultContract, StellarGoalVaultContractClient,
-        CAMPAIGN_STORAGE_TTL_EXTEND_TO,
+        CampaignClaimed, DataKey, DeadlineExtended, ExtensionApproved, ExtensionRequest,
+        ExtensionRequested, FeeCollected, StellarGoalVaultContract, StellarGoalVaultContractClient,
+        CAMPAIGN_STORAGE_TTL_EXTEND_TO, MAX_CAMPAIGN_DURATION_SECONDS,
     };
     // Keep contract tests independent of the machine clock and local timezone.
     // Soroban timestamps are UTC Unix seconds; epoch zero preserves the mock
@@ -2649,6 +2649,403 @@ mod tests {
 
         let new_deadline = env.ledger().timestamp() + 500;
         client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
+    }
+
+    // ---- #1508: extension vote authority and commit-time guards ------------
+
+    #[test]
+    fn test_extension_rejects_creator_admin_and_outsider_without_contribution() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let outsider = Address::generate(&env);
+        let contributor1 = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
+
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&contributor1, &1_000);
+        asset_client.mint(&contributor2, &1_000);
+
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "extension authority"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor1, &token, &200);
+        client.contribute(&campaign_id, &contributor2, &token, &200);
+
+        let original_deadline = client.get_campaign(&campaign_id).deadline;
+        let new_deadline = original_deadline + 500;
+
+        // The creator, the admin, and an unrelated account hold no
+        // contribution, so none of them may open an extension round.
+        for caller in [&creator, &admin, &outsider] {
+            assert!(
+                client
+                    .try_request_deadline_extension(&campaign_id, caller, &new_deadline)
+                    .is_err(),
+                "non-contributors cannot request an extension"
+            );
+        }
+        assert!(client.get_extension_request(&campaign_id).is_none());
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            original_deadline
+        );
+
+        // A real contributor opens the round: 1 of 2 approvals is not a
+        // majority, so the request stays pending.
+        client.request_deadline_extension(&campaign_id, &contributor1, &new_deadline);
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            original_deadline
+        );
+
+        // None of the privileged-but-uninvested accounts can approve either.
+        for caller in [&creator, &admin, &outsider] {
+            assert!(
+                client.try_approve_extension(&campaign_id, caller).is_err(),
+                "non-contributors cannot approve an extension"
+            );
+        }
+        let request = client.get_extension_request(&campaign_id).unwrap();
+        assert_eq!(request.approval_count, 1, "rejected votes are not counted");
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            original_deadline
+        );
+
+        // The second contributor is the smallest possible majority for a
+        // two-contributor campaign.
+        client.approve_extension(&campaign_id, &contributor2);
+        assert_eq!(client.get_campaign(&campaign_id).deadline, new_deadline);
+        assert!(client.get_extension_request(&campaign_id).is_none());
+
+        // Extending a deadline never moves escrowed funds.
+        assert_eq!(TokenClient::new(&env, &token).balance(&client.address), 400);
+        assert_eq!(TokenClient::new(&env, &token).balance(&contributor1), 800);
+        assert_eq!(TokenClient::new(&env, &token).balance(&contributor2), 800);
+    }
+
+    #[test]
+    fn test_extension_requires_strict_majority_of_distinct_contributors() {
+        use soroban_sdk::FromVal;
+
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contributors = [
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+        ];
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token);
+        for contributor in &contributors {
+            asset_client.mint(contributor, &1_000);
+        }
+
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "strict majority"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        for contributor in &contributors {
+            client.contribute(&campaign_id, contributor, &token, &100);
+        }
+
+        let original_deadline = client.get_campaign(&campaign_id).deadline;
+        let new_deadline = original_deadline + 500;
+
+        client.request_deadline_extension(&campaign_id, &contributors[0], &new_deadline);
+        client.approve_extension(&campaign_id, &contributors[1]);
+
+        // Capture the second approval's events before any further client call,
+        // because the host retains only the latest invocation's event log.
+        let second_approval = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        let not_extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+        assert_eq!(second_approval.len(), 1);
+        assert!(not_extended.is_empty(), "2 of 4 is not a majority");
+
+        // 2 of 4 is exactly 50%, which is not more than 50%.
+        let request = client.get_extension_request(&campaign_id).unwrap();
+        assert_eq!(request.approval_count, 2);
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            original_deadline
+        );
+
+        // The third distinct approval is the smallest majority and commits
+        // the extension exactly once.
+        client.approve_extension(&campaign_id, &contributors[2]);
+        let approvals = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        let extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+        assert_eq!(approvals.len(), 1);
+        assert_eq!(extended.len(), 1);
+        assert!(client.get_extension_request(&campaign_id).is_none());
+        assert_eq!(client.get_campaign(&campaign_id).deadline, new_deadline);
+
+        let expected_approval: soroban_sdk::Val = ExtensionApproved {
+            campaign_id,
+            approver: contributors[2].clone(),
+            approval_count: 3,
+        }
+        .into_val(&env);
+        assert_eq!(
+            approvals[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_approval)
+        );
+    }
+
+    #[test]
+    fn test_duplicate_extension_vote_does_not_change_the_tally() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contributors = [
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+        ];
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token);
+        for contributor in &contributors {
+            asset_client.mint(contributor, &1_000);
+        }
+
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "duplicate vote"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        for contributor in &contributors {
+            client.contribute(&campaign_id, contributor, &token, &100);
+        }
+
+        let original_deadline = client.get_campaign(&campaign_id).deadline;
+        client.request_deadline_extension(
+            &campaign_id,
+            &contributors[0],
+            &(original_deadline + 500),
+        );
+        client.approve_extension(&campaign_id, &contributors[1]);
+
+        // Re-voting is rejected and must not inflate the recorded tally or
+        // emit an approval for a vote that was never counted.
+        assert!(client
+            .try_approve_extension(&campaign_id, &contributors[1])
+            .is_err());
+        assert!(client
+            .try_approve_extension(&campaign_id, &contributors[0])
+            .is_err());
+
+        // Failed votes emit nothing; read the log before the follow-up reads
+        // replace the latest invocation.
+        assert!(goal_events(&env, soroban_sdk::symbol_short!("ExtAppr")).is_empty());
+        assert!(goal_events(&env, soroban_sdk::symbol_short!("Extended")).is_empty());
+
+        let request = client.get_extension_request(&campaign_id).unwrap();
+        assert_eq!(request.approval_count, 2);
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            original_deadline
+        );
+    }
+
+    #[test]
+    fn test_approve_extension_rejects_invalid_stored_request() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contributor1 = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&contributor1, &1_000);
+        asset_client.mint(&contributor2, &1_000);
+
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "stored request validation"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor1, &token, &200);
+        client.contribute(&campaign_id, &contributor2, &token, &200);
+
+        let campaign = client.get_campaign(&campaign_id);
+        let over_max = campaign.created_at + MAX_CAMPAIGN_DURATION_SECONDS + 1;
+
+        // A request that would exceed the campaign's maximum duration must not
+        // be committable even if it somehow reached storage.
+        env.as_contract(&client.address, || {
+            env.storage().persistent().set(
+                &DataKey::ExtensionRequest(campaign_id),
+                &ExtensionRequest {
+                    new_deadline: over_max,
+                    requested_by: contributor1.clone(),
+                    approval_count: 1,
+                },
+            );
+            env.storage().persistent().set(
+                &DataKey::ExtensionVote(campaign_id, contributor1.clone()),
+                &true,
+            );
+        });
+
+        assert!(client
+            .try_approve_extension(&campaign_id, &contributor2)
+            .is_err());
+        assert!(goal_events(&env, soroban_sdk::symbol_short!("Extended")).is_empty());
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            campaign.deadline
+        );
+
+        // A request that is no longer later than the campaign's current
+        // deadline is equally invalid at commit time.
+        env.as_contract(&client.address, || {
+            env.storage().persistent().set(
+                &DataKey::ExtensionRequest(campaign_id),
+                &ExtensionRequest {
+                    new_deadline: campaign.deadline,
+                    requested_by: contributor1.clone(),
+                    approval_count: 1,
+                },
+            );
+        });
+
+        assert!(client
+            .try_approve_extension(&campaign_id, &contributor2)
+            .is_err());
+        assert!(goal_events(&env, soroban_sdk::symbol_short!("Extended")).is_empty());
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            campaign.deadline
+        );
+    }
+
+    #[test]
+    fn test_request_extension_allows_exactly_the_maximum_deadline() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "exact maximum"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor, &token, &200);
+
+        let campaign = client.get_campaign(&campaign_id);
+        let max_deadline = campaign.created_at + MAX_CAMPAIGN_DURATION_SECONDS;
+        client.request_deadline_extension(&campaign_id, &contributor, &max_deadline);
+
+        // Capture the commit event before the follow-up reads clear the log.
+        let extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+
+        // The sole contributor's auto-approval is a majority, and the exact
+        // maximum is inclusive rather than rejected by an off-by-one.
+        assert_eq!(extended.len(), 1);
+        assert_eq!(client.get_campaign(&campaign_id).deadline, max_deadline);
+        assert!(client.get_extension_request(&campaign_id).is_none());
+    }
+
+    #[test]
+    fn test_extension_round_refreshes_vote_and_request_storage_ttl() {
+        let env = test_env();
+        env.mock_all_auths();
+        // New persistent entries start close to archival so the test observes
+        // whether the extension paths refresh the round's storage.
+        env.ledger().set_min_persistent_entry_ttl(1);
+
+        let creator = Address::generate(&env);
+        let contributor1 = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token);
+        asset_client.mint(&contributor1, &1_000);
+        asset_client.mint(&contributor2, &1_000);
+
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "extension storage"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor1, &token, &200);
+        client.contribute(&campaign_id, &contributor2, &token, &200);
+
+        let deadline = client.get_campaign(&campaign_id).deadline;
+        client.request_deadline_extension(&campaign_id, &contributor1, &(deadline + 500));
+
+        let vote_key = DataKey::ExtensionVote(campaign_id, contributor1.clone());
+        let request_key = DataKey::ExtensionRequest(campaign_id);
+        let (vote_ttl, request_ttl) = env.as_contract(&client.address, || {
+            (
+                env.storage().persistent().get_ttl(&vote_key),
+                env.storage().persistent().get_ttl(&request_key),
+            )
+        });
+        assert!(vote_ttl >= CAMPAIGN_STORAGE_TTL_EXTEND_TO);
+        assert!(request_ttl >= CAMPAIGN_STORAGE_TTL_EXTEND_TO);
+
+        // The approval path keeps the round alive and then clears it once the
+        // extension commits.
+        client.approve_extension(&campaign_id, &contributor2);
+        assert_eq!(client.get_campaign(&campaign_id).deadline, deadline + 500);
+        assert!(client.get_extension_request(&campaign_id).is_none());
     }
 
     // ── multi-sig campaign approval tests (co-creators) ────────────────────────
