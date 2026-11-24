@@ -381,6 +381,16 @@ is read, before the token transfer, and before any storage write, so a rejected
 call leaves the contributor balance, the campaign pledge, and the vault balance
 unchanged.
 
+**Per-contributor cap boundary & cumulative enforcement (SGV-2026-120):**
+When `max_per_contributor > 0`, the sum of existing contributions across all
+accepted tokens plus the new contribution amount cannot exceed the cap:
+`already + amount <= cap`.
+- Multiple contributions that sum exactly to the configured cap are accepted in full.
+- Any attempt exceeding the cap (whether upfront or following prior successful or failed pledges)
+  is atomically rejected with `"per-contributor cap exceeded"`.
+- Atomic rollback ensures no tokens move, balances remain unchanged, and no pledge events are emitted.
+- The contributor's cumulative recorded pledge remains strictly within the cap.
+
 **Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
 
 **Indexer note:** The `CampaignPledgedEvent` event is emitted exactly once per successful `contribute` call, after all validations, token transfer, and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Pledged")` and use `campaign_id` + `contributor` + `pledged_at` for deduplication and reconstructing pledge state without auxiliary contract reads.

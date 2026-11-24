@@ -1883,6 +1883,86 @@ mod tests {
         assert_eq!(token_client.balance(&vault), 500);
     }
 
+    // ── SGV-2026-120: per-contributor cap regression ──────────────────────────
+    // Scope:
+    // - Test two contributions that sum exactly to the cap and a third contribution
+    //   exceeding the cap after a previous failure using isolated Soroban fixtures.
+    // - Assert contributor's cumulative amount stays within the cap, authorization,
+    //   balances, and emitted events.
+    #[test]
+    fn test_per_contributor_cap_regression_two_contributions_at_cap_and_third_exceeds() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 10_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let cap = 500_i128;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &2_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "per-contributor cap regression"),
+            &cap,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let token_client = TokenClient::new(&env, &token);
+        let vault = client.address.clone();
+
+        // 1. Prior failure: Attempting a pledge exceeding the cap upfront (600 > 500) fails atomically.
+        let prior_fail = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &contributor, &token, &600);
+        }));
+        assert!(prior_fail.is_err(), "Contribution exceeding cap upfront must fail");
+        assert!(env.events().all().events().is_empty(), "Failed pledge must not emit events");
+
+        // Assert state is untouched after prior failure
+        assert_eq!(token_client.balance(&contributor), 10_000);
+        assert_eq!(token_client.balance(&vault), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token), 0);
+        assert_eq!(client.get_contributor_count(&campaign_id), 0);
+
+        // 2. Two contributions summing exactly to the cap (300 + 200 = 500 == cap).
+        client.contribute(&campaign_id, &contributor, &token, &300);
+        assert!(!env.events().all().events().is_empty(), "First pledge must emit events");
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token), 300);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 300);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 300);
+        assert_eq!(token_client.balance(&contributor), 9_700);
+        assert_eq!(token_client.balance(&vault), 300);
+
+        client.contribute(&campaign_id, &contributor, &token, &200);
+        assert!(!env.events().all().events().is_empty(), "Second pledge reaching cap must emit events");
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token), 500);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 500);
+        assert_eq!(token_client.balance(&contributor), 9_500);
+        assert_eq!(token_client.balance(&vault), 500);
+
+        // 3. Third contribution exceeding the cap (500 + 1 = 501 > 500) fails atomically.
+        let third_fail = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &contributor, &token, &1);
+        }));
+        assert!(third_fail.is_err(), "Third contribution exceeding cap must fail");
+        assert!(env.events().all().events().is_empty(), "Rejected third contribution must not emit events");
+
+        // Assert cumulative amount stays strictly at the cap (500)
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token), 500);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 500);
+        assert_eq!(token_client.balance(&contributor), 9_500);
+        assert_eq!(token_client.balance(&vault), 500);
+    }
+
     // ── #185: update_metadata tests ───────────────────────────────────────────
 
     #[test]
