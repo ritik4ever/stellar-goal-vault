@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures';
 import {
   mockFreighter,
+  readBridgeLog,
   recoverWalletMock,
   resetWalletMock,
   resolveDelayedSignatures,
@@ -271,5 +272,91 @@ test.describe('Wallet flow E2E fixtures (rerun-safe)', () => {
       transactionXdr: SAMPLE_XDR,
     });
     expect(approved.signedTransaction).toBe(SAMPLE_XDR);
+  });
+
+  test('signed-but-unconfirmed testnet pledge stays unconfirmed without live funds or reconcile writes', async ({
+    page,
+  }) => {
+    const rpcUrl = 'http://127.0.0.1:8000/rpc';
+    const syntheticHash = 'a'.repeat(64);
+    let reconcileCalls = 0;
+
+    await page.route('**/api/campaigns/*/pledges/reconcile', async (route) => {
+      reconcileCalls += 1;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await page.route(rpcUrl, async (route) => {
+      const payload = route.request().postDataJSON() as { id?: number; method?: string };
+      if (payload.method === 'sendTransaction') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: payload.id ?? 1,
+            result: { status: 'PENDING', hash: syntheticHash },
+          }),
+        });
+        return;
+      }
+      if (payload.method === 'getTransaction') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: payload.id ?? 2,
+            result: { status: 'NOT_FOUND' },
+          }),
+        });
+        return;
+      }
+      await route.abort();
+    });
+
+    await page.route('http://127.0.0.1:8000/', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: '<!doctype html><html><body>fixture</body></html>',
+      });
+    });
+
+    await mockFreighter(page, CONTRIBUTOR, {
+      networkPassphrase: TESTNET_PASSPHRASE,
+      sorobanRpcUrl: rpcUrl,
+    });
+    await page.goto('http://127.0.0.1:8000/');
+
+    const signed = await bridgeRequest(page, 'SUBMIT_TRANSACTION', {
+      transactionXdr: SAMPLE_XDR,
+    });
+    expect(signed.signedTransaction).toBe(SAMPLE_XDR);
+    expect(signed.error).toBe('');
+
+    const log = await readBridgeLog(page);
+    expect(log).toContainEqual(
+      expect.objectContaining({ type: 'SUBMIT_TRANSACTION', outcome: 'approved' }),
+    );
+
+    const rpcOutcome = await page.evaluate(async (url) => {
+      const sendRes = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'sendTransaction', params: {} }),
+      }).then((r) => r.json());
+      const getRes = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'getTransaction', params: {} }),
+      }).then((r) => r.json());
+      return { send: sendRes.result, get: getRes.result };
+    }, rpcUrl);
+
+    expect(rpcOutcome.send).toEqual({ status: 'PENDING', hash: syntheticHash });
+    expect(rpcOutcome.get).toEqual({ status: 'NOT_FOUND' });
+    expect(reconcileCalls).toBe(0);
+    expect((await readWalletMockSnapshot(page)).status).toBe('idle');
   });
 });
