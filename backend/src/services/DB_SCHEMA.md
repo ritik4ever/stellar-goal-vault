@@ -208,16 +208,19 @@ failure point on a fresh database and on one upgraded from the legacy schema.
 The key is scoped to API key, campaign and contributor. Request bodies are
 compared by a hash that ignores field order.
 
-Limits:
+Limits & Durability:
 
-- **Restart.** Without Redis the stored keys live in an in-process LRU cache and
-  are lost on restart, so a repeat after a restart is a new request. With Redis
-  the entry survives and is replayed.
-- **Several workers.** Waiting on an in-progress request is per process. Two
-  workers that receive the same key at the same moment do not see each other
-  unless they share a Redis cache, and even then there is a short window before
-  the first response is stored. A durable store written in the same transaction
-  as the pledge would close both gaps.
+- **Restart (Migration 007).** Idempotency keys and completed 2xx responses are
+  persisted in SQLite (`idempotency_keys`), so replays survive process restarts
+  even when Redis is not configured. A rerun neither drops nor duplicates
+  committed campaign or pledge data.
+- **Several workers.** Each worker atomically claims an `in_progress` row in
+  `idempotency_keys` inside an `IMMEDIATE` transaction before running the route
+  handler. Two workers receiving the same key concurrently coordinate through
+  SQLite: the second worker waits for the first to commit its response and then
+  replays it (`X-Idempotency-Cache: HIT`), or runs if the first fails. Stale
+  `in_progress` claims from crashed workers expire after `IN_FLIGHT_LEASE_MS`
+  (30 s).
 - The cache key format changed when the contributor scope was added, so a key
   stored before the upgrade is not matched afterwards.
 

@@ -83,6 +83,7 @@ describe('Versioned SQL migrations', () => {
         '004_add_query_plan_indexes',
         '005_add_pledges_integrity_constraints',
         '006_add_indexer_kv_store',
+        '007_add_idempotency_keys',
       ]);
       for (const migration of migrations) {
         expect(migration.up.trim()).not.toBe('');
@@ -212,7 +213,7 @@ describe('Versioned SQL migrations', () => {
     it('is correct after a fresh init', () => {
       migrate(db);
 
-      expect(getSchemaVersion(db)).toBe(6);
+      expect(getSchemaVersion(db)).toBe(7);
 
       const schema = snapshotSchema(db);
       expect(Object.keys(schema.tables).sort()).toEqual([
@@ -220,6 +221,7 @@ describe('Versioned SQL migrations', () => {
         'campaign_events',
         'campaigns',
         'campaigns_fts',
+        'idempotency_keys',
         'kv_store',
         'notifications',
         'pledges',
