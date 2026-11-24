@@ -351,6 +351,10 @@ mod test;
 #[cfg(test)]
 mod test_pledge_auth;
 
+// Regression coverage for refund rollback, retry, and partially completed bulk refunds.
+#[cfg(test)]
+mod test_refund_regression;
+
 // Authorization coverage for the configuration path (issue #913): every admin
 // setter must be driven by the stored admin's signature, and nobody else's.
 #[cfg(test)]
