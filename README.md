@@ -60,6 +60,8 @@ Architecture decision records
 ## TypeScript Bindings
 
 Type-safe bindings are auto-generated from the Soroban contract ABI and committed to `frontend/src/generated/`.
+See [`docs/SOROBAN_BINDINGS_RUNBOOK.md`](docs/SOROBAN_BINDINGS_RUNBOOK.md) for
+regeneration, contract-ID checks, and ABI drift failure signals.
 
 ### Regenerating Bindings
 
@@ -75,7 +77,7 @@ npm run gen:bindings
 
 ### How It Works
 
-1. `npm run gen:bindings` calls `stellar contract bindings typescript` (or uses manual templates during development)
+1. `npm run gen:bindings` calls `stellar contract bindings typescript` once (it is not a watch process)
 2. Generated types are output to `frontend/src/generated/`
 3. `frontend/src/services/soroban.ts` imports from generated bindings via `GoalVaultContract` client
 4. CI checks for ABI drift on every PR that touches contracts

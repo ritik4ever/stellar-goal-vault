@@ -6,15 +6,21 @@
  * typed bindings and outputs them to frontend/src/generated/
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const OUTPUT_DIR = path.join(__dirname, '../frontend/src/generated');
-const CONTRACT_ID = process.env.CONTRACT_ID || 'YOUR_CONTRACT_ID';
+const CONTRACT_ID = process.env.CONTRACT_ID;
 const NETWORK = process.env.NETWORK || 'testnet';
 const RPC_URL = process.env.RPC_URL || 'https://soroban-testnet.stellar.org';
 const NETWORK_PASSPHRASE = process.env.NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015';
+
+if (!CONTRACT_ID) {
+  console.error('❌ CONTRACT_ID is required to regenerate Soroban bindings.');
+  console.error('Set CONTRACT_ID to the deployed contract address and try again.');
+  process.exit(1);
+}
 
 // Ensure output directory exists
 if (!fs.existsSync(OUTPUT_DIR)) {
@@ -27,12 +33,21 @@ console.log(`Network: ${NETWORK}`);
 console.log(`Output: ${OUTPUT_DIR}`);
 
 try {
-  execSync(
-    `stellar contract bindings typescript ` +
-      `--contract-id ${CONTRACT_ID} ` +
-      `--rpc-url ${RPC_URL} ` +
-      `--network-passphrase "${NETWORK_PASSPHRASE}" ` +
-      `--output-dir ${OUTPUT_DIR}`,
+  execFileSync(
+    'stellar',
+    [
+      'contract',
+      'bindings',
+      'typescript',
+      '--contract-id',
+      CONTRACT_ID,
+      '--rpc-url',
+      RPC_URL,
+      '--network-passphrase',
+      NETWORK_PASSPHRASE,
+      '--output-dir',
+      OUTPUT_DIR,
+    ],
     { stdio: 'inherit' },
   );
   console.log('✅ Bindings generated successfully!');
