@@ -1023,6 +1023,37 @@ mod tests {
         client.initialize(&admin, &100_i128);
     }
 
+    // ── SGV-2026-112: minimum contribution failures are atomic ───────────────
+    // A rejected deployment (invalid minimum) and a rejected pledge must leave
+    // no partial state behind, and a later valid call must still succeed.
+
+    #[test]
+    fn test_invalid_minimum_initialize_leaves_deployment_uninitialized() {
+        let env = test_env();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+        let admin = Address::generate(&env);
+
+        // Zero and negative minima are rejected before any storage write.
+        for invalid in [0_i128, -1_i128] {
+            let rejected =
+                crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                    client.initialize(&admin, &invalid);
+                }));
+            assert!(rejected.is_err());
+
+            // Still uninitialized: default floor, no admin, unpaused.
+            assert_eq!(client.get_min_contribution(), 100);
+            assert!(!client.get_paused());
+            assert!(client.try_get_admin().is_err());
+        }
+
+        // The rejected attempts did not brick the one-time initializer.
+        client.initialize(&admin, &500_i128);
+        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.get_min_contribution(), 500);
+    }
+
     #[test]
     fn test_admin_can_pause_and_unpause() {
         let env = test_env();
@@ -1657,6 +1688,63 @@ mod tests {
         );
         assert_eq!(token_client.balance(&contributor), 500);
         assert_eq!(token_client.balance(&vault), 500);
+    }
+
+    #[test]
+    fn test_minimum_contribution_failure_keeps_storage_and_balances_valid() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 2_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &500_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &2_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "minimum atomicity test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let token_client = TokenClient::new(&env, &token);
+        let vault = client.address.clone();
+
+        // Establish valid, committed state around the failure.
+        client.contribute(&campaign_id, &contributor, &token, &600);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 600);
+        assert_eq!(token_client.balance(&vault), 600);
+
+        // 499 is below the configured minimum of 500.
+        let rejected = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &contributor, &token, &499);
+        }));
+        assert!(rejected.is_err());
+
+        // Failed call left every stored value and both balances untouched.
+        assert_eq!(client.get_min_contribution(), 500);
+        assert_eq!(client.get_next_campaign_id(), 1);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 600);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 600);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            600
+        );
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+        assert_eq!(token_client.balance(&contributor), 1_400);
+        assert_eq!(token_client.balance(&vault), 600);
+
+        // The same deployment still accepts a valid pledge at the minimum.
+        client.contribute(&campaign_id, &contributor, &token, &500);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_100);
+        assert_eq!(token_client.balance(&contributor), 900);
+        assert_eq!(token_client.balance(&vault), 1_100);
     }
 
     // ── #185: update_metadata tests ───────────────────────────────────────────
