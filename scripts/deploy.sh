@@ -38,13 +38,15 @@ FUTURENET_PASSPHRASE="Test SDF Future Network ; October 2022"
 if [ -z "$SECRET_KEY" ]; then
     echo -e "${RED}Error: SECRET_KEY environment variable is required${NC}"
     echo "Please set SECRET_KEY to your Stellar account secret key"
+    echo "Recovery: set SECRET_KEY to your funded 56-character Stellar secret key (starts with 'S', base32 encoded) before running deployment."
     echo "Example: SECRET_KEY=\"S...\" ./scripts/deploy.sh"
     exit 1
 fi
 
-if [[ ! "$SECRET_KEY" =~ ^S[A-Z2-7]{55}$ ]]; then
+if [[ "$SECRET_KEY" == "S..."* ]] || [[ "$SECRET_KEY" == *"YOUR_SECRET_KEY"* ]] || [[ ! "$SECRET_KEY" =~ ^S[A-Z2-7]{55}$ ]]; then
     echo -e "${RED}Error: Invalid SECRET_KEY format${NC}"
     echo "Expected a 56-character Stellar secret key starting with 'S' (base32)"
+    echo "Recovery: provide a valid 56-character base32 secret key starting with 'S' without placeholders."
     exit 1
 fi
 
@@ -55,12 +57,14 @@ case "$NETWORK" in
       NETWORK_PASSPHRASE="$TESTNET_PASSPHRASE"
     elif [ "$NETWORK_PASSPHRASE" = "$MAINNET_PASSPHRASE" ]; then
       echo -e "${RED}Error: Network mismatch - testnet selected but mainnet passphrase provided${NC}"
+      echo "Recovery: set NETWORK=mainnet, or unset NETWORK_PASSPHRASE to use the testnet default."
       exit 1
     fi
     if [ -z "$RPC_URL" ]; then
       RPC_URL="https://soroban-testnet.stellar.org:443"
     elif [[ "$RPC_URL" == *"mainnet"* ]] || [[ "$RPC_URL" == *"publicnode"* ]]; then
       echo -e "${RED}Error: Network mismatch - testnet selected but mainnet RPC URL provided${NC}"
+      echo "Recovery: set NETWORK=mainnet, or unset RPC_URL to use the default testnet RPC endpoint."
       exit 1
     fi
     ;;
@@ -69,12 +73,14 @@ case "$NETWORK" in
       NETWORK_PASSPHRASE="$MAINNET_PASSPHRASE"
     elif [ "$NETWORK_PASSPHRASE" = "$TESTNET_PASSPHRASE" ]; then
       echo -e "${RED}Error: Network mismatch - mainnet selected but testnet passphrase provided${NC}"
+      echo "Recovery: set NETWORK=testnet, or unset NETWORK_PASSPHRASE to use the mainnet default."
       exit 1
     fi
     if [ -z "$RPC_URL" ]; then
       RPC_URL="https://soroban-rpc.mainnet.stellar.org:443"
     elif [[ "$RPC_URL" == *"testnet"* ]]; then
       echo -e "${RED}Error: Network mismatch - mainnet selected but testnet RPC URL provided${NC}"
+      echo "Recovery: set NETWORK=testnet, or unset RPC_URL to use the default mainnet RPC endpoint."
       exit 1
     fi
     ;;
@@ -83,22 +89,36 @@ case "$NETWORK" in
       NETWORK_PASSPHRASE="$FUTURENET_PASSPHRASE"
     elif [ "$NETWORK_PASSPHRASE" = "$MAINNET_PASSPHRASE" ] || [ "$NETWORK_PASSPHRASE" = "$TESTNET_PASSPHRASE" ]; then
       echo -e "${RED}Error: Network mismatch - futurenet selected with conflicting passphrase${NC}"
+      echo "Recovery: unset NETWORK_PASSPHRASE to use futurenet default (\"$FUTURENET_PASSPHRASE\"), or set matching NETWORK."
       exit 1
     fi
     if [ -z "$RPC_URL" ]; then
       RPC_URL="https://rpc-futurenet.stellar.org:443"
+    elif [[ "$RPC_URL" == *"testnet"* ]] || [[ "$RPC_URL" == *"mainnet"* ]] || [[ "$RPC_URL" == *"publicnode"* ]]; then
+      echo -e "${RED}Error: Network mismatch - futurenet selected with conflicting RPC URL${NC}"
+      echo "Recovery: unset RPC_URL to use futurenet default (\"https://rpc-futurenet.stellar.org:443\"), or set matching NETWORK."
+      exit 1
     fi
     ;;
   standalone|local)
     if [ -z "$NETWORK_PASSPHRASE" ]; then
       NETWORK_PASSPHRASE="Standalone Network ; February 2017"
+    elif [ "$NETWORK_PASSPHRASE" = "$MAINNET_PASSPHRASE" ] || [ "$NETWORK_PASSPHRASE" = "$TESTNET_PASSPHRASE" ]; then
+      echo -e "${RED}Error: Network mismatch - $NETWORK selected with public network passphrase${NC}"
+      echo "Recovery: unset NETWORK_PASSPHRASE to use standalone default, or set matching NETWORK."
+      exit 1
     fi
     if [ -z "$RPC_URL" ]; then
       RPC_URL="http://localhost:8000/soroban/rpc"
+    elif [[ "$RPC_URL" == *"stellar.org"* ]] || [[ "$RPC_URL" == *"publicnode"* ]]; then
+      echo -e "${RED}Error: Network mismatch - $NETWORK selected with public RPC URL${NC}"
+      echo "Recovery: unset RPC_URL to use standalone default, or set matching NETWORK."
+      exit 1
     fi
     ;;
   *)
     echo -e "${RED}Error: Unsupported NETWORK \"$RAW_NETWORK\". Expected testnet, mainnet, or futurenet.${NC}"
+    echo "Recovery: set NETWORK to one of: testnet, mainnet, futurenet, standalone, or local."
     exit 1
     ;;
 esac
@@ -125,6 +145,7 @@ soroban contract build
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Error: Contract build failed${NC}"
+    cd .. || true
     exit 1
 fi
 
@@ -147,6 +168,7 @@ DEPLOY_EXIT_CODE=$?
 if [ $DEPLOY_EXIT_CODE -ne 0 ]; then
     echo -e "${RED}Error: Contract deployment failed${NC}"
     echo "$DEPLOY_OUTPUT"
+    cd .. || true
     exit 1
 fi
 
@@ -163,6 +185,7 @@ if [[ ! "$CONTRACT_ID" =~ ^C[A-Z2-7]{55}$ ]]; then
     echo -e "${RED}Error: Invalid contract ID format${NC}"
     echo "Expected a 56-character Soroban contract ID starting with 'C' (base32)"
     echo "Output was: $DEPLOY_OUTPUT"
+    cd .. || true
     exit 1
 fi
 

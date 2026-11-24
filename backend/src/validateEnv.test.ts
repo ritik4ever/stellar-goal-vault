@@ -170,5 +170,47 @@ describe('Environment & Request Input Configuration Validation', () => {
         /Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for mainnet, but SOROBAN_RPC_URL points to testnet/,
       );
     });
+
+    it('rejects mainnet SOROBAN_RPC_URL when SOROBAN_NETWORK_PASSPHRASE is missing with recovery path', () => {
+      const missingPassphrase = {
+        ...validDevEnv,
+        SOROBAN_RPC_URL: 'https://soroban-mainnet.stellar.org:443',
+        SOROBAN_NETWORK_PASSPHRASE: '',
+      };
+      expect(() => validateEnv(missingPassphrase)).toThrow(
+        /Missing or conflicting network environment variable: SOROBAN_RPC_URL points to mainnet/,
+      );
+      expect(() => validateEnv(missingPassphrase)).toThrow(/Recovery: set SOROBAN_NETWORK_PASSPHRASE/);
+    });
+
+    it('rejects mainnet SOROBAN_NETWORK_PASSPHRASE when SOROBAN_RPC_URL is missing with recovery path', () => {
+      const missingRpc = {
+        ...validDevEnv,
+        SOROBAN_NETWORK_PASSPHRASE: 'Public Global Stellar Network ; September 2015',
+        SOROBAN_RPC_URL: '',
+      };
+      expect(() => validateEnv(missingRpc)).toThrow(
+        /Missing or conflicting network environment variable: SOROBAN_NETWORK_PASSPHRASE is configured for mainnet/,
+      );
+      expect(() => validateEnv(missingRpc)).toThrow(/Recovery: set SOROBAN_RPC_URL/);
+    });
+
+    it('preserves startup error across repeated runs of validateEnv', () => {
+      const mismatched = {
+        ...validDevEnv,
+        SOROBAN_NETWORK_PASSPHRASE: 'Test SDF Network ; September 2015',
+        SOROBAN_RPC_URL: 'https://soroban-mainnet.stellar.org:443',
+      };
+
+      // Run 1 throws startup error
+      expect(() => validateEnv(mismatched)).toThrow(
+        /Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for testnet, but SOROBAN_RPC_URL points to mainnet/,
+      );
+
+      // Repeated run 2 preserves the exact same startup error
+      expect(() => validateEnv(mismatched)).toThrow(
+        /Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for testnet, but SOROBAN_RPC_URL points to mainnet/,
+      );
+    });
   });
 });
