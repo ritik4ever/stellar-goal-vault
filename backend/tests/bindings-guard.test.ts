@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BindingsError,
   checkBindingsDrift,
@@ -18,6 +18,12 @@ import {
   DEFAULT_MAINNET_RPC,
   DEFAULT_FUTURENET_RPC,
 } from '../../scripts/bindings-guard';
+import {
+  MAINNET_FIXTURE,
+  MISSING_OR_CONFLICTING_DEPLOYMENT_FIXTURES,
+  NETWORK_CONFIG_FIXTURES,
+  TESTNET_FIXTURE,
+} from '../../scripts/env-config-fixtures';
 
 const DEPLOYED = `C${'A'.repeat(55)}`;
 const OTHER = `C${'B'.repeat(55)}`;
@@ -330,4 +336,53 @@ describe('resolveDeploymentConfig', () => {
       /Missing required deployment environment variable: SECRET_KEY/,
     );
   });
+});
+
+describe('Deterministic testnet vs mainnet & startup-error fixtures (no live funds)', () => {
+  it('provides distinct, valid deterministic fixtures for testnet and mainnet', () => {
+    expect(TESTNET_FIXTURE.networkPassphrase).not.toBe(MAINNET_FIXTURE.networkPassphrase);
+    expect(TESTNET_FIXTURE.contractId).not.toBe(MAINNET_FIXTURE.contractId);
+    expect(TESTNET_FIXTURE.rpcUrl).not.toBe(MAINNET_FIXTURE.rpcUrl);
+
+    for (const profile of Object.values(NETWORK_CONFIG_FIXTURES)) {
+      expect(isValidContractId(profile.contractId)).toBe(true);
+      expect(isValidSecretKey(profile.secretKey)).toBe(true);
+      expect(resolveContractId(profile.contractId, null)).toEqual({
+        id: profile.contractId,
+        source: 'env',
+      });
+      expect(
+        resolveDeploymentConfig({
+          secretKey: profile.secretKey,
+          network: profile.network,
+          networkPassphrase: profile.networkPassphrase,
+          rpcUrl: profile.rpcUrl,
+        }),
+      ).toEqual({
+        secretKey: profile.secretKey,
+        network: profile.network,
+        networkPassphrase: profile.networkPassphrase,
+        rpcUrl: profile.rpcUrl,
+      });
+    }
+  });
+
+  it.each(MISSING_OR_CONFLICTING_DEPLOYMENT_FIXTURES)(
+    'raises startup error before any signed transaction for $name',
+    ({ input, expectedError, expectedRecovery }) => {
+      const signTransaction = vi.fn();
+
+      const runStartupThenSign = () => {
+        const config = resolveDeploymentConfig(input);
+        signTransaction(config);
+      };
+
+      expect(runStartupThenSign).toThrow(BindingsError);
+      expect(runStartupThenSign).toThrow(expectedError);
+      if (expectedRecovery) {
+        expect(runStartupThenSign).toThrow(expectedRecovery);
+      }
+      expect(signTransaction).not.toHaveBeenCalled();
+    },
+  );
 });

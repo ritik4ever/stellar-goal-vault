@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { validateEnv, envSchema } from './validateEnv';
+import {
+  MISSING_OR_CONFLICTING_BACKEND_ENV_FIXTURES,
+  VALID_MAINNET_PROD_BACKEND_ENV,
+  VALID_TESTNET_BACKEND_ENV,
+} from '../../scripts/env-config-fixtures';
 
 describe('Environment & Request Input Configuration Validation', () => {
   const validDevEnv: Record<string, string> = {
@@ -212,5 +217,27 @@ describe('Environment & Request Input Configuration Validation', () => {
         /Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for testnet, but SOROBAN_RPC_URL points to mainnet/,
       );
     });
+  });
+
+  describe('Deterministic testnet vs mainnet & startup-error fixtures (no live funds)', () => {
+    it('accepts deterministic testnet and mainnet production backend fixtures', () => {
+      expect(() => validateEnv(VALID_TESTNET_BACKEND_ENV)).not.toThrow();
+      expect(() => validateEnv(VALID_MAINNET_PROD_BACKEND_ENV)).not.toThrow();
+    });
+
+    it.each(MISSING_OR_CONFLICTING_BACKEND_ENV_FIXTURES)(
+      'fails startup validation before any signed transaction for $name',
+      ({ env, expectedError }) => {
+        const signAndSubmitTransaction = vi.fn();
+
+        const bootAndSign = () => {
+          validateEnv(env);
+          signAndSubmitTransaction();
+        };
+
+        expect(bootAndSign).toThrow(expectedError);
+        expect(signAndSubmitTransaction).not.toHaveBeenCalled();
+      },
+    );
   });
 });
