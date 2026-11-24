@@ -910,8 +910,8 @@ impl StellarGoalVaultContract {
                 amount,
                 total_pledged: campaign.pledged_amount,
                 contributor_count: campaign.contributor_count,
-                token_balance: current_balance + amount,
-                contributor_total: current_contribution + amount,
+                token_balance: new_balance,
+                contributor_total: new_contribution,
                 pledged_at: env.ledger().timestamp(),
             },
         );

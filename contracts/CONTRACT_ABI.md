@@ -384,7 +384,7 @@ fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, 
 | Deadline passed | `"campaign deadline reached"` | Medium | Campaign funding period has ended |
 | Funding cap exceeded | `"campaign funding cap exceeded"` | Medium | Campaign has reached its `target_amount`; wait for next campaign |
 | Token not accepted | `"token not accepted by this campaign"` | Medium | Contribute one of `campaign.accepted_tokens` |
-| Per-contributor cap exceeded | Soroban arithmetic panic | Medium | Check `max_per_contributor` set at campaign creation |
+| Per-contributor cap exceeded | `"per-contributor cap exceeded"` | Medium | Check `max_per_contributor` set at campaign creation |
 | Insufficient token balance | Soroban token transfer error | High | Ensure contributor has enough tokens and has approved transfer |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 | Contributor is the vault contract | `"contributor cannot be the vault contract"` | High | Pledge from a real account; the vault cannot fund itself |
@@ -418,6 +418,7 @@ accepted tokens plus the new contribution amount cannot exceed the cap:
   is atomically rejected with `"per-contributor cap exceeded"`.
 - Atomic rollback ensures no tokens move, balances remain unchanged, and no pledge events are emitted.
 - The contributor's cumulative recorded pledge remains strictly within the cap.
+- Cumulative cap checks, campaign token balances, contributor totals, and emitted `CampaignPledgedEvent` totals all use checked `i128` arithmetic so overflow and over-cap attempts are rejected cleanly.
 
 **Per-contributor cap authority enforcement (SGV-2026-118):**
 Pledges made to a capped campaign strictly require the contributor's explicit authorization (`contributor.require_auth()`).
@@ -1522,3 +1523,4 @@ Checking campaign state without mutation.
 ---
 
 *Last updated: 2026-07-29*
+

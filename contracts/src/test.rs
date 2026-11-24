@@ -2013,6 +2013,99 @@ mod tests {
         assert_eq!(token_client.balance(&vault), 500);
     }
 
+    #[test]
+    fn test_per_contributor_cap_two_contributions_exact_cap_with_checked_arithmetic() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let first_amount = 1_000_000_000_000_i128;
+        let second_amount = 2_500_000_000_000_i128;
+        let cap = first_amount
+            .checked_add(second_amount)
+            .expect("cap sum must not overflow");
+        let target = cap
+            .checked_mul(2)
+            .expect("target must not overflow");
+        let initial_mint = cap
+            .checked_add(1_000_000_i128)
+            .expect("initial mint must not overflow");
+
+        let token_a = deploy_token(&env, &admin, &contributor, initial_mint);
+        let token_b = deploy_token(&env, &admin, &contributor, initial_mint);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_a.clone(), token_b.clone()],
+            &target,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "checked arithmetic cap test"),
+            &cap,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let token_a_client = TokenClient::new(&env, &token_a);
+        let token_b_client = TokenClient::new(&env, &token_b);
+        let vault = client.address.clone();
+
+        // Two contributions across accepted tokens that sum exactly to the cap.
+        client.contribute(&campaign_id, &contributor, &token_a, &first_amount);
+        client.contribute(&campaign_id, &contributor, &token_b, &second_amount);
+
+        let cumulative = client
+            .get_contribution(&campaign_id, &contributor, &token_a)
+            .checked_add(client.get_contribution(&campaign_id, &contributor, &token_b))
+            .expect("cumulative contribution sum must not overflow");
+        assert_eq!(cumulative, cap);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, cap);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_a), first_amount);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_b), second_amount);
+        assert_eq!(
+            token_a_client.balance(&contributor),
+            initial_mint.checked_sub(first_amount).unwrap()
+        );
+        assert_eq!(
+            token_b_client.balance(&contributor),
+            initial_mint.checked_sub(second_amount).unwrap()
+        );
+        assert_eq!(token_a_client.balance(&vault), first_amount);
+        assert_eq!(token_b_client.balance(&vault), second_amount);
+
+        // An overflow-inducing amount must be rejected cleanly via checked arithmetic
+        // without mutating cumulative contribution or balances.
+        let overflow_attempt =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.contribute(&campaign_id, &contributor, &token_a, &i128::MAX);
+            }));
+        assert!(
+            overflow_attempt.is_err(),
+            "overflowing contribution must be rejected"
+        );
+
+        // A minimum valid contribution over the cap must also be rejected cleanly.
+        let over_cap_attempt =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.contribute(&campaign_id, &contributor, &token_a, &100_i128);
+            }));
+        assert!(
+            over_cap_attempt.is_err(),
+            "contribution exceeding cap must be rejected"
+        );
+
+        // Cumulative amount remains strictly within (equal to) the cap.
+        let cumulative_after = client
+            .get_contribution(&campaign_id, &contributor, &token_a)
+            .checked_add(client.get_contribution(&campaign_id, &contributor, &token_b))
+            .expect("cumulative contribution sum must not overflow");
+        assert_eq!(cumulative_after, cap);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, cap);
+    }
+
     // ── #185: update_metadata tests ───────────────────────────────────────────
 
     #[test]
