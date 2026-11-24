@@ -520,6 +520,12 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 
 **Emits:** `CampaignRefunded` (one per token the contributor used)
 
+Each refund uses the contributor's current recorded balance for that token;
+the caller cannot choose an amount. The token transfer, accounting update, and
+event are atomic: if any token transfer fails, the call commits no refund
+transfers, accounting changes, or refund events. After a successful refund,
+another individual refund for the same contribution fails with
+`"nothing to refund"`.
 **Partial refunds and retries (issue #1518):** a campaign can be refunded one
 contributor at a time, so `pledged_amount` may sit between `0` and its pre-refund
 value while funds remain for other contributors. Within a single call the refund
@@ -563,6 +569,9 @@ fn refund_all(env: Env, campaign_id: u64)
 | Caller not authorized | Soroban auth failure | High | Ensure the stored `admin` signs the transaction |
 
 **Emits:** `CampaignRefunded` (one per contributor per token)
+
+Contributors whose recorded balances are already zero (for example, because
+they individually claimed a refund earlier) are skipped.
 
 **Gas estimate:** 15,000 base + 25,000 per contributor ≈ highly variable. For 10 contributors with 1 token each: **290,000** + 20% headroom = **348,000**
 
