@@ -83,6 +83,12 @@ fn initialize(env: Env, admin: Address, min_contribution: i128)
 | `min_contribution <= 0` | `"min_contribution must be positive"` | High | Call with a positive integer (minimum 1 stroop) |
 | Caller not authorized | Soroban auth failure | High | Ensure caller signs with the `admin` address |
 
+**Failure atomicity:** an invalid minimum (`min_contribution <= 0`) is rejected
+before `Admin`, `Paused`, or `MinContribution` is written. The deployment stays
+uninitialized (the fallback minimum of 100 stroops still applies and
+`get_admin()` panics), and a later `initialize()` with a positive minimum still
+succeeds.
+
 **Gas estimate:** 15,000 + 5,000 per storage write (~20,000 units total + 20% headroom = **24,000**)
 
 ---
@@ -380,6 +386,12 @@ can be changed with `initialize()`. The minimum check runs before the campaign
 is read, before the token transfer, and before any storage write, so a rejected
 call leaves the contributor balance, the campaign pledge, and the vault balance
 unchanged.
+
+**Failure atomicity:** every validation, including the minimum-contribution
+check, runs before the token transfer and before any storage write. A rejected
+pledge leaves the campaign, contribution records, contributor count, and both
+the contributor and vault token balances unchanged. There is no partial pledge
+or payout, and later valid calls still succeed.
 
 **Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
 
