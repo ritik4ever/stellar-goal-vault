@@ -99,7 +99,11 @@ fn balance(f: &Fixture, who: &Address) -> i128 {
 /// The last top-level call was authorized by exactly one address, `expected`,
 /// for `fn_name` on the vault contract.
 fn assert_sole_signer(f: &Fixture, expected: &Address, fn_name: &str) {
-    let auths = f.env.auths();
+    assert_sole_signer_on(&f.env, &f.client.address, expected, fn_name);
+}
+
+fn assert_sole_signer_on(env: &Env, vault: &Address, expected: &Address, fn_name: &str) {
+    let auths = env.auths();
     assert_eq!(
         auths.len(),
         1,
@@ -112,13 +116,10 @@ fn assert_sole_signer(f: &Fixture, expected: &Address, fn_name: &str) {
     );
     match &invocation.function {
         AuthorizedFunction::Contract((contract, name, _)) => {
-            assert_eq!(
-                contract, &f.client.address,
-                "{fn_name}: auth for another contract"
-            );
+            assert_eq!(contract, vault, "{fn_name}: auth for another contract");
             assert_eq!(
                 name,
-                &Symbol::new(&f.env, fn_name),
+                &Symbol::new(env, fn_name),
                 "{fn_name}: auth for another function"
             );
         }
@@ -400,4 +401,280 @@ fn refund_all_requires_an_initialized_admin() {
         .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
     past_deadline(&f.env);
     f.client.refund_all(&f.campaign_id);
+}
+
+// --- refund after failures and on partially refunded campaigns (issue #1518) ---
+//
+// `refund` is contributor-authorized (above). The tests below pin that rule in
+// the two states a failed campaign actually reaches in production: a refund
+// attempt whose token transfer failed, and a campaign where some contributors
+// have already been refunded and others have not.
+
+/// Test double for a token whose `transfer` can be made to fail on demand.
+///
+/// It exists only to reproduce a failed token transfer inside `refund` without
+/// any real funds: `mint`, `balance` and `transfer` are all the vault's pledge
+/// and refund paths touch, and `freeze` makes every later transfer panic the
+/// way a token does when the vault cannot cover it. Never deployed outside
+/// `cfg(test)`.
+#[soroban_sdk::contract]
+pub struct FlakyToken;
+
+#[soroban_sdk::contractimpl]
+impl FlakyToken {
+    pub fn mint(env: Env, to: Address, amount: i128) {
+        let key = (Symbol::new(&env, "balance"), to);
+        let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        env.storage().persistent().set(&key, &(current + amount));
+    }
+
+    pub fn balance(env: Env, id: Address) -> i128 {
+        let key = (Symbol::new(&env, "balance"), id);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    /// `create_campaign` probes `decimals` to reject non-token addresses.
+    pub fn decimals(_env: Env) -> u32 {
+        7
+    }
+
+    pub fn freeze(env: Env) {
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "frozen"), &true);
+    }
+
+    pub fn unfreeze(env: Env) {
+        env.storage()
+            .instance()
+            .remove(&Symbol::new(&env, "frozen"));
+    }
+
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        let frozen: bool = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "frozen"))
+            .unwrap_or(false);
+        if frozen {
+            panic!("token transfer failed");
+        }
+        let from_key = (Symbol::new(&env, "balance"), from);
+        let from_balance: i128 = env.storage().persistent().get(&from_key).unwrap_or(0);
+        if from_balance < amount {
+            panic!("insufficient balance");
+        }
+        env.storage()
+            .persistent()
+            .set(&from_key, &(from_balance - amount));
+        let to_key = (Symbol::new(&env, "balance"), to);
+        let to_balance: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&to_key, &(to_balance + amount));
+    }
+}
+
+/// Underfunded failed campaign that accepts one real SAC token and the test
+/// double, so a refund can be made to fail halfway through its token loop.
+const FAILED_TARGET: i128 = 2_000;
+
+struct FlakyFixture {
+    env: Env,
+    client: StellarGoalVaultContractClient<'static>,
+    creator: Address,
+    alice: Address,
+    bob: Address,
+    token: Address,
+    flaky: Address,
+    campaign_id: u64,
+}
+
+fn flaky_fixture() -> FlakyFixture {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StellarGoalVaultContract, ());
+    let client = StellarGoalVaultContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    let token = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let minter = StellarAssetClient::new(&env, &token);
+    minter.mint(&alice, &10_000);
+    minter.mint(&bob, &10_000);
+
+    let flaky = env.register(FlakyToken, ());
+    FlakyTokenClient::new(&env, &flaky).mint(&alice, &10_000);
+
+    client.initialize(&admin, &1);
+
+    let campaign_id = client.create_campaign(
+        &creator,
+        &soroban_sdk::vec![&env, token.clone(), flaky.clone()],
+        &FAILED_TARGET,
+        &(env.ledger().timestamp() + DURATION),
+        &String::from_str(&env, "refund authority"),
+        &0_i128,
+        &soroban_sdk::vec![&env],
+        &0_u32,
+    );
+
+    FlakyFixture {
+        env,
+        client,
+        creator,
+        alice,
+        bob,
+        token,
+        flaky,
+        campaign_id,
+    }
+}
+
+fn sac_balance(f: &FlakyFixture, who: &Address) -> i128 {
+    TokenClient::new(&f.env, &f.token).balance(who)
+}
+
+fn flaky_balance(f: &FlakyFixture, who: &Address) -> i128 {
+    FlakyTokenClient::new(&f.env, &f.flaky).balance(who)
+}
+
+/// A refund that failed must leave the campaign, the vault and the contributor
+/// exactly as they were: no partial payout, no zeroed contribution.
+fn assert_failed_refund_paid_nothing(f: &FlakyFixture) {
+    let campaign = f.client.get_campaign(&f.campaign_id);
+    assert!(!campaign.claimed);
+    assert_eq!(campaign.pledged_amount, PLEDGE + 600);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        PLEDGE
+    );
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.flaky),
+        600
+    );
+    assert_eq!(sac_balance(f, &f.client.address), PLEDGE);
+    assert_eq!(flaky_balance(f, &f.client.address), 600);
+    assert_eq!(sac_balance(f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(flaky_balance(f, &f.alice), 9_400);
+}
+
+#[test]
+fn refund_after_a_failed_token_transfer_pays_nothing_and_only_the_contributor_can_retry() {
+    let f = flaky_fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.flaky, &600);
+    past_deadline(&f.env);
+
+    // The vault cannot pay this contributor in the second token yet, so the
+    // refund's transfer fails and the whole call reverts.
+    FlakyTokenClient::new(&f.env, &f.flaky).freeze();
+    assert!(f.client.try_refund(&f.campaign_id, &f.alice).is_err());
+    assert_failed_refund_paid_nothing(&f);
+
+    // Neither the creator nor another contributor can complete the refund,
+    // even though the campaign is failed and the funds are waiting.
+    for signer in [&f.creator, &f.bob] {
+        f.env.mock_auths(&[MockAuth {
+            address: signer,
+            invoke: &MockAuthInvoke {
+                contract: &f.client.address,
+                fn_name: "refund",
+                args: (f.campaign_id, f.alice.clone()).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(f.client.try_refund(&f.campaign_id, &f.alice).is_err());
+        assert_failed_refund_paid_nothing(&f);
+    }
+
+    // Once the token is healthy again the contributor's own signature refunds
+    // exactly once.
+    FlakyTokenClient::new(&f.env, &f.flaky).unfreeze();
+    f.env.mock_all_auths();
+    f.client.refund(&f.campaign_id, &f.alice);
+    assert_sole_signer_on(&f.env, &f.client.address, &f.alice, "refund");
+
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        0
+    );
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.flaky),
+        0
+    );
+    assert_eq!(sac_balance(&f, &f.alice), 10_000);
+    assert_eq!(flaky_balance(&f, &f.alice), 10_000);
+    assert_eq!(sac_balance(&f, &f.client.address), 0);
+    assert_eq!(flaky_balance(&f, &f.client.address), 0);
+
+    // A duplicate refund after the retry pays nothing.
+    assert!(f.client.try_refund(&f.campaign_id, &f.alice).is_err());
+    assert_eq!(sac_balance(&f, &f.alice), 10_000);
+    assert_eq!(flaky_balance(&f, &f.alice), 10_000);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+}
+
+#[test]
+fn partially_refunded_campaign_lets_only_each_contributor_release_their_own_pledge() {
+    let f = fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+    f.client
+        .contribute(&f.campaign_id, &f.bob, &f.token, &PLEDGE);
+    past_deadline(&f.env);
+
+    // Alice is refunded first: the campaign is now partially refunded.
+    f.client.refund(&f.campaign_id, &f.alice);
+    assert_sole_signer(&f, &f.alice, "refund");
+    assert_eq!(balance(&f, &f.alice), 10_000);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, PLEDGE);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+
+    // Neither the creator nor another contributor can release Bob's pledge.
+    for signer in [&f.creator, &f.alice] {
+        f.env.mock_auths(&[MockAuth {
+            address: signer,
+            invoke: &MockAuthInvoke {
+                contract: &f.client.address,
+                fn_name: "refund",
+                args: (f.campaign_id, f.bob.clone()).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(f.client.try_refund(&f.campaign_id, &f.bob).is_err());
+    }
+    assert_eq!(balance(&f, &f.bob), 10_000 - PLEDGE);
+    assert_eq!(
+        f.client.get_contribution(&f.campaign_id, &f.bob, &f.token),
+        PLEDGE
+    );
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, PLEDGE);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+
+    // Bob's own signature closes the campaign out, and only for his pledge.
+    f.env.mock_all_auths();
+    f.client.refund(&f.campaign_id, &f.bob);
+    assert_sole_signer(&f, &f.bob, "refund");
+    assert_eq!(balance(&f, &f.bob), 10_000);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        0
+    );
 }
