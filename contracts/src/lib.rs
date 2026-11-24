@@ -1114,18 +1114,21 @@ impl StellarGoalVaultContract {
         }
 
         // Every contribution and per-token balance must still be readable
-        // before the campaign is marked claimed: an expired entry would
-        // otherwise make this loop skip a token and strand its escrow.
+        // before any funds move: an expired entry would otherwise make this
+        // loop skip a token and strand its escrow.
         require_campaign_accounting_intact(&env, campaign_id, &campaign);
 
         // Authorization is enforced above: only the campaign creator (the
         // stored `creator`) can claim, and the signature covers campaign_id.
         // No other signer can trigger this privileged state transition.
-        campaign.claimed = true;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Campaign(campaign_id), &campaign);
-
+        //
+        // Atomicity (issue #1512): all validation above runs before the first
+        // storage write or token transfer, and the `claimed` flag plus the
+        // per-token balance zeroing are written only after every transfer has
+        // succeeded. If any check or transfer fails, the invocation panics
+        // before the first write and Soroban rolls back the whole call, so no
+        // partial claim (claimed flag set, or some balances cleared) can be
+        // committed.
         let contract_address = env.current_contract_address();
 
         let fee_bps: i128 = env
@@ -1136,6 +1139,9 @@ impl StellarGoalVaultContract {
         let fee_recipient: Option<Address> = env.storage().instance().get(&DataKey::FeeRecipient);
         let take_fee = fee_bps > 0;
 
+        // Phase 1: move every token balance out of escrow. No storage is
+        // mutated here, so a failing transfer aborts the claim with the
+        // campaign still unclaimed and all balances intact.
         for token in campaign.accepted_tokens.iter() {
             let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
             let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
@@ -1167,7 +1173,22 @@ impl StellarGoalVaultContract {
                 } else {
                     token_client.transfer(&contract_address, &creator, &balance);
                 }
+            }
+        }
 
+        // Phase 2: every transfer succeeded, so commit the claim. The claimed
+        // flag and the balance zeroing are written together after the funds
+        // have moved, never before.
+        campaign.claimed = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        for token in campaign.accepted_tokens.iter() {
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+
+            if balance > 0 {
                 // Clear the balance
                 env.storage().persistent().set(&balance_key, &0_i128);
 

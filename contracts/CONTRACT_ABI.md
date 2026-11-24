@@ -416,6 +416,18 @@ fn claim(env: Env, campaign_id: u64, creator: Address)
 | Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry (or rely on `extend_ttl`) before retrying. No funds move and the campaign is not marked claimed |
 | Caller not authorized | Soroban auth failure | High | Ensure `creator` signs the transaction |
 
+**Atomicity guarantee:** `claim` is all-or-nothing. Every validation — the
+`creator` signature, the creator-match check, the `claimed` and `canceled`
+flags, the deadline, the funding check, and the storage-integrity check — runs
+before the first storage write or token transfer. A failed claim therefore
+leaves campaign storage, `pledged_amount`, the `claimed` flag, per-token
+balances, and token balances exactly as they were: no partial pledge or payout
+is possible. This holds for a duplicate claim (already `claimed`), a
+non-creator caller (auth failure or `"creator mismatch"`), and any other
+rejected call. Because the invocation aborts before any externally visible
+effect, no `CampaignClaimed` or `FeeCollected` success event is emitted for a
+failed claim.
+
 **Emits:** `CampaignClaimed` (one per token with a non-zero balance), and
 `FeeCollected` for each token whose fee transfer is positive. `CampaignClaimed.amount`
 is the gross campaign balance claimed for that token, before any fee split.

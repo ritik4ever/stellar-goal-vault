@@ -3592,6 +3592,146 @@ mod tests {
         assert!(client.get_campaign(&campaign_id).claimed);
     }
 
+    // ---- #1512: claim failures are atomic ---------------------------------
+    // A rejected claim (second claim or non-creator caller) must leave the
+    // campaign record, the vault balances and the event log exactly as they
+    // were after the successful claim.
+
+    #[test]
+    fn test_second_claim_is_atomic_and_leaves_no_partial_payout() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let client = deploy_contract(&env);
+        let (campaign_id, token_a, token_b) =
+            two_token_campaign(&env, &client, &creator, &contributor);
+
+        client.contribute(&campaign_id, &contributor, &token_a, &400);
+        client.contribute(&campaign_id, &contributor, &token_b, &600);
+        advance_time(&env, 600);
+
+        client.claim(&campaign_id, &creator);
+
+        let token_a_client = TokenClient::new(&env, &token_a);
+        let token_b_client = TokenClient::new(&env, &token_b);
+        let campaign_before = client.get_campaign(&campaign_id);
+        let creator_a_before = token_a_client.balance(&creator);
+        let creator_b_before = token_b_client.balance(&creator);
+        let vault_a_before = token_a_client.balance(&client.address);
+        let vault_b_before = token_b_client.balance(&client.address);
+        let balance_a_before = client.get_campaign_token_balance(&campaign_id, &token_a);
+        let balance_b_before = client.get_campaign_token_balance(&campaign_id, &token_b);
+        let events_before = env.events().all().events().len();
+
+        assert!(campaign_before.claimed);
+        assert_eq!(campaign_before.pledged_amount, 1_000);
+        assert_eq!(creator_a_before, 400);
+        assert_eq!(creator_b_before, 600);
+        assert_eq!(vault_a_before, 0);
+        assert_eq!(vault_b_before, 0);
+
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.claim(&campaign_id, &creator);
+        }));
+        assert!(result.is_err(), "second claim must be rejected");
+
+        let campaign_after = client.get_campaign(&campaign_id);
+        assert!(campaign_after.claimed);
+        assert_eq!(campaign_after.pledged_amount, campaign_before.pledged_amount);
+        assert_eq!(campaign_after.creator, campaign_before.creator);
+        assert_eq!(campaign_after.target_amount, campaign_before.target_amount);
+        assert_eq!(campaign_after.deadline, campaign_before.deadline);
+        assert_eq!(campaign_after.canceled, campaign_before.canceled);
+
+        assert_eq!(token_a_client.balance(&creator), creator_a_before);
+        assert_eq!(token_b_client.balance(&creator), creator_b_before);
+        assert_eq!(token_a_client.balance(&client.address), vault_a_before);
+        assert_eq!(token_b_client.balance(&client.address), vault_b_before);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token_a),
+            balance_a_before
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token_b),
+            balance_b_before
+        );
+        assert_eq!(
+            env.events().all().events().len(),
+            events_before,
+            "failed second claim must not emit events"
+        );
+    }
+
+    #[test]
+    fn test_non_creator_claim_is_atomic_and_leaves_no_partial_payout() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let client = deploy_contract(&env);
+        let (campaign_id, token_a, token_b) =
+            two_token_campaign(&env, &client, &creator, &contributor);
+
+        client.contribute(&campaign_id, &contributor, &token_a, &400);
+        client.contribute(&campaign_id, &contributor, &token_b, &600);
+        advance_time(&env, 600);
+
+        let token_a_client = TokenClient::new(&env, &token_a);
+        let token_b_client = TokenClient::new(&env, &token_b);
+        let campaign_before = client.get_campaign(&campaign_id);
+        let creator_a_before = token_a_client.balance(&creator);
+        let creator_b_before = token_b_client.balance(&creator);
+        let attacker_a_before = token_a_client.balance(&attacker);
+        let attacker_b_before = token_b_client.balance(&attacker);
+        let vault_a_before = token_a_client.balance(&client.address);
+        let vault_b_before = token_b_client.balance(&client.address);
+        let balance_a_before = client.get_campaign_token_balance(&campaign_id, &token_a);
+        let balance_b_before = client.get_campaign_token_balance(&campaign_id, &token_b);
+        let events_before = env.events().all().events().len();
+
+        assert!(!campaign_before.claimed);
+        assert_eq!(campaign_before.pledged_amount, 1_000);
+        assert_eq!(vault_a_before, 400);
+        assert_eq!(vault_b_before, 600);
+
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.claim(&campaign_id, &attacker);
+        }));
+        assert!(result.is_err(), "non-creator claim must be rejected");
+
+        let campaign_after = client.get_campaign(&campaign_id);
+        assert!(!campaign_after.claimed);
+        assert_eq!(campaign_after.pledged_amount, campaign_before.pledged_amount);
+        assert_eq!(campaign_after.creator, campaign_before.creator);
+        assert_eq!(campaign_after.target_amount, campaign_before.target_amount);
+        assert_eq!(campaign_after.deadline, campaign_before.deadline);
+        assert_eq!(campaign_after.canceled, campaign_before.canceled);
+
+        assert_eq!(token_a_client.balance(&creator), creator_a_before);
+        assert_eq!(token_b_client.balance(&creator), creator_b_before);
+        assert_eq!(token_a_client.balance(&attacker), attacker_a_before);
+        assert_eq!(token_b_client.balance(&attacker), attacker_b_before);
+        assert_eq!(token_a_client.balance(&client.address), vault_a_before);
+        assert_eq!(token_b_client.balance(&client.address), vault_b_before);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token_a),
+            balance_a_before
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token_b),
+            balance_b_before
+        );
+        assert_eq!(
+            env.events().all().events().len(),
+            events_before,
+            "failed non-creator claim must not emit events"
+        );
+    }
+
     #[test]
     fn test_claim_aborts_before_payout_when_balance_entry_is_missing() {
         let env = test_env();
