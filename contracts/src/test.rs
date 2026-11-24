@@ -1659,6 +1659,104 @@ mod tests {
         assert_eq!(token_client.balance(&vault), 500);
     }
 
+    // ── SGV-2026-124: Multi-token accounting events aligned with committed state ─
+    // Scope:
+    // - Define event data and ordering for per-token balances and transfer amounts remain exact.
+    // - Consumers can reconstruct each committed change once.
+    // - Preserve unrelated behavior and do not use live funds in tests.
+    #[test]
+    fn test_multi_token_accounting_events_aligned_with_committed_state() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor_1 = Address::generate(&env);
+        let contributor_2 = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token_a = deploy_token(&env, &admin, &contributor_1, 10_000);
+        let token_b = deploy_token(&env, &admin, &contributor_1, 10_000);
+        let token_c_unaccepted = deploy_token(&env, &admin, &contributor_1, 5_000);
+
+        // Also fund contributor 2
+        let asset_a = StellarAssetClient::new(&env, &token_a);
+        asset_a.mint(&contributor_2, &10_000);
+
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_a.clone(), token_b.clone()],
+            &20_000_i128,
+            &(env.ledger().timestamp() + 2_000),
+            &String::from_str(&env, "multi-token accounting test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let client_a = TokenClient::new(&env, &token_a);
+        let client_b = TokenClient::new(&env, &token_b);
+        let vault = client.address.clone();
+
+        // 1. Contributor 1 pledges 1_000 of Token A
+        client.contribute(&campaign_id, &contributor_1, &token_a, &1_000_i128);
+        assert!(!env.events().all().events().is_empty(), "First pledge must emit events");
+
+        // Committed state assertions
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_a), 1_000);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_b), 0);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor_1, &token_a), 1_000);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor_1, &token_b), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_000);
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+        assert_eq!(client_a.balance(&vault), 1_000);
+        assert_eq!(client_b.balance(&vault), 0);
+
+        // 2. Contributor 1 pledges 2_000 of Token B
+        client.contribute(&campaign_id, &contributor_1, &token_b, &2_000_i128);
+        assert!(!env.events().all().events().is_empty(), "Second pledge must emit events");
+
+        // Committed state assertions across both tokens
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_a), 1_000);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_b), 2_000);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor_1, &token_a), 1_000);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor_1, &token_b), 2_000);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 3_000);
+        assert_eq!(client.get_contributor_count(&campaign_id), 1); // same contributor, not double-counted
+        assert_eq!(client_a.balance(&vault), 1_000);
+        assert_eq!(client_b.balance(&vault), 2_000);
+
+        // 3. Contributor 2 pledges 1_500 of Token A
+        client.contribute(&campaign_id, &contributor_2, &token_a, &1_500_i128);
+        assert!(!env.events().all().events().is_empty(), "Third pledge must emit events");
+
+        // Committed state assertions across multiple contributors and tokens
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_a), 2_500);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_b), 2_000);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor_1, &token_a), 1_000);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor_2, &token_a), 1_500);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 4_500);
+        assert_eq!(client.get_contributor_count(&campaign_id), 2);
+        assert_eq!(client_a.balance(&vault), 2_500);
+        assert_eq!(client_b.balance(&vault), 2_000);
+
+        // 4. Rejection of unaccepted token does not mutate state or emit events
+        let unaccepted_fail = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &contributor_1, &token_c_unaccepted, &500_i128);
+        }));
+        assert!(unaccepted_fail.is_err(), "Unaccepted token must be rejected");
+        assert!(env.events().all().events().is_empty(), "Rejected pledge emits no events");
+
+        // State remains strictly preserved and exact
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_a), 2_500);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_b), 2_000);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 4_500);
+        assert_eq!(client_a.balance(&vault), 2_500);
+        assert_eq!(client_b.balance(&vault), 2_000);
+    }
+
     // ── #185: update_metadata tests ───────────────────────────────────────────
 
     #[test]

@@ -381,6 +381,16 @@ is read, before the token transfer, and before any storage write, so a rejected
 call leaves the contributor balance, the campaign pledge, and the vault balance
 unchanged.
 
+**Multi-token accounting events & committed state alignment (SGV-2026-124):**
+For campaigns accepting multiple tokens (`campaign.accepted_tokens`):
+- Pledges are executed and tracked per token contract address.
+- `DataKey::CampaignTokenBalance(campaign_id, token)` tracks the exact balance for each token independently.
+- `DataKey::Contribution(campaign_id, contributor, token)` tracks the contributor's cumulative pledge per token.
+- `campaign.pledged_amount` tracks the aggregate valuation across all accepted tokens.
+- `CampaignPledgedEvent` emits `token_balance` (exact per-token balance after this pledge) and `contributor_total` (exact cumulative token pledge for this contributor), along with aggregate `total_pledged`.
+- Event emission occurs strictly after storage writes and token transfers succeed; consumers reading events can reconstruct each committed change once without duplicate or missing state.
+- Rejected transactions (e.g., unaccepted token, below minimum, exceeding cap) roll back atomically, transferring zero tokens and emitting no events.
+
 **Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
 
 **Indexer note:** The `CampaignPledgedEvent` event is emitted exactly once per successful `contribute` call, after all validations, token transfer, and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Pledged")` and use `campaign_id` + `contributor` + `pledged_at` for deduplication and reconstructing pledge state without auxiliary contract reads.
