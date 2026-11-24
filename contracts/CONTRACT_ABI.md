@@ -437,7 +437,12 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 | Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; investigate |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 
-**Emits:** `CampaignRefunded` (one per token the contributor used)
+**Emits:** One `CampaignRefunded` event per token with a positive refundable
+contribution, in the campaign's accepted-token order. `amount` is the exact
+amount transferred for that token (the contributor's stored refundable balance),
+and `total_pledged` is the campaign total after that token's refund. Events are
+published after the campaign accounting write; failed calls commit no refund
+events.
 
 **Gas estimate:** 22,000 + 12,000 per token contributed ≈ base 22,000 + 12,000 per token + 20% headroom: **40,800** (1 token) / **74,400** (3 tokens)
 
@@ -468,7 +473,12 @@ fn refund_all(env: Env, campaign_id: u64)
 | Contract not initialized | `"not initialized"` | High | Call `initialize` to set an admin first |
 | Caller not authorized | Soroban auth failure | High | Ensure the stored `admin` signs the transaction |
 
-**Emits:** `CampaignRefunded` (one per contributor per token)
+**Emits:** One `CampaignRefunded` event per positive contributor-token
+position, ordered by the campaign's contributor list and then accepted-token
+order. Each event's `amount` is the exact amount transferred from that
+contributor's stored refundable balance, and `total_pledged` is the campaign
+total after that position is refunded. Events are published after the campaign
+accounting write; failed calls commit no refund events.
 
 **Gas estimate:** 15,000 base + 25,000 per contributor ≈ highly variable. For 10 contributors with 1 token each: **290,000** + 20% headroom = **348,000**
 
@@ -904,9 +914,14 @@ committed only if the full claim transaction succeeds.
 | `campaign_id` | `u64` | Campaign ID |
 | `contributor` | `Address` | Contributor refunded |
 | `token` | `Address` | Token refunded |
-| `amount` | `i128` | Amount refunded |
+| `amount` | `i128` | Exact amount transferred from the contributor's refundable balance for this token |
+| `total_pledged` | `i128` | Campaign pledged amount after this refund |
 
-**Emitted by:** `refund`, `refund_all`
+**Emitted by:** `refund`, `refund_all`. There is exactly one event per positive
+contributor-token refund, and events follow the operation's refund order. The
+event amount is never greater than the contributor's stored refundable balance
+for that token. Events are emitted after campaign accounting is written and are
+committed only if the full operation succeeds.
 
 ---
 

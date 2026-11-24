@@ -9,7 +9,7 @@ mod tests {
     };
 
     use crate::{
-        CampaignClaimed, DeadlineExtended, ExtensionApproved, FeeCollected,
+        CampaignClaimed, CampaignRefunded, DeadlineExtended, ExtensionApproved, FeeCollected,
         StellarGoalVaultContract, StellarGoalVaultContractClient,
     };
     // Keep contract tests independent of the machine clock and local timezone.
@@ -1399,6 +1399,132 @@ mod tests {
         assert_eq!(campaign.pledged_amount, 0);
         let remaining = client.get_contribution(&campaign_id, &contributor, &token);
         assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn test_refund_events_follow_token_order_and_include_committed_totals() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let other_contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token_a = deploy_token(&env, &admin, &contributor, 1_000);
+        let token_b = deploy_token(&env, &admin, &contributor, 1_000);
+        StellarAssetClient::new(&env, &token_a).mint(&other_contributor, &150);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_a.clone(), token_b.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 100),
+            &String::from_str(&env, "refund event ordering"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor, &token_a, &100);
+        client.contribute(&campaign_id, &contributor, &token_b, &200);
+        client.contribute(&campaign_id, &other_contributor, &token_a, &150);
+        advance_time(&env, 101);
+
+        client.refund(&campaign_id, &contributor);
+
+        let events = goal_events(&env, soroban_sdk::symbol_short!("Refund"));
+        assert_eq!(events.len(), 2, "one refund event per refunded token");
+        assert!(events[0].0 < events[1].0, "events retain accepted token order");
+
+        use soroban_sdk::FromVal;
+        let expected_a: soroban_sdk::Val = CampaignRefunded {
+            campaign_id,
+            contributor: contributor.clone(),
+            token: token_a.clone(),
+            amount: 100,
+            total_pledged: 350,
+        }
+        .into_val(&env);
+        let expected_b: soroban_sdk::Val = CampaignRefunded {
+            campaign_id,
+            contributor: contributor.clone(),
+            token: token_b.clone(),
+            amount: 200,
+            total_pledged: 150,
+        }
+        .into_val(&env);
+        assert_eq!(
+            events[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_a)
+        );
+        assert_eq!(
+            events[1].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_b)
+        );
+
+        assert_eq!(TokenClient::new(&env, &token_a).balance(&contributor), 1_000);
+        assert_eq!(TokenClient::new(&env, &token_b).balance(&contributor), 1_000);
+        assert_eq!(TokenClient::new(&env, &token_a).balance(&client.address), 150);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token_a), 0);
+        assert_eq!(client.get_contribution(&campaign_id, &contributor, &token_b), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 150);
+    }
+
+    #[test]
+    fn test_refund_all_emits_one_ordered_event_per_refunded_position() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &alice, 1_000);
+        StellarAssetClient::new(&env, &token).mint(&bob, &1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 100),
+            &String::from_str(&env, "bulk refund event ordering"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &alice, &token, &100);
+        client.contribute(&campaign_id, &bob, &token, &200);
+        advance_time(&env, 101);
+
+        client.refund_all(&campaign_id);
+
+        let events = goal_events(&env, soroban_sdk::symbol_short!("Refund"));
+        assert_eq!(events.len(), 2, "one event per contributor-token position");
+        assert!(events[0].0 < events[1].0, "events retain contributor order");
+
+        use soroban_sdk::FromVal;
+        for (event, contributor, amount, total_pledged) in [
+            (&events[0], &alice, 100_i128, 200_i128),
+            (&events[1], &bob, 200_i128, 0_i128),
+        ] {
+            let expected: soroban_sdk::Val = CampaignRefunded {
+                campaign_id,
+                contributor: contributor.clone(),
+                token: token.clone(),
+                amount,
+                total_pledged,
+            }
+            .into_val(&env);
+            assert_eq!(event.1, soroban_sdk::xdr::ScVal::from_val(&env, &expected));
+        }
+        assert_eq!(TokenClient::new(&env, &token).balance(&alice), 1_000);
+        assert_eq!(TokenClient::new(&env, &token).balance(&bob), 1_000);
+        assert_eq!(client.get_contribution(&campaign_id, &alice, &token), 0);
+        assert_eq!(client.get_contribution(&campaign_id, &bob, &token), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
     }
 
     #[test]

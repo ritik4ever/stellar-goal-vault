@@ -147,6 +147,7 @@ pub struct CampaignRefunded {
     pub contributor: Address,
     pub token: Address,
     pub amount: i128,
+    pub total_pledged: i128,
 }
 
 #[contracttype]
@@ -1194,10 +1195,6 @@ impl StellarGoalVaultContract {
         if total_refunded == 0 {
             panic!("nothing to refund");
         }
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::Campaign(campaign_id), &campaign);
     }
 
     /// Refund every contributor of a failed or canceled campaign in one call.
@@ -1246,10 +1243,6 @@ impl StellarGoalVaultContract {
         if !any_refunded {
             panic!("nothing to refund");
         }
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::Campaign(campaign_id), &campaign);
     }
 
     pub fn get_campaign(env: Env, campaign_id: u64) -> Campaign {
@@ -1531,6 +1524,9 @@ fn refund_contributor(
                 .set(&balance_key, &(balance - amount));
             campaign.pledged_amount -= amount;
             total_refunded += amount;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Campaign(campaign_id), campaign);
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Refund")),
                 CampaignRefunded {
@@ -1538,6 +1534,7 @@ fn refund_contributor(
                     contributor: contributor.clone(),
                     token: token.clone(),
                     amount,
+                    total_pledged: campaign.pledged_amount,
                 },
             );
         }
