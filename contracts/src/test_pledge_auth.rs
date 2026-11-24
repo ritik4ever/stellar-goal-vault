@@ -847,3 +847,73 @@ fn unauthorized_update_metadata_around_pledge_and_settlement_leaves_balances_and
     assert_eq!(balance(&f, &f.client.address), 0);
     assert_eq!(balance(&f, &f.creator), TARGET);
 }
+
+// --- #1528: authority near Campaign storage TTL -----------------------------
+//
+// The TTL-refresh helpers write to storage, so every path that may call them
+// must be behind `require_auth` *before* the first refresh — otherwise an
+// unauthorized caller could still perturb storage lifetimes by failing late.
+// These tests pin that invariant for `contribute`, `claim` and `refund_all`:
+// with enforcing auth, an unsigned or mis-signed call fails, no fund moves,
+// and the campaign record is unchanged. Soroban rolls the whole invocation
+// back on auth failure, so the TTL bump never lands either.
+
+#[test]
+fn contribute_without_signature_near_ttl_leaves_campaign_untouched() {
+    let f = fixture();
+    f.env.ledger().set_min_persistent_entry_ttl(1);
+    enforce_no_signatures(&f);
+
+    let before = f.client.get_campaign(&f.campaign_id);
+    assert!(f
+        .client
+        .try_contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE)
+        .is_err());
+    let after = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(after.pledged_amount, before.pledged_amount);
+    assert_eq!(
+        f.client.get_contribution(&f.campaign_id, &f.alice, &f.token),
+        0
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000);
+}
+
+#[test]
+fn claim_signed_by_non_creator_near_ttl_releases_no_funds() {
+    let f = fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &TARGET);
+    past_deadline(&f.env);
+    f.env.ledger().set_min_persistent_entry_ttl(1);
+
+    f.env.mock_auths(&[MockAuth {
+        address: &f.alice,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "claim",
+            args: (f.campaign_id, f.creator.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(f.client.try_claim(&f.campaign_id, &f.creator).is_err());
+    assert!(!f.client.get_campaign(&f.campaign_id).claimed);
+    assert_eq!(balance(&f, &f.creator), 0);
+    assert_eq!(balance(&f, &f.client.address), TARGET);
+}
+
+#[test]
+fn refund_all_without_admin_signature_near_ttl_refunds_nothing() {
+    let f = fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+    past_deadline(&f.env);
+    f.env.ledger().set_min_persistent_entry_ttl(1);
+    enforce_no_signatures(&f);
+
+    assert!(f.client.try_refund_all(&f.campaign_id).is_err());
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, PLEDGE);
+    let _ = &f.admin;
+    let _ = &f.bob;
+}
