@@ -489,6 +489,101 @@ mod tests {
         client.contribute(&campaign_id, &contributor, &token, &101);
     }
 
+    // ── SGV-2026-117: per-contributor cap failures are atomic ────────────────
+
+    #[test]
+    fn test_per_contributor_cap_failure_after_prior_failure_is_atomic() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 2_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &2_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "cap atomicity test"),
+            &500_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let token_client = TokenClient::new(&env, &token);
+        let vault = client.address.clone();
+
+        client.contribute(&campaign_id, &contributor, &token, &400);
+
+        // Second attempt fails: 400 + 101 = 501 > cap 500.
+        let second = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &contributor, &token, &101);
+        }));
+        assert!(second.is_err());
+
+        // Third attempt also exceeds the cap after the previous failure:
+        // 400 + 200 = 600 > cap 500.
+        let third = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &contributor, &token, &200);
+        }));
+        assert!(third.is_err());
+
+        // Both failures left committed storage and balances untouched.
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 400);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 400);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            400
+        );
+        assert_eq!(client.get_contributor_count(&campaign_id), 1);
+        assert_eq!(client.get_next_campaign_id(), 1);
+        assert_eq!(token_client.balance(&contributor), 1_600);
+        assert_eq!(token_client.balance(&vault), 400);
+
+        // The remaining allowance can still be pledged exactly at the cap.
+        client.contribute(&campaign_id, &contributor, &token, &100);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 500);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            500
+        );
+        assert_eq!(token_client.balance(&contributor), 1_500);
+        assert_eq!(token_client.balance(&vault), 500);
+    }
+
+    #[test]
+    #[should_panic(expected = "contribution amount overflow")]
+    fn test_contribute_rejects_overflowing_amount() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &i128::MAX,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "overflow boundary test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &100);
+        // 100 + i128::MAX does not fit in an i128; it must be rejected
+        // instead of wrapping and bypassing the funding and cap checks.
+        client.contribute(&campaign_id, &contributor, &token, &i128::MAX);
+    }
+
     #[test]
     fn test_claim_success() {
         let env = test_env();
