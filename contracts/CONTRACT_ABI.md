@@ -592,11 +592,14 @@ fn request_deadline_extension(
 | Deadline not later | `"new deadline must be after current deadline"` | Low | Choose a timestamp after the current deadline |
 | Exceeds max duration | `"new deadline exceeds maximum campaign duration"` | Low | Limit extension to within 180 days of campaign creation |
 | Not a contributor | `"caller is not a contributor"` | Medium | Only existing contributors can request extensions |
+| Request already pending | `"extension request already pending"` | Low | Approve or wait for the current request to resolve before proposing another |
 | Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
 
-**Emits:** `ExtensionRequested`
+**Emits:** `ExtensionRequested`, then `ExtensionApproved` for the requester's auto-approval. If that first vote already exceeds 50% of the contributor count (for example, a campaign with a single contributor), the deadline is committed in the same call and `DeadlineExtended` follows. All events are emitted after the storage writes.
 
-**Gas estimate:** 18,000 + storage writes + event ≈ 26,000 units + 20% headroom = **31,200**
+Only one request may be pending at a time. A second proposal is rejected instead of overwriting the first, so every vote remains attributable to exactly one request.
+
+**Gas estimate:** 18,000 + storage writes + events ≈ 28,000 units + 20% headroom = **33,600**
 
 ---
 
@@ -626,7 +629,7 @@ fn approve_extension(env: Env, campaign_id: u64, caller: Address)
 | No pending request | `"no extension request"` | Low | Call `request_deadline_extension()` first |
 | Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
 
-**Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither.
+**Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither. When the extension is committed, the votes recorded for that request are cleared so the next request starts a fresh tally.
 
 **Gas estimate:** 20,000 + storage write + conditional deadline apply + event ≈ 30,000 units + 20% headroom = **36,000**
 
@@ -1123,7 +1126,10 @@ committed only if the full claim transaction succeeds.
 | `requested_by` | `Address` | Contributor who requested |
 | `new_deadline` | `u64` | Proposed new deadline |
 
-**Emitted by:** `request_deadline_extension`
+**Emitted by:** `request_deadline_extension` (first event of a successful request)
+
+Each request is followed by the requester's auto-approval, reported as an
+`ExtensionApproved` event, so the vote tally can be rebuilt from events alone.
 
 ---
 
@@ -1142,7 +1148,7 @@ committed only if the full claim transaction succeeds.
 | `approver` | `Address` | Contributor who approved |
 | `approval_count` | `u32` | Total approvals after this vote |
 
-**Emitted by:** `approve_extension` (every successful call)
+**Emitted by:** `request_deadline_extension` (the requester's auto-approval) and `approve_extension` (every successful call)
 
 ---
 
@@ -1161,9 +1167,9 @@ committed only if the full claim transaction succeeds.
 | `old_deadline` | `u64` | Deadline before the change |
 | `new_deadline` | `u64` | Deadline now stored on the campaign |
 
-Emitted once per extension, immediately after the `ExtensionApproved` event for the vote that reached a majority. The deadline decides whether a campaign still accepts pledges or can be claimed or refunded, so a consumer rebuilding campaign availability from events needs this event to see the change.
+Emitted once per committed extension, immediately after the `ExtensionApproved` event for the vote that reached a majority. The deadline decides whether a campaign still accepts pledges or can be claimed or refunded, so a consumer rebuilding campaign availability from events needs this event to see the change.
 
-**Emitted by:** `approve_extension` (only when the vote reaches a majority)
+**Emitted by:** `request_deadline_extension` when the requester's auto-approval is already a majority, otherwise `approve_extension` when a later vote reaches a majority
 
 ---
 
