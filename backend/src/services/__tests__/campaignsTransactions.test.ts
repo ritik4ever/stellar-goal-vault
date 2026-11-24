@@ -253,3 +253,101 @@ describe('addPledge – accounting transaction rollback (#891)', () => {
     ).toHaveLength(0);
   });
 });
+
+describe('campaign transaction observability (SGV-2026-169)', () => {
+  it('logs pending and committed outcomes with a redacted campaign reference on success', async () => {
+    const loggerModule = await import('../../logger');
+    const infoSpy = vi.spyOn(loggerModule, 'logInfo');
+    const errorSpy = vi.spyOn(loggerModule, 'logError');
+
+    const campaign = createCampaign(campaignBase({ title: 'Observable Campaign' }));
+
+    const txInfoCalls = infoSpy.mock.calls.filter(
+      ([event]) =>
+        event === 'campaign_transaction_pending' || event === 'campaign_transaction_committed',
+    );
+    expect(txInfoCalls).toHaveLength(2);
+
+    const [pendingEvent, pendingMeta] = txInfoCalls[0];
+    expect(pendingEvent).toBe('campaign_transaction_pending');
+    expect(pendingMeta).toMatchObject({
+      outcome: 'pending',
+      operation: 'createCampaign',
+    });
+    expect(String((pendingMeta as Record<string, unknown>).campaignRef)).not.toBe(campaign.id);
+
+    const [committedEvent, committedMeta] = txInfoCalls[1];
+    expect(committedEvent).toBe('campaign_transaction_committed');
+    expect(committedMeta).toMatchObject({
+      outcome: 'committed',
+      operation: 'createCampaign',
+      completedWrites: 2,
+    });
+    expect(String((committedMeta as Record<string, unknown>).campaignRef)).not.toBe(campaign.id);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs redacted campaign reference and rejected outcome when the second write fails after the first succeeds', async () => {
+    const campaign = createCampaign(campaignBase({ targetAmount: 500 }));
+
+    const loggerModule = await import('../../logger');
+    const eventHistoryModule = await import('../eventHistory');
+    const infoSpy = vi.spyOn(loggerModule, 'logInfo');
+    const errorSpy = vi.spyOn(loggerModule, 'logError');
+
+    vi.spyOn(eventHistoryModule, 'recordEvent').mockImplementationOnce(() => {
+      throw new Error('Simulated second write failure');
+    });
+
+    expect(() => addPledge(campaign.id, { contributor: WALLETS.alice, amount: 125 })).toThrow(
+      'Simulated second write failure',
+    );
+
+    // Pending was logged before the transaction started
+    const pendingCall = infoSpy.mock.calls.find(
+      ([event, meta]) =>
+        event === 'campaign_transaction_pending' &&
+        (meta as Record<string, unknown>)?.operation === 'addPledge',
+    );
+    expect(pendingCall).toBeDefined();
+    expect((pendingCall?.[1] as Record<string, unknown>).outcome).toBe('pending');
+
+    // Rejected was logged after rollback with failedAfterFirstWrite: true and redacted campaignRef
+    const rejectedCall = errorSpy.mock.calls.find(
+      ([, meta]) => (meta as Record<string, unknown>)?.event === 'campaign_transaction_rejected',
+    );
+    expect(rejectedCall).toBeDefined();
+    const rejectedMeta = rejectedCall?.[1] as Record<string, unknown>;
+    expect(rejectedMeta).toMatchObject({
+      event: 'campaign_transaction_rejected',
+      outcome: 'rejected',
+      operation: 'addPledge',
+      failedAfterFirstWrite: true,
+      rolledBack: true,
+    });
+    expect(Number(rejectedMeta.completedWrites)).toBeGreaterThanOrEqual(1);
+    expect(String(rejectedMeta.campaignRef)).not.toBe(campaign.id);
+    expect(String(rejectedMeta.campaignRef)).toMatch(/^.{4}\.\.\..{4}$|^\*\*\*$/);
+
+    // No committed log was emitted for the failed transaction
+    const committedCall = infoSpy.mock.calls.find(
+      ([event, meta]) =>
+        event === 'campaign_transaction_committed' &&
+        (meta as Record<string, unknown>)?.operation === 'addPledge',
+    );
+    expect(committedCall).toBeUndefined();
+
+    // Retry succeeds and logs pending -> committed
+    vi.restoreAllMocks();
+    const retryInfoSpy = vi.spyOn(loggerModule, 'logInfo');
+    addPledge(campaign.id, { contributor: WALLETS.alice, amount: 125 });
+
+    const retryCommitted = retryInfoSpy.mock.calls.find(
+      ([event, meta]) =>
+        event === 'campaign_transaction_committed' &&
+        (meta as Record<string, unknown>)?.operation === 'addPledge',
+    );
+    expect(retryCommitted).toBeDefined();
+    expect((retryCommitted?.[1] as Record<string, unknown>).outcome).toBe('committed');
+  });
+});
