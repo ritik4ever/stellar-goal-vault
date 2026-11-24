@@ -317,6 +317,14 @@ pub struct CampaignCreatedEvent {
 /// token balances, contributor counts, and timestamp so indexers can reconstruct
 /// campaign and contributor pledge state without additional reads. Sensitive data
 /// (none exists here) is not duplicated.
+///
+/// Published exactly once per committed `contribute` call, immediately after
+/// `("Goal", "Pledge")` and only after all validations (including the
+/// per-contributor cap check), token transfer, and storage writes succeed.
+/// `contributor_total` is the contributor's cumulative total for `token`;
+/// summing `amount` across accepted tokens in ledger order (against
+/// `CampaignCreatedEvent.max_per_contributor`) reconstructs the contributor's
+/// cross-token cumulative total exactly once. Rejected calls emit nothing.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CampaignPledgedEvent {

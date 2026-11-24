@@ -429,6 +429,25 @@ Pledges made to a capped campaign strictly require the contributor's explicit au
 - Multiple contributions summing exactly to the cap require valid contributor authorization for each pledge.
 - Over-cap attempts following prior failures or boundary pledges are atomically rejected, preserving contributor balances, vault escrow, and campaign valuation without releasing funds.
 
+**Per-contributor cap event data, ordering & exactly-once semantics:**
+Every committed `contribute` call publishes two contract events in fixed order,
+only after cap validation, token transfer, and all storage writes succeed:
+1. `("Goal", "Pledge")` (`CampaignPledged`) — legacy pledge event carrying `(campaign_id, contributor, token, amount)`.
+2. `("Goal", "Pledged")` (`CampaignPledgedEvent`) — structured indexer event carrying `amount`, `total_pledged`, `contributor_count`, `token_balance`, `contributor_total` (cumulative for `token`), and `pledged_at`.
+
+To reconstruct a contributor's cumulative amount within `max_per_contributor`
+without extra storage reads, consumers seed the cap from
+`CampaignCreatedEvent.max_per_contributor` and replay `CampaignPledgedEvent` in
+ledger order, summing `amount` across all accepted tokens for that contributor
+(while `contributor_total` tracks the per-token cumulative total). Each
+committed pledge appears exactly once; rejected calls — including single-token
+and cross-token over-cap attempts — panic before token transfer and storage
+writes and emit zero events. Covered by
+`test_capped_pledge_emits_ordered_events_with_committed_state`,
+`test_capped_multi_token_pledge_events_replay_cumulative_total_once`, and
+`test_rejected_over_cap_pledge_commits_nothing_and_emits_no_events` in
+`src/test.rs`.
+
 **Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
 
 **Indexer note:** The `CampaignPledgedEvent` event is emitted exactly once per successful `contribute` call, after all validations, token transfer, and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Pledged")` and use `campaign_id` + `contributor` + `pledged_at` for deduplication and reconstructing pledge state without auxiliary contract reads.
@@ -975,9 +994,9 @@ Structured event emitted for off-chain indexers and audit pipelines upon success
 
 **Stability contract & Indexer guidelines:**
 - Topic symbols `"Goal"` and `"Pledged"` are frozen for this contract version.
-- Emitted only after all validations, auth checks, token transfer, and storage writes succeed. Reverted or rejected transactions emit no event.
+- Emitted exactly once per committed `contribute` call, immediately after `("Goal", "Pledge")` and only after all validations (including the per-contributor cap check), auth checks, token transfer, and storage writes succeed. Reverted or rejected transactions emit no event.
 - All amounts are represented as `i128` stroops.
-- Indexers can reconstruct campaign and contributor pledge state directly without additional contract storage reads.
+- `contributor_total` is the contributor's cumulative total for `token`. For capped campaigns (`max_per_contributor > 0` in `CampaignCreatedEvent`), summing `amount` across accepted tokens in ledger order reconstructs the contributor's cross-token cumulative total (`<= max_per_contributor`) exactly once without additional contract storage reads.
 
 ---
 
