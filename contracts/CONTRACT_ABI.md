@@ -287,6 +287,8 @@ fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: S
 | `creator` | `Address` | Must match the campaign's stored creator |
 | `new_metadata` | `String` | Replacement metadata string |
 
+**Authorization:** Requires `creator.require_auth()` and verifies `campaign.creator == creator` before mutating campaign storage. Unsigned calls or calls signed by any non-creator fail atomically, leaving campaign metadata, pledges, and token balances unchanged.
+
 **Errors:**
 
 | Error Condition | Panic Message | Severity | Recovery Action |
