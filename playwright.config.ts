@@ -1,4 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
+import { createE2EServerEnv } from './e2e/setup';
+
+const serverEnv = createE2EServerEnv(__dirname);
 
 /**
  * See https://playwright.dev/docs/test-configuration.
@@ -43,15 +46,17 @@ export default defineConfig({
   webServer: [
     {
       command: 'npm run dev:backend',
+      env: serverEnv,
       url: 'http://localhost:3001/api/health',
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       stdout: 'pipe',
       stderr: 'pipe',
     },
     {
       command: 'npm run dev:frontend',
+      env: serverEnv,
       url: 'http://localhost:3000',
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       stdout: 'pipe',
       stderr: 'pipe',
     },

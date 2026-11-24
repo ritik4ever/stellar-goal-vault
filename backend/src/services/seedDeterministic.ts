@@ -1,4 +1,4 @@
-import { getDb, initDb } from './db';
+import { ensureSeedWorkflowIndexes, getDb, initDb } from './db';
 
 const FIXED_NOW = 1_750_000_000;
 
@@ -15,7 +15,15 @@ type SeedCampaign = {
   claimedAt: number | null;
 };
 
-const SEED_CAMPAIGNS: SeedCampaign[] = [
+type SeedPledge = {
+  campaignId: string;
+  contributor: string;
+  amount: number;
+  assetCode: string;
+  createdAt: number;
+};
+
+const BASE_CAMPAIGNS: SeedCampaign[] = [
   {
     id: '1',
     creator: `G${'A'.repeat(55)}`,
@@ -54,48 +62,268 @@ const SEED_CAMPAIGNS: SeedCampaign[] = [
   },
 ];
 
-export function seedDeterministicState(): void {
-  initDb();
-  const db = getDb();
+const BASE_PLEDGES: SeedPledge[] = [
+  {
+    campaignId: '1',
+    contributor: `G${'D'.repeat(55)}`,
+    amount: 100,
+    assetCode: 'USDC',
+    createdAt: FIXED_NOW - 250,
+  },
+  {
+    campaignId: '2',
+    contributor: `G${'E'.repeat(55)}`,
+    amount: 250,
+    assetCode: 'XLM',
+    createdAt: FIXED_NOW - 150,
+  },
+];
 
-  db.prepare(`DELETE FROM campaign_events`).run();
-  db.prepare(`DELETE FROM pledges`).run();
-  db.prepare(`DELETE FROM campaigns`).run();
+// Deterministic status/asset rotation used to extend past the 3 base campaigns.
+// Each generated campaign gets one matching pledge, same as the base set.
+const EXTRA_STATUS_CYCLE: Array<'open' | 'funded' | 'claimed'> = ['open', 'funded', 'claimed'];
+const EXTRA_ASSET_CYCLE = ['USDC', 'XLM'];
 
-  const insertCampaign = db.prepare(
-    `INSERT INTO campaigns (
-      id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-  );
-
-  for (const campaign of SEED_CAMPAIGNS) {
-    insertCampaign.run(
-      campaign.id,
-      campaign.creator,
-      campaign.title,
-      campaign.description,
-      JSON.stringify([campaign.assetCode]),
-      campaign.targetAmount,
-      campaign.pledgedAmount,
-      campaign.deadline,
-      campaign.createdAt,
-      campaign.claimedAt,
-    );
-  }
-
-  db.prepare(
-    `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
-     VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-  ).run('1', `G${'D'.repeat(55)}`, 100, 'USDC', FIXED_NOW - 250);
-
-  db.prepare(
-    `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
-     VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-  ).run('2', `G${'E'.repeat(55)}`, 250, 'XLM', FIXED_NOW - 150);
+function letterFor(index: number): string {
+  // A-Z, then AA, BB... style wrap for very large counts (index is 0-based
+  // continuing on from the 3 base campaigns, which already used A/B/C).
+  const cycleIndex = index % 26;
+  const letter = String.fromCharCode(65 + cycleIndex);
+  return letter;
 }
 
-if (require.main === module) {
-  seedDeterministicState();
-  // eslint-disable-next-line no-console
-  console.log('Deterministic database seed complete.');
+function buildExtraCampaign(index: number): { campaign: SeedCampaign; pledge: SeedPledge } {
+  // index is 0-based for campaigns beyond the 3 base ones, so real id = index + 4
+  const id = String(index + 4);
+  const letter = letterFor(index + 3); // continue the A/B/C sequence
+  const creator = `G${letter.repeat(55)}`;
+  const status = EXTRA_STATUS_CYCLE[index % EXTRA_STATUS_CYCLE.length];
+  const assetCode = EXTRA_ASSET_CYCLE[index % EXTRA_ASSET_CYCLE.length];
+
+  const targetAmount = 200 + index * 50;
+  let pledgedAmount: number;
+  let deadline: number;
+  let claimedAt: number | null;
+
+  if (status === 'open') {
+    pledgedAmount = Math.floor(targetAmount * 0.4);
+    deadline = FIXED_NOW + 86_400 + index * 1_000;
+    claimedAt = null;
+  } else if (status === 'funded') {
+    pledgedAmount = targetAmount;
+    deadline = FIXED_NOW + 43_200 + index * 1_000;
+    claimedAt = null;
+  } else {
+    pledgedAmount = targetAmount;
+    deadline = FIXED_NOW - 600 - index * 1_000;
+    claimedAt = FIXED_NOW - 100 - index * 1_000;
+  }
+
+  const campaign: SeedCampaign = {
+    id,
+    creator,
+    title: `Deterministic campaign ${id} (${status})`,
+    description: `Generated deterministic campaign seed #${id} for ${status} status checks.`,
+    assetCode,
+    targetAmount,
+    pledgedAmount,
+    deadline,
+    createdAt: FIXED_NOW - 300 - index * 100,
+    claimedAt,
+  };
+
+  const pledgeLetter = letterFor(index + 3 + 100); // distinct pool from campaign creators
+  const pledge: SeedPledge = {
+    campaignId: id,
+    contributor: `G${pledgeLetter.repeat(55)}`,
+    amount: pledgedAmount > 0 ? pledgedAmount : 1,
+    assetCode,
+    createdAt: FIXED_NOW - 250 - index * 100,
+  };
+
+  return { campaign, pledge };
+}
+
+function buildSeedSet(count: number): { campaigns: SeedCampaign[]; pledges: SeedPledge[] } {
+  if (count <= 0) {
+    throw new Error('count must be a positive integer');
+  }
+
+  if (count <= BASE_CAMPAIGNS.length) {
+    const campaigns = BASE_CAMPAIGNS.slice(0, count);
+    const ids = new Set(campaigns.map((c) => c.id));
+    const pledges = BASE_PLEDGES.filter((p) => ids.has(p.campaignId));
+    return { campaigns, pledges };
+  }
+
+  const extraCount = count - BASE_CAMPAIGNS.length;
+  const extras = Array.from({ length: extraCount }, (_, i) => buildExtraCampaign(i));
+
+  return {
+    campaigns: [...BASE_CAMPAIGNS, ...extras.map((e) => e.campaign)],
+    pledges: [...BASE_PLEDGES, ...extras.map((e) => e.pledge)],
+  };
+}
+
+const SEED_VERSION = 'deterministic-v1';
+const SEED_MARKER_KEY = 'deterministic_seed';
+
+export type SeedDeterministicResult = {
+  status: 'seeded' | 'already-seeded';
+  campaignIds: string[];
+  count: number;
+  message: string;
+};
+
+/**
+ * Wipes and repopulates the dev database with `count` deterministic campaigns
+ * (default 3). Returns a result describing whether the database was freshly
+ * seeded or already contained a matching deterministic seed.
+ *
+ * Rerun safety: a marker row in `seed_metadata` records the seed version and
+ * the last seeded count. If the marker matches the requested count and the
+ * deterministic rows are still present, the wipe is skipped and the existing
+ * IDs are returned with `status: 'already-seeded'`. If the count differs, the
+ * existing atomic wipe-and-reinsert runs. Any failure inside the transaction
+ * leaves the database untouched.
+ */
+export function seedDeterministicState(
+  count: number = BASE_CAMPAIGNS.length,
+): SeedDeterministicResult {
+  initDb();
+  const db = getDb();
+  // Ensure seed-path indexes exist before wipe/reseed so FK checks and
+  // post-seed accounting queries use the intended plans.
+  ensureSeedWorkflowIndexes(db);
+
+  const { campaigns, pledges } = buildSeedSet(count);
+  const expectedIds = campaigns.map((c) => c.id);
+
+  // Use explicit transaction to ensure atomicity: either all data is seeded
+  // or no partial state is persisted, allowing safe retries.
+  return db.transaction((): SeedDeterministicResult => {
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS seed_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`,
+    ).run();
+
+    const marker = db
+      .prepare(`SELECT value FROM seed_metadata WHERE key = ?`)
+      .get(SEED_MARKER_KEY) as { value: string } | undefined;
+
+    if (marker) {
+      let parsed: { version?: string; count?: number } | null = null;
+      try {
+        parsed = JSON.parse(marker.value);
+      } catch {
+        parsed = null;
+      }
+
+      if (
+        parsed &&
+        parsed.version === SEED_VERSION &&
+        parsed.count === count &&
+        hasMatchingDeterministicRows(db, expectedIds)
+      ) {
+        return {
+          status: 'already-seeded',
+          campaignIds: expectedIds,
+          count,
+          message:
+            `Deterministic seed already applied (count=${count}). ` +
+            `Skipping wipe. To force a reseed, run with a different --count ` +
+            `or delete the "${SEED_MARKER_KEY}" row from seed_metadata.`,
+        };
+      }
+    }
+
+    // Child tables first so FK enforcement cannot leave a partial wipe.
+    // notifications / campaign_comments are not always empty in long-lived
+    // dev DBs; skipping them is a failure mode happy-path API tests miss.
+    db.prepare(`DELETE FROM notifications`).run();
+    db.prepare(`DELETE FROM campaign_comments`).run();
+    db.prepare(`DELETE FROM campaign_events`).run();
+    db.prepare(`DELETE FROM pledges`).run();
+    db.prepare(`DELETE FROM campaigns`).run();
+    // FTS delete trigger is not guaranteed on every migrated DB — clear explicitly.
+    db.prepare(`DELETE FROM campaigns_fts`).run();
+
+    const insertCampaign = db.prepare(
+      `INSERT INTO campaigns (
+        id, creator, title, description, accepted_tokens_json, target_amount, pledged_amount, deadline, created_at, claimed_at, metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+    );
+
+    for (const campaign of campaigns) {
+      insertCampaign.run(
+        campaign.id,
+        campaign.creator,
+        campaign.title,
+        campaign.description,
+        JSON.stringify([campaign.assetCode]),
+        campaign.targetAmount,
+        campaign.pledgedAmount,
+        campaign.deadline,
+        campaign.createdAt,
+        campaign.claimedAt,
+      );
+    }
+
+    const insertPledge = db.prepare(
+      `INSERT INTO pledges (campaign_id, contributor, amount, asset_code, created_at, refunded_at, transaction_hash)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
+    );
+
+    for (const pledge of pledges) {
+      insertPledge.run(
+        pledge.campaignId,
+        pledge.contributor,
+        pledge.amount,
+        pledge.assetCode,
+        pledge.createdAt,
+      );
+    }
+
+    db.prepare(
+      `INSERT INTO seed_metadata (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).run(SEED_MARKER_KEY, JSON.stringify({ version: SEED_VERSION, count }), Date.now());
+
+    return {
+      status: 'seeded',
+      campaignIds: expectedIds,
+      count,
+      message: `Deterministic seed applied (count=${count}).`,
+    };
+  })();
+}
+
+function hasMatchingDeterministicRows(db: ReturnType<typeof getDb>, expectedIds: string[]): boolean {
+  if (expectedIds.length === 0) {
+    return true;
+  }
+  const placeholders = expectedIds.map(() => '?').join(', ');
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM campaigns WHERE id IN (${placeholders})`)
+    .get(...expectedIds) as { n: number } | undefined;
+  return (row?.n ?? 0) === expectedIds.length;
+}
+
+export function parseCountArg(argv: string[]): number {
+  const flagIndex = argv.findIndex((arg) => arg === '--count' || arg.startsWith('--count='));
+  if (flagIndex === -1) {
+    return BASE_CAMPAIGNS.length;
+  }
+
+  const raw = argv[flagIndex].includes('=') ? argv[flagIndex].split('=')[1] : argv[flagIndex + 1];
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid --count value: "${raw}". Must be a positive integer.`);
+  }
+
+  return parsed;
 }

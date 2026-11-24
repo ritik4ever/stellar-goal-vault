@@ -1,4 +1,8 @@
-import { OpenAPIRegistry, OpenApiGeneratorV3, extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+import {
+  OpenAPIRegistry,
+  OpenApiGeneratorV31,
+  extendZodWithOpenApi,
+} from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 import { config } from './config';
 import {
@@ -13,6 +17,12 @@ import {
 extendZodWithOpenApi(z);
 
 const registry = new OpenAPIRegistry();
+const bearerAuth = registry.registerComponent('securitySchemes', 'bearerAuth', {
+  type: 'http',
+  scheme: 'bearer',
+  bearerFormat: 'API key',
+  description: 'Use the API key as a Bearer token in the Authorization header.',
+});
 
 // ---------------------------------------------------------------------------
 // Shared primitive schemas
@@ -21,7 +31,10 @@ const registry = new OpenAPIRegistry();
 const stellarAddressSchema = z
   .string()
   .regex(/^G[A-Z2-7]{55}$/)
-  .openapi({ description: 'A 56-character Stellar public key (G...).', example: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' });
+  .openapi({
+    description: 'A 56-character Stellar public key (G...).',
+    example: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  });
 
 const assetCodeSchema = z
   .string()
@@ -38,21 +51,58 @@ const txHashSchema = z
 
 const unixTimestampSchema = z.number().int().positive().openapi({
   description: 'Unix timestamp in seconds.',
-  example: Math.floor(Date.now() / 1000) + 86400,
+  example: 1735689600,
 });
 
 const paginationSchema = z.object({
-  total: z.number().int().openapi({ description: 'Total number of items matching the query.', example: 42 }),
+  total: z
+    .number()
+    .int()
+    .openapi({ description: 'Total number of items matching the query.', example: 42 }),
   page: z.number().int().openapi({ description: 'Current page (1-based).', example: 1 }),
   limit: z.number().int().openapi({ description: 'Number of items per page.', example: 10 }),
   totalPages: z.number().int().openapi({ description: 'Total number of pages.', example: 5 }),
+  hasPreviousPage: z.boolean().openapi({
+    description: 'Whether a previous page exists for this paginated request.',
+    example: false,
+  }),
+  hasNextPage: z.boolean().openapi({
+    description: 'Whether a later page exists for this paginated request.',
+    example: true,
+  }),
 });
+
+const analyticsPaginationSchema = z
+  .object({
+    page: z.number().int().openapi({ description: 'Current page (1-based).', example: 1 }),
+    limit: z.number().int().openapi({ description: 'Number of items per page.', example: 10 }),
+    total: z
+      .number()
+      .int()
+      .openapi({ description: 'Total number of items matching the query.', example: 42 }),
+    totalPages: z.number().int().openapi({ description: 'Total number of pages.', example: 5 }),
+    hasPreviousPage: z.boolean().openapi({
+      description: 'Whether a previous page exists for this paginated request.',
+      example: false,
+    }),
+    hasNextPage: z.boolean().openapi({
+      description: 'Whether a later page exists for this paginated request.',
+      example: true,
+    }),
+  })
+  .openapi('AnalyticsPagination');
 
 const apiErrorSchema = z.object({
   success: z.literal(false),
   error: z.object({
-    code: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-    message: z.string().openapi({ example: 'page must be a positive integer.' }),
+    code: z.string().openapi({
+      description: 'Stable machine-readable error code.',
+      example: 'VALIDATION_ERROR',
+    }),
+    message: z.string().openapi({
+      description: 'Client-safe message; unexpected failures use a generic message.',
+      example: 'page must be a positive integer.',
+    }),
     details: z
       .array(
         z.object({
@@ -61,8 +111,14 @@ const apiErrorSchema = z.object({
         }),
       )
       .optional(),
-    requestId: z.string().optional().openapi({ example: 'req-123' }),
+    requestId: z.string().optional().openapi({
+      description: 'Correlation ID also returned in the X-Request-Id response header.',
+      example: 'req-123',
+    }),
   }),
+}).openapi({
+  description:
+    'Standard error envelope. Internal exception messages, stacks, and secret material are not returned.',
 });
 
 // ---------------------------------------------------------------------------
@@ -97,7 +153,10 @@ const campaignSchema = z
     title: z.string().openapi({ example: 'Clean Water Initiative' }),
     description: z.string().openapi({ example: 'Raising funds to provide clean water access.' }),
     acceptedTokens: z.array(assetCodeSchema).openapi({ example: ['USDC', 'XLM'] }),
-    assetCode: assetCodeSchema.openapi({ description: 'Primary asset code (backward compatibility).', example: 'USDC' }),
+    assetCode: assetCodeSchema.openapi({
+      description: 'Primary asset code (backward compatibility).',
+      example: 'USDC',
+    }),
     targetAmount: z.number().positive().openapi({ example: 1000 }),
     pledgedAmount: z.number().openapi({ example: 455 }),
     deadline: unixTimestampSchema,
@@ -107,7 +166,10 @@ const campaignSchema = z
     deletedAt: unixTimestampSchema.optional(),
     metadata: campaignMetadataSchema,
     maxPerContributor: z.number().int().positive().optional().openapi({ example: 500 }),
-    tokenBalances: z.record(z.string(), z.number()).optional().openapi({ example: { USDC: 455, XLM: 0 } }),
+    tokenBalances: z
+      .record(z.string(), z.number())
+      .optional()
+      .openapi({ example: { USDC: 455, XLM: 0 } }),
     progress: campaignProgressSchema,
     pledges: z
       .array(
@@ -140,11 +202,31 @@ const pledgeSchema = z
   })
   .openapi('Pledge');
 
+const contributorPledgeSchema = pledgeSchema
+  .extend({
+    campaignName: z.string().openapi({ example: 'Clean Water Initiative' }),
+    status: z.enum(['open', 'funded', 'claimed', 'failed']).openapi({ example: 'open' }),
+    refundStatus: z.enum(['refunded', 'not_refunded']).openapi({ example: 'not_refunded' }),
+  })
+  .openapi('ContributorPledge');
+
 const campaignEventSchema = z
   .object({
     id: z.number().int().openapi({ example: 1 }),
     campaignId: z.string().openapi({ example: '1' }),
-    eventType: z.enum(['created', 'pledged', 'claimed', 'refunded', 'updated', 'metadata_updated']).openapi({ example: 'pledged' }),
+    eventType: z
+      .enum([
+        'created',
+        'pledged',
+        'claimed',
+        'refunded',
+        'updated',
+        'metadata_updated',
+        'pledge_limit_reached',
+        'archived',
+        'restored',
+      ])
+      .openapi({ example: 'pledged' }),
     timestamp: unixTimestampSchema,
     actor: stellarAddressSchema.optional(),
     amount: z.number().positive().optional().openapi({ example: 50 }),
@@ -176,7 +258,9 @@ const openIssueSchema = z
     id: z.string().openapi({ example: 'SGV-1' }),
     title: z.string().openapi({ example: 'Implement Freighter-signed pledge transactions' }),
     labels: z.array(z.string()).openapi({ example: ['enhancement', 'soroban'] }),
-    summary: z.string().openapi({ example: 'Replace mock API pledges with wallet-signed Soroban transactions.' }),
+    summary: z
+      .string()
+      .openapi({ example: 'Replace mock API pledges with wallet-signed Soroban transactions.' }),
     complexity: z.enum(['Trivial', 'Medium', 'High']).openapi({ example: 'High' }),
     points: z.number().int().openapi({ example: 200 }),
   })
@@ -197,10 +281,19 @@ const campaignIdParamSchema = campaignIdSchema.openapi({
   example: '1',
 });
 
+const contributorAddressParamSchema = stellarAddressSchema.openapi({
+  param: { name: 'address', in: 'path', required: true },
+  example: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+});
+
 const campaignListResponseSchema = z
   .object({
     data: z.array(campaignSchema),
     pagination: paginationSchema,
+    requestId: z.string().openapi({
+      description: 'Correlation ID also returned in the X-Request-Id response header.',
+      example: 'req-123',
+    }),
   })
   .openapi('CampaignListResponse');
 
@@ -211,11 +304,59 @@ const pledgeListResponseSchema = z
   })
   .openapi('PledgeListResponse');
 
+const contributorPledgeListResponseSchema = z
+  .object({
+    data: z.array(contributorPledgeSchema),
+    pagination: paginationSchema,
+  })
+  .openapi('ContributorPledgeListResponse');
+
 const campaignDetailResponseSchema = z
   .object({
     data: campaignSchema,
+    requestId: z.string().optional().openapi({
+      description: 'Correlation ID also returned in the X-Request-Id response header.',
+      example: 'req-123',
+    }),
   })
   .openapi('CampaignDetailResponse');
+
+const campaignAnalyticsSchema = z
+  .object({
+    campaignId: z.string().openapi({ description: 'Campaign ID.', example: '1' }),
+    fundingGap: z.number().openapi({
+      description: 'Amount still needed to reach the target (never negative).',
+      example: 750,
+    }),
+    status: z.enum(['open', 'funded', 'claimed', 'failed']).openapi({ example: 'open' }),
+    percentFunded: z
+      .number()
+      .openapi({ description: 'Pledged amount as a % of target.', example: 25 }),
+    pledgeCount: z
+      .number()
+      .int()
+      .openapi({ description: 'Active (non-refunded) pledge count.', example: 3 }),
+    contributorCount: z.number().int().openapi({
+      description: 'Distinct contributors who still have funds in the campaign.',
+      example: 2,
+    }),
+  })
+  .openapi('CampaignAnalytics');
+
+const campaignAnalyticsListResponseSchema = z
+  .object({
+    data: z.array(campaignAnalyticsSchema),
+    pagination: analyticsPaginationSchema,
+    requestId: z.string().openapi({
+      description: 'Correlation ID also returned in the X-Request-Id response header.',
+      example: 'req-123',
+    }),
+  })
+  .openapi('CampaignAnalyticsListResponse');
+
+const campaignAnalyticsResponseSchema = z
+  .object({ data: campaignAnalyticsSchema })
+  .openapi('CampaignAnalyticsResponse');
 
 const campaignHistoryResponseSchema = z
   .object({
@@ -237,19 +378,59 @@ const healthResponseSchema = z
       reachable: z.boolean(),
       error: z.string().optional(),
     }),
+    indexer: z.object({
+      lastSuccessfulPollTime: z.number().nullable(),
+      lastKnownLedger: z.number(),
+      isHealthy: z.boolean(),
+      consecutiveFailures: z.number(),
+      lagMs: z.number().nullable(),
+    }),
   })
   .openapi('HealthResponse');
+
+const healthPaginationSchema = z
+  .object({
+    total: z.number().int().openapi({
+      description: 'Total number of health components available.',
+      example: 4,
+    }),
+    page: z.number().int().openapi({ description: 'Current page (1-based).', example: 1 }),
+    limit: z.number().int().openapi({ description: 'Number of components per page.', example: 20 }),
+    totalPages: z.number().int().openapi({ description: 'Total number of pages.', example: 1 }),
+    hasPreviousPage: z.boolean().openapi({
+      description: 'Whether a previous page exists for this paginated request.',
+      example: false,
+    }),
+    hasNextPage: z.boolean().openapi({
+      description: 'Whether a later page exists for this paginated request.',
+      example: false,
+    }),
+  })
+  .openapi('HealthPagination');
 
 const deepHealthResponseSchema = z
   .object({
     overall: z.enum(['up', 'down']),
     timestamp: z.string().datetime(),
     uptimeSeconds: z.number(),
-    components: z.object({
-      db: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
-      soroban: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
-      contract: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
-    }),
+    components: z
+      .object({
+        db: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
+        soroban: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
+        contract: z.object({ status: z.enum(['up', 'down']), details: z.string() }),
+        indexer: z.object({
+          status: z.enum(['up', 'down']),
+          details: z.object({
+            lastSuccessfulPollTime: z.number().nullable(),
+            lastKnownLedger: z.number(),
+            isHealthy: z.boolean(),
+            consecutiveFailures: z.number(),
+            lagMs: z.number().nullable(),
+          }),
+        }),
+      })
+      .partial(),
+    pagination: healthPaginationSchema,
   })
   .openapi('DeepHealthResponse');
 
@@ -276,13 +457,21 @@ const configResponseSchema = z
 const statsResponseSchema = z
   .object({
     data: z.object({
-      totalCampaigns: z.number().int(),
-      openCampaigns: z.number().int(),
-      fundedCampaigns: z.number().int(),
-      claimedCampaigns: z.number().int(),
-      failedCampaigns: z.number().int(),
-      totalPledgeVolume: z.number(),
-      uniqueContributors: z.number().int(),
+      total_campaigns: z.number().int().openapi({ example: 10 }),
+      open_campaigns: z.number().int().openapi({ example: 5 }),
+      funded_campaigns: z.number().int().openapi({ example: 3 }),
+      failed_campaigns: z.number().int().openapi({ example: 1 }),
+      total_pledged_usdc: z.number().openapi({ example: 35000 }),
+      total_pledged_xlm: z.number().openapi({ example: 15000 }),
+      total_contributors: z.number().int().openapi({ example: 42 }),
+      avg_funding_rate_pct: z.number().openapi({ example: 78.5 }),
+      totalCampaigns: z.number().int().optional(),
+      openCampaigns: z.number().int().optional(),
+      fundedCampaigns: z.number().int().optional(),
+      claimedCampaigns: z.number().int().optional(),
+      failedCampaigns: z.number().int().optional(),
+      totalPledgeVolume: z.number().optional(),
+      uniqueContributors: z.number().int().optional(),
     }),
   })
   .openapi('StatsResponse');
@@ -347,6 +536,7 @@ const registeredSchemas = {
   Campaign: registry.register('Campaign', campaignSchema),
   CampaignProgress: registry.register('CampaignProgress', campaignProgressSchema),
   Pledge: registry.register('Pledge', pledgeSchema),
+  ContributorPledge: registry.register('ContributorPledge', contributorPledgeSchema),
   CampaignEvent: registry.register('CampaignEvent', campaignEventSchema),
   ContributorSummary: registry.register('ContributorSummary', contributorSummarySchema),
   OpenIssue: registry.register('OpenIssue', openIssueSchema),
@@ -358,13 +548,32 @@ const registeredSchemas = {
   RefundPayload: registry.register('RefundPayload', refundRequestSchema),
   CampaignListResponse: registry.register('CampaignListResponse', campaignListResponseSchema),
   CampaignDetailResponse: registry.register('CampaignDetailResponse', campaignDetailResponseSchema),
+  CampaignAnalyticsResponse: registry.register(
+    'CampaignAnalyticsResponse',
+    campaignAnalyticsResponseSchema,
+  ),
+  CampaignAnalyticsListResponse: registry.register(
+    'CampaignAnalyticsListResponse',
+    campaignAnalyticsListResponseSchema,
+  ),
   PledgeListResponse: registry.register('PledgeListResponse', pledgeListResponseSchema),
+  ContributorPledgeListResponse: registry.register(
+    'ContributorPledgeListResponse',
+    contributorPledgeListResponseSchema,
+  ),
   PledgeResponse: registry.register('PledgeResponse', pledgeResponseSchema),
   ReconcileResponse: registry.register('ReconcileResponse', reconcileResponseSchema),
   RefundResponse: registry.register('RefundResponse', refundResponseSchema),
-  ContributorSummaryResponse: registry.register('ContributorSummaryResponse', contributorSummaryResponseSchema),
-  CampaignHistoryResponse: registry.register('CampaignHistoryResponse', campaignHistoryResponseSchema),
+  ContributorSummaryResponse: registry.register(
+    'ContributorSummaryResponse',
+    contributorSummaryResponseSchema,
+  ),
+  CampaignHistoryResponse: registry.register(
+    'CampaignHistoryResponse',
+    campaignHistoryResponseSchema,
+  ),
   HealthResponse: registry.register('HealthResponse', healthResponseSchema),
+  HealthPagination: registry.register('HealthPagination', healthPaginationSchema),
   DeepHealthResponse: registry.register('DeepHealthResponse', deepHealthResponseSchema),
   ConfigResponse: registry.register('ConfigResponse', configResponseSchema),
   StatsResponse: registry.register('StatsResponse', statsResponseSchema),
@@ -386,14 +595,38 @@ const validationErrorResponse = {
   content: { 'application/json': { schema: registeredSchemas.ApiError } },
 };
 
+const payloadTooLargeResponse = {
+  description: 'Request body exceeds the 64KB maximum limit',
+  content: { 'application/json': { schema: registeredSchemas.ApiError } },
+};
+
+const rateLimitedResponse = {
+  description: 'Rate limit exceeded (RATE_LIMITED)',
+  content: { 'application/json': { schema: registeredSchemas.ApiError } },
+};
+
+const internalServerErrorResponse = {
+  description:
+    'Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details are logged and are not returned.',
+  content: { 'application/json': { schema: registeredSchemas.ApiError } },
+};
+
 registry.registerPath({
   method: 'get',
   path: '/api/health',
   tags: ['Health'],
   summary: 'Basic health check',
+  security: [],
   responses: {
-    200: { description: 'Service is healthy', content: { 'application/json': { schema: registeredSchemas.HealthResponse } } },
-    503: { description: 'Service is degraded', content: { 'application/json': { schema: registeredSchemas.HealthResponse } } },
+    200: {
+      description: 'Service is healthy',
+      content: { 'application/json': { schema: registeredSchemas.HealthResponse } },
+    },
+    503: {
+      description: 'Service is degraded',
+      content: { 'application/json': { schema: registeredSchemas.HealthResponse } },
+    },
+    500: internalServerErrorResponse,
   },
 });
 
@@ -402,10 +635,37 @@ registry.registerPath({
   path: '/api/health/deep',
   tags: ['Health'],
   summary: 'Deep health check',
-  description: 'Checks database, Soroban RPC, and contract configuration health.',
+  description:
+    'Checks database, Soroban RPC, and contract configuration health. The `components` ' +
+    'collection is paginated deterministically in a fixed order (db, soroban, contract, ' +
+    'indexer): page defaults to 1 and limit defaults to 20 when omitted, both must be ' +
+    'integers, and limit is capped at 100. Out-of-range values are rejected with 400 rather ' +
+    'than clamped. The response includes total, totalPages, hasPreviousPage, and hasNextPage ' +
+    'under `pagination` so callers can navigate without guessing where the collection ends. ' +
+    'Because the default limit exceeds the number of components, omitting both parameters ' +
+    'returns every component exactly as before.',
+  security: [],
+  request: {
+    query: z.object({
+      page: z.coerce.number().int().min(1).optional().openapi({
+        description: '1-based page number (default 1).',
+      }),
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Components per page, 1 to 100 (default 20).',
+      }),
+    }),
+  },
   responses: {
-    200: { description: 'All components are healthy', content: { 'application/json': { schema: registeredSchemas.DeepHealthResponse } } },
-    503: { description: 'One or more components are unhealthy', content: { 'application/json': { schema: registeredSchemas.DeepHealthResponse } } },
+    200: {
+      description: 'All components are healthy',
+      content: { 'application/json': { schema: registeredSchemas.DeepHealthResponse } },
+    },
+    503: {
+      description: 'One or more components are unhealthy',
+      content: { 'application/json': { schema: registeredSchemas.DeepHealthResponse } },
+    },
+    400: validationErrorResponse,
+    500: internalServerErrorResponse,
   },
 });
 
@@ -414,24 +674,51 @@ registry.registerPath({
   path: '/api/campaigns',
   tags: ['Campaigns'],
   summary: 'List campaigns',
-  description: 'List campaigns with optional filtering, sorting, and pagination.',
+  description:
+    'List campaigns with optional filtering, sorting, and pagination. Omit both page and limit to return the full filtered set; when paginating, provide both and use a limit from 1 to 100.',
   request: {
     query: z.object({
-      page: z.coerce.number().int().min(1).optional().openapi({ description: 'Page number (requires limit).' }),
-      limit: z.coerce.number().int().min(1).max(100).optional().openapi({ description: 'Items per page (requires page).' }),
+      page: z.coerce.number().int().min(1).optional().openapi({
+        description: '1-based page number. Requires limit; omit page and limit for all results.',
+      }),
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description:
+          'Items per page, from 1 to 100. Requires page; omit page and limit for all results.',
+      }),
       q: z.string().optional().openapi({ description: 'Search query (title, creator, or id).' }),
       search: z.string().optional().openapi({ description: 'Alias for q.' }),
       asset: z.string().optional().openapi({ description: 'Comma-separated list of asset codes.' }),
       status: z.enum(['open', 'funded', 'claimed', 'failed']).optional(),
-      sort: z.enum(['createdAt', 'deadline', 'pledgedAmount', 'targetAmount']).optional(),
+      sort: z.enum(['createdAt', 'deadline', 'pledgedAmount', 'targetAmount', 'percentFunded']).optional(),
+      sortBy: z
+        .enum(['createdAt', 'deadline', 'pledgedAmount', 'targetAmount', 'percentFunded'])
+        .optional()
+        .openapi({ description: "Alias for 'sort'." }),
       order: z.enum(['asc', 'desc']).optional(),
-      includeDeleted: z.enum(['true', 'false']).optional(),
-      createdAfter: z.string().datetime().optional().openapi({ description: 'ISO 8601 timestamp.' }),
-      createdBefore: z.string().datetime().optional().openapi({ description: 'ISO 8601 timestamp.' }),
+      includeDeleted: z.enum(['true', 'false']).optional().openapi({
+        description: "Include archived (soft-deleted) campaigns. Alias: 'include_archived'.",
+      }),
+      include_archived: z
+        .enum(['true', 'false'])
+        .optional()
+        .openapi({ description: "Alias for 'includeDeleted'." }),
+      createdAfter: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO 8601 timestamp.' }),
+      createdBefore: z
+        .string()
+        .datetime()
+        .optional()
+        .openapi({ description: 'ISO 8601 timestamp.' }),
     }),
   },
   responses: {
-    200: { description: 'Paginated list of campaigns', content: { 'application/json': { schema: registeredSchemas.CampaignListResponse } } },
+    200: {
+      description: 'Paginated list of campaigns',
+      content: { 'application/json': { schema: registeredSchemas.CampaignListResponse } },
+    },
     400: validationErrorResponse,
   },
 });
@@ -442,11 +729,18 @@ registry.registerPath({
   tags: ['Campaigns'],
   summary: 'Create a campaign',
   request: {
-    body: { content: { 'application/json': { schema: registeredSchemas.CreateCampaignPayload } }, description: 'Campaign creation payload' },
+    body: {
+      content: { 'application/json': { schema: registeredSchemas.CreateCampaignPayload } },
+      description: 'Campaign creation payload',
+    },
   },
   responses: {
-    201: { description: 'Campaign created', content: { 'application/json': { schema: registeredSchemas.CampaignDetailResponse } } },
+    201: {
+      description: 'Campaign created',
+      content: { 'application/json': { schema: registeredSchemas.CampaignDetailResponse } },
+    },
     400: validationErrorResponse,
+    413: payloadTooLargeResponse,
   },
 });
 
@@ -457,9 +751,53 @@ registry.registerPath({
   summary: 'Get campaign details',
   request: { params: z.object({ id: campaignIdParamSchema }) },
   responses: {
-    200: { description: 'Campaign details', content: { 'application/json': { schema: registeredSchemas.CampaignDetailResponse } } },
+    200: {
+      description: 'Campaign details',
+      content: { 'application/json': { schema: registeredSchemas.CampaignDetailResponse } },
+    },
     400: validationErrorResponse,
     404: notFoundResponse,
+  },
+});
+
+registry.registerPath({
+  method: 'delete',
+  path: '/api/campaigns/{id}',
+  tags: ['Campaigns'],
+  summary: 'Archive (soft-delete) a campaign',
+  description:
+    'Sets the archivedAt/deletedAt timestamp on a campaign. Archived campaigns are excluded ' +
+    'from the default campaign list but their pledges and history are preserved. Use POST ' +
+    '/api/campaigns/{id}/restore to un-archive.',
+  request: { params: z.object({ id: campaignIdParamSchema }) },
+  responses: {
+    200: {
+      description: 'Campaign archived',
+      content: { 'application/json': { schema: registeredSchemas.CampaignDetailResponse } },
+    },
+    400: validationErrorResponse,
+    404: notFoundResponse,
+    409: { description: 'Campaign is already archived' },
+    429: { description: 'Rate limit exceeded' },
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/campaigns/{id}/restore',
+  tags: ['Campaigns'],
+  summary: 'Restore an archived campaign',
+  description: 'Clears the archivedAt/deletedAt timestamp, making the campaign active again.',
+  request: { params: z.object({ id: campaignIdParamSchema }) },
+  responses: {
+    200: {
+      description: 'Campaign restored',
+      content: { 'application/json': { schema: registeredSchemas.CampaignDetailResponse } },
+    },
+    400: validationErrorResponse,
+    404: notFoundResponse,
+    409: { description: 'Campaign is not archived' },
+    429: { description: 'Rate limit exceeded' },
   },
 });
 
@@ -468,17 +806,32 @@ registry.registerPath({
   path: '/api/campaigns/{id}/pledges',
   tags: ['Pledges'],
   summary: 'List campaign pledges',
+  description:
+    'Returns pledges newest-first. Pagination is deterministic: page defaults to 1 and limit ' +
+    'defaults to 10 when omitted, both must be integers, and limit is capped at 100. ' +
+    'Out-of-range values are rejected with 400 rather than clamped. The response includes ' +
+    'total, totalPages, hasPreviousPage, and hasNextPage so callers can navigate without ' +
+    'guessing where the collection ends. Errors use the ApiError envelope with stable codes: ' +
+    'VALIDATION_ERROR, NOT_FOUND, RATE_LIMITED, and INTERNAL_SERVER_ERROR.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
     query: z.object({
-      page: z.coerce.number().int().min(1).optional(),
-      limit: z.coerce.number().int().min(1).max(100).optional(),
+      page: z.coerce.number().int().min(1).optional().openapi({
+        description: '1-based page number (default 1).',
+      }),
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Items per page, 1 to 100 (default 10).',
+      }),
     }),
   },
   responses: {
-    200: { description: 'Paginated list of pledges', content: { 'application/json': { schema: registeredSchemas.PledgeListResponse } } },
+    200: {
+      description: 'Paginated list of pledges',
+      content: { 'application/json': { schema: registeredSchemas.PledgeListResponse } },
+    },
     400: validationErrorResponse,
     404: notFoundResponse,
+    500: internalServerErrorResponse,
   },
 });
 
@@ -487,15 +840,35 @@ registry.registerPath({
   path: '/api/campaigns/{id}/pledges',
   tags: ['Pledges'],
   summary: 'Create a pledge',
+  description:
+    'Creates a pledge for a campaign. Send an Idempotency-Key header to make the request safe to retry: repeating the same request with the same key replays the original response (X-Idempotency-Cache: HIT) and records no second pledge. The key is scoped to the API key, campaign and contributor, and a response is replayable for 24 hours. Only successful responses are stored, so a failed request can be retried with the same key. Reusing a key with a different request body returns 422 IDEMPOTENCY_KEY_REUSED. An identical request that arrives while the first is still being processed waits for it, and returns 409 IDEMPOTENCY_REQUEST_IN_PROGRESS if the first does not finish within 10 seconds. Without a shared cache (Redis), stored keys are held in memory and are lost when the server restarts. Errors use the ApiError envelope with stable codes: VALIDATION_ERROR, NOT_FOUND, INVALID_ASSET, INVALID_CAMPAIGN_STATE, MAX_PER_CONTRIBUTOR_EXCEEDED, CAMPAIGN_FUNDING_CAP_EXCEEDED, IDEMPOTENCY_REQUEST_IN_PROGRESS, IDEMPOTENCY_KEY_REUSED, RATE_LIMITED, and INTERNAL_SERVER_ERROR. Unexpected failures are logged without exposing internal details.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
-    body: { content: { 'application/json': { schema: registeredSchemas.CreatePledgePayload } }, description: 'Pledge creation payload' },
+    body: {
+      content: { 'application/json': { schema: registeredSchemas.CreatePledgePayload } },
+      description: 'Pledge creation payload',
+    },
   },
   responses: {
-    201: { description: 'Pledge recorded', content: { 'application/json': { schema: registeredSchemas.PledgeResponse } } },
+    201: {
+      description: 'Pledge recorded',
+      content: { 'application/json': { schema: registeredSchemas.PledgeResponse } },
+    },
     400: validationErrorResponse,
     404: notFoundResponse,
-    429: { description: 'Rate limit exceeded' },
+    409: {
+      description:
+        'An identical request with this Idempotency-Key is still being processed (IDEMPOTENCY_REQUEST_IN_PROGRESS). Retry shortly.',
+      content: { 'application/json': { schema: registeredSchemas.ApiError } },
+    },
+    413: payloadTooLargeResponse,
+    422: {
+      description:
+        'The Idempotency-Key was already used with a different request body (IDEMPOTENCY_KEY_REUSED).',
+      content: { 'application/json': { schema: registeredSchemas.ApiError } },
+    },
+    429: rateLimitedResponse,
+    500: internalServerErrorResponse,
   },
 });
 
@@ -507,12 +880,19 @@ registry.registerPath({
   description: 'Records a pledge that was already executed on-chain using its transaction hash.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
-    body: { content: { 'application/json': { schema: registeredSchemas.ReconcilePledgePayload } }, description: 'Reconciliation payload' },
+    body: {
+      content: { 'application/json': { schema: registeredSchemas.ReconcilePledgePayload } },
+      description: 'Reconciliation payload',
+    },
   },
   responses: {
-    201: { description: 'Pledge reconciled', content: { 'application/json': { schema: registeredSchemas.ReconcileResponse } } },
+    201: {
+      description: 'Pledge reconciled',
+      content: { 'application/json': { schema: registeredSchemas.ReconcileResponse } },
+    },
     400: validationErrorResponse,
     404: notFoundResponse,
+    413: payloadTooLargeResponse,
     429: { description: 'Rate limit exceeded' },
   },
 });
@@ -525,12 +905,19 @@ registry.registerPath({
   description: 'Claims funds for a successfully funded campaign after the deadline.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
-    body: { content: { 'application/json': { schema: registeredSchemas.ClaimCampaignPayload } }, description: 'Claim payload' },
+    body: {
+      content: { 'application/json': { schema: registeredSchemas.ClaimCampaignPayload } },
+      description: 'Claim payload',
+    },
   },
   responses: {
-    200: { description: 'Campaign claimed', content: { 'application/json': { schema: registeredSchemas.CampaignDetailResponse } } },
+    200: {
+      description: 'Campaign claimed',
+      content: { 'application/json': { schema: registeredSchemas.CampaignDetailResponse } },
+    },
     400: validationErrorResponse,
     404: notFoundResponse,
+    413: payloadTooLargeResponse,
     429: { description: 'Rate limit exceeded' },
   },
 });
@@ -540,16 +927,59 @@ registry.registerPath({
   path: '/api/campaigns/{id}/refund',
   tags: ['Pledges'],
   summary: 'Refund a contributor',
-  description: 'Refunds a contributor for a failed campaign after verifying the on-chain transaction.',
+  description:
+    'Refunds a contributor for a failed campaign after verifying the on-chain transaction.',
   request: {
     params: z.object({ id: campaignIdParamSchema }),
-    body: { content: { 'application/json': { schema: registeredSchemas.RefundPayload } }, description: 'Refund payload' },
+    body: {
+      content: { 'application/json': { schema: registeredSchemas.RefundPayload } },
+      description: 'Refund payload',
+    },
   },
   responses: {
-    200: { description: 'Refund processed', content: { 'application/json': { schema: registeredSchemas.RefundResponse } } },
+    200: {
+      description: 'Refund processed',
+      content: { 'application/json': { schema: registeredSchemas.RefundResponse } },
+    },
     400: validationErrorResponse,
     404: notFoundResponse,
+    413: payloadTooLargeResponse,
     429: { description: 'Rate limit exceeded' },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/campaigns/{id}/analytics',
+  tags: ['Campaigns'],
+  summary: 'Get campaign analytics',
+  description:
+    'Read-only analytics for one campaign. The path id must be a canonical positive integer ' +
+    '(no leading zeros, signs, or decimals). Pagination is deterministic: page defaults to 1 ' +
+    'and limit defaults to 10 when omitted, both must be integers, and limit is capped at 100. ' +
+    'Out-of-range values are rejected with 400 rather than clamped. The response includes ' +
+    'total, totalPages, hasPreviousPage, and hasNextPage so callers can navigate without ' +
+    'guessing where the collection ends. Missing campaigns return 404.',
+  request: {
+    params: z.object({ id: campaignIdParamSchema }),
+    query: z.object({
+      page: z.coerce.number().int().min(1).optional().openapi({
+        description: '1-based page number (default 1).',
+      }),
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Items per page, 1 to 100 (default 10).',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Paginated campaign analytics',
+      content: {
+        'application/json': { schema: registeredSchemas.CampaignAnalyticsListResponse },
+      },
+    },
+    400: validationErrorResponse,
+    404: notFoundResponse,
   },
 });
 
@@ -560,7 +990,10 @@ registry.registerPath({
   summary: 'Get campaign contributor summary',
   request: { params: z.object({ id: campaignIdParamSchema }) },
   responses: {
-    200: { description: 'Contributor summary', content: { 'application/json': { schema: registeredSchemas.ContributorSummaryResponse } } },
+    200: {
+      description: 'Contributor summary',
+      content: { 'application/json': { schema: registeredSchemas.ContributorSummaryResponse } },
+    },
     400: validationErrorResponse,
     404: notFoundResponse,
   },
@@ -574,14 +1007,51 @@ registry.registerPath({
   request: {
     params: z.object({ id: campaignIdParamSchema }),
     query: z.object({
-      page: z.coerce.number().int().min(1).optional(),
-      pageSize: z.coerce.number().int().min(1).max(100).optional(),
+      page: z.coerce.number().int().min(1).optional().openapi({
+        description: '1-based page number (default 1).',
+      }),
+      pageSize: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Items per page, 1 to 100 (default 10).',
+      }),
     }),
   },
   responses: {
-    200: { description: 'Campaign event history', content: { 'application/json': { schema: registeredSchemas.CampaignHistoryResponse } } },
+    200: {
+      description: 'Campaign event history',
+      content: { 'application/json': { schema: registeredSchemas.CampaignHistoryResponse } },
+    },
     400: validationErrorResponse,
     404: notFoundResponse,
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/contributors/{address}/pledges',
+  tags: ['Contributors'],
+  summary: 'List pledges by contributor',
+  description:
+    'Returns all pledges made by a contributor address across all campaigns. ' +
+    'Unknown addresses return an empty array. Refunded pledges include the refundedAt timestamp. ' +
+    'Pagination uses the same defaults and bounds as the campaign pledge list: page defaults to ' +
+    '1, limit defaults to 10 and is capped at 100, and out-of-range values are rejected with 400.',
+  request: {
+    params: z.object({ address: contributorAddressParamSchema }),
+    query: z.object({
+      page: z.coerce.number().int().min(1).optional().openapi({
+        description: '1-based page number (default 1).',
+      }),
+      limit: z.coerce.number().int().min(1).max(100).optional().openapi({
+        description: 'Items per page, 1 to 100 (default 10).',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Paginated list of contributor pledges',
+      content: { 'application/json': { schema: registeredSchemas.ContributorPledgeListResponse } },
+    },
+    400: validationErrorResponse,
   },
 });
 
@@ -590,8 +1060,12 @@ registry.registerPath({
   path: '/api/open-issues',
   tags: ['Misc'],
   summary: 'List open issues',
+  security: [],
   responses: {
-    200: { description: 'List of open development issues', content: { 'application/json': { schema: registeredSchemas.OpenIssuesResponse } } },
+    200: {
+      description: 'List of open development issues',
+      content: { 'application/json': { schema: registeredSchemas.OpenIssuesResponse } },
+    },
   },
 });
 
@@ -600,8 +1074,12 @@ registry.registerPath({
   path: '/api/config',
   tags: ['Misc'],
   summary: 'Get runtime configuration',
+  security: [],
   responses: {
-    200: { description: 'Runtime configuration', content: { 'application/json': { schema: registeredSchemas.ConfigResponse } } },
+    200: {
+      description: 'Runtime configuration',
+      content: { 'application/json': { schema: registeredSchemas.ConfigResponse } },
+    },
   },
 });
 
@@ -610,8 +1088,12 @@ registry.registerPath({
   path: '/api/stats',
   tags: ['Misc'],
   summary: 'Get global statistics',
+  security: [],
   responses: {
-    200: { description: 'Global campaign and pledge statistics', content: { 'application/json': { schema: registeredSchemas.StatsResponse } } },
+    200: {
+      description: 'Global campaign and pledge statistics',
+      content: { 'application/json': { schema: registeredSchemas.StatsResponse } },
+    },
   },
 });
 
@@ -619,10 +1101,30 @@ registry.registerPath({
   method: 'get',
   path: '/api/docs',
   tags: ['Docs'],
-  summary: 'OpenAPI specification',
-  description: 'Returns the machine-readable OpenAPI 3.1 specification for this API.',
+  summary: 'Open Swagger UI',
+  description: 'Development-only interactive documentation for this API.',
+  security: [],
   responses: {
-    200: { description: 'OpenAPI JSON spec', content: { 'application/json': { schema: z.object({}).passthrough() } } },
+    200: {
+      description: 'Swagger UI HTML',
+      content: { 'text/html': { schema: { type: 'string' } } },
+    },
+    404: { description: 'Swagger UI is disabled in production' },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/openapi.json',
+  tags: ['Docs'],
+  summary: 'Get the OpenAPI specification',
+  description: 'Returns the machine-readable OpenAPI 3.1 specification for this API.',
+  security: [],
+  responses: {
+    200: {
+      description: 'OpenAPI JSON spec',
+      content: { 'application/json': { schema: z.object({}).passthrough() } },
+    },
   },
 });
 
@@ -631,14 +1133,27 @@ registry.registerPath({
   path: '/api/leaderboard',
   tags: ['Misc'],
   summary: 'Get contributor leaderboard',
+  security: [],
   request: {
     query: z.object({
-      limit: z.coerce.number().int().min(1).max(100).optional().openapi({ description: 'Number of top contributors to return.', example: 10 }),
+      limit: z.coerce
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .openapi({ description: 'Number of top contributors to return.', example: 10 }),
     }),
   },
   responses: {
-    200: { description: 'Leaderboard', content: { 'application/json': { schema: registeredSchemas.LeaderboardResponse } } },
-    500: { description: 'Internal server error', content: { 'application/json': { schema: registeredSchemas.ApiError } } },
+    200: {
+      description: 'Leaderboard',
+      content: { 'application/json': { schema: registeredSchemas.LeaderboardResponse } },
+    },
+    500: {
+      description: 'Internal server error',
+      content: { 'application/json': { schema: registeredSchemas.ApiError } },
+    },
   },
 });
 
@@ -647,7 +1162,7 @@ registry.registerPath({
 // ---------------------------------------------------------------------------
 
 export function generateOpenApiDocument() {
-  const generator = new OpenApiGeneratorV3(registry.definitions);
+  const generator = new OpenApiGeneratorV31(registry.definitions);
   return generator.generateDocument({
     openapi: '3.1.0',
     info: {
@@ -657,8 +1172,9 @@ export function generateOpenApiDocument() {
     },
     servers: [
       { url: `http://localhost:${config.port}`, description: 'Local development server' },
-      { url: '/api', description: 'Relative API base' },
+      { url: '/', description: 'Relative server URL' },
     ],
+    security: [{ [bearerAuth.name]: [] }],
   });
 }
 

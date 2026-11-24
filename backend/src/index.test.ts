@@ -37,6 +37,7 @@ beforeAll(async () => {
 beforeEach(() => {
   const db = getDb();
   db.prepare(`DELETE FROM campaign_events`).run();
+  db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM pledges`).run();
   db.prepare(`DELETE FROM campaigns`).run();
 });
@@ -212,8 +213,8 @@ describe('campaign list filters and pagination', () => {
       page: 1,
       limit: 10,
     });
-    expect(afterFilter.campaigns.map(c => c.id)).toContain(campaign2.id);
-    expect(afterFilter.campaigns.map(c => c.id)).not.toContain(campaign1.id);
+    expect(afterFilter.campaigns.map((c) => c.id)).toContain(campaign2.id);
+    expect(afterFilter.campaigns.map((c) => c.id)).not.toContain(campaign1.id);
 
     // Test createdBefore filter
     const beforeFilter = listCampaigns({
@@ -221,8 +222,8 @@ describe('campaign list filters and pagination', () => {
       page: 1,
       limit: 10,
     });
-    expect(beforeFilter.campaigns.map(c => c.id)).toContain(campaign1.id);
-    expect(beforeFilter.campaigns.map(c => c.id)).not.toContain(campaign2.id);
+    expect(beforeFilter.campaigns.map((c) => c.id)).toContain(campaign1.id);
+    expect(beforeFilter.campaigns.map((c) => c.id)).not.toContain(campaign2.id);
   });
 
   it('filters campaigns by multiple asset codes', () => {
@@ -262,7 +263,7 @@ describe('campaign list filters and pagination', () => {
       limit: 10,
     });
 
-    const ids = filtered.campaigns.map(c => c.id);
+    const ids = filtered.campaigns.map((c) => c.id);
     expect(ids).toContain(xlmCampaign.id);
     expect(ids).toContain(usdcCampaign.id);
     expect(ids).toContain(multiCampaign.id);
@@ -275,7 +276,7 @@ describe('Query parameter validation', () => {
     const result = parseCampaignListQuery({ page: 'invalid', limit: '10' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.issues.some(issue => issue.path.includes('page'))).toBe(true);
+      expect(result.issues.some((issue) => issue.path.includes('page'))).toBe(true);
     }
   });
 
@@ -283,7 +284,7 @@ describe('Query parameter validation', () => {
     const result = parseCampaignListQuery({ page: '1', limit: '999' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.issues.some(issue => issue.path.includes('limit'))).toBe(true);
+      expect(result.issues.some((issue) => issue.path.includes('limit'))).toBe(true);
     }
   });
 
@@ -291,7 +292,7 @@ describe('Query parameter validation', () => {
     const result = parseCampaignListQuery({ asset: 'INVALID' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.issues.some(issue => issue.path.includes('asset'))).toBe(true);
+      expect(result.issues.some((issue) => issue.path.includes('asset'))).toBe(true);
     }
   });
 
@@ -299,7 +300,7 @@ describe('Query parameter validation', () => {
     const result = parseCampaignListQuery({ status: 'invalid' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.issues.some(issue => issue.path.includes('status'))).toBe(true);
+      expect(result.issues.some((issue) => issue.path.includes('status'))).toBe(true);
     }
   });
 
@@ -307,7 +308,7 @@ describe('Query parameter validation', () => {
     const result = parseCampaignListQuery({ createdAfter: 'not-a-date' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.issues.some(issue => issue.path.includes('createdAfter'))).toBe(true);
+      expect(result.issues.some((issue) => issue.path.includes('createdAfter'))).toBe(true);
     }
   });
 
@@ -329,6 +330,41 @@ describe('Query parameter validation', () => {
     if (result.ok) {
       expect(result.data.asset).toEqual(['XLM', 'USDC']);
     }
+  });
+
+
+  it('supports sortBy and order including percentFunded and remains stable with filters', () => {
+    const { fixtures } = buildCampaignList();
+
+    const parsed = parseCampaignListQuery({
+      asset: 'USDC',
+      sortBy: 'percentFunded',
+      order: 'desc',
+    });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.data.sort).toBe('percentFunded');
+      expect(parsed.data.order).toBe('desc');
+    }
+
+    const { campaigns: descCampaigns } = listCampaigns({
+      assetCodes: ['USDC'],
+      sort: 'percentFunded',
+      sortOrder: 'desc',
+    });
+    expect(descCampaigns).toHaveLength(4);
+    expect([fixtures.fundedUsdc.id, fixtures.claimedUsdc.id]).toContain(descCampaigns[0].id);
+
+    const { campaigns: ascCampaigns } = listCampaigns({
+      assetCodes: ['USDC'],
+      sort: 'percentFunded',
+      sortOrder: 'asc',
+    });
+    expect(ascCampaigns).toHaveLength(4);
+    expect([fixtures.openUsdc.id, fixtures.failedUsdc.id]).toContain(ascCampaigns[0].id);
+
+    const invalidSortBy = parseCampaignListQuery({ sortBy: 'invalidField' });
+    expect(invalidSortBy.ok).toBe(false);
   });
 
   it('requires both page and limit for pagination', () => {
@@ -355,7 +391,7 @@ describe('maxPerContributor in response', () => {
     });
 
     const { campaigns } = listCampaigns({ page: 1, limit: 10 });
-    const found = campaigns.find(c => c.id === campaign.id);
+    const found = campaigns.find((c) => c.id === campaign.id);
 
     expect(found).toBeDefined();
     expect(found?.maxPerContributor).toBe(50);
@@ -374,7 +410,7 @@ describe('maxPerContributor in response', () => {
     });
 
     const { campaigns } = listCampaigns({ page: 1, limit: 10 });
-    const found = campaigns.find(c => c.id === campaign.id);
+    const found = campaigns.find((c) => c.id === campaign.id);
 
     expect(found).toBeDefined();
     // maxPerContributor should be undefined but the field should be present in the type

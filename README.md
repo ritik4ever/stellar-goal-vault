@@ -1,5 +1,7 @@
 # Stellar Goal Vault
 
+Read this README in: [English](./README.md) | [Español](./docs/README.es.md) | [Português](./docs/README.pt.md)
+
 Stellar Goal Vault is a lightweight crowdfunding MVP for the Stellar ecosystem.
 
 It includes:
@@ -19,6 +21,8 @@ Contributors can pledge until the deadline:
 - If the target is missed, contributors can refund their pledges
 
 This repo is intentionally scoped as an MVP so it is easy to extend with wallet signing, event indexing, and production-grade UX.
+
+> **📚 Documentation index:** See [INDEX.md](./INDEX.md) for a complete map of every documentation file in the repository, organized by topic.
 
 ## Current architecture
 
@@ -49,6 +53,9 @@ Architecture decision records
 - See `adr/0001-sqlite-off-chain-mvp.md` for the SQLite off-chain MVP decision.
 - See `adr/0002-react-express-mvp.md` for the React + Express + Soroban MVP architecture decision.
 - See `adr/0003-freighter-wallet-integration.md` for the Freighter wallet signing approach.
+- See `adr/0004-sqlite-mvp-postgresql-migration.md` for the SQLite / PostgreSQL database decision.
+- See `adr/0005-soroban-smart-contract-platform.md` for the Soroban smart contract platform decision.
+- See `adr/0006-multi-token-design.md` for the multi-token campaign design decision.
 
 ## TypeScript Bindings
 
@@ -72,6 +79,14 @@ npm run gen:bindings
 2. Generated types are output to `frontend/src/generated/`
 3. `frontend/src/services/soroban.ts` imports from generated bindings via `GoalVaultContract` client
 4. CI checks for ABI drift on every PR that touches contracts
+
+### Rerun safety and drift check
+
+- `CONTRACT_ID` is optional. When it is not set, `npm run gen:bindings` reads `contracts/contract_id.txt`.
+- If no ID is found, or it is still a placeholder like `YOUR_CONTRACT_ID`, the script stops before touching `frontend/src/generated/` and prints how to recover.
+- Bindings are generated into a temp directory first, so a failed run leaves the committed bindings unchanged.
+- Each successful run writes `frontend/src/generated/.contract-id` with the contract the bindings came from. Rerunning against the same contract produces the same file, so there is no diff.
+- `npm run gen:bindings:check` compares that stamp with the deployed ID without calling the network, and exits with code 1 on drift so CI can fail on it.
 
 ### Mainnet
 
@@ -252,20 +267,23 @@ Base URL:
 
 ### `GET /api/stats`
 
-- Returns aggregate metrics and totals computed from campaigns and pledges.
-- Cached with a 30-second TTL.
+- Returns aggregate metrics and totals computed from campaigns and pledges (platform summary).
+- Cached with a 60-second TTL.
+- Includes `X-Cache` header (`HIT` or `MISS`).
+- Public endpoint, no authentication required.
 - Response:
 
 ```json
 {
   "data": {
-    "totalCampaigns": 10,
-    "openCampaigns": 5,
-    "fundedCampaigns": 3,
-    "claimedCampaigns": 1,
-    "failedCampaigns": 1,
-    "totalPledgeVolume": 50000,
-    "uniqueContributors": 42
+    "total_campaigns": 10,
+    "open_campaigns": 5,
+    "funded_campaigns": 3,
+    "failed_campaigns": 1,
+    "total_pledged_usdc": 35000,
+    "total_pledged_xlm": 15000,
+    "total_contributors": 42,
+    "avg_funding_rate_pct": 78.5
   }
 }
 ```
@@ -273,6 +291,9 @@ Base URL:
 ### `GET /api/campaigns`
 
 - Returns all campaigns with computed progress
+- Optional `page` and `limit` parameters enable pagination; provide both, with `limit` from 1 to 100. Invalid values or only one parameter return `400`.
+- Omitting both parameters preserves the default and returns the full filtered campaign list.
+- Paginated responses include total pages and `hasPreviousPage` / `hasNextPage` navigation flags.
 - Query parameters:
   - `q` (optional): Search query to filter campaigns by title, creator, or campaign ID (case-insensitive)
   - `asset` (optional): Filter campaigns by asset code (e.g., USDC, XLM)
@@ -325,6 +346,11 @@ Request body:
 
 - `contributor`
 - `amount`
+- `assetCode`
+
+Request headers:
+
+- `Idempotency-Key` (optional): A unique key used to make the request idempotent. When provided, duplicate requests with the same key (for the same user and campaign) will return the cached response instead of creating a new pledge. Cache entries expire after 24 hours. The `X-Idempotency-Cache` response header indicates whether the response was served from cache (`HIT`) or generated fresh (`MISS`).
 
 ### `POST /api/campaigns/:id/pledges/reconcile`
 
@@ -413,6 +439,22 @@ Open:
 
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:3001`
+
+### Seed the dev database
+
+Wipes and repopulates the local SQLite database with deterministic campaigns and pledges — useful for a fresh, reproducible local state. See the [seed runbook](./docs/SEED_RUNBOOK.md) for open / funded / claimed outcomes, double-run behaviour, and failure signals.
+
+```bash
+cd backend
+npm run seed
+
+# Seed a custom number of campaigns (default: 3)
+npm run seed -- --count 10
+```
+
+Seeded campaign IDs are printed to stdout. The first 3 campaigns always match a fixed
+set (open, funded, claimed status). Any additional campaigns beyond that cycle
+deterministically through open/funded/claimed statuses so the seed is reproducible run to run.
 
 Build:
 
@@ -509,6 +551,10 @@ The script will:
 
 ## Environment variables
 
+See [docs/SECURE_CONFIGURATION.md](./docs/SECURE_CONFIGURATION.md) for the safe
+production default, local-development override, and the risk of weakening each
+security-relevant setting.
+
 Backend:
 
 - `PORT` defaults to `3001`
@@ -542,7 +588,11 @@ That issue is already represented in:
 
 ## Frequently Asked Questions
 
-See the [FAQ.md](./FAQ.md) for answers to common questions about testnet funding, Freighter setup, contract deployment, database reset, pledge failures, and more.
+See [FAQ.md](./FAQ.md) for 22 Q&A entries covering campaign creation, pledging, refunds, supported wallets, fees, mainnet support, and local development — organized into **For Creators**, **For Backers**, and **Technical** sections.
+
+## Troubleshooting
+
+See the [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for solutions to common issues like SQLite permissions, Soroban CLI mismatches, and CORS errors.
 
 ## Security
 
@@ -551,12 +601,13 @@ Please see [SECURITY.md](./SECURITY.md) for our responsible disclosure policy, s
 ## Contributing
 
 Please see the [Contributing Guide](./CONTRIBUTING.md) for setup and contribution guidelines.
+Translation credits are listed in [CONTRIBUTORS.md](./CONTRIBUTORS.md).
 See also [CHANGELOG.md](./CHANGELOG.md) for a full history of notable changes across releases.
 
 ## Known limitations
 
 - Campaign creation is still local-first, so pledges will only simulate successfully for campaign IDs that also exist in the configured contract
-- No authentication or rate limiting on write endpoints
+- API key authentication and configurable per-IP rate limits apply in production; both are disabled in local development
 - No background indexer for on-chain event sync yet
 
 ## Suggested roadmap

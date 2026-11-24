@@ -1,0 +1,2308 @@
+openapi: 3.1.0
+info:
+  title: Stellar Goal Vault API
+  description: Machine-readable OpenAPI specification for the Stellar Goal Vault backend.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3001
+    description: Local development server
+  - url: /
+    description: Relative server URL
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API key
+      description: Use the API key as a Bearer token in the Authorization header.
+  schemas:
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Numeric campaign identifier.
+          example: "1"
+        creator:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+          description: A 56-character Stellar public key (G...).
+          example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        title:
+          type: string
+          example: Clean Water Initiative
+        description:
+          type: string
+          example: Raising funds to provide clean water access.
+        acceptedTokens:
+          type: array
+          items:
+            type: string
+            pattern: ^[A-Z0-9]{1,12}$
+            description: Accepted Stellar asset code.
+            example: USDC
+          example: &a1
+            - USDC
+            - XLM
+        assetCode:
+          type: string
+          pattern: ^[A-Z0-9]{1,12}$
+          description: Primary asset code (backward compatibility).
+          example: USDC
+        targetAmount:
+          type: number
+          exclusiveMinimum: 0
+          example: 1000
+        pledgedAmount:
+          type: number
+          example: 455
+        deadline:
+          type: integer
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        createdAt:
+          type: integer
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        claimedAt:
+          type: integer
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        failedAt:
+          type: integer
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        deletedAt:
+          type: integer
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        metadata:
+          type: object
+          properties:
+            imageUrl:
+              type: string
+              format: uri
+            externalLink:
+              type: string
+              format: uri
+          description: Optional campaign media / link metadata.
+        maxPerContributor:
+          type: integer
+          exclusiveMinimum: 0
+          example: 500
+        tokenBalances:
+          type: object
+          additionalProperties:
+            type: number
+          example: &a2
+            USDC: 455
+            XLM: 0
+        progress:
+          $ref: "#/components/schemas/CampaignProgress"
+        pledges:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              campaignId:
+                type: string
+              contributor:
+                type: string
+                pattern: ^G[A-Z2-7]{55}$
+                description: A 56-character Stellar public key (G...).
+                example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+              amount:
+                type: number
+                exclusiveMinimum: 0
+              assetCode:
+                type: string
+                pattern: ^[A-Z0-9]{1,12}$
+                description: Accepted Stellar asset code.
+                example: USDC
+              createdAt:
+                type: integer
+                exclusiveMinimum: 0
+                description: Unix timestamp in seconds.
+                example: 1735689600
+              refundedAt:
+                type: integer
+                exclusiveMinimum: 0
+                description: Unix timestamp in seconds.
+                example: 1735689600
+              transactionHash:
+                type: string
+            required:
+              - id
+              - campaignId
+              - contributor
+              - amount
+              - assetCode
+              - createdAt
+          description: Recent pledges included on campaign detail responses.
+      required:
+        - id
+        - creator
+        - title
+        - description
+        - acceptedTokens
+        - assetCode
+        - targetAmount
+        - pledgedAmount
+        - deadline
+        - createdAt
+        - progress
+    CampaignProgress:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - open
+            - funded
+            - claimed
+            - failed
+          example: open
+        percentFunded:
+          type: number
+          example: 45.5
+        remainingAmount:
+          type: number
+          example: 54.5
+        pledgeCount:
+          type: integer
+          example: 12
+        hoursLeft:
+          type: number
+          example: 72
+        canPledge:
+          type: boolean
+          example: true
+        canClaim:
+          type: boolean
+          example: false
+        canRefund:
+          type: boolean
+          example: false
+      required:
+        - status
+        - percentFunded
+        - remainingAmount
+        - pledgeCount
+        - hoursLeft
+        - canPledge
+        - canClaim
+        - canRefund
+    Pledge:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        campaignId:
+          type: string
+          example: "1"
+        contributor:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+          description: A 56-character Stellar public key (G...).
+          example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        amount:
+          type: number
+          exclusiveMinimum: 0
+          example: 50
+        assetCode:
+          type: string
+          pattern: ^[A-Z0-9]{1,12}$
+          description: Accepted Stellar asset code.
+          example: USDC
+        createdAt:
+          type: integer
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        refundedAt:
+          type: integer
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        transactionHash:
+          type: string
+      required:
+        - id
+        - campaignId
+        - contributor
+        - amount
+        - assetCode
+        - createdAt
+    ContributorPledge:
+      allOf:
+        - $ref: "#/components/schemas/Pledge"
+        - type: object
+          properties:
+            campaignName:
+              type: string
+              example: Clean Water Initiative
+            status:
+              type: string
+              enum:
+                - open
+                - funded
+                - claimed
+                - failed
+              example: open
+            refundStatus:
+              type: string
+              enum:
+                - refunded
+                - not_refunded
+              example: not_refunded
+          required:
+            - campaignName
+            - status
+            - refundStatus
+    CampaignEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        campaignId:
+          type: string
+          example: "1"
+        eventType:
+          type: string
+          enum:
+            - created
+            - pledged
+            - claimed
+            - refunded
+            - updated
+            - metadata_updated
+            - pledge_limit_reached
+            - archived
+            - restored
+          example: pledged
+        timestamp:
+          type: integer
+          exclusiveMinimum: 0
+          description: Unix timestamp in seconds.
+          example: 1735689600
+        actor:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+          description: A 56-character Stellar public key (G...).
+          example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        amount:
+          type: number
+          exclusiveMinimum: 0
+          example: 50
+        metadata:
+          type: object
+          additionalProperties: {}
+        blockchainMetadata:
+          type: object
+          properties:
+            txHash:
+              type: string
+            ledgerNumber:
+              type: integer
+            ledgerCloseTime:
+              type: integer
+            eventIndex:
+              type: integer
+            contractId:
+              type: string
+            source:
+              type: string
+              enum:
+                - local
+                - soroban
+      required:
+        - id
+        - campaignId
+        - eventType
+        - timestamp
+    ContributorSummary:
+      type: object
+      properties:
+        contributor:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+          description: A 56-character Stellar public key (G...).
+          example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        totalPledged:
+          type: number
+          example: 150
+        refundedAmount:
+          type: number
+          example: 0
+        isFullyRefunded:
+          type: boolean
+          example: false
+      required:
+        - contributor
+        - totalPledged
+        - refundedAmount
+        - isFullyRefunded
+    OpenIssue:
+      type: object
+      properties:
+        id:
+          type: string
+          example: SGV-1
+        title:
+          type: string
+          example: Implement Freighter-signed pledge transactions
+        labels:
+          type: array
+          items:
+            type: string
+          example:
+            - enhancement
+            - soroban
+        summary:
+          type: string
+          example: Replace mock API pledges with wallet-signed Soroban transactions.
+        complexity:
+          type: string
+          enum:
+            - Trivial
+            - Medium
+            - High
+          example: High
+        points:
+          type: integer
+          example: 200
+      required:
+        - id
+        - title
+        - labels
+        - summary
+        - complexity
+        - points
+    ApiError:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+            - false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Stable machine-readable error code.
+              example: VALIDATION_ERROR
+            message:
+              type: string
+              description: Client-safe message; unexpected failures use a generic message.
+              example: page must be a positive integer.
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                    example: page
+                  message:
+                    type: string
+                    example: page must be a positive integer.
+                required:
+                  - field
+                  - message
+            requestId:
+              type: string
+              description: Correlation ID also returned in the X-Request-Id response header.
+              example: req-123
+          required:
+            - code
+            - message
+      required:
+        - success
+        - error
+      description: Standard error envelope. Internal exception messages, stacks, and
+        secret material are not returned.
+    CreateCampaignPayload:
+      type: object
+      properties:
+        creator:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+        title:
+          type: string
+          minLength: 4
+          maxLength: 80
+        description:
+          type: string
+          minLength: 20
+          maxLength: 500
+        acceptedTokens:
+          type: array
+          items:
+            type: string
+            pattern: ^[A-Za-z0-9]{1,12}$
+          minItems: 1
+        targetAmount:
+          type: number
+          exclusiveMinimum: 0
+        deadline:
+          type: integer
+          exclusiveMinimum: 0
+        metadata:
+          type: object
+          properties:
+            imageUrl:
+              type: string
+            externalLink:
+              type: string
+              maxLength: 2048
+        maxPerContributor:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+      required:
+        - creator
+        - title
+        - description
+        - acceptedTokens
+        - targetAmount
+        - deadline
+    CreatePledgePayload:
+      type: object
+      properties:
+        contributor:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+        amount:
+          type: number
+          exclusiveMinimum: 0
+        assetCode:
+          type: string
+          pattern: ^[A-Za-z0-9]{1,12}$
+      required:
+        - contributor
+        - amount
+        - assetCode
+    ReconcilePledgePayload:
+      type: object
+      properties:
+        contributor:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+        amount:
+          type: number
+          exclusiveMinimum: 0
+        assetCode:
+          type: string
+          pattern: ^[A-Za-z0-9]{1,12}$
+        transactionHash:
+          type: string
+          pattern: ^[A-Fa-f0-9]{64}$
+        confirmedAt:
+          type: integer
+          exclusiveMinimum: 0
+      required:
+        - contributor
+        - amount
+        - assetCode
+        - transactionHash
+    ClaimCampaignPayload:
+      type: object
+      properties:
+        creator:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+        transactionHash:
+          type: string
+          pattern: ^[A-Fa-f0-9]{64}$
+        confirmedAt:
+          type: integer
+          exclusiveMinimum: 0
+      required:
+        - creator
+        - transactionHash
+    RefundPayload:
+      type: object
+      properties:
+        contributor:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+        soroban:
+          type: object
+          properties:
+            txHash:
+              type: string
+              pattern: ^[A-Fa-f0-9]{64}$
+            contractId:
+              type: string
+              minLength: 1
+            networkPassphrase:
+              type: string
+              minLength: 1
+            rpcUrl:
+              type: string
+              format: uri
+            walletAddress:
+              type: string
+              pattern: ^G[A-Z2-7]{55}$
+            ledger:
+              type: integer
+              exclusiveMinimum: 0
+            createdAt:
+              type: integer
+              exclusiveMinimum: 0
+            latestLedger:
+              type: integer
+              exclusiveMinimum: 0
+          required:
+            - txHash
+            - contractId
+            - networkPassphrase
+            - rpcUrl
+            - walletAddress
+      required:
+        - contributor
+        - soroban
+    CampaignListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Campaign"
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Total number of items matching the query.
+              example: 42
+            page:
+              type: integer
+              description: Current page (1-based).
+              example: 1
+            limit:
+              type: integer
+              description: Number of items per page.
+              example: 10
+            totalPages:
+              type: integer
+              description: Total number of pages.
+              example: 5
+            hasPreviousPage:
+              type: boolean
+              description: Whether a previous page exists for this paginated request.
+              example: false
+            hasNextPage:
+              type: boolean
+              description: Whether a later page exists for this paginated request.
+              example: true
+          required:
+            - total
+            - page
+            - limit
+            - totalPages
+            - hasPreviousPage
+            - hasNextPage
+        requestId:
+          type: string
+          description: Correlation ID also returned in the X-Request-Id response header.
+          example: req-123
+      required:
+        - data
+        - pagination
+        - requestId
+    CampaignDetailResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Campaign"
+        requestId:
+          type: string
+          description: Correlation ID also returned in the X-Request-Id response header.
+          example: req-123
+      required:
+        - data
+    CampaignAnalyticsResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/CampaignAnalytics"
+      required:
+        - data
+    CampaignAnalytics:
+      type: object
+      properties:
+        campaignId:
+          type: string
+          description: Campaign ID.
+          example: "1"
+        fundingGap:
+          type: number
+          description: Amount still needed to reach the target (never negative).
+          example: 750
+        status:
+          type: string
+          enum:
+            - open
+            - funded
+            - claimed
+            - failed
+          example: open
+        percentFunded:
+          type: number
+          description: Pledged amount as a % of target.
+          example: 25
+        pledgeCount:
+          type: integer
+          description: Active (non-refunded) pledge count.
+          example: 3
+        contributorCount:
+          type: integer
+          description: Distinct contributors who still have funds in the campaign.
+          example: 2
+      required:
+        - campaignId
+        - fundingGap
+        - status
+        - percentFunded
+        - pledgeCount
+        - contributorCount
+    CampaignAnalyticsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CampaignAnalytics"
+        pagination:
+          $ref: "#/components/schemas/AnalyticsPagination"
+        requestId:
+          type: string
+          description: Correlation ID also returned in the X-Request-Id response header.
+          example: req-123
+      required:
+        - data
+        - pagination
+        - requestId
+    AnalyticsPagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          description: Current page (1-based).
+          example: 1
+        limit:
+          type: integer
+          description: Number of items per page.
+          example: 10
+        total:
+          type: integer
+          description: Total number of items matching the query.
+          example: 42
+        totalPages:
+          type: integer
+          description: Total number of pages.
+          example: 5
+        hasPreviousPage:
+          type: boolean
+          description: Whether a previous page exists for this paginated request.
+          example: false
+        hasNextPage:
+          type: boolean
+          description: Whether a later page exists for this paginated request.
+          example: true
+      required:
+        - page
+        - limit
+        - total
+        - totalPages
+        - hasPreviousPage
+        - hasNextPage
+    PledgeListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Pledge"
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Total number of items matching the query.
+              example: 42
+            page:
+              type: integer
+              description: Current page (1-based).
+              example: 1
+            limit:
+              type: integer
+              description: Number of items per page.
+              example: 10
+            totalPages:
+              type: integer
+              description: Total number of pages.
+              example: 5
+            hasPreviousPage:
+              type: boolean
+              description: Whether a previous page exists for this paginated request.
+              example: false
+            hasNextPage:
+              type: boolean
+              description: Whether a later page exists for this paginated request.
+              example: true
+          required:
+            - total
+            - page
+            - limit
+            - totalPages
+            - hasPreviousPage
+            - hasNextPage
+      required:
+        - data
+        - pagination
+    ContributorPledgeListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContributorPledge"
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Total number of items matching the query.
+              example: 42
+            page:
+              type: integer
+              description: Current page (1-based).
+              example: 1
+            limit:
+              type: integer
+              description: Number of items per page.
+              example: 10
+            totalPages:
+              type: integer
+              description: Total number of pages.
+              example: 5
+            hasPreviousPage:
+              type: boolean
+              description: Whether a previous page exists for this paginated request.
+              example: false
+            hasNextPage:
+              type: boolean
+              description: Whether a later page exists for this paginated request.
+              example: true
+          required:
+            - total
+            - page
+            - limit
+            - totalPages
+            - hasPreviousPage
+            - hasNextPage
+      required:
+        - data
+        - pagination
+    PledgeResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Campaign"
+      required:
+        - data
+    ReconcileResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            campaign:
+              $ref: "#/components/schemas/Campaign"
+            transactionHash:
+              type: string
+              pattern: ^[A-Fa-f0-9]{64}$
+              description: A 64-character hexadecimal transaction hash.
+              example: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          required:
+            - campaign
+            - transactionHash
+      required:
+        - data
+    RefundResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+              description: Numeric campaign identifier.
+              example: "1"
+            creator:
+              type: string
+              pattern: ^G[A-Z2-7]{55}$
+              description: A 56-character Stellar public key (G...).
+              example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+            title:
+              type: string
+              example: Clean Water Initiative
+            description:
+              type: string
+              example: Raising funds to provide clean water access.
+            acceptedTokens:
+              type: array
+              items:
+                type: string
+                pattern: ^[A-Z0-9]{1,12}$
+                description: Accepted Stellar asset code.
+                example: USDC
+              example: *a1
+            assetCode:
+              type: string
+              pattern: ^[A-Z0-9]{1,12}$
+              description: Primary asset code (backward compatibility).
+              example: USDC
+            targetAmount:
+              type: number
+              exclusiveMinimum: 0
+              example: 1000
+            pledgedAmount:
+              type: number
+              example: 455
+            deadline:
+              type: integer
+              exclusiveMinimum: 0
+              description: Unix timestamp in seconds.
+              example: 1735689600
+            createdAt:
+              type: integer
+              exclusiveMinimum: 0
+              description: Unix timestamp in seconds.
+              example: 1735689600
+            claimedAt:
+              type: integer
+              exclusiveMinimum: 0
+              description: Unix timestamp in seconds.
+              example: 1735689600
+            failedAt:
+              type: integer
+              exclusiveMinimum: 0
+              description: Unix timestamp in seconds.
+              example: 1735689600
+            deletedAt:
+              type: integer
+              exclusiveMinimum: 0
+              description: Unix timestamp in seconds.
+              example: 1735689600
+            metadata:
+              type: object
+              properties:
+                imageUrl:
+                  type: string
+                  format: uri
+                externalLink:
+                  type: string
+                  format: uri
+              description: Optional campaign media / link metadata.
+            maxPerContributor:
+              type: integer
+              exclusiveMinimum: 0
+              example: 500
+            tokenBalances:
+              type: object
+              additionalProperties:
+                type: number
+              example: *a2
+            progress:
+              $ref: "#/components/schemas/CampaignProgress"
+            pledges:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  campaignId:
+                    type: string
+                  contributor:
+                    type: string
+                    pattern: ^G[A-Z2-7]{55}$
+                    description: A 56-character Stellar public key (G...).
+                    example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                  amount:
+                    type: number
+                    exclusiveMinimum: 0
+                  assetCode:
+                    type: string
+                    pattern: ^[A-Z0-9]{1,12}$
+                    description: Accepted Stellar asset code.
+                    example: USDC
+                  createdAt:
+                    type: integer
+                    exclusiveMinimum: 0
+                    description: Unix timestamp in seconds.
+                    example: 1735689600
+                  refundedAt:
+                    type: integer
+                    exclusiveMinimum: 0
+                    description: Unix timestamp in seconds.
+                    example: 1735689600
+                  transactionHash:
+                    type: string
+                required:
+                  - id
+                  - campaignId
+                  - contributor
+                  - amount
+                  - assetCode
+                  - createdAt
+              description: Recent pledges included on campaign detail responses.
+            refundedAmount:
+              type: number
+              example: 50
+          required:
+            - id
+            - creator
+            - title
+            - description
+            - acceptedTokens
+            - assetCode
+            - targetAmount
+            - pledgedAmount
+            - deadline
+            - createdAt
+            - progress
+            - refundedAmount
+      required:
+        - data
+    ContributorSummaryResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContributorSummary"
+      required:
+        - data
+    CampaignHistoryResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CampaignEvent"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        hasMore:
+          type: boolean
+      required:
+        - data
+        - total
+        - page
+        - pageSize
+        - hasMore
+    HealthResponse:
+      type: object
+      properties:
+        service:
+          type: string
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+        timestamp:
+          type: string
+          format: date-time
+        uptimeSeconds:
+          type: number
+        database:
+          type: object
+          properties:
+            reachable:
+              type: boolean
+            error:
+              type: string
+          required:
+            - reachable
+        indexer:
+          type: object
+          properties:
+            lastSuccessfulPollTime:
+              type:
+                - number
+                - "null"
+            lastKnownLedger:
+              type: number
+            isHealthy:
+              type: boolean
+            consecutiveFailures:
+              type: number
+            lagMs:
+              type:
+                - number
+                - "null"
+          required:
+            - lastSuccessfulPollTime
+            - lastKnownLedger
+            - isHealthy
+            - consecutiveFailures
+            - lagMs
+      required:
+        - service
+        - status
+        - timestamp
+        - uptimeSeconds
+        - database
+        - indexer
+    HealthPagination:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of health components available.
+          example: 4
+        page:
+          type: integer
+          description: Current page (1-based).
+          example: 1
+        limit:
+          type: integer
+          description: Number of components per page.
+          example: 20
+        totalPages:
+          type: integer
+          description: Total number of pages.
+          example: 1
+        hasPreviousPage:
+          type: boolean
+          description: Whether a previous page exists for this paginated request.
+          example: false
+        hasNextPage:
+          type: boolean
+          description: Whether a later page exists for this paginated request.
+          example: false
+      required:
+        - total
+        - page
+        - limit
+        - totalPages
+        - hasPreviousPage
+        - hasNextPage
+    DeepHealthResponse:
+      type: object
+      properties:
+        overall:
+          type: string
+          enum:
+            - up
+            - down
+        timestamp:
+          type: string
+          format: date-time
+        uptimeSeconds:
+          type: number
+        components:
+          type: object
+          properties:
+            db:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - up
+                    - down
+                details:
+                  type: string
+              required:
+                - status
+                - details
+            soroban:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - up
+                    - down
+                details:
+                  type: string
+              required:
+                - status
+                - details
+            contract:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - up
+                    - down
+                details:
+                  type: string
+              required:
+                - status
+                - details
+            indexer:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - up
+                    - down
+                details:
+                  type: object
+                  properties:
+                    lastSuccessfulPollTime:
+                      type:
+                        - number
+                        - "null"
+                    lastKnownLedger:
+                      type: number
+                    isHealthy:
+                      type: boolean
+                    consecutiveFailures:
+                      type: number
+                    lagMs:
+                      type:
+                        - number
+                        - "null"
+                  required:
+                    - lastSuccessfulPollTime
+                    - lastKnownLedger
+                    - isHealthy
+                    - consecutiveFailures
+                    - lagMs
+              required:
+                - status
+                - details
+        pagination:
+          $ref: "#/components/schemas/HealthPagination"
+      required:
+        - overall
+        - timestamp
+        - uptimeSeconds
+        - components
+        - pagination
+    ConfigResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            allowedAssets:
+              type: array
+              items:
+                type: string
+                pattern: ^[A-Z0-9]{1,12}$
+                description: Accepted Stellar asset code.
+                example: USDC
+            soroban:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                contractId:
+                  type: string
+                networkPassphrase:
+                  type: string
+                rpcUrl:
+                  type: string
+              required:
+                - enabled
+                - networkPassphrase
+            sorobanRpcUrl:
+              type: string
+            contractId:
+              type: string
+            networkPassphrase:
+              type: string
+            contractAmountDecimals:
+              type: integer
+            walletIntegrationReady:
+              type: boolean
+            assetAddresses:
+              type: object
+              additionalProperties:
+                type: string
+          required:
+            - allowedAssets
+            - soroban
+            - networkPassphrase
+            - contractAmountDecimals
+            - walletIntegrationReady
+            - assetAddresses
+      required:
+        - data
+    StatsResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            total_campaigns:
+              type: integer
+              example: 10
+            open_campaigns:
+              type: integer
+              example: 5
+            funded_campaigns:
+              type: integer
+              example: 3
+            failed_campaigns:
+              type: integer
+              example: 1
+            total_pledged_usdc:
+              type: number
+              example: 35000
+            total_pledged_xlm:
+              type: number
+              example: 15000
+            total_contributors:
+              type: integer
+              example: 42
+            avg_funding_rate_pct:
+              type: number
+              example: 78.5
+            totalCampaigns:
+              type: integer
+            openCampaigns:
+              type: integer
+            fundedCampaigns:
+              type: integer
+            claimedCampaigns:
+              type: integer
+            failedCampaigns:
+              type: integer
+            totalPledgeVolume:
+              type: number
+            uniqueContributors:
+              type: integer
+          required:
+            - total_campaigns
+            - open_campaigns
+            - funded_campaigns
+            - failed_campaigns
+            - total_pledged_usdc
+            - total_pledged_xlm
+            - total_contributors
+            - avg_funding_rate_pct
+      required:
+        - data
+    LeaderboardResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeaderboardEntry"
+      required:
+        - data
+    LeaderboardEntry:
+      type: object
+      properties:
+        rank:
+          type: integer
+        contributor:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+          description: A 56-character Stellar public key (G...).
+          example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        totalPledged:
+          type: number
+        campaignCount:
+          type: integer
+        averagePledgeAmount:
+          type: number
+      required:
+        - rank
+        - contributor
+        - totalPledged
+        - campaignCount
+        - averagePledgeAmount
+    OpenIssuesResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpenIssue"
+      required:
+        - data
+  parameters: {}
+paths:
+  /api/health:
+    get:
+      tags:
+        - Health
+      summary: Basic health check
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Service is degraded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /api/health/deep:
+    get:
+      tags:
+        - Health
+      summary: Deep health check
+      description: "Checks database, Soroban RPC, and contract configuration health.
+        The `components` collection is paginated deterministically in a fixed
+        order (db, soroban, contract, indexer): page defaults to 1 and limit
+        defaults to 20 when omitted, both must be integers, and limit is capped
+        at 100. Out-of-range values are rejected with 400 rather than clamped.
+        The response includes total, totalPages, hasPreviousPage, and
+        hasNextPage under `pagination` so callers can navigate without guessing
+        where the collection ends. Because the default limit exceeds the number
+        of components, omitting both parameters returns every component exactly
+        as before."
+      security: []
+      parameters:
+        - schema:
+            type: integer
+            minimum: 1
+            description: 1-based page number (default 1).
+          required: false
+          description: 1-based page number (default 1).
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Components per page, 1 to 100 (default 20).
+          required: false
+          description: Components per page, 1 to 100 (default 20).
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: All components are healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeepHealthResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: One or more components are unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeepHealthResponse"
+  /api/campaigns:
+    get:
+      tags:
+        - Campaigns
+      summary: List campaigns
+      description: List campaigns with optional filtering, sorting, and pagination.
+        Omit both page and limit to return the full filtered set; when
+        paginating, provide both and use a limit from 1 to 100.
+      parameters:
+        - schema:
+            type: integer
+            minimum: 1
+            description: 1-based page number. Requires limit; omit page and limit for all
+              results.
+          required: false
+          description: 1-based page number. Requires limit; omit page and limit for all
+            results.
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Items per page, from 1 to 100. Requires page; omit page and limit
+              for all results.
+          required: false
+          description: Items per page, from 1 to 100. Requires page; omit page and limit
+            for all results.
+          name: limit
+          in: query
+        - schema:
+            type: string
+            description: Search query (title, creator, or id).
+          required: false
+          description: Search query (title, creator, or id).
+          name: q
+          in: query
+        - schema:
+            type: string
+            description: Alias for q.
+          required: false
+          description: Alias for q.
+          name: search
+          in: query
+        - schema:
+            type: string
+            description: Comma-separated list of asset codes.
+          required: false
+          description: Comma-separated list of asset codes.
+          name: asset
+          in: query
+        - schema:
+            type: string
+            enum:
+              - open
+              - funded
+              - claimed
+              - failed
+          required: false
+          name: status
+          in: query
+        - schema:
+            type: string
+            enum:
+              - createdAt
+              - deadline
+              - pledgedAmount
+              - targetAmount
+              - percentFunded
+          required: false
+          name: sort
+          in: query
+        - schema:
+            type: string
+            enum:
+              - createdAt
+              - deadline
+              - pledgedAmount
+              - targetAmount
+              - percentFunded
+            description: Alias for 'sort'.
+          required: false
+          description: Alias for 'sort'.
+          name: sortBy
+          in: query
+        - schema:
+            type: string
+            enum:
+              - asc
+              - desc
+          required: false
+          name: order
+          in: query
+        - schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+            description: "Include archived (soft-deleted) campaigns. Alias:
+              'include_archived'."
+          required: false
+          description: "Include archived (soft-deleted) campaigns. Alias:
+            'include_archived'."
+          name: includeDeleted
+          in: query
+        - schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+            description: Alias for 'includeDeleted'.
+          required: false
+          description: Alias for 'includeDeleted'.
+          name: include_archived
+          in: query
+        - schema:
+            type: string
+            format: date-time
+            description: ISO 8601 timestamp.
+          required: false
+          description: ISO 8601 timestamp.
+          name: createdAfter
+          in: query
+        - schema:
+            type: string
+            format: date-time
+            description: ISO 8601 timestamp.
+          required: false
+          description: ISO 8601 timestamp.
+          name: createdBefore
+          in: query
+      responses:
+        "200":
+          description: Paginated list of campaigns
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignListResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      tags:
+        - Campaigns
+      summary: Create a campaign
+      requestBody:
+        description: Campaign creation payload
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCampaignPayload"
+      responses:
+        "201":
+          description: Campaign created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignDetailResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/campaigns/{id}:
+    get:
+      tags:
+        - Campaigns
+      summary: Get campaign details
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Campaign details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignDetailResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      tags:
+        - Campaigns
+      summary: Archive (soft-delete) a campaign
+      description: Sets the archivedAt/deletedAt timestamp on a campaign. Archived
+        campaigns are excluded from the default campaign list but their pledges
+        and history are preserved. Use POST /api/campaigns/{id}/restore to
+        un-archive.
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Campaign archived
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignDetailResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Campaign is already archived
+        "429":
+          description: Rate limit exceeded
+  /api/campaigns/{id}/restore:
+    post:
+      tags:
+        - Campaigns
+      summary: Restore an archived campaign
+      description: Clears the archivedAt/deletedAt timestamp, making the campaign
+        active again.
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Campaign restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignDetailResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Campaign is not archived
+        "429":
+          description: Rate limit exceeded
+  /api/campaigns/{id}/pledges:
+    get:
+      tags:
+        - Pledges
+      summary: List campaign pledges
+      description: "Returns pledges newest-first. Pagination is deterministic: page
+        defaults to 1 and limit defaults to 10 when omitted, both must be
+        integers, and limit is capped at 100. Out-of-range values are rejected
+        with 400 rather than clamped. The response includes total, totalPages,
+        hasPreviousPage, and hasNextPage so callers can navigate without
+        guessing where the collection ends. Errors use the ApiError envelope
+        with stable codes: VALIDATION_ERROR, NOT_FOUND, RATE_LIMITED, and
+        INTERNAL_SERVER_ERROR."
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: integer
+            minimum: 1
+            description: 1-based page number (default 1).
+          required: false
+          description: 1-based page number (default 1).
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Items per page, 1 to 100 (default 10).
+          required: false
+          description: Items per page, 1 to 100 (default 10).
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Paginated list of pledges
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PledgeListResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      tags:
+        - Pledges
+      summary: Create a pledge
+      description: "Creates a pledge for a campaign. Send an Idempotency-Key header to
+        make the request safe to retry: repeating the same request with the same
+        key replays the original response (X-Idempotency-Cache: HIT) and records
+        no second pledge. The key is scoped to the API key, campaign and
+        contributor, and a response is replayable for 24 hours. Only successful
+        responses are stored, so a failed request can be retried with the same
+        key. Reusing a key with a different request body returns 422
+        IDEMPOTENCY_KEY_REUSED. An identical request that arrives while the
+        first is still being processed waits for it, and returns 409
+        IDEMPOTENCY_REQUEST_IN_PROGRESS if the first does not finish within 10
+        seconds. Without a shared cache (Redis), stored keys are held in memory
+        and are lost when the server restarts. Errors use the ApiError envelope
+        with stable codes: VALIDATION_ERROR, NOT_FOUND, INVALID_ASSET,
+        INVALID_CAMPAIGN_STATE, MAX_PER_CONTRIBUTOR_EXCEEDED,
+        CAMPAIGN_FUNDING_CAP_EXCEEDED, IDEMPOTENCY_REQUEST_IN_PROGRESS,
+        IDEMPOTENCY_KEY_REUSED, RATE_LIMITED, and INTERNAL_SERVER_ERROR.
+        Unexpected failures are logged without exposing internal details."
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      requestBody:
+        description: Pledge creation payload
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePledgePayload"
+      responses:
+        "201":
+          description: Pledge recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PledgeResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: An identical request with this Idempotency-Key is still being
+            processed (IDEMPOTENCY_REQUEST_IN_PROGRESS). Retry shortly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: The Idempotency-Key was already used with a different request body
+            (IDEMPOTENCY_KEY_REUSED).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: Rate limit exceeded (RATE_LIMITED)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server failure (INTERNAL_SERVER_ERROR). Internal details
+            are logged and are not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/campaigns/{id}/pledges/reconcile:
+    post:
+      tags:
+        - Pledges
+      summary: Reconcile an on-chain pledge
+      description: Records a pledge that was already executed on-chain using its
+        transaction hash.
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      requestBody:
+        description: Reconciliation payload
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReconcilePledgePayload"
+      responses:
+        "201":
+          description: Pledge reconciled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconcileResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: Rate limit exceeded
+  /api/campaigns/{id}/claim:
+    post:
+      tags:
+        - Campaigns
+      summary: Claim a campaign
+      description: Claims funds for a successfully funded campaign after the deadline.
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      requestBody:
+        description: Claim payload
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimCampaignPayload"
+      responses:
+        "200":
+          description: Campaign claimed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignDetailResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: Rate limit exceeded
+  /api/campaigns/{id}/refund:
+    post:
+      tags:
+        - Pledges
+      summary: Refund a contributor
+      description: Refunds a contributor for a failed campaign after verifying the
+        on-chain transaction.
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      requestBody:
+        description: Refund payload
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundPayload"
+      responses:
+        "200":
+          description: Refund processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Request body exceeds the 64KB maximum limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: Rate limit exceeded
+  /api/campaigns/{id}/analytics:
+    get:
+      tags:
+        - Campaigns
+      summary: Get campaign analytics
+      description: "Read-only analytics for one campaign. The path id must be a
+        canonical positive integer (no leading zeros, signs, or decimals).
+        Pagination is deterministic: page defaults to 1 and limit defaults to 10
+        when omitted, both must be integers, and limit is capped at 100.
+        Out-of-range values are rejected with 400 rather than clamped. The
+        response includes total, totalPages, hasPreviousPage, and hasNextPage so
+        callers can navigate without guessing where the collection ends. Missing
+        campaigns return 404."
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: integer
+            minimum: 1
+            description: 1-based page number (default 1).
+          required: false
+          description: 1-based page number (default 1).
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Items per page, 1 to 100 (default 10).
+          required: false
+          description: Items per page, 1 to 100 (default 10).
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Paginated campaign analytics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignAnalyticsListResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/campaigns/{id}/contributors:
+    get:
+      tags:
+        - Campaigns
+      summary: Get campaign contributor summary
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Contributor summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContributorSummaryResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/campaigns/{id}/history:
+    get:
+      tags:
+        - Campaigns
+      summary: Get campaign event history
+      parameters:
+        - schema:
+            type: string
+            pattern: ^[1-9]\d*$
+            example: "1"
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: integer
+            minimum: 1
+            description: 1-based page number (default 1).
+          required: false
+          description: 1-based page number (default 1).
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Items per page, 1 to 100 (default 10).
+          required: false
+          description: Items per page, 1 to 100 (default 10).
+          name: pageSize
+          in: query
+      responses:
+        "200":
+          description: Campaign event history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignHistoryResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/contributors/{address}/pledges:
+    get:
+      tags:
+        - Contributors
+      summary: List pledges by contributor
+      description: "Returns all pledges made by a contributor address across all
+        campaigns. Unknown addresses return an empty array. Refunded pledges
+        include the refundedAt timestamp. Pagination uses the same defaults and
+        bounds as the campaign pledge list: page defaults to 1, limit defaults
+        to 10 and is capped at 100, and out-of-range values are rejected with
+        400."
+      parameters:
+        - schema:
+            type: string
+            pattern: ^G[A-Z2-7]{55}$
+            description: A 56-character Stellar public key (G...).
+            example: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          required: true
+          description: A 56-character Stellar public key (G...).
+          name: address
+          in: path
+        - schema:
+            type: integer
+            minimum: 1
+            description: 1-based page number (default 1).
+          required: false
+          description: 1-based page number (default 1).
+          name: page
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Items per page, 1 to 100 (default 10).
+          required: false
+          description: Items per page, 1 to 100 (default 10).
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Paginated list of contributor pledges
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContributorPledgeListResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/open-issues:
+    get:
+      tags:
+        - Misc
+      summary: List open issues
+      security: []
+      responses:
+        "200":
+          description: List of open development issues
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenIssuesResponse"
+  /api/config:
+    get:
+      tags:
+        - Misc
+      summary: Get runtime configuration
+      security: []
+      responses:
+        "200":
+          description: Runtime configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigResponse"
+  /api/stats:
+    get:
+      tags:
+        - Misc
+      summary: Get global statistics
+      security: []
+      responses:
+        "200":
+          description: Global campaign and pledge statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+  /api/docs:
+    get:
+      tags:
+        - Docs
+      summary: Open Swagger UI
+      description: Development-only interactive documentation for this API.
+      security: []
+      responses:
+        "200":
+          description: Swagger UI HTML
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          description: Swagger UI is disabled in production
+  /api/openapi.json:
+    get:
+      tags:
+        - Docs
+      summary: Get the OpenAPI specification
+      description: Returns the machine-readable OpenAPI 3.1 specification for this API.
+      security: []
+      responses:
+        "200":
+          description: OpenAPI JSON spec
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {}
+                additionalProperties: {}
+  /api/leaderboard:
+    get:
+      tags:
+        - Misc
+      summary: Get contributor leaderboard
+      security: []
+      parameters:
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            description: Number of top contributors to return.
+            example: 10
+          required: false
+          description: Number of top contributors to return.
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Leaderboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaderboardResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+webhooks: {}

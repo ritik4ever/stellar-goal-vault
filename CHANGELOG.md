@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Idempotent pledge creation using the `Idempotency-Key` request header.
+- 24-hour response caching for duplicate pledge requests with the same idempotency key.
+- Redis-backed idempotency cache with in-memory LRU fallback for non-production environments.
+- `X-Idempotency-Cache` response header (`HIT` or `MISS`) for debugging cache behavior.
+
+### Changed
+
 ## [0.6.0] - 2026-05-27
 
 ### Added

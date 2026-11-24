@@ -6,6 +6,7 @@ import { EmptyState } from './EmptyState';
 import { ContributorSummary as ContributorSummaryData } from '../types/campaign';
 import { apiRequest } from '../services/httpClient';
 import { buildContributorCsv, downloadCsv } from '../utils/exportCsv';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -19,6 +20,8 @@ interface ContributorsApiResponse {
   data: ContributorSummaryData[];
 }
 
+const CONTRIBUTOR_INCREMENT = 20;
+
 export function ContributorSummary({
   campaignId,
   assetCode,
@@ -27,6 +30,9 @@ export function ContributorSummary({
   const [contributors, setContributors] = useState<ContributorSummaryData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(CONTRIBUTOR_INCREMENT);
+  const [hasEnteredView, setHasEnteredView] = useState(false);
+  const containerRef = useRef<HTMLElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchContributors = useCallback(async () => {
@@ -55,18 +61,39 @@ export function ContributorSummary({
     }
   }, [campaignId]);
 
+  // Lazy: defer fetch until component enters viewport
   useEffect(() => {
-    if (!campaignId) {
-      setIsLoading(false);
+    const el = containerRef.current;
+    if (!el) {
+      setHasEnteredView(true);
+      return;
+    }
+    if (hasEnteredView) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setHasEnteredView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasEnteredView]);
+
+  useEffect(() => {
+    if (!campaignId || !hasEnteredView) {
+      if (!campaignId) setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     void fetchContributors();
 
-    // Poll every 30 seconds
+    // Poll only when visible and document not hidden
     timerRef.current = setInterval(() => {
-      void fetchContributors();
+      if (document.visibilityState === 'visible') void fetchContributors();
     }, POLL_INTERVAL_MS);
 
     return () => {
@@ -75,25 +102,75 @@ export function ContributorSummary({
         timerRef.current = null;
       }
     };
-  }, [campaignId, fetchContributors]);
+  }, [campaignId, hasEnteredView, fetchContributors]);
 
-  if (externalLoading || (isLoading && contributors.length === 0)) {
+  useEffect(() => {
+    setVisibleCount(CONTRIBUTOR_INCREMENT);
+  }, [campaignId]);
+
+  const showSkeleton = useMinDisplayTime(
+    externalLoading || (isLoading && contributors.length === 0),
+  );
+  if (showSkeleton) {
     return (
       <section
+        ref={containerRef as any}
         className="contributor-summary contributor-summary-loading"
+        aria-busy="true"
         aria-label="Contributor summary"
       >
         <h3 className="contributor-summary-title">Contributors</h3>
         <div className="contributor-summary-stats" style={{ marginTop: 12 }}>
-          {Array.from({ length: 3 }).map((_, i) => (
+          {Array.from({ length: 4 }).map((_, i) => (
             <article key={i} className="contributor-stat">
               <div className="skeleton skeleton-line" style={{ width: 100 }} />
               <div
                 className="skeleton skeleton-line"
                 style={{ width: 60, height: 20, marginTop: 8 }}
               />
+              <div
+                className="skeleton skeleton-line"
+                style={{ width: 140, height: 10, marginTop: 6 }}
+              />
             </article>
           ))}
+        </div>
+        <div className="contributor-table-wrap" aria-hidden="true">
+          <div className="contributor-table contributor-table-head">
+            <div className="contributor-table-row">
+              <span>
+                <div className="skeleton skeleton-line" style={{ width: 80 }} />
+              </span>
+              <span>
+                <div className="skeleton skeleton-line" style={{ width: 80 }} />
+              </span>
+              <span>
+                <div className="skeleton skeleton-line" style={{ width: 80 }} />
+              </span>
+            </div>
+          </div>
+          <div className="contributor-table contributor-table-body">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="contributor-table-row">
+                <div
+                  className="contributor-address"
+                  style={{ display: 'flex', alignItems: 'center', gap: 10 }}
+                >
+                  <div
+                    className="skeleton"
+                    style={{ width: 24, height: 24, borderRadius: '50%' }}
+                  />
+                  <div className="skeleton skeleton-line" style={{ width: 120 }} />
+                </div>
+                <div className="contributor-amounts">
+                  <div className="skeleton skeleton-line" style={{ width: 60 }} />
+                </div>
+                <div className="contributor-amounts">
+                  <div className="skeleton skeleton-line" style={{ width: 60 }} />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
     );
@@ -101,7 +178,11 @@ export function ContributorSummary({
 
   if (error) {
     return (
-      <section className="contributor-summary" aria-label="Contributor summary">
+      <section
+        ref={containerRef as any}
+        className="contributor-summary"
+        aria-label="Contributor summary"
+      >
         <div className="contributor-summary-heading">
           <h3 className="contributor-summary-title">Contributor summary</h3>
         </div>
@@ -114,7 +195,11 @@ export function ContributorSummary({
 
   if (contributors.length === 0) {
     return (
-      <section className="contributor-summary" aria-label="Contributor summary">
+      <section
+        ref={containerRef as any}
+        className="contributor-summary"
+        aria-label="Contributor summary"
+      >
         <div className="contributor-summary-heading">
           <h3 className="contributor-summary-title">Contributor summary</h3>
         </div>
@@ -143,8 +228,15 @@ export function ContributorSummary({
     downloadCsv(filename, buildContributorCsv(contributors));
   }
 
+  const visibleContributors = contributors.slice(0, visibleCount);
+  const hasMore = contributors.length > visibleCount;
+
   return (
-    <section className="contributor-summary" aria-label="Contributor summary">
+    <section
+      ref={containerRef as any}
+      className="contributor-summary"
+      aria-label="Contributor summary"
+    >
       <div className="contributor-summary-heading">
         <h3 className="contributor-summary-title">Contributor summary</h3>
         <button
@@ -199,7 +291,7 @@ export function ContributorSummary({
           </div>
         </div>
         <div className="contributor-table contributor-table-body" role="rowgroup">
-          {contributors.map((row) => (
+          {visibleContributors.map((row) => (
             <div key={row.contributor} role="row" className="contributor-table-row">
               <div
                 role="cell"
@@ -246,6 +338,18 @@ export function ContributorSummary({
           ))}
         </div>
       </div>
+      {hasMore ? (
+        <div style={{ padding: '12px 0', textAlign: 'center' }}>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => setVisibleCount((c) => c + CONTRIBUTOR_INCREMENT)}
+          >
+            Show {Math.min(CONTRIBUTOR_INCREMENT, contributors.length - visibleCount)} more (
+            {visibleCount}/{contributors.length})
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

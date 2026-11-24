@@ -69,7 +69,7 @@ export const KeyboardShortcutsOverlay: React.FC<KeyboardShortcutsOverlayProps> =
   if (!isOpen) return null;
 
   return (
-    <div className="shortcuts-overlay-backdrop" onClick={onClose} aria-hidden="true">
+    <div className="shortcuts-overlay-backdrop" onClick={onClose}>
       <div
         className="shortcuts-overlay-content card animate-fade-in"
         role="dialog"

@@ -175,3 +175,206 @@ Security alerts from CodeQL are surfaced in the **Security** tab of the reposito
 - Consider the security impact of any medium or low severity issues
 
 The workflow uses the `security-extended` and `security-and-quality` query suites to provide comprehensive coverage of potential vulnerabilities.
+
+---
+
+## Self-Audit Checklist (Smart Contract / DeFi)
+
+Use this checklist when reviewing the Soroban contract (`contracts/src/lib.rs`) or proposing changes that affect on-chain logic. Each item must be answered before merging.
+
+### Reentrancy
+
+| # | Check | Severity | Mitigation | Status |
+|---|-------|----------|------------|--------|
+| 1 | External token transfers occur **after** all state updates (checks-effects-interactions pattern) | **High** | Move `TokenClient::transfer()` calls after storage writes; or add a reentrancy guard if transfers must precede state changes | ☐ Open |
+| 2 | Cross-contract calls do not allow the callee to re-enter and mutate contract state before the first invocation completes | **High** | Verify that Soroban's host-level call-depth limits are sufficient; add a `REENTRANCY_GUARD` flag stored in temporary storage if untrusted contracts are called | ☐ Open |
+| 3 | `claim()` and `refund()` loops call external token contracts on each iteration without intermediate state snapshots | **Medium** | Consider batching transfers or taking a storage snapshot before the loop so a partial failure does not leave state inconsistent | ☐ Open |
+
+### Access Control
+
+| # | Check | Severity | Mitigation | Status |
+|---|-------|----------|------------|--------|
+| 4 | Admin address is immutable after `initialize()` | **Critical** | Already enforced — `DataKey::Admin` is set once and never updated; verify no `set_admin()` function is added in future PRs | ☐ Pass |
+| 5 | Creator-only functions (`cancel_campaign`, `claim`, `update_metadata`) verify caller matches `campaign.creator` | **High** | Already enforced with `require_auth()` + identity comparison; ensure any new creator-gated function follows the same pattern | ☐ Pass |
+| 6 | No function allows arbitrary address to withdraw funds from any campaign | **Critical** | `claim()` checks `campaign.creator`; `refund()` checks `contributor.require_auth()` and `HasContributed` key; verify no new withdrawal paths bypass these checks | ☐ Open |
+| 7 | Pause mechanism excludes read-only functions to avoid denial-of-service on data reads | **Low** | Already enforced — `require_not_paused()` is called only in state-mutating entry points; verify any new `fn` with side effects does the same | ☐ Pass |
+
+### Integer Overflow / Arithmetic
+
+| # | Check | Severity | Mitigation | Status |
+|---|-------|----------|------------|--------|
+| 8 | `overflow-checks = true` is set in `Cargo.toml` release profile | **Critical** | Already present on line 27 of `contracts/Cargo.toml`; verify it is never removed or commented out | ☐ Pass |
+| 9 | `pledged_amount + amount <= target_amount` guard prevents both overflow and over-funding | **High** | Already implemented at line 361 of `lib.rs`; verify similar guards exist for any new arithmetic in the contract | ☐ Open |
+| 10 | Token amounts use `i128` (not `u64` or `u128`) to match Soroban token interface | **Medium** | Already using `i128` throughout; verify new fields also use `i128` and never cast without bounds checks | ☐ Pass |
+| 11 | Multiplication before division (or vice versa) does not cause precision loss or overflow | **Medium** | Review any percentage or ratio calculations added in future; prefer `checked_mul().unwrap_or(i128::MAX)` for multiplications that could overflow | ☐ Open |
+| 12 | `contributor_count += 1` (and similar counters) cannot overflow | **Low** | With `overflow-checks = true`, a panic would occur; consider using `saturating_add` if graceful handling is preferred over panic | ☐ Open |
+
+### Flash Loan Attack Vectors
+
+| # | Check | Severity | Mitigation | Status |
+|---|-------|----------|------------|--------|
+| 13 | Contract does not expose a "donate" or "deposit" function that manipulates internal price/balance snapshots used by other operations | **High** | Verify no function accepts tokens without recording a corresponding contribution or refund; flash loans rely on the ability to manipulate oracle-like state | ☐ Open |
+| 14 | Campaign balance used for eligibility checks reflects actual token balance of the contract, not a stored snapshot | **Medium** | The contract tracks per-campaign token balances via `CampaignTokenBalance`; consider cross-referencing with `TokenClient::balance()` to prevent balance inflation attacks | ☐ Open |
+| 15 | No governance or quorum function relies on a contributor's token balance that could be borrowed for a single transaction | **Medium** | `contributor_count` counts unique addresses (not balances), so flash-loaned tokens cannot inflate voting power; verify the same for any future governance features | ☐ Pass |
+
+### Front-Running
+
+| # | Check | Severity | Mitigation | Status |
+|---|-------|----------|------------|--------|
+| 16 | `create_campaign` parameters cannot be front-run to replace a legitimate campaign creation with a lookalike | **Medium** | `campaign_id` is a monotonically increasing `u32`, so an attacker can only create their own campaign with a predictable ID; no user-supplied ID exists | ☐ Pass |
+| 17 | `claim()` cannot be front-run by an attacker to redirect funds | **High** | `claim()` transfers only to `campaign.creator` (verified via `require_auth()`); funds always go to the intended recipient regardless of transaction ordering | ☐ Pass |
+| 18 | Deadline-dependent logic (`claim` vs `refund`) is not susceptible to validator timestamp manipulation | **Medium** | Soroban ledger timestamps are bounded by validator consensus; still, avoid tight time windows where a one-slot difference changes fund disposition | ☐ Open |
+| 19 | `contribute()` race condition: two contributions arriving in the same block cannot jointly exceed `target_amount` | **Low** | Each contribution checks `pledged_amount + amount <= target_amount` independently; in practice the gap is bounded by one contribution. Acceptable for MVP | ☐ Open |
+
+### Findings Register (Open Items)
+
+| ID | Category | Finding | Severity | Mitigation | Assigned To | Due Date |
+|----|----------|---------|----------|------------|-------------|----------|
+| F-01 | Reentrancy | Token transfer precedes state update in `contribute()` — external call before storage write violates checks-effects-interactions | **High** | Swap the order: update `pledged_amount`, `contributor_count`, and per-contributor balance **before** calling `TokenClient::transfer()` | — | — |
+| F-02 | Access Control | No two-step admin transfer mechanism exists | **Low** | If admin rotation is needed, implement a two-step pattern (propose + accept) to prevent accidental lockout | — | — |
+| F-03 | Arithmetic | Counter increments use raw `+=` rather than `checked_add` | **Low** | With `overflow-checks=true` these will panic on overflow, which is acceptable; upgrade to `checked_add()` for explicit error handling if desired | — | — |
+
+---
+
+## External Audit Firm Template
+
+Use this template when engaging an external security firm to audit the Soroban smart contract. Fill in the fields marked `[...]` before sending.
+
+```markdown
+# Audit Request: Stellar Goal Vault — Soroban Smart Contract
+
+## Project Overview
+
+- **Repository:** https://github.com/ritik4ever/stellar-goal-vault
+- **Contract:** `contracts/src/lib.rs` — crowdfunding vault
+- **Language / Framework:** Rust / Soroban SDK 21.0.0
+- **Deployment Target:** Stellar Soroban (testnet → mainnet)
+- **Commit Hash:** [GIT_COMMIT_HASH]
+- **Prior Audits:** None
+
+## Scope
+
+### In-Scope Files
+
+| File | LOC | Description |
+|------|-----|-------------|
+| `contracts/src/lib.rs` | ~828 | Main contract — campaign creation, contribution, claiming, refunding, cancellation, deadline extensions, pause, migrate |
+| `contracts/src/test.rs` | ~1210 | Unit tests (optional: review test coverage quality) |
+
+### Out of Scope
+
+- Backend API (`backend/`)
+- Frontend (`frontend/`)
+- Docker / CI configuration
+- JavaScript/TypeScript code
+
+## Threat Model
+
+### Assumed Attacker Capabilities
+
+- Can submit arbitrary transactions to the Soroban network
+- Can deploy their own Soroban contracts
+- Can observe the mempool (subject to Soroban DAG ordering constraints)
+- Does **not** control the Stellar validator set
+- Does **not** have access to the contract admin key
+
+### Critical Assets
+
+| Asset | Description |
+|-------|-------------|
+| Campaign funds | Tokens held by the contract on behalf of campaign creators and contributors |
+| Admin key | Controls `set_paused()` and `migrate()` — loss or compromise is critical |
+| Campaign metadata integrity | Must not be arbitrarily overwritable |
+
+## Focus Areas
+
+Please prioritize the following vulnerability classes during the audit:
+
+1. **Reentrancy** — Cross-contract calls during `contribute()`, `claim()`, and `refund()`; verify checks-effects-interactions pattern
+2. **Access control** — Admin, creator, contributor boundaries; `require_auth()` usage
+3. **Integer arithmetic** — Overflow, underflow, precision loss in `pledged_amount`, deadline calculations, contribution limits
+4. **Flash loan resistance** — Any function that could be exploited with a single-transaction borrow-and-repay cycle
+5. **Front-running / MEV** — Transaction ordering dependencies, deadline manipulation, race conditions in `contribute()` and `claim()`
+6. **Fund safety** — Tokens cannot be permanently locked, stolen by non-creators, or claimed by unauthorized parties
+7. **State consistency** — Idempotency of `migrate()`, correctness of `refund_all()` enumeration, dust handling
+
+## Deliverables
+
+### Required
+
+- [ ] **Audit Report** — PDF or Markdown covering all findings with:
+  - Title and description of each finding
+  - Severity rating (Critical / High / Medium / Low / Informational)
+  - Steps to reproduce or proof-of-concept
+  - Recommended remediation
+  - Code references (file + line number)
+- [ ] **Status Summary** — Table of all findings with severity, status (Open / Acknowledged / Fixed / Verified), and verification commit hash
+- [ ] **Re-Audit Letter** — After fixes are applied, a brief verification report confirming all high-severity items are resolved
+
+### Nice-to-Have
+
+- [ ] **Test Suite Recommendations** — Suggestions for property-based tests or fuzzing harnesses
+- [ ] **Gas / Fee Optimization Notes** — Suggestions to reduce contract execution costs
+
+## Timeline & Process
+
+- **Audit Duration:** [e.g., 2 weeks]
+- **Communication:** [e.g., Slack / Signal / Email]
+- **Submission Method:** Private GitHub repository or encrypted email
+- **Fix Verification:** After findings are addressed, one round of re-audit on the updated commit
+- **Embargo Period:** Findings must not be publicly disclosed until [DATE] or until the fix has been deployed to mainnet
+
+## Access
+
+- [ ] Audit firm will be granted read-only access to a private fork or mirror of the repository
+- [ ] CI/CD secrets and deployment credentials will **not** be shared
+- [ ] No production data will be shared
+- [ ] All communication will be encrypted
+
+## Acceptance Criteria
+
+This audit is considered complete when:
+
+1. All in-scope files have been reviewed
+2. Every finding has a severity rating and remediation recommendation
+3. No **Critical** or **High** severity findings remain unresolved without an explicit risk acceptance
+4. The re-audit letter confirms all fixes are correctly applied
+5. The final report is delivered in the agreed format
+```
+
+---
+
+## Audit Sign-Off
+
+Before each production deployment, complete this sign-off:
+
+```markdown
+# Security Audit Sign-Off
+
+**Deployment Tag:** [DEPLOYMENT_VERSION]
+**Commit:** [GIT_COMMIT_HASH]
+**Review Date:** [DATE]
+**Reviewer:** [NAME]
+
+## Self-Audit Checklist Sign-Off
+
+All checklist items above have been reviewed:
+
+- [ ] Reentrancy — no high-severity open items
+- [ ] Access Control — no critical or high-severity open items
+- [ ] Integer Overflow — overflow-checks enabled, no unsafe arithmetic introduced
+- [ ] Flash Loan Vectors — no exploitable balance-manipulation paths
+- [ ] Front-Running — no transaction-ordering dependencies with fund impact
+
+## External Audit Status
+
+- [ ] External audit has been completed for this scope
+- [ ] All critical/high findings remediated and verified
+- [ ] Risk acceptance documented for any remaining medium/low items
+
+## Decision
+
+☐ **Approved** — ready for deployment
+☐ **Changes requested** — [link to required changes]
+☐ **Blocked** — [reason]
+```

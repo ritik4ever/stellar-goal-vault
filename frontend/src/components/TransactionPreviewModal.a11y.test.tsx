@@ -22,11 +22,7 @@ const previewWithFee = {
 describe.each(THEMES)('TransactionPreviewModal Accessibility (%s theme)', (theme: ThemeMode) => {
   it('has no accessibility violations with estimated fee', async () => {
     const { container } = render(
-      <TransactionPreviewModal
-        preview={previewWithFee}
-        onConfirm={() => {}}
-        onCancel={() => {}}
-      />,
+      <TransactionPreviewModal preview={previewWithFee} onConfirm={() => {}} onCancel={() => {}} />,
     );
 
     const results = await runAxeAudit(container, theme);
@@ -44,16 +40,39 @@ describe.each(THEMES)('TransactionPreviewModal Accessibility (%s theme)', (theme
 
   it('has no accessibility violations with expanded XDR panel', async () => {
     const { container } = render(
-      <TransactionPreviewModal
-        preview={previewWithFee}
-        onConfirm={() => {}}
-        onCancel={() => {}}
-      />,
+      <TransactionPreviewModal preview={previewWithFee} onConfirm={() => {}} onCancel={() => {}} />,
     );
 
     fireEvent.click(screen.getByRole('checkbox'));
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
+  });
+
+  it('exposes accessible names for confirm and cancel actions', () => {
+    render(
+      <TransactionPreviewModal preview={previewWithFee} onConfirm={() => {}} onCancel={() => {}} />,
+    );
+
+    expect(screen.getByRole('button', { name: /confirm/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /cancel/i })).toBeDefined();
+  });
+
+  it('supports keyboard activation of the confirm action', () => {
+    const onConfirm = vi.fn();
+    render(
+      <TransactionPreviewModal
+        preview={previewWithFee}
+        onConfirm={onConfirm}
+        onCancel={() => {}}
+      />,
+    );
+
+    const confirmButton = screen.getByRole('button', { name: /confirm/i });
+    confirmButton.focus();
+    expect(confirmButton).toHaveFocus();
+    fireEvent.keyDown(confirmButton, { key: 'Enter', code: 'Enter' });
+    fireEvent.click(confirmButton);
+    expect(onConfirm).toHaveBeenCalled();
   });
 });

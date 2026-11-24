@@ -83,6 +83,10 @@ Soroban SDK version: 21.7.7
 | `get_next_campaign_id` | ~6 000 | 1 | 0 | 0 | 0 |
 | `get_campaign_count` | ~6 000 | 1 | 0 | 0 | 0 |
 | `get_version` | ~10 000 | 1 | 1 | 0 | 0 |
+| `initialize` | ~60 582 | 1 | 3 | 1 | 2 paths |
+| `set_paused` | ~75 200 | 1 | 1 | 2 | 2 paths |
+| `set_fee` | ~80 125 | 1 | 1 | 1 | 3 paths |
+| `set_fee_recipient` | ~91 199 | 1 | 1 | 1 | 2 paths |
 
 ### Notes
 
@@ -112,3 +116,18 @@ See also:
   every PR modifying `contracts/`.
 - [`scripts/benchmark.sh`](../scripts/benchmark.sh) — compares current cost to
   baseline.
+### Contract Configuration Resource Usage (#917)
+
+Resource consumption for administrative configuration entry points (measured in test harness with `soroban-env-host` 28.0.2 budget tracker):
+
+| Configuration Entry Point | CPU Instructions | Memory (bytes) | Storage Reads/Writes | Events Emitted |
+|---|---|---|---|---|
+| `initialize` | 60,582 | 24,086 | 1 read, 3 writes (`Admin`, `Paused`, `MinContribution`) | 1 (`Goal`, `Init`) |
+| `set_paused(true)` | 75,169 | 26,987 | 1 read (`Admin`), 1 write (`Paused`) | 2 (`Goal`/`Pause`, `Goal`/`CfgPause`) |
+| `set_paused(false)` | 75,266 | 27,259 | 1 read (`Admin`), 1 write (`Paused`) | 2 (`Goal`/`Unpause`, `Goal`/`CfgPause`) |
+| `set_fee` | 80,125 | 30,265 | 2 reads (`Admin`, `PlatformFeeBps`), 1 write (`PlatformFeeBps`) | 1 (`Goal`, `FeeSet`) |
+| `set_fee_recipient` | 91,199 | 34,209 | 2 reads (`Admin`, `FeeRecipient`), 1 write (`FeeRecipient`) | 1 (`Goal`, `RecipSet`) |
+
+#### High-Cost Operations Discovered:
+- **`set_fee_recipient`**: Demonstrates the highest CPU (91k) and memory (34k) overhead among configuration entry points due to handling optional `Address` serialization/deserialization across instance storage boundaries and event payload packaging.
+- **`set_paused`**: Event serialization for contract version string and two event topics contributes ~20k instructions over basic boolean persistence.

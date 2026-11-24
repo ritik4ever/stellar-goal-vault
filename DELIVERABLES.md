@@ -1,489 +1,283 @@
-# 📦 Integration Test Suite - Complete Deliverables
+# Deliverables
 
-## Project Summary
-
-A **production-ready, comprehensive end-to-end integration test suite** has been successfully implemented for the Stellar Goal Vault campaign lifecycle API. The suite provides 100% confidence in the campaign state machine before deployment.
-
----
-
-## 📁 Files Delivered
-
-### 1. **Core Test Suite** 
-#### `backend/tests/integration_test.ts` ✅
-**Size**: ~770 lines  
-**Purpose**: Main test file with all test scenarios
-
-**Contents**:
-- Test configuration & setup (database isolation, server startup)
-- Test utilities (mock data, helper functions)
-- 15 test suites covering:
-  - Campaign lifecycle happy path
-  - Edge case handling
-  - Authorization & validation
-  - State consistency
-  - Health & stability
-
-**Features**:
-- Isolated test database per worker (`/tmp/stellar-goal-vault-integration-{PID}-{TIMESTAMP}.db`)
-- Automatic server startup and teardown
-- Complete campaign state machine testing
-- Event history verification
-- Error path validation
+Current implementation status for the Stellar Goal Vault project.
+Last updated: 2026-07-29
 
 ---
 
-### 2. **Shared Test Utilities**
-#### `backend/tests/utils.ts` ✅
-**Size**: ~220 lines  
-**Purpose**: Reusable test helpers and fixtures
+## Backend API
 
-**Exports**:
-- Mock data:
-  - `MOCK_CREATORS` (alice, bob, charlie)
-  - `MOCK_CONTRIBUTORS` (dave, eve, frank, grace, henry)
-  - `MOCK_ASSETS` (USDC, XLM)
-- Time helpers:
-  - `nowInSeconds()`
-  - `generateTxHash()`
-  - `sleep(ms)`
-  - `roundAmount(value)`
-- API request helpers:
-  - `createCampaign()`
-  - `addPledge()`
-  - `claimCampaign()`
-  - `refundContributor()`
-  - `getCampaign()`
-  - `getCampaignHistory()`
-  - `listCampaigns()`
-- Assertion helpers:
-  - `assertCampaignState()`
-  - `assertHistoryContains()`
-  - `assertError()`
-  - `assertSuccess()`
+### Core Server
 
----
+- [x] Express 5 application with TypeScript — `backend/src/index.ts`
+- [x] Structured request logging — `backend/src/logger.ts`
+- [x] Request context propagation — `backend/src/requestContext.ts`
+- [x] Environment variable validation on startup — `backend/src/validateEnv.ts`
+- [x] OpenAPI spec generation (zod-to-openapi) — `backend/src/openapi.ts`
 
-### 3. **Test Configuration**
-#### `backend/vitest.config.ts` ✅
-**Size**: ~30 lines  
-**Purpose**: Vitest test runner configuration
+### Campaign Service
 
-**Configuration**:
-```yaml
-environment: node
-threads: 4 workers (parallel execution)
-maxThreads: 4
-minThreads: 1
-isolate: true (test file isolation)
-globals: true (describe/it/expect auto-imported)
-testTimeout: 30000ms (30 seconds)
-include patterns: src/**/*.test.ts, tests/**/*.test.ts
-```
+- [x] Campaign CRUD + state machine logic — `backend/src/services/campaignStore.ts`
+- [x] LRU caching layer — `backend/src/services/campaignCache.ts`
+- [x] Event history tracking — `backend/src/services/eventHistory.ts`
+- [x] Soroban RPC event indexer — `backend/src/services/eventIndexer.ts`
+- [x] SQLite database with WAL mode — `backend/src/services/db.ts`
+- [x] Deterministic data seeding — `backend/src/services/seedDeterministic.ts`
 
-**Benefits**:
-- 4x parallel execution vs sequential
-- Node.js environment (not browser)
-- Full test file isolation
-- Short timeout prevents hanging tests
+### API Endpoints
+
+- [x] Campaign CRUD (create, read, list, update)
+- [x] Pledge/contribute endpoint
+- [x] Claim endpoint
+- [x] Refund endpoint
+- [x] Search with pagination and asset filter
+- [x] Campaign stats endpoint
+- [x] Health endpoint with DB status
+- [x] Contributors summary endpoint (backend)
+- [x] Event history endpoint
+
+### Middleware
+
+- [x] API key authentication — `backend/src/middleware/apiKeyAuth.ts`
+- [x] Response caching — `backend/src/middleware/cacheMiddleware.ts`
+- [x] Request ID injection — `backend/src/middleware/requestId.ts`
+- [x] Request body validation (zod) — `backend/src/middleware/validateBody.ts`
+
+### Validation
+
+- [x] Zod schemas for all endpoints — `backend/src/validation/schemas.ts`
+- [x] Stellar address validation — `backend/src/validation/stellarAddress.ts`
+- [x] URL safety checks — `backend/src/validation/urlSafety.ts`
 
 ---
 
-### 4. **Documentation - README**
-#### `backend/tests/README.md` ✅
-**Size**: ~400 lines  
-**Purpose**: Complete user guide for running tests
+## Frontend
 
-**Sections**:
-1. Overview & features
-2. Requirements & setup
-3. Running tests (basic & advanced)
-4. Test structure & discovery
-5. Test scenarios explained
-6. Database isolation explained
-7. CI/CD integration
-8. Performance metrics
-9. Test utilities reference
-10. Troubleshooting guide
-11. Best practices
-12. Contributing guidelines
+### Core UI
 
-**Usage Examples**:
-```bash
-npm test                          # Run all tests
-npm test -- tests/                # Integration only
-npm test -- --watch              # Watch mode
-npm test -- --coverage           # Coverage report
-```
+- [x] React 18 + Vite 5 + TypeScript 5 — `frontend/`
+- [x] Tailwind CSS 3 styling — `frontend/src/index.css`
+- [x] React Router 6 navigation — `frontend/src/App.tsx`
+- [x] PWA support (service worker) — `frontend/src/sw.ts`
 
----
+### Components (40+)
 
-### 5. **Documentation - Setup & Architecture**
-#### `backend/tests/SETUP.md` ✅
-**Size**: ~450 lines  
-**Purpose**: Deep technical documentation
+- [x] CampaignCard — campaign list cards
+- [x] CampaignDetailPanel — campaign detail view
+- [x] CampaignsTable — virtualized campaign table (@tanstack/react-virtual)
+- [x] CampaignTimeline — campaign event timeline
+- [x] CreateCampaignForm — campaign creation form
+- [x] ContributorSummary — contributor breakdown
+- [x] CreatorAnalytics — creator dashboard analytics (recharts)
+- [x] TransactionPreviewModal — transaction preview before signing
+- [x] WalletWidget — Freighter wallet connection
+- [x] SearchInput — campaign search
+- [x] SortDropdown — sort controls
+- [x] EmptyState — empty state illustrations
+- [x] ErrorBoundary — React error boundaries
+- [x] SkeletonCard — loading skeletons
+- [x] ToastContainer — notification toasts
+- [x] CopyButton — clipboard copy utility
+- [x] FundedConfetti — celebration animation
+- [x] IssueBacklog — open-source issue display
+- [x] KeyboardShortcutsOverlay — keyboard shortcuts
+- [x] NotFoundPage — 404 page
 
-**Topics**:
-1. Architecture overview
-2. Database isolation design
-3. Vitest configuration explained
-4. Test coverage breakdown
-5. Database cleanup strategy
-6. Performance optimization
-7. CI/CD integration details
-8. Environment variables
-9. Troubleshooting section
-10. Test data management
-11. Maintenance guidelines
-12. References to related docs
+### Services
 
-**Includes**:
-- Architecture diagrams
-- Performance benchmarks
-- Isolation examples
-- State machine diagrams
-- Debugging techniques
+- [x] API client — `frontend/src/services/api.ts`
+- [x] HTTP client — `frontend/src/services/httpClient.ts`
+- [x] Freighter wallet integration — `frontend/src/services/freighter.ts`
+- [x] Soroban SDK integration — `frontend/src/services/soroban.ts`
 
----
+### Hooks
 
-### 6. **Documentation - Implementation Details**
-#### `backend/tests/IMPLEMENTATION.md` ✅
-**Size**: ~350 lines  
-**Purpose**: Technical implementation reference
+- [x] useFreighter — wallet state management
+- [x] useMediaQuery — responsive breakpoints
+- [x] useToast — toast notifications
+- [x] useLocalStorage — persistent state
+- [x] useDebounce — input debouncing
 
-**Sections**:
-1. Executive summary
-2. File structure overview
-3. Database isolation strategy
-4. Complete test coverage breakdown (7 categories)
-5. Implementation details for each test
-6. Vitest configuration explanation
-7. Performance profile analysis
-8. CI/CD integration details
-9. Production safety guards
-10. Test utilities module
-11. Running tests
-12. Verification checklist
-13. Conclusion & next steps
+### Utilities
 
-**Includes**:
-- Code examples
-- Performance metrics
-- Design decisions
-- Safety analysis
+- [x] Input validation — `frontend/src/utils/validation.ts`
+- [x] CSV export — `frontend/src/utils/exportCsv.ts`
+- [x] Funding celebration effects — `frontend/src/lib/fundingCelebration.ts`
+- [x] Keyboard shortcut definitions — `frontend/src/lib/shortcuts.ts`
 
 ---
 
-### 7. **CI/CD Workflow**
-#### `.github/workflows/backend-integration-tests.yml` ✅
-**Size**: ~60 lines  
-**Purpose**: GitHub Actions automation
+## Soroban Smart Contract
 
-**Triggers**:
-- Push to main/develop
-- Pull requests to main/develop
-- Only runs when backend files change
-
-**Jobs**:
-1. `integration-tests`: Run tests on multiple Node versions
-   - Matrix: Node 18.x, 20.x
-   - Steps: checkout → setup → install → test → coverage → cleanup
-2. `test-results`: Summary job showing pass/fail
-
-**Features**:
-- Automatic test execution on PR
-- Coverage upload to Codecov
-- Parallel matrix execution (2 Node versions)
-- Automatic cleanup
-- Fails PR if tests don't pass
+- [x] Campaign lifecycle (create, contribute, claim, refund) — `contracts/src/lib.rs`
+- [x] Initialize with min contribution — `contracts/src/lib.rs`
+- [x] Update metadata — `contracts/src/lib.rs`
+- [x] Request deadline extension — `contracts/src/lib.rs`
+- [x] Approve extension — `contracts/src/lib.rs`
+- [x] Cancel campaign — `contracts/src/lib.rs`
+- [x] Pause/unpause — `contracts/src/lib.rs`
+- [x] State migration — `contracts/src/lib.rs`
+- [x] Contract unit tests — `contracts/src/test.rs`
+- [x] 50+ test snapshots — `contracts/test_snapshots/`
+- [x] Deployment script — `scripts/deploy.sh`
+- [x] TypeScript bindings generator — `scripts/gen-bindings.ts`
 
 ---
 
-### 8. **Quick Start Guide**
-#### `INTEGRATION_TESTS_SUMMARY.md` ✅
-**Size**: ~300 lines  
-**Purpose**: Executive summary & quick reference
+## Testing
 
-**Contents**:
-- What was built (by the numbers)
-- Deliverables checklist
-- 30-second quick start
-- Test coverage summary
-- Database isolation explained
-- Performance metrics
-- Sample test code
-- Utilities provided
-- CI/CD overview
-- Troubleshooting
-- Verification checklist
-- Next steps
+### Backend Unit Tests (20 files)
 
----
+- [x] API endpoint tests — `backend/src/api.test.ts`, `index.test.ts`
+- [x] Campaign store tests — `backend/src/services/campaignStore.test.ts`
+- [x] Concurrent campaign store tests — `backend/src/services/campaignStore.concurrent.test.ts`
+- [x] Campaign cache tests — `backend/src/services/campaignCache.test.ts`
+- [x] Database WAL tests — `backend/src/services/db.wal.test.ts`
+- [x] Seed deterministic tests — `backend/src/services/seedDeterministic.test.ts`
+- [x] Middleware tests — `validateBody.test.ts`, `requestId.test.ts`
+- [x] Validation tests — `schemas.test.ts`, `stellarAddress.test.ts`, `urlSafety.test.ts`
+- [x] Logger tests — `backend/src/logger.test.ts`
+- [x] OpenAPI tests — `backend/src/openapi.test.ts`
+- [x] Security tests — `backend/src/security.test.ts`
+- [x] Rate limiter tests — `backend/src/rateLimiter.test.ts`
+- [x] Event metadata tests — `backend/src/services/__tests__/eventMetadata.test.ts`
+- [x] Mutation tests (Stryker) — `backend/src/services/__tests__/mutation.test.ts`
 
-### 9. **Architecture Diagrams**
-#### `ARCHITECTURE_DIAGRAMS.md` ✅
-**Size**: ~400 lines  
-**Purpose**: Visual system design documentation
+### Frontend Tests (38 files)
 
-**Diagrams**:
-1. System overview
-2. Test execution flow
-3. Parallel execution architecture (4 workers)
-4. Database isolation strategy
-5. Campaign state machine
-6. Event history timeline
-7. Test utility architecture
-8. CI/CD pipeline
+- [x] Component unit tests — `frontend/src/components/*.test.tsx`
+- [x] Accessibility tests (vitest-axe) — `frontend/src/components/*.a11y.test.tsx`
+- [x] Hook tests — `frontend/src/hooks/*.test.ts`
+- [x] Service tests — `frontend/src/services/*.test.ts`
+- [x] Utility tests — `frontend/src/utils/*.test.ts`
+- [x] Integration tests — `frontend/src/components/CampaignsTable.integration.test.tsx`
 
----
+### E2E Tests (Playwright)
 
-## 📊 Metrics
+- [x] Campaign lifecycle spec — `e2e/campaign-lifecycle.spec.ts`
+- [x] Campaign card visual regression — `e2e/campaign-card.visual.spec.ts`
+- [x] Dashboard page object — `e2e/dashboard.ts`
+- [x] Playwright config — `playwright.config.ts`
+- [x] Visual regression config — `playwright.visual.config.ts`
 
-### Code Coverage
-- **Total Lines of Code**: 1500+
-- **Test Code**: 770 lines (integration_test.ts)
-- **Utilities**: 220 lines (utils.ts)
-- **Configuration**: 30 lines (vitest.config.ts)
-- **CI/CD**: 60 lines (workflow)
+### Integration Tests
 
-### Documentation
-- **README**: 400 lines
-- **SETUP**: 450 lines
-- **IMPLEMENTATION**: 350 lines
-- **SUMMARY**: 300 lines
-- **ARCHITECTURE**: 400 lines
-- **Total**: 1900+ lines
-
-### Test Coverage
-- **Test Suites**: 15 groups
-- **Test Cases**: 70+ assertions
-- **State Machine Coverage**: 100%
-- **Scenarios**: Happy path, edge cases, auth, consistency, health
-
-### Performance
-- **Parallel Execution**: 4 threads (4x faster)
-- **Full Suite Runtime**: ~10 seconds
-- **Individual Test**: 100-500ms
-- **Database Operation**: <50ms
-- **Startup/Teardown**: <1 second
+- [x] Test utilities (mock data, API helpers, assertions) — `backend/tests/utils.ts` (335 lines)
+- [ ] Backend integration test suite — `backend/tests/integration.test.ts` (empty, 0 lines)
 
 ---
 
-## ✅ Verification Checklist
+## CI/CD
 
-### ✅ Isolation
-- [x] Unique database path per test worker
-- [x] No test pollution possible
-- [x] Parallel execution safe
-- [x] Automatic cleanup guaranteed
+### GitHub Actions Workflows (16)
 
-### ✅ State Machine Testing
-- [x] All states tested (open, funded, failed, claimed)
-- [x] All transitions validated
-- [x] Invalid transitions rejected
-- [x] Edge cases covered
+- [x] Main CI pipeline — `.github/workflows/ci.yml`
+- [x] PR test runner — `.github/workflows/pr-tests.yml`
+- [x] Backend CI — `.github/workflows/backend.yml`
+- [x] Frontend CI — `.github/workflows/frontend.yml`
+- [x] Backend integration tests workflow — `.github/workflows/backend-integration-tests.yml`
+- [x] Soroban contract build & test — `.github/workflows/contracts-ci.yml`
+- [x] ABI bindings freshness check — `.github/workflows/check-bindings.yml`
+- [x] Playwright E2E — `.github/workflows/playwright-e2e.yml`
+- [x] Visual regression — `.github/workflows/playwright-visual-regression.yml`
+- [x] Lighthouse CI — `.github/workflows/lighthouse-ci.yml`
+- [x] Storybook build/deploy — `.github/workflows/storybook.yml`
+- [x] Load testing — `.github/workflows/load-test.yml`
+- [x] CodeQL security scanning — `.github/workflows/codeql-analysis.yml`
+- [x] Gitleaks secret detection — `.github/workflows/gitleaks.yml`
+- [x] Docker GHCR publish — `.github/workflows/publish-ghcr.yml`
+- [x] Release-please automation — `.github/workflows/release.yml`
 
-### ✅ Security & Safety
-- [x] No production database usage
-- [x] Environment variables protected
-- [x] Authorization tested
-- [x] Input validation verified
+### Supporting Config
 
-### ✅ Performance
-- [x] Tests run in parallel (4 threads)
-- [x] Full suite < 10 seconds
-- [x] CI/CD friendly (< 5 min on Actions)
-- [x] No test pollution overhead
-
-### ✅ Maintainability
-- [x] Clear test organization
-- [x] Shared utilities provided
-- [x] Mock data fixtures
-- [x] Comprehensive documentation
-
-### ✅ Documentation
-- [x] User guide (README.md)
-- [x] Architecture docs (SETUP.md)
-- [x] Implementation details (IMPLEMENTATION.md)
-- [x] Quick reference (SUMMARY.md)
-- [x] Visual diagrams (ARCHITECTURE.md)
-
-### ✅ CI/CD Integration
-- [x] GitHub Actions workflow
-- [x] Multiple Node versions tested
-- [x] Coverage upload configured
-- [x] PR integration complete
+- [x] Dependabot — `.github/dependabot.yml`
+- [x] Issue templates — `.github/ISSUE_TEMPLATE/`
+- [x] PR template — `.github/PULL_REQUEST_TEMPLATE.md`
 
 ---
 
-## 🚀 Quick Start
+## Infrastructure
 
-### Install & Run
-```bash
-cd backend
-npm install              # Install dependencies
-npm test                 # Run all tests
-```
-
-### Other Commands
-```bash
-npm test -- tests/       # Integration tests only
-npm test -- --watch      # Watch mode
-npm test -- --coverage   # Coverage report
-npm test -- --reporter=verbose  # Verbose output
-```
+- [x] Docker Compose (dev + prod) — `docker-compose.yml`, `docker-compose.override.yml`
+- [x] Backend Dockerfile — `backend/dockerfile`
+- [x] Frontend Dockerfile — `frontend/dockerfile`
+- [x] Nginx reverse proxy — `nginx/`
+- [x] Release-please config — `release-please-config.json`
+- [x] Benchmarking script — `scripts/benchmark.sh`
+- [x] SRI check script — `scripts/check-sri.sh`
 
 ---
 
-## 📖 Documentation Map
+## Documentation
 
-1. **START HERE**: [INTEGRATION_TESTS_SUMMARY.md](INTEGRATION_TESTS_SUMMARY.md) - Quick overview
-2. **HOW TO RUN**: [backend/tests/README.md](backend/tests/README.md) - Complete user guide
-3. **HOW IT WORKS**: [backend/tests/SETUP.md](backend/tests/SETUP.md) - Architecture & design
-4. **IMPLEMENTATION**: [backend/tests/IMPLEMENTATION.md](backend/tests/IMPLEMENTATION.md) - Technical details
-5. **VISUALS**: [ARCHITECTURE_DIAGRAMS.md](ARCHITECTURE_DIAGRAMS.md) - System diagrams
-6. **THIS FILE**: [All deliverables summary](current file)
+### Core Docs
 
----
+- [x] Project README — `README.md` (574 lines)
+- [x] Changelog — `CHANGELOG.md` (v0.1.0 through v0.6.0)
+- [x] Contributing guide — `CONTRIBUTING.md`
+- [x] Security policy — `SECURITY.md`
+- [x] Security checklist — `SECURITY_CHECKLIST.md`
+- [x] Deployment guide — `DEPLOYMENT.md`
+- [x] Operations runbook — `RUNBOOK.md`
+- [x] FAQ — `FAQ.md`
 
-## 🔍 What Each File Does
+### Technical Docs
 
-| File | Purpose | Size | Key Features |
-|------|---------|------|--------------|
-| `integration_test.ts` | Main test suite | 770 lines | 15 test suites, 70+ assertions |
-| `utils.ts` | Shared helpers | 220 lines | Fixtures, API helpers, assertions |
-| `vitest.config.ts` | Test config | 30 lines | 4-thread parallel execution |
-| `README.md` | User guide | 400 lines | How to run, scenarios, troubleshoot |
-| `SETUP.md` | Architecture | 450 lines | Design, isolation, performance |
-| `IMPLEMENTATION.md` | Tech ref | 350 lines | Code details, coverage breakdown |
-| Workflow YAML | CI/CD | 60 lines | GitHub Actions automation |
-| `SUMMARY.md` | Quick ref | 300 lines | Executive summary, quick start |
-| `ARCHITECTURE.md` | Diagrams | 400 lines | Visual system design |
+- [x] Architecture Mermaid diagrams — `docs/architecture.md`
+- [x] Soroban RPC docs — `docs/soroban-rpc.md`
+- [x] Architecture Decision Records — `adr/0001-sqlite-off-chain-mvp.md`, `0002-react-express-mvp.md`, `0003-freighter-wallet-integration.md`
+- [x] Campaign lifecycle implementation — `CAMPAIGN_LIFECYCLE_IMPLEMENTATION.md`
+- [x] Multi-token design decision — `MULTI_TOKEN_DESIGN_DECISION.md`
+- [x] Event metadata documentation — `EVENT_METADATA_DOCUMENTATION.md`
+- [x] Validation implementation — `VALIDATION_IMPLEMENTATION.md`, `VALIDATION_SUMMARY.md`
 
----
+### Testing Docs
 
-## 🎯 Success Criteria - All Met ✅
+- [x] Integration tests summary — `INTEGRATION_TESTS_SUMMARY.md`
+- [x] Architecture diagrams — `ARCHITECTURE_DIAGRAMS.md`
+- [x] Backend test README — `backend/tests/README.md`
+- [x] Backend test setup — `backend/tests/SETUP.md`
+- [x] Backend test implementation — `backend/tests/IMPLEMENTATION.md`
+- [x] Property tests implementation — `PROPERTY_TESTS_IMPLEMENTATION.md`
+- [x] Property tests verification — `PROPERTY_TESTS_VERIFICATION.md`
+- [x] Campaign form testing complete — `CAMPAIGN_FORM_TESTING_COMPLETE.md`
 
-### Requirement 1: Isolated Test Database
-✅ **IMPLEMENTED**
-- Temporary databases use `/tmp/` + unique PID/timestamp
-- Zero database conflicts
-- Automatic cleanup
+### Feature Docs
 
-### Requirement 2: Standard Rust Pattern
-✅ **ADAPTED** (TypeScript/Express instead of Rust)
-- Tests in `/backend/tests/` directory
-- Separate from source code (`/src/`)
-- Vitest standard test runner
+- [x] Search feature delivery — `SEARCH_FEATURE_DELIVERY.md`
+- [x] Implementation summary — `IMPLEMENTATION_SUMMARY.md`
+- [x] Open source issues — `OPEN_SOURCE_ISSUES.md`
+- [x] Documentation index — `INDEX.md`
 
-### Requirement 3: Golden Path Test
-✅ **IMPLEMENTED**
-- Creates campaign
-- Pledges from multiple contributors
-- Reaches target amount
-- Claims funds
-- Verifies event history
+### Quality Tooling
 
-### Requirement 4: Edge Cases
-✅ **IMPLEMENTED**
-- Double claim prevention
-- Invalid refunds blocked
-- Unauthorized actions rejected
-- 7 edge case tests
-
-### Requirement 5: CI/CD & Workflow
-✅ **IMPLEMENTED**
-- GitHub Actions workflow
-- Parallel test execution (4 threads)
-- No side effects/production pollution
-- Automatic test discovery
-
-### Requirement 6: Parallelism & Speed
-✅ **IMPLEMENTED**
-- 4-thread parallel execution
-- 4x faster than sequential
-- Full suite completes in ~10 seconds
-- Safe concurrent database access
-
-### Requirement 7: No Side Effects
-✅ **IMPLEMENTED**
-- Environment variables set in-process
-- Temporary databases only
-- No mutations to production
-- Automatic cleanup
+- [x] Lighthouse CI config — `frontend/lighthouserc.json`
+- [x] Storybook config — `frontend/.storybook/`
+- [x] Prettier config — `.prettierrc`
+- [x] Gitleaks config — `.gitleaks.toml`
+- [x] Husky git hooks — `.husky/`
+- [x] VS Code settings — `.vscode/`
 
 ---
 
-## 📋 Deployment Instructions
+## In Progress
 
-### For Development
-1. No additional setup needed
-2. Run `npm test` from backend directory
-3. All necessary dependencies already in package.json
-
-### For CI/CD
-1. Workflow file already in `.github/workflows/`
-2. Automatically runs on push/PR
-3. No manual configuration needed
-4. Results visible in PR Checks tab
-
-### For coverage
-1. Run `npm test -- --coverage` to generate report
-2. Coverage appears in `coverage/` directory
-3. Codecov integration optional (configured in workflow)
+| Item | Status | Notes |
+|------|--------|-------|
+| Backend integration test suite | Empty file exists | `backend/tests/integration.test.ts` is 0 lines; utils are ready |
+| Contributor summary frontend wiring | Backend done, frontend pending | API client + component hookup in `frontend/src/services/api.ts` and `ContributorSummary.tsx` |
 
 ---
 
-## 🏆 Key Achievements
+## Planned
 
-✅ **1500+ lines** of production-grade test code  
-✅ **1900+ lines** of comprehensive documentation  
-✅ **100% state machine coverage** - all transitions tested  
-✅ **4x performance** - parallel execution  
-✅ **Zero test pollution** - isolated databases  
-✅ **100% safe** - production database never touched  
-✅ **Full CI/CD** - GitHub Actions integrated  
-✅ **Easy to maintain** - clear utilities and mocks  
-
----
-
-## 🎓 Technologies Used
-
-- **Vitest**: Modern test runner with parallel support
-- **Axios**: HTTP client for API testing
-- **Express**: Backend server under test
-- **SQLite**: Database (isolated per test)
-- **GitHub Actions**: CI/CD automation
-- **TypeScript**: Type-safe test code
-
-All were already in the project's package.json.
-
----
-
-## ✨ Next Steps
-
-1. **Run tests locally**: `cd backend && npm test`
-2. **Review documentation**: Start with INTEGRATION_TESTS_SUMMARY.md
-3. **Add to PR workflow**: Tests already run automatically
-4. **Monitor in CI/CD**: Check PR Checks tab for results
-5. **Maintain coverage**: Add tests for new features
-
----
-
-**🚀 Ready to Deploy with 100% Confidence!**
-
-All deliverables are complete and production-ready. The test suite provides comprehensive coverage of the campaign lifecycle state machine with perfect isolation, high performance, and complete CI/CD integration.
-
----
-
-## 📞 Support & Questions
-
-For questions about:
-- **How to run tests**: See [README.md](backend/tests/README.md)
-- **How it works**: See [SETUP.md](backend/tests/SETUP.md)
-- **Code details**: See [IMPLEMENTATION.md](backend/tests/IMPLEMENTATION.md)
-- **Visual overview**: See [ARCHITECTURE_DIAGRAMS.md](ARCHITECTURE_DIAGRAMS.md)
-- **Quick start**: See [INTEGRATION_TESTS_SUMMARY.md](INTEGRATION_TESTS_SUMMARY.md)
-
----
-
-**Total Deliverables: 9 files | 3400+ lines of code & docs | 100% state machine coverage**
+| Item | Effort | Description |
+|------|--------|-------------|
+| Backend integration test suite | 3-5 days | Fill `backend/tests/integration.test.ts` with campaign lifecycle, edge case, and auth tests using existing `utils.ts` |
+| Contributor summary frontend wiring | 0.5 day | Add `listCampaignContributors()` to API client, connect `ContributorSummary` component |
+| Load test script backend package.json | 0.5 day | Add `load:test` and `mutation` scripts to `backend/package.json` |
+| Additional E2E test coverage | 2-3 days | Expand Playwright specs beyond campaign lifecycle (pledge flow, refund flow, search) |
+| API rate limiting tests | 1 day | Add tests for rate limiter middleware under load |
+| Frontend visual regression coverage | 1-2 days | Add visual regression specs for key components beyond CampaignCard |
+| Contract property-based testing expansion | 2-3 days | Expand proptest coverage for edge cases in campaign state transitions |
+| Accessibility audit remediation | 1-2 days | Address any a11y issues surfaced by existing vitest-axe tests |

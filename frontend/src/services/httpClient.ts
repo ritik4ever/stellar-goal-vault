@@ -19,8 +19,20 @@ function createRequestId(): string {
   return `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+export function getApiBaseUrl(): string {
+  const rawUrl = import.meta.env.VITE_API_URL;
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    return '/api';
+  }
+  const trimmed = rawUrl.trim();
+  if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  return '/api';
+}
+
 export const apiClient: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? '/api',
+  baseURL: getApiBaseUrl(),
   headers: {
     Accept: 'application/json',
   },
@@ -54,8 +66,7 @@ export async function apiRequest<T>(config: AxiosRequestConfig): Promise<T> {
         validateStatus: () => true,
       });
 
-      requestId =
-        (response.config.headers?.[REQUEST_ID_HEADER] as string | undefined) ?? requestId;
+      requestId = (response.config.headers?.[REQUEST_ID_HEADER] as string | undefined) ?? requestId;
 
       if (response.status >= 500 && attempt < MAX_RETRIES) {
         await sleep(RETRY_DELAY_MS);
@@ -75,8 +86,7 @@ export async function apiRequest<T>(config: AxiosRequestConfig): Promise<T> {
         (error as Error & { code?: string }).code = body.error?.code;
         (error as Error & { details?: Array<{ field: string; message: string }> }).details =
           body.error?.details;
-        (error as Error & { requestId?: string }).requestId =
-          body.error?.requestId ?? requestId;
+        (error as Error & { requestId?: string }).requestId = body.error?.requestId ?? requestId;
         throw error;
       }
 

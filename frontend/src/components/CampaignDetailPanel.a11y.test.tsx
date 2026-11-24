@@ -1,20 +1,21 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { AppConfig, Campaign } from '../types/campaign';
 import { CampaignDetailPanel } from './CampaignDetailPanel';
 import { runAxeAudit, THEMES, type ThemeMode } from '../test/a11yTestUtils';
+import { BASE_TEST_TIME_SEC } from '../test/timeTestUtils';
 
 const mockConfig: AppConfig = {
   allowedAssets: ['USDC', 'XLM'],
   soroban: {
     enabled: true,
     contractId: 'C123',
-    networkPassphrase: 'Test SDF Network ; September 2015',
+    networkPassphrase: 'Test DF Network ; September 2015',
     rpcUrl: 'https://example.com',
   },
   sorobanRpcUrl: 'https://example.com',
   contractId: 'C123',
-  networkPassphrase: 'Test SDF Network ; September 2015',
+  networkPassphrase: 'Test DF Network ; September 2015',
   contractAmountDecimals: 2,
   walletIntegrationReady: true,
   assetAddresses: {},
@@ -29,8 +30,8 @@ const mockCampaign: Campaign = {
   acceptedTokens: ['USDC'],
   targetAmount: 100,
   pledgedAmount: 25,
-  deadline: Math.floor(Date.now() / 1000) + 3600,
-  createdAt: Math.floor(Date.now() / 1000),
+  deadline: BASE_TEST_TIME_SEC + 3600,
+  createdAt: BASE_TEST_TIME_SEC,
   pledges: [
     {
       id: 1,
@@ -38,7 +39,7 @@ const mockCampaign: Campaign = {
       contributor: `G${'B'.repeat(55)}`,
       amount: 25,
       assetCode: 'USDC',
-      createdAt: Math.floor(Date.now() / 1000),
+      createdAt: BASE_TEST_TIME_SEC,
     },
   ],
   progress: {
@@ -73,5 +74,38 @@ describe.each(THEMES)('CampaignDetailPanel Accessibility (%s theme)', (theme: Th
 
     const results = await runAxeAudit(container, theme);
     expect(results).toHaveNoViolations();
+  });
+
+  it('exposes an accessible name for the campaign detail region', async () => {
+    render(
+      <CampaignDetailPanel
+        campaign={mockCampaign}
+        appConfig={mockConfig}
+        connectedWallet={mockCampaign.creator}
+      />,
+    );
+
+    const region = screen.getByRole('region', {
+      name: /Test Campaign( details?)?/i,
+    });
+    expect(region).toBeDefined();
+  });
+
+  it('exposes a control with an accessible name for the primary pledge action', async () => {
+    render(
+      <CampaignDetailPanel
+        campaign={mockCampaign}
+        appConfig={mockConfig}
+        connectedWallet={mockCampaign.creator}
+      />,
+    );
+
+    const controls = screen.getAllByRole('button');
+    expect(controls.length).greaterThan(0);
+    const named = controls.some((control) => {
+      const name = control.getAttribute('aria-label') ?? control.textContent ?? '';
+      return name.trim().length > 0;
+    });
+    expect(named).toBe(true);
   });
 });

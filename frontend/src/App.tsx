@@ -1,56 +1,70 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { CampaignDetailPanel } from "./components/CampaignDetailPanel";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { FundedConfetti } from "./components/FundedConfetti";
-import { KeyboardShortcutsOverlay } from "./components/KeyboardShortcutsOverlay";
-import { CampaignsTable } from "./components/CampaignsTable";
-import { CampaignTimeline } from "./components/CampaignTimeline";
-import { CreateCampaignForm } from "./components/CreateCampaignForm";
-import { CreatorAnalytics } from "./components/CreatorAnalytics";
-import { IssueBacklog } from "./components/IssueBacklog";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { FundedConfetti } from './components/FundedConfetti';
+import { KeyboardShortcutsOverlay } from './components/KeyboardShortcutsOverlay';
+import { lazy, Suspense } from 'react';
+import { CampaignsTable } from './components/CampaignsTable';
+import { CampaignTimeline } from './components/CampaignTimeline';
+import { NotificationBell } from './components/NotificationBell';
+import { IssueBacklog } from './components/IssueBacklog';
+import { SkeletonAnalytics } from './components/SkeletonAnalytics';
+import { SkeletonCard } from './components/SkeletonCard';
+
+// Heavy panel components are lazy-loaded so they do not block the initial
+// render of the campaign board and metrics. Each has a lightweight skeleton
+// fallback that matches its visual footprint.
+const CampaignDetailPanel = lazy(() =>
+  import('./components/CampaignDetailPanel').then((m) => ({ default: m.CampaignDetailPanel })),
+);
+
+const CreateCampaignForm = lazy(() =>
+  import('./components/CreateCampaignForm').then((m) => ({ default: m.CreateCampaignForm })),
+);
+
+const CreatorAnalytics = lazy(() =>
+  import('./components/CreatorAnalytics').then((m) => ({ default: m.CreatorAnalytics })),
+);
+import { InstallPrompt } from './components/InstallPrompt';
+import { OfflineBanner } from './components/OfflineBanner';
 import {
   TransactionPreviewModal,
   TransactionPreviewData,
-} from "./components/TransactionPreviewModal";
-import { ToastContainer } from "./components/ToastContainer";
-import { WalletWidget } from "./components/WalletWidget";
+} from './components/TransactionPreviewModal';
+import { ToastContainer } from './components/ToastContainer';
+import { WalletWidget } from './components/WalletWidget';
+import { WalletPickerModal } from './components/WalletPickerModal';
 import {
   claimCampaign,
   createCampaign,
   getAppConfig,
   getCampaign,
-  getCampaignHistory,
+  getCampaignHistoryPage,
   listCampaigns,
   listOpenIssues,
   reconcilePledge,
   refundCampaign,
   softDeleteCampaign,
-} from "./services/api";
-import {
-  submitFreighterClaim,
-  submitFreighterPledge,
-  watchFreighterAccount,
-} from "./services/freighter";
-import { submitRefundTransaction } from "./services/soroban";
-import { useFreighter } from "./hooks/useFreighter";
-import { useLocalStorage } from "./hooks/useLocalStorage";
-import { useToast } from "./hooks/useToast";
-import { didCampaignBecomeFunded } from "./lib/fundingCelebration";
-import {
-  ApiError,
-  AppConfig,
-  Campaign,
-  CampaignEvent,
-  OpenIssue,
-} from "./types/campaign";
+} from './services/api';
+import { submitFreighterClaim, submitFreighterPledge } from './services/freighter';
+import { submitRefundTransaction } from './services/soroban';
+import { useWallet } from './hooks/useWallet';
+import { useLocalStorage } from './hooks/useLocalStorage';
+import { useToast } from './hooks/useToast';
+import { useOpenGraph } from './hooks/useOpenGraph';
+import { useCampaignShareCard } from './components/CampaignShareCard';
+import { didCampaignBecomeFunded } from './lib/fundingCelebration';
+import { safeErrorMessage } from './lib/signingErrors';
+import { appendUniqueCampaigns } from './lib/campaignListPagination';
+import { mergeCampaignDetail, mergeHistoryPages } from './lib/campaignDetailLoading';
+import { ApiError, AppConfig, Campaign, CampaignEvent, OpenIssue } from './types/campaign';
 
-const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
-const MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
-const THEME_STORAGE_KEY = "stellar-goal-vault-theme";
-const SORT_ORDER_KEY = "stellar-goal-vault-sort-order";
-const FILTER_STATE_KEY = "stellar-goal-vault-filter-state";
-const LIST_STATE_KEY = "sgv-list-state";
+const DEFAULT_NETWORK_PASSPHRASE = 'Test SDF Network ; September 2015';
+const MAINNET_PASSPHRASE = 'Public Global Stellar Network ; September 2015';
+const THEME_STORAGE_KEY = 'stellar-goal-vault-theme';
+const SORT_ORDER_KEY = 'stellar-goal-vault-sort-order';
+const FILTER_STATE_KEY = 'stellar-goal-vault-filter-state';
+const LIST_STATE_KEY = 'sgv-list-state';
 const CAMPAIGN_PAGE_SIZE = 20;
 
 type SavedListState = {
@@ -59,7 +73,7 @@ type SavedListState = {
   search: string;
 };
 
-type ThemeMode = "light" | "dark";
+type ThemeMode = 'light' | 'dark';
 
 type TransactionPreviewState = {
   data: TransactionPreviewData;
@@ -76,17 +90,13 @@ function round(value: number): number {
 }
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim().length > 0) {
-    return error;
-  }
-  return "Something went wrong.";
+  // Wallet/RPC failures already carry authored, recoverable messages; anything
+  // else is still scrubbed so a stray SDK message cannot expose XDR or a seed.
+  return safeErrorMessage(error, 'Something went wrong.');
 }
 
 function toApiError(error: unknown): ApiError {
-  if (error && typeof error === "object") {
+  if (error && typeof error === 'object') {
     const maybeError = error as Error & {
       code?: string;
       details?: Array<{ field: string; message: string }>;
@@ -94,22 +104,22 @@ function toApiError(error: unknown): ApiError {
     };
 
     return {
-      message: maybeError.message || "Something went wrong.",
+      message: safeErrorMessage(maybeError, 'Something went wrong.'),
       code: maybeError.code,
       details: maybeError.details,
       requestId: maybeError.requestId,
     };
   }
 
-  if (typeof error === "string") {
-    return { message: error };
+  if (typeof error === 'string') {
+    return { message: safeErrorMessage(error, 'Something went wrong.') };
   }
 
-  return { message: "Something went wrong." };
+  return { message: 'Something went wrong.' };
 }
 
 function getSystemTheme(): ThemeMode {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 /**
@@ -117,34 +127,46 @@ function getSystemTheme(): ThemeMode {
  * Uses testnet explorer for the testnet passphrase, mainnet otherwise.
  */
 function stellarExpertTxUrl(txHash: string, networkPassphrase: string | undefined): string {
-  const network =
-    networkPassphrase === MAINNET_PASSPHRASE ? "public" : "testnet";
+  const network = networkPassphrase === MAINNET_PASSPHRASE ? 'public' : 'testnet';
   return `https://stellar.expert/explorer/${network}/tx/${txHash}`;
+}
+
+function getNetworkName(networkPassphrase: string): string {
+  if (networkPassphrase === 'Test SDF Network ; September 2015') {
+    return 'Testnet';
+  }
+  if (networkPassphrase === 'Public Global Stellar Network ; September 2015') {
+    return 'Mainnet';
+  }
+  return networkPassphrase;
 }
 
 function App() {
   const { id: paramId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const freighter = useFreighter();
+  const wallet = useWallet();
   const { toasts, addToast, dismiss } = useToast();
-  const connectedWallet = freighter.publicKey;
+  const connectedWallet = wallet.publicKey;
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignPage, setCampaignPage] = useState(1);
   const [hasMoreCampaigns, setHasMoreCampaigns] = useState(false);
   const [isLoadingMoreCampaigns, setIsLoadingMoreCampaigns] = useState(false);
-  const activeSearchRef = useRef("");
+  const activeSearchRef = useRef('');
   const activeSortRef = useRef<string>('newest');
   const activeOrderRef = useRef<string>('desc');
   const [searchParams] = useSearchParams();
   const campaignParam = searchParams.get('campaign');
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(paramId ?? campaignParam ?? null);
-  const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(
-    null,
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(
+    paramId ?? campaignParam ?? null,
   );
+  const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(null);
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
   const [isIssuesLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
@@ -157,10 +179,12 @@ function App() {
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(
-    null,
-  );
+  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
   const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
+  const [campaignsError, setCampaignsError] = useState<{
+    message: string;
+    isRecoverable: boolean;
+  } | null>(null);
   const [transactionPreview, setTransactionPreview] = useState<TransactionPreviewState | null>(
     null,
   );
@@ -173,7 +197,7 @@ function App() {
   };
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", themeMode);
+    document.documentElement.setAttribute('data-theme', themeMode);
   }, [themeMode]);
 
   useEffect(() => {
@@ -182,7 +206,7 @@ function App() {
 
   async function fetchCampaignPage(
     page: number,
-    searchQuery = "",
+    searchQuery = '',
     append = false,
     sort = activeSortRef.current,
     order = activeOrderRef.current,
@@ -195,7 +219,9 @@ function App() {
       order,
     });
 
-    setCampaigns((current) => (append ? [...current, ...response.data] : response.data));
+    setCampaigns((current) =>
+      append ? appendUniqueCampaigns(current, response.data) : response.data,
+    );
     setCampaignPage(page);
     setHasMoreCampaigns(page < response.pagination.totalPages);
 
@@ -215,7 +241,7 @@ function App() {
         page,
         limit: CAMPAIGN_PAGE_SIZE,
       });
-      combined = [...combined, ...lastResponse.data];
+      combined = appendUniqueCampaigns(combined, lastResponse.data);
     }
 
     setCampaigns(combined);
@@ -236,20 +262,25 @@ function App() {
     try {
       await fetchCampaignPage(campaignPage + 1, activeSearchRef.current, true);
     } catch (error) {
-      addToast(getErrorMessage(error), "error");
+      addToast(getErrorMessage(error), 'error');
     } finally {
       setIsLoadingMoreCampaigns(false);
     }
   }
 
+  function handleRetryCampaignsLoad() {
+    setCampaignsError(null);
+    void refreshCampaigns(activeSearchRef.current);
+  }
+
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (event.key === '?' && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         setIsShortcutsOpen((current) => !current);
       }
 
-      if (event.key === "Escape") {
+      if (event.key === 'Escape') {
         setIsShortcutsOpen(false);
         if (transactionPreview) {
           transactionPreview.resolve(false);
@@ -258,14 +289,18 @@ function App() {
       }
     };
 
-    window.addEventListener("keydown", handleKeydown);
+    window.addEventListener('keydown', handleKeydown);
     return () => {
-      window.removeEventListener("keydown", handleKeydown);
+      window.removeEventListener('keydown', handleKeydown);
     };
   }, [transactionPreview]);
 
-  async function refreshCampaigns(searchQuery: string = '', nextSelectedId?: string | null): Promise<Campaign[]> {
+  async function refreshCampaigns(
+    searchQuery: string = '',
+    nextSelectedId?: string | null,
+  ): Promise<Campaign[]> {
     setIsCampaignsLoading(true);
+    setCampaignsError(null);
     activeSearchRef.current = searchQuery;
     try {
       const response = await fetchCampaignPage(1, searchQuery, false);
@@ -274,7 +309,7 @@ function App() {
       const requestedId = nextSelectedId ?? selectedCampaignId;
       const nextId = requestedId ?? data[0]?.id ?? null;
       const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
-      const resolvedId = exists ? nextId : data[0]?.id ?? null;
+      const resolvedId = exists ? nextId : (data[0]?.id ?? null);
 
       setInvalidUrlCampaignId(requestedId && !exists ? requestedId : null);
       setSelectedCampaignId(resolvedId);
@@ -285,6 +320,13 @@ function App() {
       }
 
       return data;
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      setCampaignsError({
+        message: errorMessage,
+        isRecoverable: true,
+      });
+      throw error;
     } finally {
       setIsCampaignsLoading(false);
     }
@@ -293,11 +335,38 @@ function App() {
   async function refreshHistory(campaignId: string | null) {
     if (!campaignId) {
       setHistory([]);
+      setHistoryPage(1);
+      setHasMoreHistory(false);
       return;
     }
 
-    const data = await getCampaignHistory(campaignId);
+    const { data, hasMore } = await getCampaignHistoryPage(campaignId, { page: 1, pageSize: 20 });
     setHistory(data);
+    setHistoryPage(1);
+    setHasMoreHistory(hasMore);
+  }
+
+  async function loadMoreHistory() {
+    if (!selectedCampaignId || !hasMoreHistory || isLoadingMoreHistory || isSelectedLoading) {
+      return;
+    }
+    setIsLoadingMoreHistory(true);
+    try {
+      const nextPage = historyPage + 1;
+      const { data, hasMore } = await getCampaignHistoryPage(selectedCampaignId, {
+        page: nextPage,
+        pageSize: 20,
+      });
+      // Dedupe against the loaded chunks and re-sort by (timestamp, id) so pages
+      // that interleave with the window on screen stay in one stable order.
+      setHistory((current) => mergeHistoryPages(current, data));
+      setHistoryPage(nextPage);
+      setHasMoreHistory(hasMore);
+    } catch (error) {
+      addToast(getErrorMessage(error), 'error');
+    } finally {
+      setIsLoadingMoreHistory(false);
+    }
   }
 
   async function refreshSelectedCampaign(campaignId: string | null) {
@@ -318,6 +387,8 @@ function App() {
   async function refreshSelectedData(campaignId: string | null) {
     await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
   }
+
+  const { toDataUrl } = useCampaignShareCard();
 
   const initialParamIdRef = useRef(paramId);
 
@@ -347,38 +418,42 @@ function App() {
       let data: Campaign[] = [];
       try {
         if (restoredState && !requestedCampaignId) {
-          data = await loadInitialCampaignPages(
-            restoredState.search,
-            Math.max(1, restoredState.pages),
-          );
+          // Bounded initial work: cap restored pages to 3 to avoid unbounded fetch from tampered storage
+          const boundedPages = Math.min(Math.max(1, restoredState.pages), 3);
+          data = await loadInitialCampaignPages(restoredState.search, boundedPages);
           requestAnimationFrame(() => {
             window.scrollTo(0, restoredState?.scrollY ?? 0);
           });
         } else {
-          const response = await fetchCampaignPage(1, "", false);
+          const response = await fetchCampaignPage(1, '', false);
           data = response.data;
         }
       } catch (error) {
-        addToast(getErrorMessage(error), "error");
+        const errorMessage = getErrorMessage(error);
+        setCampaignsError({
+          message: errorMessage,
+          isRecoverable: true,
+        });
+        addToast(errorMessage, 'error');
       }
 
       if (cancelled) {
         return;
       }
 
-      if (configResult.status === "fulfilled") {
+      if (configResult.status === 'fulfilled') {
         setAppConfig(configResult.value);
       } else {
-        addToast(getErrorMessage(configResult.reason), "error");
+        addToast(getErrorMessage(configResult.reason), 'error');
       }
 
-      if (issuesResult.status === "fulfilled") {
+      if (issuesResult.status === 'fulfilled') {
         setIssues(issuesResult.value);
       }
 
       const nextId = requestedCampaignId ?? data[0]?.id ?? null;
       const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
-      const resolvedId = exists ? nextId : data[0]?.id ?? null;
+      const resolvedId = exists ? nextId : (data[0]?.id ?? null);
 
       if (requestedCampaignId && !exists) {
         navigate('/not-found', { replace: true });
@@ -398,33 +473,37 @@ function App() {
 
   useEffect(() => {
     void refreshSelectedData(selectedCampaignId).catch((error) => {
-      addToast(getErrorMessage(error), "error");
+      addToast(getErrorMessage(error), 'error');
     });
   }, [addToast, selectedCampaignId]);
 
-  const selectedCampaign = useMemo(() => {
-    const summaryCampaign =
-      campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
+  const selectedCampaign = useMemo(
+    () =>
+      mergeCampaignDetail(
+        campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null,
+        selectedCampaignDetails,
+      ),
+    [campaigns, selectedCampaignDetails, selectedCampaignId],
+  );
 
-    if (!summaryCampaign) {
-      return selectedCampaignDetails;
-    }
-
-    if (!selectedCampaignDetails || selectedCampaignDetails.id !== summaryCampaign.id) {
-      return summaryCampaign;
-    }
-
+  const ogMeta = useMemo(() => {
+    const c = selectedCampaign;
+    if (!c) return null;
+    const baseUrl = window.location.origin;
     return {
-      ...summaryCampaign,
-      pledges: selectedCampaignDetails.pledges,
-      metadata: selectedCampaignDetails.metadata ?? summaryCampaign.metadata,
+      title: `${c.title} — Stellar Goal Vault`,
+      description: c.description.slice(0, 200),
+      image: c.metadata?.imageUrl ?? undefined,
+      url: `${baseUrl}/campaigns/${c.id}`,
     };
-  }, [campaigns, selectedCampaignDetails, selectedCampaignId]);
+  }, [selectedCampaign]);
+
+  useOpenGraph(ogMeta);
 
   const metrics = useMemo(() => {
-    const open = campaigns.filter((campaign) => campaign.progress.status === "open").length;
-    const funded = campaigns.filter((campaign) => campaign.progress.status === "funded").length;
-    const claimed = campaigns.filter((campaign) => campaign.progress.status === "claimed").length;
+    const open = campaigns.filter((campaign) => campaign.progress.status === 'open').length;
+    const funded = campaigns.filter((campaign) => campaign.progress.status === 'funded').length;
+    const claimed = campaigns.filter((campaign) => campaign.progress.status === 'claimed').length;
     const pledged = campaigns.reduce((sum, campaign) => sum + campaign.pledgedAmount, 0);
 
     return {
@@ -444,52 +523,41 @@ function App() {
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
       navigate('/campaigns/' + campaign.id);
-      addToast(`Campaign #${campaign.id} is live and ready for pledges.`, "success");
+      addToast(`Campaign #${campaign.id} is live and ready for pledges.`, 'success');
     } catch (error) {
       const apiError = toApiError(error);
       setCreateError(apiError);
-      addToast(apiError.message, "error");
+      addToast(apiError.message, 'error');
+      throw error;
     }
   }
 
-  async function handleConnectWallet() {
+  async function handleConnectWallet(walletType: string) {
     const networkPassphrase = appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
     setIsConnectingWallet(true);
     try {
-      const key = await freighter.connect(networkPassphrase);
-      if (key) {
-        addToast(`Wallet connected: ${key.slice(0, 16)}...`, "success");
-      }
+      await wallet.connect(walletType as any, networkPassphrase);
+      addToast(`Wallet connected: ${wallet.publicKey?.slice(0, 16)}...`, 'success');
     } finally {
       setIsConnectingWallet(false);
     }
   }
 
   function handleDisconnectWallet() {
-    freighter.disconnect();
-    addToast("Wallet disconnected.", "success");
+    wallet.disconnect();
+    addToast('Wallet disconnected.', 'success');
   }
 
-  useEffect(() => {
-    if (!connectedWallet) return;
-    const stop = watchFreighterAccount((address) => {
-      if (address && address !== connectedWallet) {
-        addToast(`Switched to ${address.slice(0, 16)}...`, "success");
-      } else if (!address) {
-        addToast("Wallet disconnected.", "success");
-      }
-    });
-    return stop;
-  }, [connectedWallet, addToast]);
+  // Account watching is handled by individual wallet adapters
 
   async function handlePledge(campaignId: string, amount: number, assetCode: string) {
     if (!connectedWallet) {
-      addToast("Connect Freighter before submitting a pledge.", "error");
+      addToast('Connect Freighter before submitting a pledge.', 'error');
       return;
     }
 
     if (!appConfig) {
-      addToast("App configuration is still loading. Try again in a moment.", "error");
+      addToast('App configuration is still loading. Try again in a moment.', 'error');
       return;
     }
 
@@ -524,27 +592,28 @@ function App() {
       if (didCampaignBecomeFunded(previousCampaign, refreshedCampaign)) {
         setConfettiBurst({
           id: Date.now(),
-          campaignTitle: refreshedCampaign?.title ?? "Campaign",
+          campaignTitle: refreshedCampaign?.title ?? 'Campaign',
         });
       }
 
       await refreshSelectedData(campaignId);
       addToast(
-        `Pledge confirmed on-chain. Tx: ${transactionResult.transactionHash.slice(0, 12)}…`,
-        "success",
+        `Pledged ${amount} ${assetCode}. Tx: ${transactionResult.transactionHash.slice(0, 12)}…`,
+        'success',
         {
-          href: stellarExpertTxUrl(
-            transactionResult.transactionHash,
-            appConfig?.networkPassphrase,
-          ),
-          label: "View on Stellar Expert",
+          href: stellarExpertTxUrl(transactionResult.transactionHash, appConfig?.networkPassphrase),
+          label: 'View on Stellar Expert',
         },
       );
     } catch (error) {
-      if (error && typeof error === "object" && (error as { code?: string }).code === "USER_CANCELLED") {
+      if (
+        error &&
+        typeof error === 'object' &&
+        (error as { code?: string }).code === 'USER_CANCELLED'
+      ) {
         return;
       }
-      addToast(getErrorMessage(error), "error");
+      addToast(getErrorMessage(error), 'error');
     } finally {
       setPendingPledgeCampaignId(null);
     }
@@ -552,17 +621,17 @@ function App() {
 
   async function handleClaim(campaign: Campaign) {
     if (!appConfig?.walletIntegrationReady) {
-      addToast("Wallet signing is not configured on the backend yet.", "error");
+      addToast('Wallet signing is not configured on the backend yet.', 'error');
       return;
     }
 
     if (!connectedWallet) {
-      addToast("Connect Freighter before claiming campaign funds.", "error");
+      addToast('Connect Freighter before claiming campaign funds.', 'error');
       return;
     }
 
     if (connectedWallet !== campaign.creator) {
-      addToast("Only the campaign creator can claim funds.", "error");
+      addToast('Only the campaign creator can claim funds.', 'error');
       return;
     }
 
@@ -583,28 +652,34 @@ function App() {
 
       await refreshCampaigns(campaign.id);
       await refreshSelectedData(campaign.id);
-      addToast("Campaign claimed successfully.", "success");
+      addToast('Campaign claimed successfully.', 'success');
     } catch (error) {
-      if (error && typeof error === "object" && (error as { code?: string }).code === "USER_CANCELLED") {
+      if (
+        error &&
+        typeof error === 'object' &&
+        (error as { code?: string }).code === 'USER_CANCELLED'
+      ) {
         return;
       }
-      addToast(getErrorMessage(error), "error");
+      addToast(getErrorMessage(error), 'error');
     }
   }
 
   async function handleSoftDelete(campaignId: string) {
-    if (!window.confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)) {
+    if (
+      !window.confirm(`Soft delete campaign #${campaignId}? Data preserved, hidden from lists.`)
+    ) {
       return;
     }
 
     setActionError(null);
-    setActionMessage("Soft deleting...");
+    setActionMessage('Soft deleting...');
 
     try {
       await softDeleteCampaign(campaignId);
       await refreshCampaigns();
       navigate('/');
-      setActionMessage("Campaign soft deleted.");
+      setActionMessage('Campaign soft deleted.');
     } catch (error) {
       setActionError(toApiError(error));
       setActionMessage(null);
@@ -613,7 +688,7 @@ function App() {
 
   async function handleRefund(campaignId: string, contributor: string) {
     setActionError(null);
-    setActionMessage("Preparing Soroban refund transaction...");
+    setActionMessage('Preparing Soroban refund transaction...');
 
     try {
       const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
@@ -621,11 +696,11 @@ function App() {
       await refreshCampaigns(campaignId);
       await refreshSelectedData(campaignId);
       setActionMessage(null);
-      addToast("Contributor refunded successfully.", "success");
+      addToast('Contributor refunded successfully.', 'success');
     } catch (error) {
       setActionError(toApiError(error));
       setActionMessage(null);
-      addToast(getErrorMessage(error), "error");
+      addToast(getErrorMessage(error), 'error');
     }
   }
 
@@ -644,11 +719,13 @@ function App() {
   }
 
   function handleThemeToggle() {
-    setThemeMode((current) => (current === "dark" ? "light" : "dark"));
+    setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'));
   }
 
   return (
     <div className="app-shell">
+      <OfflineBanner />
+      <InstallPrompt />
       {confettiBurst ? (
         <FundedConfetti
           key={confettiBurst.id}
@@ -660,98 +737,141 @@ function App() {
       <section className="hero animate-fade-in">
         <div className="hero-topline">
           <div>
-            <div className="eyebrow">Stellar Goal Vault</div>
-            <h1>Campaign control center</h1>
+            <div className="eyebrow">{t('app.eyebrow')}</div>
+            <h1>{t('app.title')}</h1>
           </div>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <WalletWidget
-              status={freighter.status}
-              publicKey={freighter.publicKey}
-              error={freighter.error}
+              status={wallet.status}
+              publicKey={wallet.publicKey}
+              walletName={wallet.walletName}
+              error={wallet.error}
               network={getNetworkName(appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE)}
-              onConnect={() => {
-                void handleConnectWallet();
-              }}
+              onConnect={wallet.openPicker}
               onDisconnect={handleDisconnectWallet}
+              onSwitchWallet={wallet.openPicker}
             />
+            <NotificationBell wallet={connectedWallet} campaignId={selectedCampaignId} />
             <button className="btn-ghost" type="button" onClick={handleThemeToggle}>
-              {themeMode === "dark" ? "Light mode" : "Dark mode"}
+              {themeMode === 'dark' ? t('app.controls.lightMode') : t('app.controls.darkMode')}
             </button>
             <button className="btn-ghost" type="button" onClick={() => setIsShortcutsOpen(true)}>
-              Shortcuts
+              {t('app.controls.shortcuts')}
             </button>
           </div>
         </div>
-        <p className="hero-copy">
-          Create campaigns, manage pledges, and track funding milestones as they
-          move through the Stellar goal vault lifecycle.
-        </p>
+        <p className="hero-copy">{t('app.description')}</p>
         {actionError ? <p className="form-error">{actionError.message}</p> : null}
         {actionMessage ? <p className="form-success">{actionMessage}</p> : null}
       </section>
 
       <section className="metric-grid animate-fade-in">
         <article className="metric-card">
-          <span>Total campaigns</span>
+          <span>{t('app.metrics.total')}</span>
           <strong>{metrics.total}</strong>
         </article>
         <article className="metric-card">
-          <span>Open campaigns</span>
+          <span>{t('app.metrics.open')}</span>
           <strong>{metrics.open}</strong>
         </article>
         <article className="metric-card">
-          <span>Funded campaigns</span>
+          <span>{t('app.metrics.funded')}</span>
           <strong>{metrics.funded}</strong>
         </article>
         <article className="metric-card">
-          <span>Claimed campaigns</span>
+          <span>{t('app.metrics.claimed')}</span>
           <strong>{metrics.claimed}</strong>
         </article>
         <article className="metric-card">
-          <span>Total pledged</span>
+          <span>{t('app.metrics.pledged')}</span>
           <strong>{metrics.pledged}</strong>
         </article>
       </section>
 
       {selectedCampaign && (
-        <section
-          className="animate-fade-in"
-          style={{ animationDelay: "0.1s" }}
-        >
+        <section className="animate-fade-in" style={{ animationDelay: '0.1s' }}>
           <ErrorBoundary componentName="CreatorAnalytics">
-            <CreatorAnalytics
-              creatorAddress={selectedCampaign.creator}
-              campaigns={campaigns}
-              isLoading={isCampaignsLoading || initialLoad}
-            />
+            <Suspense fallback={<SkeletonAnalytics />}>
+              <CreatorAnalytics
+                creatorAddress={selectedCampaign.creator}
+                campaigns={campaigns}
+                isLoading={isCampaignsLoading || initialLoad}
+              />
+            </Suspense>
           </ErrorBoundary>
         </section>
       )}
 
-      <section
-        className="layout-grid animate-fade-in"
-        style={{ animationDelay: "0.2s" }}
-      >
-        <CreateCampaignForm
-          onCreate={handleCreate}
-          apiError={createError}
-          allowedAssets={appConfig?.allowedAssets ?? []}
-        />
+      <section className="layout-grid animate-fade-in" style={{ animationDelay: '0.2s' }}>
+        <ErrorBoundary componentName="CreateCampaignForm">
+          <Suspense
+            fallback={
+              <section
+                className="card wizard-card"
+                aria-busy="true"
+                aria-label="Loading create campaign form"
+              >
+                <div className="section-heading">
+                  <div className="skeleton skeleton-line" style={{ width: 180, height: 24 }} />
+                </div>
+                <SkeletonCard />
+              </section>
+            }
+          >
+            <CreateCampaignForm
+              onCreate={handleCreate}
+              apiError={createError}
+              isLoading={initialLoad || !appConfig}
+              onRetry={() => window.location.reload()}
+              allowedAssets={appConfig?.allowedAssets}
+            />
+          </Suspense>
+        </ErrorBoundary>
         <ErrorBoundary componentName="CampaignDetailPanel">
-          <CampaignDetailPanel
-            campaign={selectedCampaign}
-            appConfig={appConfig}
-            connectedWallet={connectedWallet}
-            isConnectingWallet={isConnectingWallet}
-            isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
-            isLoading={isSelectedLoading || initialLoad}
-            onConnectWallet={handleConnectWallet}
-            onDisconnectWallet={handleDisconnectWallet}
-            onPledge={handlePledge}
-            onClaim={handleClaim}
-            onSoftDelete={handleSoftDelete}
-            onRefund={handleRefund}
-          />
+          <Suspense
+            fallback={
+              <section
+                className="card detail-panel"
+                aria-busy="true"
+                aria-label="Loading campaign details"
+              >
+                <div className="section-heading">
+                  <div className="skeleton skeleton-line" style={{ width: 220, height: 24 }} />
+                  <div
+                    className="skeleton skeleton-line"
+                    style={{ width: 320, height: 14, marginTop: 8 }}
+                  />
+                </div>
+                <div className="detail-grid">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <article key={i} className="detail-stat">
+                      <div className="skeleton skeleton-line" style={{ width: 120 }} />
+                      <div
+                        className="skeleton skeleton-line"
+                        style={{ width: 80, height: 18, marginTop: 8 }}
+                      />
+                    </article>
+                  ))}
+                </div>
+              </section>
+            }
+          >
+            <CampaignDetailPanel
+              campaign={selectedCampaign}
+              appConfig={appConfig}
+              connectedWallet={connectedWallet}
+              isConnectingWallet={isConnectingWallet}
+              isPledgePending={pendingPledgeCampaignId === selectedCampaignId}
+              isLoading={isSelectedLoading || initialLoad}
+              notFoundCampaignId={invalidUrlCampaignId}
+              onConnectWallet={handleConnectWallet}
+              onDisconnectWallet={handleDisconnectWallet}
+              onPledge={handlePledge}
+              onClaim={handleClaim}
+              onSoftDelete={handleSoftDelete}
+              onRefund={handleRefund}
+            />
+          </Suspense>
         </ErrorBoundary>
       </section>
 
@@ -776,6 +896,15 @@ function App() {
             isLoadingMore={isLoadingMoreCampaigns}
             isLoading={isCampaignsLoading || initialLoad}
             invalidUrlCampaignId={invalidUrlCampaignId}
+            error={
+              campaignsError
+                ? {
+                    message: campaignsError.message,
+                    onRetry: handleRetryCampaignsLoad,
+                    isRecoverable: campaignsError.isRecoverable,
+                  }
+                : null
+            }
           />
         </ErrorBoundary>
 
@@ -784,6 +913,9 @@ function App() {
           isLoading={isSelectedLoading || initialLoad}
           targetAmount={selectedCampaign?.targetAmount}
           pledgedAmount={selectedCampaign?.pledgedAmount}
+          hasMore={hasMoreHistory}
+          isLoadingMore={isLoadingMoreHistory}
+          onLoadMore={() => void loadMoreHistory()}
         />
       </section>
 
@@ -810,6 +942,14 @@ function App() {
       <KeyboardShortcutsOverlay
         isOpen={isShortcutsOpen}
         onClose={() => setIsShortcutsOpen(false)}
+      />
+
+      <WalletPickerModal
+        isOpen={wallet.isPickerOpen}
+        onClose={wallet.closePicker}
+        onSelectWallet={handleConnectWallet}
+        isConnecting={wallet.status === 'connecting'}
+        connectingWallet={wallet.walletType}
       />
     </div>
   );

@@ -17,17 +17,26 @@ describe('TransactionPreviewModal pledge flow', () => {
     const onCancel = vi.fn();
 
     render(
-      <TransactionPreviewModal
-        preview={basePreview}
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      />
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText('Transaction Preview')).toBeInTheDocument();
     expect(screen.getByText('contribute')).toBeInTheDocument();
     expect(screen.getByText(/100\s+USDC/)).toBeInTheDocument();
     expect(screen.getByText(/0.00001 XLM/)).toBeInTheDocument();
+  });
+
+  it('exposes accessible names for interactive controls', () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+
+    render(
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
+    );
+
+    expect(screen.getByRole('button', { name: /Confirm and Sign/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Cancel/i })).toBeInTheDocument();
   });
 
   it('calls onConfirm when user clicks Confirm button', () => {
@@ -35,14 +44,10 @@ describe('TransactionPreviewModal pledge flow', () => {
     const onCancel = vi.fn();
 
     render(
-      <TransactionPreviewModal
-        preview={basePreview}
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      />
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
-    const confirmButton = screen.getByRole('button', { name: /Confirm and Sign/ });
+    const confirmButton = screen.getByRole('button', { name: /Confirm and Sign/i });
     fireEvent.click(confirmButton);
 
     expect(onConfirm).toHaveBeenCalledTimes(1);
@@ -54,15 +59,44 @@ describe('TransactionPreviewModal pledge flow', () => {
     const onCancel = vi.fn();
 
     render(
-      <TransactionPreviewModal
-        preview={basePreview}
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      />
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
-    const cancelButton = screen.getByRole('button', { name: /Cancel/ });
+    const cancelButton = screen.getByRole('button', { name: /Cancel/i });
     fireEvent.click(cancelButton);
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('activates Confirm with the keyboard and restores focus to the dialog', () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+
+    render(
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
+    );
+
+    const confirmButton = screen.getByRole('button', { name: /Confirm and Sign/i });
+    confirmButton.focus();
+    expect(confirmButton).toHaveFocus();
+
+    fireEvent.keyDown(confirmButton, { key: 'Enter', code: 'Enter' });
+    fireEvent.click(confirmButton);
+
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the dialog on Escape via onCancel', () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+
+    render(
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
+    );
+
+    const dialog = screen.getByRole('dialog');
+    fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
 
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onConfirm).not.toHaveBeenCalled();
@@ -73,14 +107,10 @@ describe('TransactionPreviewModal pledge flow', () => {
     const onCancel = vi.fn();
 
     render(
-      <TransactionPreviewModal
-        preview={basePreview}
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      />
+      <TransactionPreviewModal preview={basePreview} onConfirm={onConfirm} onCancel={onCancel} />,
     );
 
-    const confirmButton = screen.getByRole('button', { name: /Confirm and Sign/ });
-    expect(confirmButton).toHaveProperty('type', 'button');
+    const confirmButton = screen.getByRole('button', { name: /Confirm and Sign/i });
+    expect(confirmButton).toHaveAttribute('type', 'button');
   });
 });

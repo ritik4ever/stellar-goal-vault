@@ -31,16 +31,18 @@ export function searchCampaigns(campaigns: Campaign[], searchQuery: string): Cam
 
   return campaigns.filter((campaign) => {
     // Check title (partial match)
-    const titleMatches = campaign.title.toLowerCase().includes(normalizedQuery);
+    if (campaign.title.toLowerCase().includes(normalizedQuery)) return true;
+
+    // Check description (partial match)
+    if (campaign.description?.toLowerCase().includes(normalizedQuery)) return true;
 
     // Check creator address (case-insensitive)
-    const creatorMatches = campaign.creator.toLowerCase().includes(normalizedQuery);
+    if (campaign.creator.toLowerCase().includes(normalizedQuery)) return true;
 
     // Check campaign ID (partial match, case-insensitive)
-    const idMatches = campaign.id.toLowerCase().includes(normalizedQuery);
+    if (campaign.id.toLowerCase().includes(normalizedQuery)) return true;
 
-    // Match if any field matches
-    return titleMatches || creatorMatches || idMatches;
+    return false;
   });
 }
 
@@ -54,11 +56,7 @@ export function searchCampaigns(campaigns: Campaign[], searchQuery: string): Cam
  *
  * For search filtering, use {@link searchCampaigns} separately.
  */
-export function applyFilters(
-  campaigns: Campaign[],
-  assetCode: string,
-  status: string,
-): Campaign[] {
+export function applyFilters(campaigns: Campaign[], assetCode: string, status: string): Campaign[] {
   return campaigns.filter((c) => {
     const matchesAsset = assetCode === '' || c.assetCode === assetCode;
     const matchesStatus = status === '' || c.progress.status === status;
@@ -76,7 +74,7 @@ export function applyFilters(
  * @param sortBy - Sort option (createdAt, deadline, pledgedAmount, targetAmount)
  * @returns Sorted array of campaigns
  */
-export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption): Campaign[] {
+export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption | string): Campaign[] {
   // Create a copy to avoid mutating the original array
   const sorted = [...campaigns];
 
@@ -84,6 +82,7 @@ export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption): Campai
     let comparison = 0;
 
     switch (sortBy) {
+      case 'newest':
       case 'createdAt':
         // Sort by createdAt descending (newest first)
         comparison = b.createdAt - a.createdAt;
@@ -94,9 +93,15 @@ export function sortCampaigns(campaigns: Campaign[], sortBy: SortOption): Campai
         comparison = a.deadline - b.deadline;
         break;
 
+      case 'totalPledged':
       case 'pledgedAmount':
         // Sort by pledgedAmount descending (largest first)
         comparison = b.pledgedAmount - a.pledgedAmount;
+        break;
+
+      case 'percentFunded':
+        // Sort by percentFunded descending (highest first)
+        comparison = (b.progress?.percentFunded ?? 0) - (a.progress?.percentFunded ?? 0);
         break;
 
       case 'targetAmount':
