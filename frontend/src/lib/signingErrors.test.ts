@@ -16,6 +16,7 @@ import {
   createSigningError,
   describeErrorForLog,
   redactSecretMaterial,
+  safeErrorMessage,
   toSigningError,
 } from './signingErrors';
 import { connectFreighterWallet, verifyFreighterNetwork } from '../services/freighter';
@@ -109,6 +110,26 @@ describe('secret material handling', () => {
   });
 });
 
+describe('safeErrorMessage', () => {
+  it('passes authored app messages through unchanged', () => {
+    expect(safeErrorMessage(new Error('Amount must be greater than zero.'))).toBe(
+      'Amount must be greater than zero.',
+    );
+    expect(safeErrorMessage('Campaign not found.')).toBe('Campaign not found.');
+  });
+
+  it('strips secret seeds and XDR from messages before they reach the UI', () => {
+    const message = safeErrorMessage(new Error(`signing failed ${FAKE_SECRET} ${FAKE_XDR}`));
+
+    expect(message).toBe('signing failed [REDACTED_SECRET] [REDACTED_XDR]');
+  });
+
+  it('falls back when there is no usable message', () => {
+    expect(safeErrorMessage(undefined, 'Something went wrong.')).toBe('Something went wrong.');
+    expect(safeErrorMessage({}, 'Something went wrong.')).toBe('Something went wrong.');
+  });
+});
+
 describe('Freighter service errors', () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -127,6 +148,21 @@ describe('Freighter service errors', () => {
       code: 'FREIGHTER_ACCESS_DENIED',
       signingErrorClass: 'USER_REJECTED',
       message: SIGNING_ERROR_MESSAGES.USER_REJECTED,
+    });
+    expect(JSON.stringify({ message: error.message, detail: error.detail })).not.toContain(
+      FAKE_SECRET,
+    );
+  });
+
+  it('reports a throwing extension probe as WALLET_UNAVAILABLE, not a rejection', async () => {
+    freighterMocks.isConnected.mockRejectedValue(new Error(`probe crashed ${FAKE_SECRET}`));
+
+    const error = await connectFreighterWallet(TESTNET).catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'FREIGHTER_UNAVAILABLE',
+      signingErrorClass: 'WALLET_UNAVAILABLE',
+      message: SIGNING_ERROR_MESSAGES.WALLET_UNAVAILABLE,
     });
     expect(JSON.stringify({ message: error.message, detail: error.detail })).not.toContain(
       FAKE_SECRET,

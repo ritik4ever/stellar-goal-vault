@@ -91,9 +91,14 @@ Thank you for your interest in contributing to **Stellar Goal Vault**!
 
 ### Database
 
-- **Seeding**: The application automatically initializes the SQLite database with the schema on first run. To seed deterministic test campaigns:
+- **Seeding**: The application automatically initializes the SQLite database with the schema on first run. To reset local data to deterministic open / funded / claimed fixtures (safe to run twice):
   ```bash
-  npm test -- tests/services/seedDeterministic.test.ts
+  npm run seed
+  npm run seed -- --count 10
+  ```
+  Outcomes and failure signals: [`docs/SEED_RUNBOOK.md`](./docs/SEED_RUNBOOK.md). Focused tests:
+  ```bash
+  npm test -- src/services/seedDeterministic.test.ts
   ```
 
 - **Viewing the database**:
@@ -135,7 +140,7 @@ See the [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for a comprehensive l
 
 - Backend: `cd backend && npm test`
 - Contract: `cd contracts && cargo test`
-- E2E: `npm run test:e2e`
+- E2E: `npm run test:e2e` (see [`e2e/README.md`](./e2e/README.md) for wallet mock reject/delay recovery and rerun-safe fixtures; no live funds)
 
 ## Code style
 

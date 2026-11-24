@@ -165,11 +165,31 @@ function buildSeedSet(count: number): { campaigns: SeedCampaign[]; pledges: Seed
   };
 }
 
+const SEED_VERSION = 'deterministic-v1';
+const SEED_MARKER_KEY = 'deterministic_seed';
+
+export type SeedDeterministicResult = {
+  status: 'seeded' | 'already-seeded';
+  campaignIds: string[];
+  count: number;
+  message: string;
+};
+
 /**
  * Wipes and repopulates the dev database with `count` deterministic campaigns
- * (default 3). Returns the seeded campaign IDs in insertion order.
+ * (default 3). Returns a result describing whether the database was freshly
+ * seeded or already contained a matching deterministic seed.
+ *
+ * Rerun safety: a marker row in `seed_metadata` records the seed version and
+ * the last seeded count. If the marker matches the requested count and the
+ * deterministic rows are still present, the wipe is skipped and the existing
+ * IDs are returned with `status: 'already-seeded'`. If the count differs, the
+ * existing atomic wipe-and-reinsert runs. Any failure inside the transaction
+ * leaves the database untouched.
  */
-export function seedDeterministicState(count: number = BASE_CAMPAIGNS.length): string[] {
+export function seedDeterministicState(
+  count: number = BASE_CAMPAIGNS.length,
+): SeedDeterministicResult {
   initDb();
   const db = getDb();
   // Ensure seed-path indexes exist before wipe/reseed so FK checks and
@@ -177,10 +197,49 @@ export function seedDeterministicState(count: number = BASE_CAMPAIGNS.length): s
   ensureSeedWorkflowIndexes(db);
 
   const { campaigns, pledges } = buildSeedSet(count);
+  const expectedIds = campaigns.map((c) => c.id);
 
   // Use explicit transaction to ensure atomicity: either all data is seeded
   // or no partial state is persisted, allowing safe retries.
-  db.transaction(() => {
+  return db.transaction((): SeedDeterministicResult => {
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS seed_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`,
+    ).run();
+
+    const marker = db
+      .prepare(`SELECT value FROM seed_metadata WHERE key = ?`)
+      .get(SEED_MARKER_KEY) as { value: string } | undefined;
+
+    if (marker) {
+      let parsed: { version?: string; count?: number } | null = null;
+      try {
+        parsed = JSON.parse(marker.value);
+      } catch {
+        parsed = null;
+      }
+
+      if (
+        parsed &&
+        parsed.version === SEED_VERSION &&
+        parsed.count === count &&
+        hasMatchingDeterministicRows(db, expectedIds)
+      ) {
+        return {
+          status: 'already-seeded',
+          campaignIds: expectedIds,
+          count,
+          message:
+            `Deterministic seed already applied (count=${count}). ` +
+            `Skipping wipe. To force a reseed, run with a different --count ` +
+            `or delete the "${SEED_MARKER_KEY}" row from seed_metadata.`,
+        };
+      }
+    }
+
     // Child tables first so FK enforcement cannot leave a partial wipe.
     // notifications / campaign_comments are not always empty in long-lived
     // dev DBs; skipping them is a failure mode happy-path API tests miss.
@@ -227,9 +286,30 @@ export function seedDeterministicState(count: number = BASE_CAMPAIGNS.length): s
         pledge.createdAt,
       );
     }
-  })();
 
-  return campaigns.map((c) => c.id);
+    db.prepare(
+      `INSERT INTO seed_metadata (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).run(SEED_MARKER_KEY, JSON.stringify({ version: SEED_VERSION, count }), Date.now());
+
+    return {
+      status: 'seeded',
+      campaignIds: expectedIds,
+      count,
+      message: `Deterministic seed applied (count=${count}).`,
+    };
+  })();
+}
+
+function hasMatchingDeterministicRows(db: ReturnType<typeof getDb>, expectedIds: string[]): boolean {
+  if (expectedIds.length === 0) {
+    return true;
+  }
+  const placeholders = expectedIds.map(() => '?').join(', ');
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM campaigns WHERE id IN (${placeholders})`)
+    .get(...expectedIds) as { n: number } | undefined;
+  return (row?.n ?? 0) === expectedIds.length;
 }
 
 export function parseCountArg(argv: string[]): number {

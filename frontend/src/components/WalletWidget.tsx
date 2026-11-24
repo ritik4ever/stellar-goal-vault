@@ -1,4 +1,4 @@
-import { Wallet, ChevronDown } from 'lucide-react';
+import { AlertCircle, RefreshCw, Wallet, ChevronDown } from 'lucide-react';
 import { WalletStatus, WalletType } from '../hooks/useWallet';
 import { CopyButton } from './CopyButton';
 
@@ -27,7 +27,9 @@ export function WalletWidget({
   onDisconnect,
   onSwitchWallet,
 }: WalletWidgetProps) {
-  if (status === 'checking') {
+  // Loading states: explicit, distinguishable feedback while we detect or
+  // establish the wallet connection. Never fall back to a blank screen.
+  if (status === 'checking' || status === 'connecting') {
     return (
       <div
         className="wallet-widget wallet-widget--checking"
@@ -35,24 +37,17 @@ export function WalletWidget({
         aria-live="polite"
         aria-atomic="true"
       >
-        Detecting wallet…
+        <span
+          className="wallet-widget__spinner"
+          aria-hidden="true"
+          data-testid="wallet-widget-spinner"
+        />
+        <span>{status === 'checking' ? 'Detecting wallet…' : 'Connecting wallet…'}</span>
       </div>
     );
   }
 
-  if (status === 'connecting') {
-    return (
-      <div
-        className="wallet-widget wallet-widget--checking"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        Connecting wallet…
-      </div>
-    );
-  }
-
+  // Success state: connected with an address.
   if (status === 'connected' && publicKey) {
     const isMainnet = network?.toLowerCase() === 'mainnet';
     const displayWalletName = walletName || 'Wallet';
@@ -102,13 +97,85 @@ export function WalletWidget({
     );
   }
 
+  // Recoverable failure: surface the error and offer an explicit retry action.
+  if (error) {
+    return (
+      <div className="wallet-widget wallet-widget--error">
+        <div className="wallet-widget__error-banner" role="alert">
+          <AlertCircle size={16} aria-hidden="true" />
+          <span className="wallet-widget__error">{error}</span>
+        </div>
+        <button
+          className="btn-ghost wallet-widget__btn wallet-widget__retry"
+          type="button"
+          onClick={() => onConnect()}
+          aria-label="Retry wallet connection"
+        >
+          <RefreshCw size={16} aria-hidden="true" />
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  // Unavailable: no wallet extension detected. Explain why and how to recover.
+  if (status === 'unavailable') {
+    return (
+      <div
+        className="wallet-widget wallet-widget--unavailable"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <span className="wallet-widget__empty-text">No Stellar wallet extension detected.</span>
+        <a
+          className="wallet-widget__link"
+          href="https://www.freighter.app/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Install Freighter
+        </a>
+        <button
+          className="btn-ghost wallet-widget__btn"
+          type="button"
+          onClick={() => onConnect()}
+          aria-label="Connect Freighter wallet"
+        >
+          <Wallet size={16} aria-hidden="true" />
+          Connect Wallet
+        </button>
+      </div>
+    );
+  }
+
+  // Empty state: wallet available but not connected yet.
+  if (status === 'available') {
+    return (
+      <div
+        className="wallet-widget wallet-widget--empty"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <span className="wallet-widget__empty-text">No wallet connected</span>
+        <button
+          className="btn-ghost wallet-widget__btn"
+          type="button"
+          onClick={() => onConnect()}
+          aria-label="Connect Freighter wallet"
+        >
+          <Wallet size={16} aria-hidden="true" />
+          Connect Wallet
+        </button>
+      </div>
+    );
+  }
+
+  // Fallback for any other combination (e.g. connected without a public key):
+  // keep a usable action on screen so the panel never renders blank.
   return (
     <div className="wallet-widget">
-      {error ? (
-        <span className="wallet-widget__error" role="alert">
-          {error}
-        </span>
-      ) : null}
       <button
         className="btn-ghost wallet-widget__btn"
         type="button"

@@ -17,6 +17,10 @@
 | `get_contribution` | N/A |
 | `get_campaign_token_balance` | N/A |
 | `get_contributor_count` | N/A |
+| `initialize` | ~60 582 |
+| `set_paused` | ~75 200 |
+| `set_fee` | ~80 125 |
+| `set_fee_recipient` | ~91 199 |
 
 **Note:** N/A values will be populated after running `stellar contract invoke --cost`
 against a live network. See [BENCHMARKS.md](./BENCHMARKS.md) for methodology.

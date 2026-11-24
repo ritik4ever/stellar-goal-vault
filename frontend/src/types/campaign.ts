@@ -148,6 +148,15 @@ export interface WalletConnection {
   sorobanRpcUrl?: string;
 }
 
+export type TransactionLifecycleStatus = 'idle' | 'pending' | 'confirmed' | 'failed' | 'retryable';
+
+export interface TransactionSubmissionState {
+  status: TransactionLifecycleStatus;
+  transactionHash?: string;
+  error?: string;
+  isRetryable?: boolean;
+}
+
 export interface PledgeTransactionResult {
   transactionHash: string;
   confirmedAt: number;

@@ -29,6 +29,8 @@
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest run",
     "test:watch": "vitest",
+    "seed": "ts-node src/scripts/seed.ts",
+    "seed:force": "ts-node src/scripts/seed.ts --force",
     "check:openapi": "npm run build:openapi && git diff --exit-code -- ../docs/openapi.yaml",
     "validate:openapi": "swagger-cli validate ../docs/openapi.yaml"
   },

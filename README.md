@@ -80,6 +80,14 @@ npm run gen:bindings
 3. `frontend/src/services/soroban.ts` imports from generated bindings via `GoalVaultContract` client
 4. CI checks for ABI drift on every PR that touches contracts
 
+### Rerun safety and drift check
+
+- `CONTRACT_ID` is optional. When it is not set, `npm run gen:bindings` reads `contracts/contract_id.txt`.
+- If no ID is found, or it is still a placeholder like `YOUR_CONTRACT_ID`, the script stops before touching `frontend/src/generated/` and prints how to recover.
+- Bindings are generated into a temp directory first, so a failed run leaves the committed bindings unchanged.
+- Each successful run writes `frontend/src/generated/.contract-id` with the contract the bindings came from. Rerunning against the same contract produces the same file, so there is no diff.
+- `npm run gen:bindings:check` compares that stamp with the deployed ID without calling the network, and exits with code 1 on drift so CI can fail on it.
+
 ### Mainnet
 
 ```bash
@@ -432,7 +440,7 @@ Open:
 
 ### Seed the dev database
 
-Wipes and repopulates the local SQLite database with deterministic campaigns and pledges — useful for a fresh, reproducible local state.
+Wipes and repopulates the local SQLite database with deterministic campaigns and pledges — useful for a fresh, reproducible local state. See the [seed runbook](./docs/SEED_RUNBOOK.md) for open / funded / claimed outcomes, double-run behaviour, and failure signals.
 
 ```bash
 cd backend
@@ -446,26 +454,10 @@ Seeded campaign IDs are printed to stdout. The first 3 campaigns always match a 
 set (open, funded, claimed status). Any additional campaigns beyond that cycle
 deterministically through open/funded/claimed statuses so the seed is reproducible run to run.
 
-Build:eed the dev database
-+
-+Wipes and repopulates the local SQLite database with deterministic campaigns and pledges — useful for a fresh, reproducible local state.
-+
-+```bash
-+cd backend
-+npm run seed
-+
-+# Seed a custom number of campaigns (default: 3)
-+npm run seed -- --count 10
-+```
-+
-+Seeded campaign IDs are printed to stdout. The first 3 campaigns always match a fixed
-+set (open, funded, claimed status). Any additional campaigns beyond that cycle
-+deterministically through open/funded/claimed statuses so the seed is reproducible run to run.
-+
- Build:
- 
+Build:
+
 ```bash
- npm run build
+npm run build
 ```
 
 ### Local development with Docker (hot-reload)
@@ -613,7 +605,7 @@ See also [CHANGELOG.md](./CHANGELOG.md) for a full history of notable changes ac
 ## Known limitations
 
 - Campaign creation is still local-first, so pledges will only simulate successfully for campaign IDs that also exist in the configured contract
-- No authentication or rate limiting on write endpoints
+- API key authentication and configurable per-IP rate limits apply in production; both are disabled in local development
 - No background indexer for on-chain event sync yet
 
 ## Suggested roadmap

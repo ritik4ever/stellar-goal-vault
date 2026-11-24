@@ -2,7 +2,8 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { AppConfig, Campaign } from '../types/campaign';
 import { CampaignDetailPanel } from './CampaignDetailPanel';
-import { runAxeAudit, THEMES, type ThemeMode } from '../test/a1yTestUtils';
+import { runAxeAudit, THEMES, type ThemeMode } from '../test/a11yTestUtils';
+import { BASE_TEST_TIME_SEC } from '../test/timeTestUtils';
 
 const mockConfig: AppConfig = {
   allowedAssets: ['USDC', 'XLM'],
@@ -29,8 +30,8 @@ const mockCampaign: Campaign = {
   acceptedTokens: ['USDC'],
   targetAmount: 100,
   pledgedAmount: 25,
-  deadline: Math.floor(Date.now() / 1000) + 3600,
-  createdAt: Math.floor(Date.now() / 1000),
+  deadline: BASE_TEST_TIME_SEC + 3600,
+  createdAt: BASE_TEST_TIME_SEC,
   pledges: [
     {
       id: 1,
@@ -38,7 +39,7 @@ const mockCampaign: Campaign = {
       contributor: `G${'B'.repeat(55)}`,
       amount: 25,
       assetCode: 'USDC',
-      createdAt: Math.floor(Date.now() / 1000),
+      createdAt: BASE_TEST_TIME_SEC,
     },
   ],
   progress: {
@@ -85,7 +86,7 @@ describe.each(THEMES)('CampaignDetailPanel Accessibility (%s theme)', (theme: Th
     );
 
     const region = screen.getByRole('region', {
-      name: /Test Campaign details?/i,
+      name: /Test Campaign( details?)?/i,
     });
     expect(region).toBeDefined();
   });

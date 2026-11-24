@@ -10,11 +10,11 @@ vi.mock('./ContributorSummary', () => ({ ContributorSummary: () => null }));
 
 const wallet = `G${'B'.repeat(55)}`;
 const appConfig: AppConfig = {
-  allowedAssets: ['USDC', 'XLM'],
+  allowedAssets: ['USDC', 'XLM',],
   soroban: {
     enabled: true,
     contractId: `C${'C'.repeat(55)}`,
-    networkPassphrase: 'Test SDF Network ; September 2015',
+    networkPassphrase: 'Test DF Network ; September 2015',
     rpcUrl: 'https://soroban-testnet.stellar.org',
   },
   sorobanRpcUrl: 'https://soroban-testnet.stellar.org',
@@ -22,7 +22,7 @@ const appConfig: AppConfig = {
   networkPassphrase: 'Test SDF Network ; September 2015',
   contractAmountDecimals: 2,
   walletIntegrationReady: true,
-  assetAddresses: { USDC: 'CUSDC', XLM: 'CXLM' },
+  assetAddresses: { USDC: 'CUSDC', XLM: 'CXL' },
 };
 const campaign: Campaign = {
   id: 'pledge-campaign',
@@ -30,7 +30,7 @@ const campaign: Campaign = {
   description: 'Fund a community garden',
   creator: `G${'A'.repeat(55)}`,
   assetCode: 'USDC',
-  acceptedTokens: ['USDC', 'XLM'],
+  acceptedTokens: ['USDC', 'XLM',],
   targetAmount: 1000,
   pledgedAmount: 0,
   deadline: 4102444800,
@@ -64,10 +64,10 @@ function renderPledge(overrides: Partial<Props> = {}) {
   return { onPledge, user: userEvent.setup() };
 }
 
-const form = () => screen.getByRole('form', { name: 'Pledge form' });
+const form = () => screen.getByRole('form', { name: /pledge/i });
 const amount = () => within(form()).getByRole('spinbutton', { name: 'Amount' });
 const asset = () => within(form()).getByRole('combobox', { name: 'Asset' });
-const submit = () => within(form()).getByRole('button', { name: 'Pledge' });
+const submit = () => within(form()).getByRole('button', { name: /pledge/i });
 
 describe('Pledge asset selection', () => {
   it('submits the selected accepted asset and resets after success', async () => {
@@ -92,7 +92,7 @@ describe('Pledge asset selection', () => {
     expect(amount()).toHaveValue(12.34);
     expect(asset()).toHaveValue('XLM');
     await act(async () => resolvePledge());
-    expect(screen.getByRole('status')).toHaveTextContent('Your pledge was submitted successfully.');
+    expect(screen.getByRole('status')).toHaveTextContent(/pledge submitted successfully/i);
     expect(amount()).toHaveValue(25);
     expect(asset()).toHaveValue('');
   });
@@ -120,5 +120,22 @@ describe('Pledge asset selection', () => {
     expect(amount()).toHaveValue(42);
     expect(asset()).toHaveValue('XLM');
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('blocks submission and shows an actionable message when the wallet network mismatches', async () => {
+    const onPledge = vi.fn().mockResolvedValue(undefined);
+    const { user } = renderPledge({
+      onPledge,
+      walletNetworkPassphrase: 'Public Global Stellar Network ; September 2015',
+    });
+
+    await user.clear(amount());
+    await user.type(amount(), '10');
+    await user.click(submit());
+
+    expect(onPledge).not.toHaveBeenCalled();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/network/i);
+    expect(screen.getByRole('alert')).toHaveTextContent(/switch/i);
+    expect(amount()).toHaveValue(10);
   });
 });

@@ -230,7 +230,7 @@ export function CampaignsTable({
     overscan: 5,
   });
 
-  const showSkeleton = useMinDisplayTime(isLoading && isEmpty);
+  const showSkeleton = useMinDisplayTime(isLoading && isEmpty && !error);
   if (showSkeleton) {
     return (
       <section className="card">
@@ -275,6 +275,42 @@ export function CampaignsTable({
               {isLoading ? 'Retrying...' : 'Retry'}
             </button>
           )}
+        </div>
+
+        <div className="board-controls">
+          <SearchInput value={searchQuery} onChange={handleSearchChange} disabled={isLoading} />
+          <label className="field-group" style={{ minWidth: 180 }}>
+            <span>Asset:</span>
+            <AssetFilterDropdown
+              options={assetOptions}
+              value={assetCode}
+              onChange={setAssetCode}
+              disabled={isLoading}
+            />
+          </label>
+          <label className="field-group" style={{ minWidth: 180 }}>
+            <span>Status:</span>
+            <div className="status-filter-tabs" role="group" aria-label="Filter campaigns by status">
+              {STATUS_FILTERS.map((filter) => {
+                const isActive = statusFilter === filter.value;
+                const count = filter.value === '' ? statusCounts.all : statusCounts[filter.value];
+
+                return (
+                  <button
+                    key={filter.label}
+                    type="button"
+                    className={`status-filter-tab ${isActive ? 'status-filter-tab-active' : ''}`}
+                    onClick={() => handleStatusFilterChange(filter.value)}
+                    aria-pressed={isActive}
+                    disabled={isLoading}
+                  >
+                    <span>{filter.label}</span>
+                    <span className="status-filter-count">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </label>
         </div>
       </section>
     );

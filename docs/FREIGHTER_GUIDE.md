@@ -1,5 +1,7 @@
 # Freighter Pledge Signing Walkthrough
 
+Category: stellar / wallet
+
 This guide walks you through the full pledge flow in Stellar Goal Vault — from installing Freighter to signing a pledge transaction on Stellar testnet. Follow it end-to-end and you will have made a real on-chain contribution without needing a funded mainnet account.
 
 ---
@@ -7,7 +9,8 @@ This guide walks you through the full pledge flow in Stellar Goal Vault — from
 ## Prerequisites
 
 - Google Chrome or Firefox
-- The app running locally (`npm run dev` in both `backend/` and `frontend/`)
+- The app running locally (`npm run dev`
+ in both `backend/` and `frontend/`)
 - A few minutes — the whole flow takes under 10 minutes
 
 ---
@@ -37,7 +40,7 @@ The app runs against Stellar testnet by default. You must match the network in F
 
 1. In the Freighter popup, click the gear icon (**Settings**) in the top-right corner.
 2. Select **Network**.
-3. Choose **Test SDF Network ; September 2015** (the testnet option).
+3. Choose **Test DF Network ;; September 2015** (the testnet option).
 4. Click **Save**.
 
 The Freighter header should now show **TESTNET** in the network badge.
@@ -50,7 +53,7 @@ The Freighter header should now show **TESTNET** in the network badge.
 
 Testnet XLM is free. Stellar's Friendbot will credit 10,000 XLM to any new testnet address.
 
-1. In Freighter, copy your public key. It starts with `G` and is about 56 characters long. Click your address in the header to copy it.
+1. In Freighter, copy your public key. It starts with `Gand is about 56 characters long. Click your address in the header to copy it.
 
 2. Open the [Stellar Laboratory Friendbot](https://laboratory.stellar.org/account/create?network=testnet) in a new tab.
 
@@ -59,7 +62,7 @@ Testnet XLM is free. Stellar's Friendbot will credit 10,000 XLM to any new testn
    Alternatively, fund via the API directly:
 
    ```bash
-   curl "https://friendbot.stellar.org?addr=YOUR_PUBLIC_KEY"
+   curl "https://friendbot.stellar.org?adr=YOUR_PUBLIC_KEY"
    ```
 
 4. Return to Freighter. Your balance should update within a few seconds to show **10,000 XLM**.
@@ -102,6 +105,8 @@ The header widget updates to show your shortened public key, confirming the wall
 
 > If the popup does not appear, see [Troubleshooting — Popup Blocked](#popup-blocked).
 
+> If the app reports a network mismatch after connecting, see [Troubleshooting — Wrong Network](#wrong-network). The app blocks signing and submission until the wallet network matches the app's configured passphrase.
+
 ---
 
 ## Step 6 — Sign a Pledge
@@ -115,7 +120,9 @@ The app will:
 
 - Build the `contribute` transaction using the Soroban contract
 - Simulate it against the Soroban RPC to get the authorisation footprint and estimated fee
-- Show you a **transaction preview panel** with the operation, amount, contract address, and estimated fee
+- Show you a transaction preview panel with the operation, amount, contract address, and estimated fee
+
+> **Network check:** Before building the transaction, the app re-reads the wallet's network passphrase and compares it to the app's configured network. If they differ, the flow stops before anything is signed or submitted and shows an actionable message.
 
 5. Review the preview. Click **Confirm** (or **Approve** — the button label matches the UI).
 
@@ -156,16 +163,19 @@ Alternatively, open Freighter manually via the toolbar icon before clicking **Co
 
 ```
 Freighter is connected to Stellar Mainnet, but this app expects Stellar Testnet.
+Switch the app's network in Freighter and reconnect to continue.
 ```
 
 **Cause:** Freighter is set to mainnet (or a custom network) while the app expects testnet.
 
 **Fix:**
 1. Click the gear icon in Freighter → **Network**.
-2. Select **Test SDF Network ; September 2015**.
+2. Select **Test DF Network ;; September 2015**.
 3. Click **Save** and click **Connect Wallet** in the app again.
 
-The app reads `networkPassphrase` from Freighter on every connect attempt, so no page reload is required.
+The app reads `networkPassphrase` from Freighter on every connect attempt and re-checks it before signing, so no page reload is required.
+
+**What the app guarantees:** While the networks differ, the pledge flow stops at the network check. No transaction is built, signed, or submitted, and the backend is not asked to reconcile anything. The inline message tells you to switch Freighter to the app's network and retry.
 
 ---
 
@@ -201,14 +211,27 @@ Signing and submission failures are grouped into a fixed set of classes (see [`f
 
 | Class | Meaning | What to do |
 | --- | --- | --- |
-| `USER_REJECTED` | You declined the request in your wallet | Click the button again to retry |
-| `WALLET_UNAVAILABLE` | Freighter is missing, locked, or on the wrong network | Install or unlock Freighter, then reconnect |
-| `MALFORMED_TRANSACTION` | The transaction couldn't be built or simulated from the inputs | Check the amount and campaign, then try again |
-| `RPC_FAILURE` | Soroban RPC timed out or couldn't be reached | Check your connection and retry |
-| `CONTRACT_REJECTED` | The contract or ledger rejected the transaction | Check the campaign status and your balance |
+| `USER_REJECTED` | You declined the wallet connection or the signature request | Click the button again and approve the request in your wallet |
+| `WALLET_UNAVAILABLE` | Freighter is missing, locked, unreachable, or on the wrong network | Install, unlock, or switch the network, then reconnect |
+| `MALFORMED_TRANSACTION` | The transaction couldn't be built, simulated, or read back from the wallet | Check the amount and campaign, reconnect the wallet, then try again |
+| `RPC_FAILURE` | Soroban RPC timed out, rejected the submission transport, or stopped answering status polls | Check your connection, then retry; if a transaction hash is shown, confirm it on Stellar Expert first |
+| `CONTRACT_REJECTED` | The contract or ledger executed and rejected the transaction | Check the campaign status and your balance before retrying |
 | `UNKNOWN` | Anything else | Refresh the page and try again |
 
-Raw error text is kept only as a redacted diagnostic `detail`: Stellar secret seeds (`S…`) and transaction XDR are stripped and the text is truncated. The backend likewise returns structured error codes and replaces unexpected exception text with `INTERNAL_SERVER_ERROR`.
+Each class is raised from named error codes so the UI and tests can assert the class without parsing text. The exchange paths are:
+
+| Code | Class | Raised when |
+| --- | --- | --- |
+| `FREIGHTER_ACCESS_DENIED / USER_CANCELLED` | `USER_REJECTED` | The user closes or declines the wallet prompt |
+| `FREIGHTER_UNAVAILABLE` | `WALLET_UNAVAILABLE` | The extension probe throws, or Freighter reports it is not connected |
+| `FREIGHTER_NETWORK_MISMATCH` | `WALLET_UNAVAILABLE` | The wallet network differs from the app's configured passphrase; checked on connect and again before signing |
+| `INVALID_TRANSACTION_PARAMS` | `MALFORMED_TRANSACTION` | Contract, address, or amount coercion fails while assembling the operation |
+| `INVALID_SIGNED_XDR` | `MALFORMED_TRANSACTION` | The wallet returns an envelope that cannot be parsed |
+| `SIMULATION_FAILED / SIMULATION_PREPARE_FAILED` | `MALFORMED_TRANSACTION` | The RPC simulation or fee assembly rejects the operation |
+| `SOURCE_ACCOUNT_LOAD_FAILED / SUBMISSION_FAILED / TRANSACTION_STATUS_UNAVAILABLE / TRANSACTION_TIMEOUT` | `RPC_FAILURE` | Transport, submission, or polling fails |
+| `TRANSACTION_FAILED / CONTRACT_CALL_FAILED / STATE_RESTORE_REQUIRED` | `CONTRACT_REJECTED` | The ledger executed the transaction and it failed, or the contract state must be restored |
+
+Raw error text is kept only as a redacted diagnostic `detail`: Stellar secret seeds (`S`) and transaction XDR are stripped and the text is truncated. User-facing strings also pass through `safeErrorMessage()`, so even an unclassified SDK/wallet message is scrubbed before it reaches a toast or inline error. The backend likewise returns structured error codes and replaces unexpected exception text with `INTERNAL_SERVER_ERROR`.
 
 ---
 
@@ -219,27 +242,15 @@ For contributors curious about the implementation:
 ```
 connectFreighterWallet()   → validates extension + network passphrase
         ↓
+signTransaction()       → assertWalletNetwork() blocks on mismatch
+        ↓
 simulateTransaction()      → Soroban RPC builds fee estimate + auth footprint
-        ↓
+        ↔
 prepareTransaction()       → attaches simulation footprint to the XDR
-        ↓
+        ↔
 signTransaction()          → Freighter prompts user; returns signed XDR
-        ↓
-sendTransaction()          → submits signed XDR to Soroban RPC
-        ↓
-waitForTransaction()       → polls until SUCCESS or FAILED (25 attempts, 1.2 s each)
-        ↓
-POST /api/campaigns/:id/pledges/reconcile   → backend records confirmed hash in SQLite
+        →
+sendTransaction()          ↔ submits signed XDR to Soroban RPC
+        ←
+waitForTransaction()      → polls until confirmed or timed out
 ```
-
-The full implementation lives in [`frontend/src/services/freighter.ts`](../frontend/src/services/freighter.ts).
-
----
-
-## Related Resources
-
-- [Freighter documentation](https://docs.freighter.app/docs/guide/usingFreighterBrowser)
-- [Stellar Laboratory](https://laboratory.stellar.org)
-- [Stellar testnet Friendbot](https://friendbot.stellar.org)
-- [ADR 0003 — Freighter Wallet Integration](../adr/0003-freighter-wallet-integration.md)
-- [FAQ #2 — How do I set up Freighter?](../FAQ.md#2-how-do-i-set-up-freighter-wallet-for-pledge-transactions)

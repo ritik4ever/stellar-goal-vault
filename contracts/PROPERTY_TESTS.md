@@ -108,6 +108,20 @@ if campaign.claimed == true, then:
 - Attempts to add contributions after claim (should fail)
 - Validates claim idempotency (second claim fails)
 
+### Claim Accounting Table Cases
+
+The contract test `test_claim_accounting_invariants_across_amounts_and_fees`
+checks successful claims over several contribution amounts and fee rates,
+including zero-fee, rounded fee, and full-fee boundaries. It verifies that
+the creator and fee recipient receive exactly the contributed amount in total,
+the vault token balance and campaign token accounting are cleared, and the
+campaign remains marked claimed.
+
+The `test_invalid_claim_accounting_invariants` table covers an early claim, an
+underfunded claim after the deadline, and a claim by the wrong creator. Each
+rejected transition must leave contributor/vault token balances, campaign token
+accounting, pledged amount, and claimed state unchanged.
+
 ---
 
 ### Invariant 5: Refund State Consistency
@@ -137,6 +151,32 @@ refund(contributor, campaign) is_allowed_if:
 - Advances time past deadline
 - Attempts refunds (should succeed)
 - Validates error handling and state consistency
+
+---
+
+### Invariant 6: Refund Accounting & Value Conservation (#911)
+**Tests:**
+- `test_refund_lifecycle_table_driven_underfunded_preserves_accounting_invariants`
+- `test_refund_invalid_transitions_preserve_state_and_conserve_value`
+- `test_canceled_campaign_refund_matrix_preserves_invariants`
+- `test_multi_token_refund_lifecycle_conserves_value`
+- `test_refund_all_admin_bulk_refund_table_driven`
+- `test_prop_refund_conserves_system_value`
+
+**Description:**
+Throughout all refund operations (partial, full, multi-token, canceled campaign, or bulk admin refund), the contract enforces strict value conservation and accounting symmetry:
+1. Valid transitions return the exact contributed amount to contributors and decrease both `pledged_amount` and the vault's holding by that exact amount.
+2. Invalid transitions (premature refund before deadline on active campaign, funded campaign after deadline, claimed campaign, stranger with zero contribution, double refund, or paused contract) fail cleanly and leave all ledger entries untouched.
+3. Total system value is conserved: no funds are ever created, duplicated, or destroyed.
+
+**Mathematical property:**
+```
+1. pledged_amount == Σ Contribution(campaign, contributor, token)
+2. pledged_amount == Σ CampaignTokenBalance(campaign, token)
+3. CampaignTokenBalance(campaign, token) == vault_token_balance
+4. balance_of(contributor, token)_after == balance_of(contributor, token)_before + refunded_amount
+5. For all invalid refund attempts: state_after == state_before
+```
 
 ---
 
@@ -240,6 +280,11 @@ cargo test --lib
 cargo test --lib property_tests
 ```
 
+### Run Claim Accounting Cases
+```bash
+cargo test --lib claim_accounting
+```
+
 ### Run Specific Invariant Tests
 ```bash
 # Pledged sum invariant
@@ -256,6 +301,14 @@ cargo test --lib prop_invariant_claim_immutability
 
 # Refund state consistency invariant
 cargo test --lib prop_invariant_refund_funding_state
+
+# Refund path table-driven and property invariants (#911)
+cargo test --lib test_refund_lifecycle_table_driven_underfunded_preserves_accounting_invariants
+cargo test --lib test_refund_invalid_transitions_preserve_state_and_conserve_value
+cargo test --lib test_canceled_campaign_refund_matrix_preserves_invariants
+cargo test --lib test_multi_token_refund_lifecycle_conserves_value
+cargo test --lib test_refund_all_admin_bulk_refund_table_driven
+cargo test --lib test_prop_refund_conserves_system_value
 ```
 
 ### Run with Verbose Output
@@ -314,7 +367,15 @@ cargo test --lib prop_invariant_pledged_sum -- --exact
 cargo test --lib prop_invariant_nonnegativity -- --exact
 cargo test --lib prop_invariant_no_overflow -- --exact
 cargo test --lib prop_invariant_claim_immutability -- --exact
-cargo test --lib prop_invariant_refund_funding_state -- --exact
+cargo test --lib prop_invariant_refund_funding_state
+
+# Refund path table-driven and property invariants (#911)
+cargo test --lib test_refund_lifecycle_table_driven_underfunded_preserves_accounting_invariants
+cargo test --lib test_refund_invalid_transitions_preserve_state_and_conserve_value
+cargo test --lib test_canceled_campaign_refund_matrix_preserves_invariants
+cargo test --lib test_multi_token_refund_lifecycle_conserves_value
+cargo test --lib test_refund_all_admin_bulk_refund_table_driven
+cargo test --lib test_prop_refund_conserves_system_value -- --exact
 ```
 
 ### Step 5: Verify Coverage

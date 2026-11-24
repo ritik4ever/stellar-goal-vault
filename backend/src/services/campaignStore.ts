@@ -504,7 +504,7 @@ export function calculateProgress(
   };
 }
 
-export type CampaignSortField = 'createdAt' | 'deadline' | 'pledgedAmount' | 'targetAmount';
+export type CampaignSortField = 'createdAt' | 'deadline' | 'pledgedAmount' | 'targetAmount' | 'percentFunded';
 export type SortOrder = 'asc' | 'desc';
 
 export interface ListCampaignsOptions {
@@ -697,6 +697,9 @@ export function listCampaigns(options?: ListCampaignsOptions): ListCampaignsResu
     case 'targetAmount':
       primaryOrder = `campaigns.target_amount ${orderDir}`;
       break;
+    case 'percentFunded':
+      primaryOrder = `CASE WHEN campaigns.target_amount > 0 THEN (CAST(campaigns.pledged_amount AS REAL) / campaigns.target_amount) ELSE 0 END ${orderDir}`;
+      break;
     case 'createdAt':
     default:
       primaryOrder = `campaigns.created_at ${orderDir}`;
@@ -774,7 +777,8 @@ export function getCampaign(
 ): CampaignRecord | undefined {
   const db = getDb();
   const row = db.prepare(`SELECT * FROM campaigns WHERE id = ?`).get(campaignId) as
-    CampaignRow | undefined;
+    | CampaignRow
+    | undefined;
 
   if (row) {
     const now = nowInMilliseconds();
@@ -1870,10 +1874,22 @@ export function getTopContributors(limit: number = 10): LeaderboardEntry[] {
 
 export interface CampaignAnalytics {
   fundingGap: number;
+  status: CampaignStatus;
+  percentFunded: number;
+  pledgeCount: number;
+  /**
+   * Distinct contributors with money still in the campaign. Fully refunded
+   * contributions are counted by `pledgeCount` but not here, so a contributor
+   * who was refunded does not distort "who is currently funding this".
+   */
+  contributorCount: number;
 }
 
 /**
  * Computes basic analytics for a campaign.
+ *
+ * Read-only: every value is derived from the campaign row, its active pledges,
+ * and the contributor rollup, so it never writes or fixes up state.
  *
  * @param campaignId - The unique campaign identifier.
  * @returns A {@link CampaignAnalytics} object with computed metrics, or undefined if campaign doesn't exist.
@@ -1884,9 +1900,16 @@ export function getCampaignAnalytics(campaignId: string): CampaignAnalytics | un
     return undefined;
   }
 
-  const fundingGap = round(Math.max(0, campaign.targetAmount - campaign.pledgedAmount));
+  const progress = calculateProgress(campaign);
+  const contributorCount = getContributorSummary(campaignId).filter(
+    (contributor) => !contributor.isFullyRefunded,
+  ).length;
 
   return {
-    fundingGap,
+    fundingGap: round(Math.max(0, campaign.targetAmount - campaign.pledgedAmount)),
+    status: progress.status,
+    percentFunded: progress.percentFunded,
+    pledgeCount: progress.pledgeCount,
+    contributorCount,
   };
 }

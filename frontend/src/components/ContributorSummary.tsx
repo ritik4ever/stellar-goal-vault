@@ -115,7 +115,7 @@ export function ContributorSummary({
     return (
       <section
         ref={containerRef as any}
-        className="contributor-summary"
+        className="contributor-summary contributor-summary-loading"
         aria-busy="true"
         aria-label="Contributor summary"
       >

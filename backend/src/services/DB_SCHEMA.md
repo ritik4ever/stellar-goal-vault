@@ -91,8 +91,27 @@ Column additions must precede dependent partial and composite indexes.
 Backfill only when the existing data has a clear default, and avoid rewriting
 lifecycle or accounting history.
 
-To roll back, call `rollbackMigrations(db, targetVersion)`. It runs the down
-scripts newest first and removes their `schema_migrations` rows.
+### Interrupted upgrades
+
+A migration is applied inside a single transaction, and the `schema_migrations`
+row for that version is written in the same transaction. The version therefore
+advances only if the migration's DDL and bookkeeping both commit. If the process
+is killed, the power fails, or a statement fails before commit, SQLite rolls the
+whole transaction back: the schema stays at the previous version, the migration
+has no `schema_migrations` row, and no committed campaign, pledge, or event data
+is dropped or duplicated.
+
+Rerunning `migrate()` after an interruption is safe. Migrations already recorded
+are skipped, and the interrupted one is applied again from its start. Because its
+prior attempt rolled back, the rerun begins from a clean state and does not stack
+duplicate columns, indexes, or triggers. Migrations that create objects use
+`IF NOT EXISTS`, and column additions run only when the column is absent. The
+legacy upgrade (`upgradeLegacySchema()`) follows the same rule: it is idempotent,
+so an interruption part-way through it can be recovered by rerunning startup.
+
+Regression coverage for this behaviour lives in
+`src/db/versionedMigrations.test.ts` (interrupted migration recovery) and must
+stay green when migrations change.
 
 ### Databases created before versioned migrations
 
@@ -105,6 +124,9 @@ transaction hashes, and backfills `campaigns_fts`. Migrations 001–004 are then
 recorded as applied. That module is frozen, so new schema work goes in
 migration files.
 
+To roll back, call `rollbackMigrations(db, targetVersion)`. It runs the down
+scripts newest first and removes their `schema_migrations` rows.
+
 ### Startup invariants
 
 After migrations, `applyStartupInvariants()` runs on every startup. It
@@ -114,6 +136,90 @@ It also re-asserts the query-plan indexes and campaign integrity triggers with
 
 Update the focused database tests (`src/db/versionedMigrations.test.ts`) when a
 schema object or invariant changes.
+
+## Event indexer cursor (`kv_store`)
+
+Migration 006 creates `kv_store (key TEXT PRIMARY KEY, value TEXT NOT NULL)`.
+The Soroban event indexer keeps its resume position there, in two keys:
+
+| Key | Value | Meaning |
+|-----|-------|---------|
+| `soroban_indexer_cursor` | `{"ledger": N, "eventIndex": I}` | Position of the last event fully processed. |
+| `soroban_indexer_last_ledger` | `N` | Kept in sync for older readers. On a database that has only this key, `N` is the next ledger to fetch. |
+
+An event's position is its ledger plus its index within that ledger, so several
+events that share a ledger or a transaction hash each get their own position and
+are indexed once, in chain order. When the RPC omits `event_index`, the indexer
+uses the event's ordinal within the ledger.
+
+`processSorobanEvents()` writes each event and the cursor advance in one
+transaction. A restart therefore cannot leave an event recorded with the cursor
+still behind it, or the cursor past an event that was never recorded. If an
+event cannot be stored, the batch stops, the cursor stays on the last committed
+event, and the next poll resumes from there. Each poll fetches from the cursor's
+own ledger and skips events at or before the cursor, so a batch that stopped
+part-way through a ledger loses nothing.
+
+A database that has only the legacy key has not recorded which events inside
+its ledger were consumed, so the indexer processes that ledger in full; events
+already recorded are recognised by `(txHash, eventIndex)` and skipped.
+
+Known limit: the RPC returns at most 200 events per request. If one ledger holds
+more than 200 events for the contract, polling from that ledger cannot reach the
+rest, because the request has no pagination token yet.
+
+## Pledge write boundary
+
+`addPledge()` (`campaignStore.ts`) writes three things in one
+`db.transaction(...).immediate()`:
+
+1. the `pledges` row,
+2. the `campaigns.pledged_amount` total, and
+3. the `pledged` row in `campaign_events`, plus a `pledge_limit_reached` row when
+   the pledge reaches the contributor limit.
+
+If any write fails, including the second event after the first succeeded, the
+whole transaction rolls back: no pledge, no change to the total, no history. The
+funding cap, the contributor limit and the campaign state are re-checked inside
+the transaction, so a pledge that loses a race writes nothing. A retry after a
+failure therefore commits exactly once, and a pledge that was rolled back leaves
+nothing to duplicate.
+
+Databases created before versioned migrations keep this behaviour after the
+upgrade. Existing pledges and totals are untouched (old pledges keep `NULL`
+`transaction_hash`), and the first new pledge on an upgraded database commits the
+same three writes together. `schemaUpgradeTransactions.test.ts` covers each
+failure point on a fresh database and on one upgraded from the legacy schema.
+
+### Idempotent pledge requests
+
+`POST /api/campaigns/:id/pledges` accepts an `Idempotency-Key` header
+(`middleware/idempotencyMiddleware.ts`, `services/idempotencyCache.ts`):
+
+| Situation | Result |
+|-----------|--------|
+| Same key, same body, after the first succeeded | Original response replayed (`X-Idempotency-Cache: HIT`); no second pledge. |
+| Same key, different body | `422 IDEMPOTENCY_KEY_REUSED`; the stored response is not replayed. |
+| Same key, same body, first request still running | Waits for it, then replays its response. `409 IDEMPOTENCY_REQUEST_IN_PROGRESS` if it takes longer than 10 s. |
+| Same key from a different contributor | Independent request, so it gets its own pledge. |
+| First request failed (non-2xx) | Nothing is stored; the retry runs normally. |
+| Repeat at 24 h or later | A new request. The age is checked against the stored timestamp, so the boundary is exact (`now - storedAt >= 24 h`). |
+
+The key is scoped to API key, campaign and contributor. Request bodies are
+compared by a hash that ignores field order.
+
+Limits:
+
+- **Restart.** Without Redis the stored keys live in an in-process LRU cache and
+  are lost on restart, so a repeat after a restart is a new request. With Redis
+  the entry survives and is replayed.
+- **Several workers.** Waiting on an in-progress request is per process. Two
+  workers that receive the same key at the same moment do not see each other
+  unless they share a Redis cache, and even then there is a short window before
+  the first response is stored. A durable store written in the same transaction
+  as the pledge would close both gaps.
+- The cache key format changed when the contributor scope was added, so a key
+  stored before the upgrade is not matched afterwards.
 
 ## Index Strategy
 
@@ -147,43 +253,4 @@ history, campaign pledge lists, and active-pledge accounting). All use
 - `idx_pledges_transaction_hash` unique partial on `pledges(transaction_hash)`
   where `transaction_hash IS NOT NULL`.
 
-### Seed-workflow / FK child indexes
-
-- `idx_notifications_campaign_id` on `notifications(campaign_id)` — speeds
-  foreign-key child discovery when the seed wipe deletes campaigns (and any
-  campaign-scoped notification lookups).
-- `idx_campaign_comments_campaign_id` on `campaign_comments(campaign_id)`.
-- `idx_campaign_events_campaign_id` on `campaign_events(campaign_id)`.
-- `idx_webhook_dlq_campaign_id` on `webhook_dead_letter_queue(campaign_id)`.
-
-### Query-layer composite indexes (#889)
-
-Installed by `ensureQueryLayerIndexes()` for concrete application read plans:
-
-- `idx_pledges_campaign_contributor` on `pledges(campaign_id, contributor, refunded_at)` —
-  contributor totals and refund lookups (`WHERE campaign_id AND contributor AND refunded_at IS NULL`).
-- `idx_campaign_events_campaign_timestamp` on `campaign_events(campaign_id, timestamp, id)` —
-  ordered campaign history pages.
-- `idx_campaign_comments_campaign_created` on `campaign_comments(campaign_id, deleted_at, created_at DESC)` —
-  soft-deleted comment lists per campaign.
-- `idx_campaign_events_source` on `json_extract(blockchain_metadata, '$.source')` —
-  filtering local vs soroban history events.
-
-### Migration-runner query indexes
-
-Created by migration 004 and re-asserted by `ensureMigrationRunnerIndexes()` to accelerate backfill, deduplication, and cached accounting query plans during schema upgrades:
-
-- `idx_pledges_token_id_null` partial index on `pledges(token_id)` where `token_id IS NULL` — speeds legacy `token_id` backfill (`UPDATE pledges SET token_id = asset_code WHERE token_id IS NULL`).
-- `idx_pledges_campaign_refunded` covering index on `pledges(campaign_id, refunded_at)` — accelerates campaign `pledged_amount` recomputation (`UPDATE campaigns SET pledged_amount = ...`).
-- `idx_pledges_tx_hash_migration` partial index on `pledges(transaction_hash)` where `transaction_hash IS NOT NULL` — accelerates `transaction_hash` deduplication (`GROUP BY transaction_hash`).
-
-### Pledge query invariants (#891)
-
-Pledge writes use an SQLite `IMMEDIATE` transaction before reading contributor
-totals or campaign accounting. This reserves the writer before the cap checks,
-then re-reads campaign lifecycle and cap data inside the transaction. A second
-writer therefore cannot validate against the same stale pledged total. Pledge
-amounts must be finite, positive, and remain at least `0.01` after currency
-rounding. Rejected writes leave the pledge row, cached campaign total, and event
-history unchanged. Contributor summaries break equal-total ties by contributor
-address so query results are deterministic.
+### Seed-workflo

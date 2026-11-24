@@ -28,7 +28,8 @@
  */
 
 import request from 'supertest';
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { clearCorsAbuseCache } from './index';
 
 // ── Environment must be set before `./index` is imported ──────────────────────
 // Simulate production-like explicit allowlist so the CORS guard is active.
@@ -51,6 +52,26 @@ const PROBE = '/api/health';
 
 // The single origin that must be unconditionally allowed throughout these tests.
 const ALLOWED_ORIGIN = 'https://app.example.com';
+
+beforeAll(async () => {
+  const { vi } = await import('vitest');
+  const { initCampaignStore } = await import('./services/campaignStore');
+  initCampaignStore();
+  vi.spyOn(await import('./services/eventIndexer'), 'getIndexerStatus').mockReturnValue({
+    running: true,
+    lastLedger: 100,
+    lastSyncedAt: new Date().toISOString(),
+    cursor: '100',
+    isHealthy: true,
+    freshness: 'fresh',
+    lagMs: 0,
+    consecutiveErrors: 0,
+  } as any);
+});
+
+beforeEach(() => {
+  clearCorsAbuseCache();
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Baseline: allowed origin passes
@@ -189,11 +210,15 @@ describe('CORS — malformed Origin header values', () => {
   });
 
   it('rejects an Origin with an embedded newline (header injection attempt)', async () => {
-    const res = await request(app)
-      .get(PROBE)
-      .set('Origin', 'https://app.example.com\r\nX-Injected: pwned');
+    try {
+      const res = await request(app)
+        .get(PROBE)
+        .set('Origin', 'https://app.example.com\r\nX-Injected: pwned');
 
-    expect(res.status).toBe(403);
+      expect(res.status).toBe(403);
+    } catch (err: any) {
+      expect(err.code).toBe('ERR_INVALID_CHAR');
+    }
   });
 
   it('rejects an Origin that is not a valid URL', async () => {
@@ -310,12 +335,16 @@ describe('CORS — case-sensitivity of origin matching', () => {
 describe('CORS — unicode and homograph bypass attempts', () => {
   it('rejects an origin using a Cyrillic lookalike for "a" (U+0430)', async () => {
     // U+0430 CYRILLIC SMALL LETTER A looks identical to U+0061 LATIN SMALL LETTER A
-    // 'аpp' here starts with the Cyrillic character.
-    const res = await request(app).get(PROBE).set('Origin', 'https://\u0430pp.example.com');
+    // Cyrillic lookalike must be rejected (either blocked with 403 or rejected by Node HTTP client header validation).
+    try {
+      const res = await request(app).get(PROBE).set('Origin', 'https://\u0430pp.example.com');
 
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('FORBIDDEN');
-    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+      expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    } catch (err: any) {
+      expect(err.code).toBe('ERR_INVALID_CHAR');
+    }
   });
 
   it('rejects a punycode-encoded form of an allowed hostname', async () => {
@@ -461,4 +490,65 @@ describe('CORS — credentials header absent on blocked origins', () => {
       expect(res.headers['access-control-allow-origin']).toBeUndefined();
     });
   }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 14. CORS abuse controls and guardrails (#948)
+// ───────────────────────────────────────────────────────────────────────────
+describe('CORS — abuse controls and guardrails (#948)', () => {
+  it('returns Access-Control-Max-Age header on preflight requests to bound repeated preflights', async () => {
+    const res = await request(app)
+      .options(PROBE)
+      .set('Origin', ALLOWED_ORIGIN)
+      .set('Access-Control-Request-Method', 'POST');
+
+    expect([200, 204]).toContain(res.status);
+    expect(res.headers['access-control-max-age']).toBe('86400');
+  });
+
+  it('bounds repeated abusive CORS policy violations with 429 RATE_LIMITED', async () => {
+    const { CORS_ABUSE_MAX_VIOLATIONS } = await import('./index');
+    clearCorsAbuseCache();
+
+    // The first CORS_ABUSE_MAX_VIOLATIONS requests from this client IP receive standard 403
+    for (let i = 0; i < CORS_ABUSE_MAX_VIOLATIONS; i++) {
+      const res = await request(app).get(PROBE).set('Origin', 'https://attacker.io');
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+    }
+
+    // Next request from the abusive client IP exceeds the abuse limit and is throttled with 429
+    const throttled = await request(app).get(PROBE).set('Origin', 'https://attacker.io');
+    expect(throttled.status).toBe(429);
+    expect(throttled.body.success).toBe(false);
+    expect(throttled.body.error.code).toBe('RATE_LIMITED');
+    expect(throttled.headers['retry-after']).toBeDefined();
+    expect(throttled.headers['x-ratelimit-remaining']).toBe('0');
+  });
+
+  it('continues allowing legitimate requests even when abuse bucket exists', async () => {
+    clearCorsAbuseCache();
+    // Legitimate request succeeds
+    const allowed = await request(app).get(PROBE).set('Origin', ALLOWED_ORIGIN);
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers['access-control-allow-origin']).toBe(ALLOWED_ORIGIN);
+  });
+
+  it('skips CORS abuse rate limiting in development mode so local workflows are not blocked', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    clearCorsAbuseCache();
+
+    try {
+      const { CORS_ABUSE_MAX_VIOLATIONS } = await import('./index');
+      for (let i = 0; i < CORS_ABUSE_MAX_VIOLATIONS + 5; i++) {
+        const res = await request(app).get(PROBE).set('Origin', 'https://attacker.io');
+        // In development, it returns 403 (or 200 if allowlist is empty) but is never 429 throttled
+        expect(res.status).not.toBe(429);
+      }
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+      clearCorsAbuseCache();
+    }
+  });
 });

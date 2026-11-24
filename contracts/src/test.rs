@@ -1,12 +1,18 @@
+#![allow(deprecated)]
 #[cfg(test)]
+#[allow(deprecated, irrefutable_let_patterns)]
 mod tests {
     use soroban_sdk::{
-        testutils::{Address as _, Events as _, Ledger},
+        testutils::{storage::Persistent as _, Address as _, Events as _, Ledger},
         token::{Client as TokenClient, StellarAssetClient},
-        Address, Env, String,
+        Address, Env, IntoVal, String,
     };
 
-    use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
+    use crate::{
+        CampaignClaimed, DataKey, DeadlineExtended, ExtensionApproved, ExtensionRequested,
+        FeeCollected, StellarGoalVaultContract, StellarGoalVaultContractClient,
+        CAMPAIGN_STORAGE_TTL_EXTEND_TO,
+    };
     // Keep contract tests independent of the machine clock and local timezone.
     // Soroban timestamps are UTC Unix seconds; epoch zero preserves the mock
     // ledger's historical test behavior while making the chosen time explicit.
@@ -34,6 +40,32 @@ mod tests {
         env.ledger().with_mut(|info| {
             info.timestamp += seconds;
         });
+    }
+
+    /// Events with topics ("Goal", `name`) from the most recent contract call,
+    /// as (position among all of that call's events, data payload). The position
+    /// lets a test assert emission order across different topics.
+    fn goal_events(
+        env: &Env,
+        name: soroban_sdk::Symbol,
+    ) -> std::vec::Vec<(usize, soroban_sdk::xdr::ScVal)> {
+        let topics_vec: soroban_sdk::Vec<soroban_sdk::Val> =
+            (soroban_sdk::symbol_short!("Goal"), name).into_val(env);
+        let topics: soroban_sdk::xdr::ScVec = topics_vec.into();
+        env.events()
+            .all()
+            .events()
+            .iter()
+            .enumerate()
+            .filter_map(|(position, e)| {
+                if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = e.body {
+                    if body.topics == *topics {
+                        return Some((position, body.data.clone()));
+                    }
+                }
+                None
+            })
+            .collect()
     }
 
     /// Builds a synthetic metadata String of `len` bytes for boundary tests.
@@ -230,6 +262,57 @@ mod tests {
         assert!(
             env.events().all().events().is_empty(),
             "failed creation must not emit a success event"
+        );
+    }
+
+    #[test]
+    fn test_contribute_emits_structured_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline = env.ledger().timestamp() + 1_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &500_i128,
+            &deadline,
+            &String::from_str(&env, "pledge event test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let events_before = env.events().all().events().len();
+
+        client.contribute(&campaign_id, &contributor, &token, &150_i128);
+
+        let events_after = env.events().all().events().len();
+        assert!(events_after > events_before, "pledge must emit events");
+    }
+
+    #[test]
+    fn test_contribute_rejection_emits_no_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&999, &contributor, &token, &100_i128);
+        }));
+        assert!(result.is_err(), "nonexistent campaign pledge must fail");
+        assert!(
+            env.events().all().events().is_empty(),
+            "failed pledge must not emit a success event"
         );
     }
 
@@ -443,6 +526,119 @@ mod tests {
     }
 
     #[test]
+    fn test_claim_accounting_invariants_across_amounts_and_fees() {
+        for (amount, fee_bps) in [(100_i128, 0_i128), (101, 1), (999, 200), (10_000, 10_000)] {
+            let env = test_env();
+            env.mock_all_auths();
+
+            let creator = Address::generate(&env);
+            let contributor = Address::generate(&env);
+            let admin = Address::generate(&env);
+            let fee_recipient = Address::generate(&env);
+            let token = deploy_token(&env, &admin, &contributor, amount);
+            let client = deploy_contract(&env);
+            client.initialize(&admin, &100_i128);
+            client.set_fee(&admin, &fee_bps);
+            client.set_fee_recipient(&admin, &fee_recipient);
+
+            let deadline = env.ledger().timestamp() + 10;
+            let campaign_id = client.create_campaign(
+                &creator,
+                &soroban_sdk::vec![&env, token.clone()],
+                &amount,
+                &deadline,
+                &String::from_str(&env, "claim accounting invariant"),
+                &0_i128,
+                &soroban_sdk::vec![&env],
+                &0_u32,
+            );
+
+            client.contribute(&campaign_id, &contributor, &token, &amount);
+            advance_time(&env, 11);
+            client.claim(&campaign_id, &creator);
+
+            let token_client = TokenClient::new(&env, &token);
+            let fee_amount = amount * fee_bps / 10_000;
+            let creator_amount = amount - fee_amount;
+            assert_eq!(token_client.balance(&creator), creator_amount);
+            assert_eq!(token_client.balance(&fee_recipient), fee_amount);
+            assert_eq!(token_client.balance(&client.address), 0);
+            assert_eq!(
+                token_client.balance(&creator) + token_client.balance(&fee_recipient),
+                amount,
+                "claim must distribute every contributed token"
+            );
+            assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+
+            let campaign = client.get_campaign(&campaign_id);
+            assert!(campaign.claimed);
+            assert_eq!(campaign.pledged_amount, amount);
+
+            assert!(client.try_claim(&campaign_id, &creator).is_err());
+            assert_eq!(token_client.balance(&creator), creator_amount);
+            assert_eq!(token_client.balance(&fee_recipient), fee_amount);
+            assert_eq!(token_client.balance(&client.address), 0);
+            assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+        }
+    }
+
+    #[test]
+    fn test_invalid_claim_accounting_invariants() {
+        for (funding, past_deadline, wrong_creator) in [
+            (1_000_i128, false, false),
+            (500, true, false),
+            (1_000, true, true),
+        ] {
+            let env = test_env();
+            env.mock_all_auths();
+
+            let creator = Address::generate(&env);
+            let attacker = Address::generate(&env);
+            let contributor = Address::generate(&env);
+            let admin = Address::generate(&env);
+            let token = deploy_token(&env, &admin, &contributor, 1_000);
+            let client = deploy_contract(&env);
+            let deadline = env.ledger().timestamp() + 10;
+            let campaign_id = client.create_campaign(
+                &creator,
+                &soroban_sdk::vec![&env, token.clone()],
+                &1_000_i128,
+                &deadline,
+                &String::from_str(&env, "invalid claim invariant"),
+                &0_i128,
+                &soroban_sdk::vec![&env],
+                &0_u32,
+            );
+
+            client.contribute(&campaign_id, &contributor, &token, &funding);
+            if past_deadline {
+                advance_time(&env, 11);
+            }
+
+            let claimant = if wrong_creator { &attacker } else { &creator };
+            assert!(client.try_claim(&campaign_id, claimant).is_err());
+
+            let token_client = TokenClient::new(&env, &token);
+            assert_eq!(token_client.balance(&contributor), 1_000 - funding);
+            assert_eq!(token_client.balance(&client.address), funding);
+            assert_eq!(token_client.balance(&creator), 0);
+            assert_eq!(
+                token_client.balance(&contributor) + token_client.balance(&client.address),
+                1_000,
+                "rejected claim must not create or destroy tokens"
+            );
+            assert_eq!(
+                client.get_campaign_token_balance(&campaign_id, &token),
+                funding
+            );
+
+            let campaign = client.get_campaign(&campaign_id);
+            assert!(!campaign.claimed);
+            assert_eq!(campaign.pledged_amount, funding);
+        }
+    }
+
+    #[test]
     #[should_panic(expected = "creator mismatch")]
     fn test_claim_creator_mismatch() {
         let env = test_env();
@@ -505,6 +701,35 @@ mod tests {
 
         client.contribute(&campaign_id, &contributor, &token, &target);
         client.claim(&campaign_id, &creator);
+    }
+
+    #[test]
+    fn test_failed_claim_emits_no_success_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 100),
+            &String::from_str(&env, "failed claim event test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor, &token, &1_000);
+
+        assert!(client.try_claim(&campaign_id, &creator).is_err());
+        assert!(
+            env.events().all().events().is_empty(),
+            "failed claim must not leave success events"
+        );
     }
 
     #[test]
@@ -1375,6 +1600,69 @@ mod tests {
         assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
     }
 
+    // ── SGV-2026-111: minimum contribution boundary contract ─────────────────
+    // The accepted range is `amount >= get_min_contribution()`. Exactly at the
+    // configured minimum is accepted; one stroop below is rejected. A rejection
+    // must be total: no tokens move, no pledge is recorded, and the configured
+    // minimum and campaign accounting are unchanged.
+
+    #[test]
+    fn test_min_contribution_boundary_rejects_below_and_accepts_exactly_at_min() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &500_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "minimum boundary contract"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let token_client = TokenClient::new(&env, &token);
+        let vault = client.address.clone();
+
+        // One stroop below the configured minimum (500 - 1 = 499) is rejected.
+        let rejected = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &contributor, &token, &499);
+        }));
+        assert!(rejected.is_err());
+
+        // The configured minimum survives and nothing was deducted or recorded.
+        assert_eq!(client.get_min_contribution(), 500);
+        assert_eq!(token_client.balance(&contributor), 1_000);
+        assert_eq!(token_client.balance(&vault), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            0
+        );
+        assert_eq!(client.get_contributor_count(&campaign_id), 0);
+
+        // Exactly at the configured minimum is accepted.
+        client.contribute(&campaign_id, &contributor, &token, &500);
+        assert_eq!(client.get_min_contribution(), 500);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 500);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            500
+        );
+        assert_eq!(token_client.balance(&contributor), 500);
+        assert_eq!(token_client.balance(&vault), 500);
+    }
+
     // ── #185: update_metadata tests ───────────────────────────────────────────
 
     #[test]
@@ -1499,13 +1787,16 @@ mod tests {
 
     #[test]
     fn test_request_extension_stores_request() {
+        use soroban_sdk::FromVal;
         let env = test_env();
         env.mock_all_auths();
 
         let creator = Address::generate(&env);
         let contributor = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
         let admin = Address::generate(&env);
         let token = deploy_token(&env, &admin, &contributor, 1_000);
+        StellarAssetClient::new(&env, &token).mint(&contributor2, &500);
         let client = deploy_contract(&env);
 
         let deadline_offset: u64 = 1_000;
@@ -1521,14 +1812,47 @@ mod tests {
         );
 
         client.contribute(&campaign_id, &contributor, &token, &500);
+        client.contribute(&campaign_id, &contributor2, &token, &500);
 
         let new_deadline = env.ledger().timestamp() + deadline_offset + 500;
         client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
+
+        // The request and the requester's auto-approval are both reported, in
+        // that order, and no deadline change is committed for 1 of 2 votes.
+        let requested = goal_events(&env, soroban_sdk::symbol_short!("ExtReq"));
+        let approvals = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        let extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+        assert_eq!(requested.len(), 1);
+        assert_eq!(approvals.len(), 1);
+        assert!(extended.is_empty());
+        assert!(requested[0].0 < approvals[0].0);
 
         let request = client.get_extension_request(&campaign_id).unwrap();
         assert_eq!(request.new_deadline, new_deadline);
         assert_eq!(request.approval_count, 1); // requester auto-approves
         assert_eq!(request.requested_by, contributor);
+
+        let expected_requested: soroban_sdk::Val = ExtensionRequested {
+            campaign_id,
+            requested_by: contributor.clone(),
+            new_deadline,
+        }
+        .into_val(&env);
+        assert_eq!(
+            requested[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_requested)
+        );
+
+        let expected_approval: soroban_sdk::Val = ExtensionApproved {
+            campaign_id,
+            approver: contributor.clone(),
+            approval_count: 1,
+        }
+        .into_val(&env);
+        assert_eq!(
+            approvals[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_approval)
+        );
     }
 
     #[test]
@@ -1637,6 +1961,318 @@ mod tests {
 
         // Extension request cleared
         assert!(client.get_extension_request(&campaign_id).is_none());
+    }
+
+    // ---- #1529: committed deadline changes must be reconstructable from events
+
+    #[test]
+    fn test_approve_extension_emits_approval_then_deadline_extended() {
+        use soroban_sdk::FromVal;
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor1 = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
+        let admin = Address::generate(&env);
+
+        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token_id);
+        asset_client.mint(&contributor1, &300);
+        asset_client.mint(&contributor2, &300);
+
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_id.clone()],
+            &600_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "extension events"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor1, &token_id, &300);
+        client.contribute(&campaign_id, &contributor2, &token_id, &300);
+
+        let original_deadline = client.get_campaign(&campaign_id).deadline;
+        let new_deadline = original_deadline + 500;
+        client.request_deadline_extension(&campaign_id, &contributor1, &new_deadline);
+
+        // The request call reports the request and its auto-approval.
+        let requested = goal_events(&env, soroban_sdk::symbol_short!("ExtReq"));
+        let request_approvals = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        assert_eq!(requested.len(), 1);
+        assert_eq!(
+            request_approvals.len(),
+            1,
+            "the requester's auto-approval is reported"
+        );
+        assert!(requested[0].0 < request_approvals[0].0);
+
+        let expected_request_approval: soroban_sdk::Val = ExtensionApproved {
+            campaign_id,
+            approver: contributor1.clone(),
+            approval_count: 1,
+        }
+        .into_val(&env);
+        assert_eq!(
+            request_approvals[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_request_approval)
+        );
+
+        // 2 of 2 contributors approve: majority, so the deadline is committed.
+        client.approve_extension(&campaign_id, &contributor2);
+        let approvals = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        let extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+
+        assert_eq!(approvals.len(), 1, "one second-vote event is expected");
+        assert_eq!(extended.len(), 1, "one deadline-extended event is expected");
+        assert!(
+            approvals[0].0 < extended[0].0,
+            "the approval is reported before the deadline change it triggers"
+        );
+
+        let expected_approval: soroban_sdk::Val = ExtensionApproved {
+            campaign_id,
+            approver: contributor2.clone(),
+            approval_count: 2,
+        }
+        .into_val(&env);
+        assert_eq!(
+            approvals[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_approval)
+        );
+
+        let expected_extended: soroban_sdk::Val = DeadlineExtended {
+            campaign_id,
+            old_deadline: original_deadline,
+            new_deadline,
+        }
+        .into_val(&env);
+        assert_eq!(
+            extended[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_extended)
+        );
+
+        // The event describes state that is actually committed.
+        assert_eq!(client.get_campaign(&campaign_id).deadline, new_deadline);
+    }
+
+    #[test]
+    fn test_approve_extension_without_majority_emits_only_approval() {
+        use soroban_sdk::FromVal;
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contributors = [
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+        ];
+
+        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let asset_client = StellarAssetClient::new(&env, &token_id);
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_id.clone()],
+            &400_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "no majority"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        for contributor in contributors.iter() {
+            asset_client.mint(contributor, &100);
+            client.contribute(&campaign_id, contributor, &token_id, &100);
+        }
+
+        let original_deadline = client.get_campaign(&campaign_id).deadline;
+        client.request_deadline_extension(
+            &campaign_id,
+            &contributors[0],
+            &(original_deadline + 500),
+        );
+
+        let request_approvals = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        assert_eq!(request_approvals.len(), 1);
+        let expected_request_approval: soroban_sdk::Val = ExtensionApproved {
+            campaign_id,
+            approver: contributors[0].clone(),
+            approval_count: 1,
+        }
+        .into_val(&env);
+        assert_eq!(
+            request_approvals[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_request_approval)
+        );
+
+        // 2 of 4 is exactly half, not a majority: the vote is recorded, nothing changes.
+        client.approve_extension(&campaign_id, &contributors[1]);
+        let approvals = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        let extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+
+        assert_eq!(approvals.len(), 1);
+        assert!(extended.is_empty(), "no deadline change was committed");
+
+        let expected_approval: soroban_sdk::Val = ExtensionApproved {
+            campaign_id,
+            approver: contributors[1].clone(),
+            approval_count: 2,
+        }
+        .into_val(&env);
+        assert_eq!(
+            approvals[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_approval)
+        );
+        assert_eq!(
+            client.get_campaign(&campaign_id).deadline,
+            original_deadline
+        );
+        assert!(client.get_extension_request(&campaign_id).is_some());
+    }
+
+    #[test]
+    #[should_panic(expected = "extension request already pending")]
+    fn test_request_extension_rejects_second_pending_request() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor1 = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor1, 1_000);
+        StellarAssetClient::new(&env, &token).mint(&contributor2, &500);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 1_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "pending extension test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor1, &token, &500);
+        client.contribute(&campaign_id, &contributor2, &token, &500);
+
+        let current_deadline = client.get_campaign(&campaign_id).deadline;
+        client.request_deadline_extension(&campaign_id, &contributor1, &(current_deadline + 100));
+        // A second proposal would reset the tally while old votes stay behind.
+        client.request_deadline_extension(&campaign_id, &contributor2, &(current_deadline + 200));
+    }
+
+    #[test]
+    fn test_request_extension_commits_when_auto_approval_is_majority() {
+        use soroban_sdk::FromVal;
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "sole contributor extension"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor, &token, &500);
+
+        let old_deadline = client.get_campaign(&campaign_id).deadline;
+        let new_deadline = old_deadline + 500;
+        client.request_deadline_extension(&campaign_id, &contributor, &new_deadline);
+
+        let requested = goal_events(&env, soroban_sdk::symbol_short!("ExtReq"));
+        let approvals = goal_events(&env, soroban_sdk::symbol_short!("ExtAppr"));
+        let extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+        assert_eq!(requested.len(), 1);
+        assert_eq!(approvals.len(), 1);
+        assert_eq!(extended.len(), 1);
+        assert!(requested[0].0 < approvals[0].0 && approvals[0].0 < extended[0].0);
+
+        // The requester is the only contributor, so their auto-approval is
+        // already a majority: the deadline is committed in this same call.
+        assert_eq!(client.get_campaign(&campaign_id).deadline, new_deadline);
+        assert!(client.get_extension_request(&campaign_id).is_none());
+
+        let expected_extended: soroban_sdk::Val = DeadlineExtended {
+            campaign_id,
+            old_deadline,
+            new_deadline,
+        }
+        .into_val(&env);
+        assert_eq!(
+            extended[0].1,
+            soroban_sdk::xdr::ScVal::from_val(&env, &expected_extended)
+        );
+    }
+
+    #[test]
+    fn test_extension_votes_reset_after_committed_request() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor1 = Address::generate(&env);
+        let contributor2 = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor1, 1_000);
+        StellarAssetClient::new(&env, &token).mint(&contributor2, &500);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "repeat extension test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor1, &token, &500);
+        client.contribute(&campaign_id, &contributor2, &token, &500);
+
+        let first_deadline = client.get_campaign(&campaign_id).deadline + 100;
+        client.request_deadline_extension(&campaign_id, &contributor1, &first_deadline);
+        client.approve_extension(&campaign_id, &contributor2);
+        let first_extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+        assert_eq!(
+            first_extended.len(),
+            1,
+            "each committed extension is reported once"
+        );
+        assert_eq!(client.get_campaign(&campaign_id).deadline, first_deadline);
+
+        // The contributors who voted in the first round must be able to vote
+        // again for the next extension instead of being rejected as duplicates.
+        let second_deadline = first_deadline + 100;
+        client.request_deadline_extension(&campaign_id, &contributor1, &second_deadline);
+        client.approve_extension(&campaign_id, &contributor2);
+        let second_extended = goal_events(&env, soroban_sdk::symbol_short!("Extended"));
+        assert_eq!(
+            second_extended.len(),
+            1,
+            "each committed extension is reported once"
+        );
+        assert_eq!(client.get_campaign(&campaign_id).deadline, second_deadline);
     }
 
     #[test]
@@ -2553,11 +3189,72 @@ mod tests {
         client.contribute(&campaign_id, &contributor, &token, &target);
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &creator);
+        use soroban_sdk::FromVal;
+        let events = env.events().all();
 
         // Verify event via balance check (core logic)
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 980);
         assert_eq!(token_client.balance(&fee_recipient), 20);
+        let claim_topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = (
+            soroban_sdk::symbol_short!("Goal"),
+            soroban_sdk::symbol_short!("Claim"),
+        )
+            .into_val(&env);
+        let claim_topics: soroban_sdk::xdr::ScVec = claim_topics_vec.into();
+        let fee_topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = (
+            soroban_sdk::symbol_short!("Goal"),
+            soroban_sdk::symbol_short!("Fee"),
+        )
+            .into_val(&env);
+        let fee_topics: soroban_sdk::xdr::ScVec = fee_topics_vec.into();
+        let claim_events: std::vec::Vec<_> = events
+            .events()
+            .iter()
+            .filter(|e| {
+                if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = e.body {
+                    body.topics == *claim_topics
+                } else {
+                    false
+                }
+            })
+            .collect();
+        assert_eq!(claim_events.len(), 1, "one claim event is expected");
+        if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = claim_events[0].body {
+            let expected_val: soroban_sdk::Val = CampaignClaimed {
+                campaign_id,
+                creator: creator.clone(),
+                token: token.clone(),
+                amount: target,
+            }
+            .into_val(&env);
+            let expected_data = soroban_sdk::xdr::ScVal::from_val(&env, &expected_val);
+            assert_eq!(body.data, expected_data);
+        }
+
+        let fee_events: std::vec::Vec<_> = events
+            .events()
+            .iter()
+            .filter(|e| {
+                if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = e.body {
+                    body.topics == *fee_topics
+                } else {
+                    false
+                }
+            })
+            .collect();
+        assert_eq!(fee_events.len(), 1, "one fee event is expected");
+        if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = fee_events[0].body {
+            let expected_fee_val: soroban_sdk::Val = FeeCollected {
+                campaign_id,
+                token: token.clone(),
+                fee_amount: 20,
+                fee_recipient: fee_recipient.clone(),
+            }
+            .into_val(&env);
+            let expected_fee_data = soroban_sdk::xdr::ScVal::from_val(&env, &expected_fee_val);
+            assert_eq!(body.data, expected_fee_data);
+        }
     }
 
     #[test]
@@ -2595,11 +3292,58 @@ mod tests {
         client.contribute(&campaign_id, &contributor, &token, &target);
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &creator);
+        use soroban_sdk::FromVal;
+        let events = env.events().all();
 
         // Fee=0 → all to creator
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&creator), 1_000);
         assert_eq!(token_client.balance(&fee_recipient), 0);
+        let claim_topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = (
+            soroban_sdk::symbol_short!("Goal"),
+            soroban_sdk::symbol_short!("Claim"),
+        )
+            .into_val(&env);
+        let claim_topics: soroban_sdk::xdr::ScVec = claim_topics_vec.into();
+        let fee_topics_vec: soroban_sdk::Vec<soroban_sdk::Val> = (
+            soroban_sdk::symbol_short!("Goal"),
+            soroban_sdk::symbol_short!("Fee"),
+        )
+            .into_val(&env);
+        let fee_topics: soroban_sdk::xdr::ScVec = fee_topics_vec.into();
+        let claim_events: std::vec::Vec<_> = events
+            .events()
+            .iter()
+            .filter(|e| {
+                if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = e.body {
+                    body.topics == *claim_topics
+                } else {
+                    false
+                }
+            })
+            .collect();
+        assert_eq!(claim_events.len(), 1);
+        if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = claim_events[0].body {
+            let expected_val: soroban_sdk::Val = CampaignClaimed {
+                campaign_id,
+                creator: creator.clone(),
+                token: token.clone(),
+                amount: target,
+            }
+            .into_val(&env);
+            let expected_data = soroban_sdk::xdr::ScVal::from_val(&env, &expected_val);
+            assert_eq!(body.data, expected_data);
+        }
+        assert!(
+            events.events().iter().all(|e| {
+                if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = e.body {
+                    body.topics != *fee_topics
+                } else {
+                    true
+                }
+            }),
+            "zero fee must not emit a fee event"
+        );
     }
 
     // --- Failure-path coverage (issue #989) ---
@@ -3093,5 +3837,422 @@ mod tests {
         let client = deploy_contract(&env);
         client.initialize(&admin, &100_i128);
         client.set_fee(&admin, &(-1_i128));
+    }
+
+    #[test]
+    #[should_panic(expected = "fee must not exceed 10000 basis points")]
+    fn test_set_fee_rejects_above_10000_bps() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+        client.set_fee(&admin, &10_001_i128);
+    }
+
+    #[test]
+    fn test_set_fee_rejection_does_not_mutate_state() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        assert_eq!(client.get_platform_fee_bps(), 50);
+
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.set_fee(&admin, &(-100_i128));
+        }));
+        assert!(result.is_err());
+        assert_eq!(client.get_platform_fee_bps(), 50);
+
+        let result_over =
+            crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+                client.set_fee(&admin, &15_000_i128);
+            }));
+        assert!(result_over.is_err());
+        assert_eq!(client.get_platform_fee_bps(), 50);
+    }
+
+    #[test]
+    #[should_panic(expected = "fee recipient cannot be the vault contract")]
+    fn test_set_fee_recipient_rejects_vault_address() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+        client.set_fee_recipient(&admin, &client.address);
+    }
+
+    #[test]
+    fn test_set_fee_recipient_rejection_does_not_mutate_state() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        assert!(client.get_fee_recipient().is_none());
+
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.set_fee_recipient(&admin, &client.address);
+        }));
+        assert!(result.is_err());
+        assert!(client.get_fee_recipient().is_none());
+    }
+
+    #[test]
+    fn test_campaign_storage_lifetime_and_availability() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        // Verify storage instance health and availability across settlement and auth boundaries
+        assert_eq!(
+            client.get_version(),
+            String::from_str(&env, env!("CARGO_PKG_VERSION"))
+        );
+        assert!(!client.get_paused());
+        assert_eq!(client.get_min_contribution(), 100_i128);
+    }
+
+    // ---- #1527: campaign storage lifetime failures are atomic ------------
+    // Persistent entries can be archived independently of the campaign. A
+    // settlement must not read a missing entry as zero and pay only part of
+    // the vault; it refreshes the entries it uses and aborts before the first
+    // transfer when the accounting no longer adds up.
+
+    fn two_token_campaign(
+        env: &Env,
+        client: &StellarGoalVaultContractClient<'_>,
+        creator: &Address,
+        contributor: &Address,
+    ) -> (u64, Address, Address) {
+        let admin = Address::generate(env);
+        let token_a = deploy_token(env, &admin, contributor, 10_000);
+        let token_b = deploy_token(env, &admin, contributor, 10_000);
+        client.initialize(&admin, &100_i128);
+        let campaign_id = client.create_campaign(
+            creator,
+            &soroban_sdk::vec![env, token_a.clone(), token_b.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 500),
+            &String::from_str(env, "lifetime"),
+            &0_i128,
+            &soroban_sdk::vec![env],
+            &0_u32,
+        );
+        (campaign_id, token_a, token_b)
+    }
+
+    #[test]
+    fn test_claim_refreshes_contribution_storage_before_payout() {
+        let env = test_env();
+        env.mock_all_auths();
+        // New persistent entries live for a single ledger, so the contribution
+        // records written by `contribute` stay close to archival.
+        env.ledger().set_min_persistent_entry_ttl(1);
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let client = deploy_contract(&env);
+        let (campaign_id, token_a, token_b) =
+            two_token_campaign(&env, &client, &creator, &contributor);
+
+        client.contribute(&campaign_id, &contributor, &token_a, &400);
+        client.contribute(&campaign_id, &contributor, &token_b, &600);
+        advance_time(&env, 600);
+
+        let contribution_key =
+            DataKey::Contribution(campaign_id, contributor.clone(), token_a.clone());
+        let before = env.as_contract(&client.address, || {
+            env.storage().persistent().get_ttl(&contribution_key)
+        });
+        assert!(before <= 1);
+
+        client.claim(&campaign_id, &creator);
+
+        let after = env.as_contract(&client.address, || {
+            env.storage().persistent().get_ttl(&contribution_key)
+        });
+        assert!(after >= CAMPAIGN_STORAGE_TTL_EXTEND_TO);
+        assert_eq!(TokenClient::new(&env, &token_a).balance(&creator), 400);
+        assert_eq!(TokenClient::new(&env, &token_b).balance(&creator), 600);
+        assert_eq!(TokenClient::new(&env, &token_a).balance(&client.address), 0);
+        assert!(client.get_campaign(&campaign_id).claimed);
+    }
+
+    // ---- #1512: claim failures are atomic ---------------------------------
+    // A rejected claim (second claim or non-creator caller) must leave the
+    // campaign record, the vault balances and the event log exactly as they
+    // were after the successful claim.
+
+    #[test]
+    fn test_second_claim_is_atomic_and_leaves_no_partial_payout() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let client = deploy_contract(&env);
+        let (campaign_id, token_a, token_b) =
+            two_token_campaign(&env, &client, &creator, &contributor);
+
+        client.contribute(&campaign_id, &contributor, &token_a, &400);
+        client.contribute(&campaign_id, &contributor, &token_b, &600);
+        advance_time(&env, 600);
+
+        client.claim(&campaign_id, &creator);
+
+        let token_a_client = TokenClient::new(&env, &token_a);
+        let token_b_client = TokenClient::new(&env, &token_b);
+        let campaign_before = client.get_campaign(&campaign_id);
+        let creator_a_before = token_a_client.balance(&creator);
+        let creator_b_before = token_b_client.balance(&creator);
+        let vault_a_before = token_a_client.balance(&client.address);
+        let vault_b_before = token_b_client.balance(&client.address);
+        let balance_a_before = client.get_campaign_token_balance(&campaign_id, &token_a);
+        let balance_b_before = client.get_campaign_token_balance(&campaign_id, &token_b);
+        let events_before = env.events().all().events().len();
+
+        assert!(campaign_before.claimed);
+        assert_eq!(campaign_before.pledged_amount, 1_000);
+        assert_eq!(creator_a_before, 400);
+        assert_eq!(creator_b_before, 600);
+        assert_eq!(vault_a_before, 0);
+        assert_eq!(vault_b_before, 0);
+
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.claim(&campaign_id, &creator);
+        }));
+        assert!(result.is_err(), "second claim must be rejected");
+
+        let campaign_after = client.get_campaign(&campaign_id);
+        assert!(campaign_after.claimed);
+        assert_eq!(campaign_after.pledged_amount, campaign_before.pledged_amount);
+        assert_eq!(campaign_after.creator, campaign_before.creator);
+        assert_eq!(campaign_after.target_amount, campaign_before.target_amount);
+        assert_eq!(campaign_after.deadline, campaign_before.deadline);
+        assert_eq!(campaign_after.canceled, campaign_before.canceled);
+
+        assert_eq!(token_a_client.balance(&creator), creator_a_before);
+        assert_eq!(token_b_client.balance(&creator), creator_b_before);
+        assert_eq!(token_a_client.balance(&client.address), vault_a_before);
+        assert_eq!(token_b_client.balance(&client.address), vault_b_before);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token_a),
+            balance_a_before
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token_b),
+            balance_b_before
+        );
+        assert_eq!(
+            env.events().all().events().len(),
+            events_before,
+            "failed second claim must not emit events"
+        );
+    }
+
+    #[test]
+    fn test_non_creator_claim_is_atomic_and_leaves_no_partial_payout() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let client = deploy_contract(&env);
+        let (campaign_id, token_a, token_b) =
+            two_token_campaign(&env, &client, &creator, &contributor);
+
+        client.contribute(&campaign_id, &contributor, &token_a, &400);
+        client.contribute(&campaign_id, &contributor, &token_b, &600);
+        advance_time(&env, 600);
+
+        let token_a_client = TokenClient::new(&env, &token_a);
+        let token_b_client = TokenClient::new(&env, &token_b);
+        let campaign_before = client.get_campaign(&campaign_id);
+        let creator_a_before = token_a_client.balance(&creator);
+        let creator_b_before = token_b_client.balance(&creator);
+        let attacker_a_before = token_a_client.balance(&attacker);
+        let attacker_b_before = token_b_client.balance(&attacker);
+        let vault_a_before = token_a_client.balance(&client.address);
+        let vault_b_before = token_b_client.balance(&client.address);
+        let balance_a_before = client.get_campaign_token_balance(&campaign_id, &token_a);
+        let balance_b_before = client.get_campaign_token_balance(&campaign_id, &token_b);
+        let events_before = env.events().all().events().len();
+
+        assert!(!campaign_before.claimed);
+        assert_eq!(campaign_before.pledged_amount, 1_000);
+        assert_eq!(vault_a_before, 400);
+        assert_eq!(vault_b_before, 600);
+
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.claim(&campaign_id, &attacker);
+        }));
+        assert!(result.is_err(), "non-creator claim must be rejected");
+
+        let campaign_after = client.get_campaign(&campaign_id);
+        assert!(!campaign_after.claimed);
+        assert_eq!(campaign_after.pledged_amount, campaign_before.pledged_amount);
+        assert_eq!(campaign_after.creator, campaign_before.creator);
+        assert_eq!(campaign_after.target_amount, campaign_before.target_amount);
+        assert_eq!(campaign_after.deadline, campaign_before.deadline);
+        assert_eq!(campaign_after.canceled, campaign_before.canceled);
+
+        assert_eq!(token_a_client.balance(&creator), creator_a_before);
+        assert_eq!(token_b_client.balance(&creator), creator_b_before);
+        assert_eq!(token_a_client.balance(&attacker), attacker_a_before);
+        assert_eq!(token_b_client.balance(&attacker), attacker_b_before);
+        assert_eq!(token_a_client.balance(&client.address), vault_a_before);
+        assert_eq!(token_b_client.balance(&client.address), vault_b_before);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token_a),
+            balance_a_before
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token_b),
+            balance_b_before
+        );
+        assert_eq!(
+            env.events().all().events().len(),
+            events_before,
+            "failed non-creator claim must not emit events"
+        );
+    }
+
+    #[test]
+    fn test_claim_aborts_before_payout_when_balance_entry_is_missing() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let client = deploy_contract(&env);
+        let (campaign_id, token_a, token_b) =
+            two_token_campaign(&env, &client, &creator, &contributor);
+
+        client.contribute(&campaign_id, &contributor, &token_a, &400);
+        client.contribute(&campaign_id, &contributor, &token_b, &600);
+        advance_time(&env, 600);
+
+        // Simulate archival of one per-token balance after the deadline. The
+        // claim must fail before transferring anything, not mark the campaign
+        // claimed while one token is silently skipped.
+        let expired_balance = DataKey::CampaignTokenBalance(campaign_id, token_b.clone());
+        env.as_contract(&client.address, || {
+            env.storage().persistent().remove(&expired_balance);
+        });
+
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.claim(&campaign_id, &creator);
+        }));
+        assert!(result.is_err());
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert!(!campaign.claimed);
+        assert_eq!(campaign.pledged_amount, 1_000);
+        assert_eq!(TokenClient::new(&env, &token_a).balance(&creator), 0);
+        assert_eq!(TokenClient::new(&env, &token_b).balance(&creator), 0);
+        assert_eq!(
+            TokenClient::new(&env, &token_a).balance(&client.address),
+            400
+        );
+        assert_eq!(
+            TokenClient::new(&env, &token_b).balance(&client.address),
+            600
+        );
+    }
+
+    #[test]
+    fn test_refund_aborts_before_transfer_when_a_contribution_entry_is_missing() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let client = deploy_contract(&env);
+        let (campaign_id, token_a, token_b) =
+            two_token_campaign(&env, &client, &creator, &contributor);
+
+        client.contribute(&campaign_id, &contributor, &token_a, &400);
+        client.contribute(&campaign_id, &contributor, &token_b, &600);
+        client.cancel_campaign(&campaign_id, &creator);
+
+        let expired_contribution =
+            DataKey::Contribution(campaign_id, contributor.clone(), token_b.clone());
+        env.as_contract(&client.address, || {
+            env.storage().persistent().remove(&expired_contribution);
+        });
+
+        // Without the preflight this would refund token A, silently skip the
+        // archived token B contribution, and report success.
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.refund(&campaign_id, &contributor);
+        }));
+        assert!(result.is_err());
+
+        assert_eq!(
+            TokenClient::new(&env, &token_a).balance(&client.address),
+            400
+        );
+        assert_eq!(
+            TokenClient::new(&env, &token_b).balance(&client.address),
+            600
+        );
+        assert_eq!(
+            TokenClient::new(&env, &token_a).balance(&contributor),
+            9_600
+        );
+        assert_eq!(
+            TokenClient::new(&env, &token_b).balance(&contributor),
+            9_400
+        );
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_000);
+    }
+
+    #[test]
+    fn test_refund_all_aborts_atomically_when_a_contribution_entry_is_missing() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let client = deploy_contract(&env);
+        let (campaign_id, token_a, token_b) = two_token_campaign(&env, &client, &creator, &alice);
+
+        client.contribute(&campaign_id, &alice, &token_a, &400);
+        client.contribute(&campaign_id, &alice, &token_b, &600);
+        client.cancel_campaign(&campaign_id, &creator);
+
+        let expired_contribution =
+            DataKey::Contribution(campaign_id, alice.clone(), token_a.clone());
+        env.as_contract(&client.address, || {
+            env.storage().persistent().remove(&expired_contribution);
+        });
+
+        let result = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.refund_all(&campaign_id);
+        }));
+        assert!(result.is_err());
+
+        assert_eq!(
+            TokenClient::new(&env, &token_a).balance(&client.address),
+            400
+        );
+        assert_eq!(
+            TokenClient::new(&env, &token_b).balance(&client.address),
+            600
+        );
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_000);
     }
 }

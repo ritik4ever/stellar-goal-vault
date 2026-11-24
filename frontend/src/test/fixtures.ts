@@ -34,13 +34,28 @@ interface User {
 }
 
 // Deterministic time helpers
-const FIXED_NOW = new Date('2023-01-01T00:00:00.000Z');
+export const FIXED_NOW = new Date('2023-01-01T00:00:00.000Z');
 
 export const createFixedDate = (offsetDays: number = 0): Date => {
   const date = new Date(FIXED_NOW);
   date.setDate(date.getDate() + offsetDays);
   return date;
 };
+
+// Re-export deterministic time utilities
+export {
+  BASE_TEST_TIME,
+  BASE_TEST_TIME_SEC,
+  setupDeterministicTime,
+  resetDeterministicTime,
+  advanceTime,
+  advanceTimeBySeconds,
+  advanceTimeByHours,
+  advanceTimeByDays,
+  withDeterministicTime,
+  createDeterministicCampaign,
+  createDeterministicPledge,
+} from './timeTestUtils';
 
 // User Fixtures
 export const createMockUser = (overrides: Partial<User> = {}): User => ({

@@ -64,9 +64,15 @@ describe('Rate Limiter Middleware', () => {
     // Third request - should exceed limit
     nextCalled = false;
     delete (mockReq as any).rateLimitedProcessed;
-    expect(() => {
+    let rateLimitError: unknown;
+    try {
       middleware(mockReq as Request, mockRes as Response, next);
-    }).toThrow(/Rate limit exceeded/);
+    } catch (error) {
+      rateLimitError = error;
+    }
+
+    expect(rateLimitError).toMatchObject({ statusCode: 429, code: 'RATE_LIMITED' });
+    expect(headers['X-RateLimit-Remaining']).toBe('0');
     expect(headers['Retry-After']).toBeDefined();
   });
 });

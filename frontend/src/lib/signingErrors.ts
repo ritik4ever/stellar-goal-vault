@@ -33,16 +33,20 @@ const CODE_CLASSES: Record<string, SigningErrorClass> = {
   FREIGHTER_UNAVAILABLE: 'WALLET_UNAVAILABLE',
   FREIGHTER_NETWORK_MISMATCH: 'WALLET_UNAVAILABLE',
   INVALID_AMOUNT: 'MALFORMED_TRANSACTION',
+  INVALID_TRANSACTION_PARAMS: 'MALFORMED_TRANSACTION',
+  INVALID_SIGNED_XDR: 'MALFORMED_TRANSACTION',
   INVALID_AMOUNT_PRECISION: 'MALFORMED_TRANSACTION',
   INVALID_DECIMALS: 'MALFORMED_TRANSACTION',
   ASSET_NOT_CONFIGURED: 'MALFORMED_TRANSACTION',
   CONFIG_MISSING: 'MALFORMED_TRANSACTION',
   SIMULATION_FAILED: 'MALFORMED_TRANSACTION',
+  TRANSACTION_IN_FLIGHT: 'USER_REJECTED',
   SIMULATION_PREPARE_FAILED: 'MALFORMED_TRANSACTION',
   SOURCE_ACCOUNT_LOAD_FAILED: 'RPC_FAILURE',
   SUBMISSION_FAILED: 'RPC_FAILURE',
   SUBMISSION_RETRY: 'RPC_FAILURE',
   TRANSACTION_TIMEOUT: 'RPC_FAILURE',
+  TRANSACTION_STATUS_UNAVAILABLE: 'RPC_FAILURE',
   STATE_RESTORE_REQUIRED: 'CONTRACT_REJECTED',
   CONTRACT_CALL_FAILED: 'CONTRACT_REJECTED',
   TRANSACTION_FAILED: 'CONTRACT_REJECTED',
@@ -54,22 +58,25 @@ const CODE_CLASSES: Record<string, SigningErrorClass> = {
  */
 const TEXT_RULES: Array<[RegExp, SigningErrorClass]> = [
   [
-    /user (rejected|declined|denied|cancell?ed)|(rejected|declined|denied|cancell?ed) by (the )?user|request (was )?(rejected|declined|denied)/i,
+    /user (rejected|declined|denied|cancell?ed|refused|aborted)|(rejected|declined|denied|cancell?ed|refused|aborted) by (the )?user|request (was )?(rejected|declined|denied|aborted)|action cancell?ed|user closed/i,
     'USER_REJECTED',
   ],
   [
-    /not (installed|detected|connected|available)|locked|no wallet|extension/i,
+    /not (installed|detected|connected|available)|locked|no wallet|extension|unauthorized|account not found|session expired/i,
     'WALLET_UNAVAILABLE',
   ],
   [
-    /xdr|malformed|could not parse|invalid (transaction|envelope|param|argument)/i,
+    /xdr|malformed|could not parse|invalid (transaction|envelope|param|argument|amount|sequence)|bad sequence/i,
     'MALFORMED_TRANSACTION',
   ],
   [
-    /timed? ?out|network ?error|failed to fetch|econn|enotfound|socket|unavailable|\b50[0-4]\b|try_again_later/i,
+    /timed? ?out|network ?error|failed to fetch|econn|enotfound|socket|unavailable|\b50[0-4]\b|try_again_later|rpc error|horizon error/i,
     'RPC_FAILURE',
   ],
-  [/contract|host ?error|tx_?failed|\bop_/i, 'CONTRACT_REJECTED'],
+  [
+    /contract|host ?error|tx_?failed|\bop_|insufficient balance|underfunded|expired/i,
+    'CONTRACT_REJECTED',
+  ],
   // Stellar transaction result codes, e.g. txBadSeq, txInsufficientBalance.
   [/\btx[A-Z]\w+/, 'CONTRACT_REJECTED'],
 ];
@@ -151,6 +158,23 @@ export type SigningError = Error & {
   /** Redacted diagnostic text from the underlying error; never shown to users. */
   detail?: string;
 };
+
+/**
+ * Produces the text that may be shown to a user for any error. Authored app
+ * messages pass through, but secret material is stripped on the way out so a
+ * stray SDK/wallet message can never expose an XDR envelope or a secret seed.
+ * Returns `fallback` when there is no usable message.
+ */
+export function safeErrorMessage(
+  error: unknown,
+  fallback: string = SIGNING_ERROR_MESSAGES.UNKNOWN,
+): string {
+  const message = rawText(error).trim();
+  if (message.length === 0 || message === '{}' || message === '[object Object]') {
+    return fallback;
+  }
+  return redactSecretMaterial(message);
+}
 
 /**
  * Builds a safe error for a failure. The user-facing message is either the

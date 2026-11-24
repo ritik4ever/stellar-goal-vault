@@ -87,6 +87,40 @@ fn initialize(env: Env, admin: Address, min_contribution: i128)
 
 ---
 
+### `set_fee`
+
+Sets the platform fee in basis points (e.g. 50 = 0.5%). Admin only. Pass 0 to disable platform fees.
+
+```
+fn set_fee(env: Env, admin: Address, bps: i128)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Stored admin address (must authenticate) |
+| `bps` | `i128` | Fee in basis points (must be >= 0) |
+
+**Emits:** `PlatformFeeUpdatedEvent` with topic pair `("Goal", "FeeSet")`
+
+---
+
+### `set_fee_recipient`
+
+Sets the recipient address that receives platform fees upon campaign claims. Admin only.
+
+```
+fn set_fee_recipient(env: Env, admin: Address, recipient: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Stored admin address (must authenticate) |
+| `recipient` | `Address` | Address designated to receive fee deductions |
+
+**Emits:** `FeeRecipientUpdatedEvent` with topic pair `("Goal", "RecipSet")`
+
+---
+
 ### `set_paused`
 
 Pauses or unpauses all state-mutating entry points. Admin only.
@@ -110,6 +144,53 @@ fn set_paused(env: Env, caller: Address, paused: bool)
 **Emits:** `ContractPaused` or `ContractUnpaused`
 
 **Gas estimate:** 12,000 + event cost (~4,000) ≈ 16,000 units + 20% headroom = **19,200**
+
+---
+
+### `set_fee`
+
+Sets the platform fee in basis points (e.g. 50 = 0.5%). Admin only. Pass 0 to disable the fee. Maximum is 10000 bps (100%).
+
+```
+fn set_fee(env: Env, admin: Address, bps: i128)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Must match the stored admin address and authorize the call |
+| `bps` | `i128` | Platform fee in basis points (0–10000) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller is not admin | `"caller is not admin"` | Critical | Only the admin address stored during `initialize()` can call this |
+| `bps < 0` | `"fee must be non-negative"` | Medium | Provide a fee >= 0 bps |
+| `bps > 10000` | `"fee must not exceed 10000 basis points"` | Medium | Limit fee to 10000 basis points (100%) or lower |
+
+---
+
+### `set_fee_recipient`
+
+Sets the address that receives platform fees on campaign claims. Admin only.
+
+```
+fn set_fee_recipient(env: Env, admin: Address, recipient: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Must match the stored admin address and authorize the call |
+| `recipient` | `Address` | Address to receive platform fee deductions (cannot be the vault contract) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller is not admin | `"caller is not admin"` | Critical | Only the admin address stored during `initialize()` can call this |
+| Recipient is vault | `"fee recipient cannot be the vault contract"` | Medium | Provide a recipient address other than the vault contract address |
 
 ---
 
@@ -225,6 +306,21 @@ fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: S
 
 ## Contributions & Funds
 
+### Configuration-path authorization (issue #913)
+
+Every configuration entry point is guarded by `require_admin`, which requires
+the caller to sign **and** checks that the caller is the address stored by
+`initialize`. Keeping the check in one helper means a setter cannot ship with
+only one half of the check. Covered by `src/test_admin_auth.rs`.
+
+| Entry point | Required signer | Extra check |
+|---|---|---|
+| `initialize` | the `admin` argument | contract not already initialized |
+| `set_paused` | stored `admin` | contract must be initialized |
+| `set_fee` | stored `admin` | contract must be initialized |
+| `set_fee_recipient` | stored `admin` | contract must be initialized |
+| `migrate` | stored `admin` | contract must be initialized |
+
 ### Pledge-path authorization (issue #898)
 
 Every state transition on the pledge path requires exactly one signer, and
@@ -272,7 +368,22 @@ fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, 
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 | Contributor is the vault contract | `"contributor cannot be the vault contract"` | High | Pledge from a real account; the vault cannot fund itself |
 
-**Emits:** `CampaignPledged`
+**Minimum contribution boundary:** `amount` is compared as an `i128` against
+`get_min_contribution()`. The accepted range is `amount >= minimum`:
+
+- `amount == minimum` is accepted.
+- `amount == minimum - 1` (one stroop below) is rejected with
+  `"contribution below minimum"`.
+
+The floor defaults to 100 stroops when `initialize()` has not been called and
+can be changed with `initialize()`. The minimum check runs before the campaign
+is read, before the token transfer, and before any storage write, so a rejected
+call leaves the contributor balance, the campaign pledge, and the vault balance
+unchanged.
+
+**Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
+
+**Indexer note:** The `CampaignPledgedEvent` event is emitted exactly once per successful `contribute` call, after all validations, token transfer, and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Pledged")` and use `campaign_id` + `contributor` + `pledged_at` for deduplication and reconstructing pledge state without auxiliary contract reads.
 
 **Gas estimate:** 30,000 + token transfer cost (~10,000) + storage writes ≈ 50,000 units + 20% headroom = **60,000**
 
@@ -302,9 +413,25 @@ fn claim(env: Env, campaign_id: u64, creator: Address)
 | Campaign canceled | `"campaign canceled"` | Medium | Campaign was canceled; no funds to claim |
 | Still active | `"campaign is still active"` | Medium | Wait for deadline to pass |
 | Underfunded | `"campaign is not funded"` | Medium | `pledged_amount < target_amount`; contributors should use `refund()` |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry (or rely on `extend_ttl`) before retrying. No funds move and the campaign is not marked claimed |
 | Caller not authorized | Soroban auth failure | High | Ensure `creator` signs the transaction |
 
-**Emits:** `CampaignClaimed` (one per token with a non-zero balance)
+**Atomicity guarantee:** `claim` is all-or-nothing. Every validation — the
+`creator` signature, the creator-match check, the `claimed` and `canceled`
+flags, the deadline, the funding check, and the storage-integrity check — runs
+before the first storage write or token transfer. A failed claim therefore
+leaves campaign storage, `pledged_amount`, the `claimed` flag, per-token
+balances, and token balances exactly as they were: no partial pledge or payout
+is possible. This holds for a duplicate claim (already `claimed`), a
+non-creator caller (auth failure or `"creator mismatch"`), and any other
+rejected call. Because the invocation aborts before any externally visible
+effect, no `CampaignClaimed` or `FeeCollected` success event is emitted for a
+failed claim.
+
+**Emits:** `CampaignClaimed` (one per token with a non-zero balance), and
+`FeeCollected` for each token whose fee transfer is positive. `CampaignClaimed.amount`
+is the gross campaign balance claimed for that token, before any fee split.
+Failed calls commit no claim or fee success events.
 
 **Gas estimate:** 20,000 + 15,000 per accepted token (transfer + storage) ≈ base 20,000 + 15,000 per token + 20% headroom: **42,000** (1 token) / **102,000** (5 tokens)
 
@@ -333,7 +460,8 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 | Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or campaign cancellation |
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target; creator can claim |
 | Nothing to refund | `"nothing to refund"` | Low | Contributor had no contributions to this campaign |
-| Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; the whole refund is reverted (see **Atomicity**); top up and retry |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry before retrying. Nothing is transferred |
+| Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; investigate |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 
 **Emits:** `CampaignRefunded` (one per token the contributor used)
@@ -366,6 +494,7 @@ fn refund_all(env: Env, campaign_id: u64)
 | Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or cancellation |
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target |
 | Nothing to refund (no contributors) | `"nothing to refund"` | Low | No contributors found |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry before retrying. No contributor is refunded |
 | Contract not initialized | `"not initialized"` | High | Call `initialize` to set an admin first |
 | Caller not authorized | Soroban auth failure | High | Ensure the stored `admin` signs the transaction |
 
@@ -374,6 +503,28 @@ fn refund_all(env: Env, campaign_id: u64)
 **Atomicity (issue #1517):** the batch is all-or-nothing. All contributors' pledges, campaign token balances and `Campaign.pledged_amount` are cleared and the campaign record is persisted **before** the first token transfer. A failed transfer anywhere in the batch reverts the entire invocation: no earlier contributor is paid, every pledge stays intact, and the admin can restore token liquidity and retry. A repeat call after a successful batch fails with `"nothing to refund"` and pays nobody twice.
 
 **Gas estimate:** 15,000 base + 25,000 per contributor ≈ highly variable. For 10 contributors with 1 token each: **290,000** + 20% headroom = **348,000**
+
+---
+
+### Storage lifetime and settlement atomicity
+
+Campaign data lives in persistent storage. The campaign record, the contributor
+list, each per-token balance and each individual contribution are separate
+entries with independent lifetimes, so one of them can be archived while the
+rest of the campaign is still present. Soroban reads a missing entry as zero,
+which previously allowed a settlement to skip an archived token and still
+report success (issue #1527).
+
+`contribute`, `claim`, `refund` and `refund_all` first refresh the TTL of every
+entry they are about to read or rewrite. Before moving any funds, `claim`,
+`refund` and `refund_all` also rebuild each per-token total from the live
+contribution entries and require it to match both the stored per-token balance
+and the campaign's `pledged_amount`. Any disagreement aborts the invocation
+with `"campaign storage expired"` before the first token transfer.
+
+Because the abort happens before any externally visible effect, Soroban rolls
+the invocation back: no balance changes, no token movement, and the campaign is
+not marked claimed. Callers can restore the archived entry and retry.
 
 ---
 
@@ -402,8 +553,8 @@ fn migrate(
 
 | Error Condition | Panic Message | Severity | Recovery Action |
 |----------------|---------------|----------|-----------------|
-| Not initialized | `"not initialized"` (assert) | High | Call `initialize()` first |
-| Caller not admin | `"only admin can call migrate"` (assert) | Critical | Only the stored admin can migrate |
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller not admin | `"caller is not admin"` | Critical | Only the stored admin can migrate |
 | Length mismatch | `"source_ids and campaigns must have the same length"` (assert) | High | Ensure both vectors have equal length |
 | Caller not authorized | Soroban auth failure | High | Ensure `admin` signs the transaction |
 
@@ -445,11 +596,14 @@ fn request_deadline_extension(
 | Deadline not later | `"new deadline must be after current deadline"` | Low | Choose a timestamp after the current deadline |
 | Exceeds max duration | `"new deadline exceeds maximum campaign duration"` | Low | Limit extension to within 180 days of campaign creation |
 | Not a contributor | `"caller is not a contributor"` | Medium | Only existing contributors can request extensions |
+| Request already pending | `"extension request already pending"` | Low | Approve or wait for the current request to resolve before proposing another |
 | Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
 
-**Emits:** `ExtensionRequested`
+**Emits:** `ExtensionRequested`, then `ExtensionApproved` for the requester's auto-approval. If that first vote already exceeds 50% of the contributor count (for example, a campaign with a single contributor), the deadline is committed in the same call and `DeadlineExtended` follows. All events are emitted after the storage writes.
 
-**Gas estimate:** 18,000 + storage writes + event ≈ 26,000 units + 20% headroom = **31,200**
+Only one request may be pending at a time. A second proposal is rejected instead of overwriting the first, so every vote remains attributable to exactly one request.
+
+**Gas estimate:** 18,000 + storage writes + events ≈ 28,000 units + 20% headroom = **33,600**
 
 ---
 
@@ -478,6 +632,8 @@ fn approve_extension(env: Env, campaign_id: u64, caller: Address)
 | Already voted | `"already voted"` | Low | Each contributor votes once per extension request |
 | No pending request | `"no extension request"` | Low | Call `request_deadline_extension()` first |
 | Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
+
+**Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither. When the extension is committed, the votes recorded for that request are cleared so the next request starts a fresh tally.
 
 **Gas estimate:** 20,000 + storage write + conditional deadline apply + event ≈ 30,000 units + 20% headroom = **36,000**
 
@@ -712,6 +868,39 @@ All events use the topic prefix `(symbol_short!("Goal"), ...)`.
 
 ---
 
+### `CampaignPledgedEvent`
+
+Structured event emitted for off-chain indexers and audit pipelines upon successful pledge execution.
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Pledged"` |
+
+**Data** (`CampaignPledgedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `contributor` | `Address` | Contributor address |
+| `token` | `Address` | Token contract address contributed |
+| `amount` | `i128` | Amount contributed in this transaction (in stroops) |
+| `total_pledged` | `i128` | Total amount pledged across all tokens for the campaign after this pledge |
+| `contributor_count` | `u32` | Total unique contributors to the campaign after this pledge |
+| `token_balance` | `i128` | Total balance of this specific token held by the campaign after this pledge |
+| `contributor_total` | `i128` | Cumulative amount this contributor has contributed with this token |
+| `pledged_at` | `u64` | Unix timestamp (seconds) of the pledge transaction ledger |
+
+**Emitted by:** `contribute`
+
+**Stability contract & Indexer guidelines:**
+- Topic symbols `"Goal"` and `"Pledged"` are frozen for this contract version.
+- Emitted only after all validations, auth checks, token transfer, and storage writes succeed. Reverted or rejected transactions emit no event.
+- All amounts are represented as `i128` stroops.
+- Indexers can reconstruct campaign and contributor pledge state directly without additional contract storage reads.
+
+---
+
 ### `CampaignClaimed`
 
 | Topic | Type | Value |
@@ -728,7 +917,33 @@ All events use the topic prefix `(symbol_short!("Goal"), ...)`.
 | `token` | `Address` | Token claimed |
 | `amount` | `i128` | Amount claimed |
 
-**Emitted by:** `claim` (one per token with balance)
+**Emitted by:** `claim` (one per token with a non-zero balance, after successful
+transfers and campaign balance clearing). `amount` is the gross amount removed
+from campaign accounting; when a fee applies, `FeeCollected` describes the fee
+portion of this amount. The event contains no contributor-specific data.
+
+---
+
+### `FeeCollected`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Fee"` |
+
+**Data** (`FeeCollected`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `token` | `Address` | Token from which the fee was collected |
+| `fee_amount` | `i128` | Positive fee transferred to the recipient |
+| `fee_recipient` | `Address` | Address receiving the fee |
+
+**Emitted by:** `claim`, once per token only when a fee recipient is configured
+and the calculated fee is greater than zero. No event is emitted for zero fees,
+or when no fee recipient is configured. As with `CampaignClaimed`, the event is
+committed only if the full claim transaction succeeds.
 
 ---
 
@@ -767,6 +982,82 @@ All events use the topic prefix `(symbol_short!("Goal"), ...)`.
 | `creator` | `Address` | Creator who canceled |
 
 **Emitted by:** `cancel_campaign`
+
+---
+
+### `ContractInitializedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Init"` |
+
+**Data** (`ContractInitializedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Initialized admin address |
+| `min_contribution` | `i128` | Minimum contribution floor in stroops |
+| `contract_version` | `String` | Contract version deployed |
+
+**Emitted by:** `initialize`
+
+---
+
+### `ContractPausedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"CfgPause"` |
+
+**Data** (`ContractPausedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin address initiating pause state change |
+| `paused` | `bool` | New pause status (`true` = paused, `false` = unpaused) |
+| `contract_version` | `String` | Contract version at time of change |
+
+**Emitted by:** `set_paused`
+
+---
+
+### `PlatformFeeUpdatedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"FeeSet"` |
+
+**Data** (`PlatformFeeUpdatedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin updating fee |
+| `old_fee_bps` | `i128` | Previous fee in basis points |
+| `new_fee_bps` | `i128` | New fee in basis points |
+
+**Emitted by:** `set_fee`
+
+---
+
+### `FeeRecipientUpdatedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"RecipSet"` |
+
+**Data** (`FeeRecipientUpdatedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin updating recipient |
+| `old_recipient` | `Option<Address>` | Previous recipient address if configured |
+| `new_recipient` | `Address` | Newly designated recipient address |
+
+**Emitted by:** `set_fee_recipient`
 
 ---
 
@@ -839,7 +1130,50 @@ All events use the topic prefix `(symbol_short!("Goal"), ...)`.
 | `requested_by` | `Address` | Contributor who requested |
 | `new_deadline` | `u64` | Proposed new deadline |
 
-**Emitted by:** `request_deadline_extension`
+**Emitted by:** `request_deadline_extension` (first event of a successful request)
+
+Each request is followed by the requester's auto-approval, reported as an
+`ExtensionApproved` event, so the vote tally can be rebuilt from events alone.
+
+---
+
+### `ExtensionApproved`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"ExtAppr"` |
+
+**Data** (`ExtensionApproved`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `approver` | `Address` | Contributor who approved |
+| `approval_count` | `u32` | Total approvals after this vote |
+
+**Emitted by:** `request_deadline_extension` (the requester's auto-approval) and `approve_extension` (every successful call)
+
+---
+
+### `DeadlineExtended`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Extended"` |
+
+**Data** (`DeadlineExtended`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `old_deadline` | `u64` | Deadline before the change |
+| `new_deadline` | `u64` | Deadline now stored on the campaign |
+
+Emitted once per committed extension, immediately after the `ExtensionApproved` event for the vote that reached a majority. The deadline decides whether a campaign still accepts pledges or can be claimed or refunded, so a consumer rebuilding campaign availability from events needs this event to see the change.
+
+**Emitted by:** `request_deadline_extension` when the requester's auto-approval is already a majority, otherwise `approve_extension` when a later vote reaches a majority
 
 ---
 
@@ -862,9 +1196,11 @@ All events use the topic prefix `(symbol_short!("Goal"), ...)`.
 |---------------|-----------|----------|----------|
 | `"already initialized"` | `initialize` | High | Do not call `initialize()` again |
 | `"min_contribution must be positive"` | `initialize` | High | Pass `min_contribution > 0` |
-| `"not initialized"` | `set_paused`, `get_admin`, `migrate` | High | Call `initialize()` with admin address |
-| `"caller is not admin"` | `set_paused` | Critical | Only the stored admin address can pause |
-| `"only admin can call migrate"` | `migrate` | Critical | Only the stored admin address can migrate |
+| `"not initialized"` | `set_paused`, `set_fee`, `set_fee_recipient`, `get_admin`, `migrate` | High | Call `initialize()` with admin address |
+| `"caller is not admin"` | `set_paused`, `set_fee`, `set_fee_recipient`, `migrate` | Critical | Only the admin address stored during `initialize()` may call configuration setters |
+| `"fee must be non-negative"` | `set_fee` | Medium | Provide a fee >= 0 bps |
+| `"fee must not exceed 10000 basis points"` | `set_fee` | Medium | Limit fee to 10000 basis points (100%) or lower |
+| `"fee recipient cannot be the vault contract"` | `set_fee_recipient` | Medium | Provide a fee recipient address other than the vault contract address |
 | `"contract is paused"` | all state-mutating functions | Medium | Wait for admin to unpause |
 | `"campaign not found"` | all campaign-specific functions | High | Verify `campaign_id` via `get_campaign()` |
 | `"target amount must be positive"` | `create_campaign` | High | Set `target_amount > 0` |

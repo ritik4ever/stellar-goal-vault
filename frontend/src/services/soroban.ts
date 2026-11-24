@@ -12,17 +12,46 @@ import { SorobanRefundMetadata } from '../types/campaign';
 import { GoalVaultContract } from '../generated';
 import { verifyFreighterNetwork } from './freighter';
 import {
+  SIGNING_ERROR_MESSAGES,
   SigningErrorClass,
   classifyCause,
   createSigningError,
   toSigningError,
 } from '../lib/signingErrors';
 
-function causedError(code: string, cause: unknown, fallbackClass: SigningErrorClass) {
+function causedError(
+  code: string,
+  cause: unknown,
+  fallbackClass: SigningErrorClass,
+  message?: string,
+) {
   return createSigningError(code, {
     signingErrorClass: classifyCause(cause, fallbackClass),
     cause,
+    message,
   });
+}
+
+/**
+ * Parses an assembled transaction or the XDR a wallet returned. Both throw SDK
+ * errors that embed the envelope itself, so the raw text is swapped for the
+ * authored MALFORMED_TRANSACTION message and kept only as a redacted detail.
+ */
+function parseTransaction(xdr: string, networkPassphrase: string, message?: string) {
+  try {
+    return TransactionBuilder.fromXDR(xdr, networkPassphrase);
+  } catch (error) {
+    throw causedError('INVALID_SIGNED_XDR', error, 'MALFORMED_TRANSACTION', message);
+  }
+}
+
+/** Builds a contract invocation, mapping SDK coercion errors to MALFORMED_TRANSACTION. */
+function buildOperation<T>(build: () => T): T {
+  try {
+    return build();
+  } catch (error) {
+    throw causedError('INVALID_TRANSACTION_PARAMS', error, 'MALFORMED_TRANSACTION');
+  }
 }
 
 /**
@@ -81,21 +110,23 @@ async function buildAndSubmitRefund(
   const sourceAccount = await server.getAccount(walletAddress).catch((error) => {
     throw causedError('SOURCE_ACCOUNT_LOAD_FAILED', error, 'RPC_FAILURE');
   });
-  const contract = new Contract(contractId);
+  const contract = buildOperation(() => new Contract(contractId));
 
-  let transaction = new TransactionBuilder(sourceAccount, {
-    fee: BASE_FEE,
-    networkPassphrase,
-  })
-    .addOperation(
-      contract.call(
-        'refund',
-        nativeToScVal(BigInt(campaignId), { type: 'u64' }),
-        new Address(contributor).toScVal(),
-      ),
-    )
-    .setTimeout(300)
-    .build();
+  let transaction = buildOperation(() =>
+    new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          'refund',
+          nativeToScVal(BigInt(campaignId), { type: 'u64' }),
+          new Address(contributor).toScVal(),
+        ),
+      )
+      .setTimeout(300)
+      .build(),
+  );
 
   const simulation = await server.simulateTransaction(transaction).catch((error) => {
     throw createSigningError('SIMULATION_FAILED', {
@@ -104,10 +135,19 @@ async function buildAndSubmitRefund(
     });
   });
   if (rpc.Api.isSimulationError(simulation)) {
-    throw causedError('SIMULATION_FAILED', simulation.error, 'MALFORMED_TRANSACTION');
+    const errorClass = classifyCause(simulation.error, 'CONTRACT_REJECTED');
+    const userMessage =
+      errorClass === 'CONTRACT_REJECTED'
+        ? SIGNING_ERROR_MESSAGES.CONTRACT_REJECTED
+        : SIGNING_ERROR_MESSAGES.MALFORMED_TRANSACTION;
+    throw createSigningError('SIMULATION_FAILED', {
+      signingErrorClass: errorClass,
+      cause: simulation.error,
+      message: `${userMessage} Preflight check failed before signing.`,
+    });
   }
 
-  transaction = rpc.assembleTransaction(transaction, simulation).build();
+  transaction = buildOperation(() => rpc.assembleTransaction(transaction, simulation).build());
 
   let signedXdr: string;
   try {
@@ -116,10 +156,26 @@ async function buildAndSubmitRefund(
       networkPassphrase,
     });
   } catch (error) {
-    throw causedError('SIGNING_FAILED', error, 'UNKNOWN');
+    const errorClass = classifyCause(error, 'UNKNOWN');
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: errorClass,
+      cause: error,
+      message: SIGNING_ERROR_MESSAGES[errorClass],
+    });
   }
 
-  const signedTransaction = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
+  if (!signedXdr) {
+    throw createSigningError('SIGNING_FAILED', {
+      signingErrorClass: 'USER_REJECTED',
+      message: 'Freighter did not return a signed transaction.',
+    });
+  }
+
+  const signedTransaction = parseTransaction(
+    signedXdr,
+    networkPassphrase,
+    'Your wallet returned a signature this app could not read. Reconnect the wallet, then try again.',
+  );
   const sendResponse = await server.sendTransaction(signedTransaction).catch((error) => {
     throw createSigningError('SUBMISSION_FAILED', {
       signingErrorClass: 'RPC_FAILURE',

@@ -508,23 +508,36 @@ export function parseCampaignListQuery(
     }
   }
 
-  const sortValue = normalizeQueryValue(query.sort);
+  const sortByRaw = normalizeQueryValue(query.sortBy);
+  const sortRaw = normalizeQueryValue(query.sort);
   const sortFields: CampaignSortField[] = [
     'createdAt',
     'deadline',
     'pledgedAmount',
     'targetAmount',
+    'percentFunded',
   ];
   let sort: CampaignSortField | undefined;
-  if (sortValue !== undefined) {
-    if (!sortFields.includes(sortValue as CampaignSortField)) {
+  if (sortByRaw !== undefined) {
+    if (!sortFields.includes(sortByRaw as CampaignSortField)) {
+      issues.push({
+        code: 'custom',
+        message: `sortBy must be one of: ${sortFields.join(', ')}`,
+        path: ['sortBy'],
+      });
+    } else {
+      sort = sortByRaw as CampaignSortField;
+    }
+  }
+  if (sortRaw !== undefined) {
+    if (!sortFields.includes(sortRaw as CampaignSortField)) {
       issues.push({
         code: 'custom',
         message: `sort must be one of: ${sortFields.join(', ')}`,
         path: ['sort'],
       });
-    } else {
-      sort = sortValue as CampaignSortField;
+    } else if (sort === undefined) {
+      sort = sortRaw as CampaignSortField;
     }
   }
 
@@ -639,6 +652,70 @@ export function parseTimelineQuery(query: {
   return {
     ok: true,
     cursor,
+    limit: parsedLimit.ok ? (parsedLimit.value ?? 20) : 20,
+  };
+}
+
+/**
+ * Parses the query string of `GET /api/campaigns/:id/analytics`.
+ *
+ * The analytics endpoint is a pure read over one campaign and takes no
+ * query parameters. Accepting arbitrary keys would let callers silently
+ * request behaviour that does not exist (for example `?page=2`, which would
+ * look like pagination but be ignored), so any supplied key is rejected at
+ * the API boundary with a deterministic 400 instead of being dropped.
+ */
+export function parseCampaignAnalyticsQuery(
+  query: Record<string, unknown>,
+): { ok: true } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const unsupportedKeys = Object.keys(query).sort();
+  if (unsupportedKeys.length === 0) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    issues: unsupportedKeys.map((key) => ({
+      code: 'custom' as const,
+      message: `Unsupported query parameter: ${key}. This endpoint accepts no query parameters.`,
+      path: ['query'],
+    })),
+  };
+}
+
+/**
+ * Parses optional `page` and `limit` for `GET /api/health/deep`.
+ *
+ * The deep health response exposes an ordered `components` collection
+ * (db, soroban, contract, indexer). Pagination is opt-out: page defaults to 1
+ * and limit defaults to 20, which exceeds the number of components, so a
+ * request without parameters returns every component exactly as before.
+ * Both parameters must be integers and limit is bounded to 1..100. Invalid or
+ * out-of-range values are rejected with a 400 rather than silently clamped, so
+ * a caller never receives a page it did not ask for.
+ */
+export function parseHealthPaginationQuery(query: {
+  page?: unknown;
+  limit?: unknown;
+}): { ok: true; page: number; limit: number } | { ok: false; issues: z.core.$ZodIssue[] } {
+  const parsedPage = parsePositiveIntegerQueryParam(query.page, 'page');
+  const parsedLimit = parsePositiveIntegerQueryParam(query.limit, 'limit', 100);
+  const issues: z.core.$ZodIssue[] = [];
+
+  if (!parsedPage.ok) {
+    issues.push(...parsedPage.issues);
+  }
+  if (!parsedLimit.ok) {
+    issues.push(...parsedLimit.issues);
+  }
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  return {
+    ok: true,
+    page: parsedPage.ok ? (parsedPage.value ?? 1) : 1,
     limit: parsedLimit.ok ? (parsedLimit.value ?? 20) : 20,
   };
 }

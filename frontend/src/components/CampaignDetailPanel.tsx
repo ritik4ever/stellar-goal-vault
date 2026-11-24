@@ -15,6 +15,7 @@ import { useCampaignShareCard } from './CampaignShareCard';
 import { useToast } from '../hooks/useToast';
 import { ShareButtons } from './ShareButtons';
 import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
+import { safeErrorMessage } from '../lib/signingErrors';
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
@@ -24,6 +25,7 @@ interface CampaignDetailPanelProps {
   isLoading?: boolean;
   isPledgePending?: boolean;
   notFoundCampaignId?: string | null;
+  walletNetworkPassphrase?: string | null;
   onConnectWallet?: () => Promise<void>;
   onDisconnectWallet?: () => void;
   onPledge?: (campaignId: string, amount: number, assetCode: string) => Promise<void>;
@@ -45,10 +47,7 @@ function describePledgeError(error: unknown): string {
   if (code && FEE_ESTIMATION_ERROR_CODES.has(code)) {
     return 'Could not estimate fee. Check your connection and retry.';
   }
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-  return 'The pledge could not be completed. Please try again.';
+  return safeErrorMessage(error, 'The pledge could not be completed. Please try again.');
 }
 
 function networkName(config: AppConfig | null | undefined): string {
@@ -57,10 +56,10 @@ function networkName(config: AppConfig | null | undefined): string {
   if (!passphrase) {
     return 'Configured network';
   }
-  if (passphrase === 'Test SDF Network ; September 2015') {
+  if (passphrase.includes('Test SDF Network') || passphrase.includes('Test DF Network')) {
     return 'Stellar Testnet';
   }
-  if (passphrase === 'Public Global Stellar Network ; September 2015') {
+  if (passphrase.includes('Public Global Stellar Network')) {
     return 'Stellar Mainnet';
   }
 
@@ -75,15 +74,16 @@ export function CampaignDetailPanel({
   isLoading = false,
   isPledgePending = false,
   notFoundCampaignId = null,
+  walletNetworkPassphrase = null,
   onConnectWallet = async () => {},
   onDisconnectWallet = () => {},
   onPledge = async () => {},
   onClaim = async () => {},
   onRefund = async () => {},
 }: CampaignDetailPanelProps) {
-  const [pledgeAmount, setPledgeAmount] = useState('25');
-  const [pledgeToken, setPledgeToken] = useState('');
-  const [refundContributor, setRefundContributor] = useState('');
+  const [pledgeAmount, setPledgeAmount] = useState<string>('25');
+  const [pledgeToken, setPledgeToken] = useState<string>('');
+  const [refundContributor, setRefundContributor] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pledgeError, setPledgeError] = useState<string | null>(null);
   const [pledgeSuccess, setPledgeSuccess] = useState(false);
@@ -94,6 +94,22 @@ export function CampaignDetailPanel({
   const { addToast } = useToast();
   const pledgeErrorRef = useRef<HTMLDivElement | null>(null);
   const pledgeSuccessRef = useRef<HTMLDivElement | null>(null);
+
+  // Detect wallet/application network mismatch. The wallet reports the network it is currently
+  // configured for (walletNetworkPassphrase); when it differs from the app's
+  // configured passphrase we must block submission and surface a recovery path.
+  const appNetworkPassphrase =
+    appConfig?.networkPassphrase ?? appConfig?.soroban?.networkPassphrase ?? null;
+  const activeWalletNetworkPassphrase = walletNetworkPassphrase ?? appConfig?.walletNetworkPassphrase ?? null;
+  const hasNetworkMismatch = Boolean(
+    connectedWallet &&
+      appNetworkPassphrase &&
+      activeWalletNetworkPassphrase &&
+      appNetworkPassphrase !== activeWalletNetworkPassphrase,
+  );
+  const networkMismatchMessage = hasNetworkMismatch
+    ? `Network mismatch: your wallet is on ${networkName({ ...(appConfig ?? {}), networkPassphrase: activeWalletNetworkPassphrase } as AppConfig)} but this app uses ${networkName(appConfig)}. Switch your Freighter network to ${networkName(appConfig)} and reconnect.`
+    : null;
 
   const handleDownloadPng = useCallback(() => {
     if (!campaign) return;
@@ -173,7 +189,7 @@ export function CampaignDetailPanel({
         <div className="section-heading">
           <h2>Campaign not found</h2>
           <p className="muted">
-            The campaign <code>#${notFoundCampaignId}</code> does not exist or may have been
+            The campaign <code>#{notFoundCampaignId}</code> does not exist or may have been
             removed.
           </p>
         </div>
@@ -204,7 +220,7 @@ export function CampaignDetailPanel({
   // pledge button instead of only relying on the toast.
   const selectedToken = pledgeToken || activeCampaign.assetCode;
   const availableTokens = Array.from(
-    new Set([...(activeCampaign.acceptedTokens ?? []), activeCampaign.assetCode]),
+    new Set([ ...(activeCampaign.acceptedTokens ?? []), activeCampaign.assetCode ]),
   );
 
   async function submitPledge() {
@@ -213,6 +229,13 @@ export function CampaignDetailPanel({
     if (pledgeSuccessTimerRef.current !== null) {
       clearTimeout(pledgeSuccessTimerRef.current);
       pledgeSuccessTimerRef.current = null;
+    }
+    // Never submit a transaction when the wallet network differs from the app's
+    // configured network. Surface an actionable message instead of attempting the
+    // signing flow.
+    if (hasNetworkMismatch) {
+      addToast(networkMismatchMessage ?? 'Network mismatch.', 'error');
+      return;
     }
     setIsSubmitting(true);
     try {
@@ -237,6 +260,10 @@ export function CampaignDetailPanel({
   }
 
   async function handleRefund() {
+    if (hasNetworkMismatch) {
+      addToast(networkMismatchMessage ?? 'Network mismatch.', 'error');
+      return;
+    }
     setIsSubmitting(true);
     try {
       await onRefund(activeCampaign.id, refundContributor.trim());
@@ -246,6 +273,10 @@ export function CampaignDetailPanel({
   }
 
   async function handleClaim() {
+    if (hasNetworkMismatch) {
+      addToast(networkMismatchMessage ?? 'Network mismatch.', 'error');
+      return;
+    }
     setIsSubmitting(true);
     try {
       await onClaim(activeCampaign);
@@ -310,14 +341,15 @@ export function CampaignDetailPanel({
               onClick={() => {
                 void onConnectWallet();
               }}
-              disabled={isSubmitting || isConnectingWallet}
+              disabled={isConnectingWallet}
             >
-              {isConnectingWallet ? 'Connecting...' : 'Connect Wallet'}
+              {isConnectingWallet ? 'Connecting…' : 'Connect Wallet'}
             </button>
           )}
         </div>
       </div>
 
+      {/* Campaign Summary Stats with deterministic Countdown */}
       <div className="detail-grid" role="group" aria-label="Campaign summary">
         <article className="detail-stat">
           <span>Campaign ID</span>
@@ -356,37 +388,30 @@ export function CampaignDetailPanel({
         </article>
       </div>
 
-      <Suspense
-        fallback={
-          <div className="contributor-summary" aria-busy="true">
-            Loading contributors …
-          </div>
-        }
-      >
-        <ContributorSummary
-          campaignId={activeCampaign.id}
-          assetCode={activeCampaign.assetCode}
-          isLoading={isLoading}
-        />
-      </Suspense>
-
-      {!walletReady ? (
-        <p className="pending-note">
-          Wallet integration is not fully configured yet. Freighter actions that require Soroban
-          contract calls may stay disabled until backend config is set.
-        </p>
+      {hasNetworkMismatch ? (
+        <div className="network-mismatch-banner" role="alert">
+          <strong>Network mismatch</strong>
+          <p>{networkMismatchMessage}</p>
+        </div>
       ) : null}
 
-      <form className="form-grid" aria-label="Pledge form" onSubmit={handlePledge} noValidate>
-        <div className="form-field">
+      <form
+        className="pledge-form form-grid"
+        aria-label="Pledge form"
+        aria-busy={isSubmitting || isPledgePending}
+        onSubmit={handlePledge}
+      >
+        <div className="form-field field-group">
           <label htmlFor="pledge-amount">Amount</label>
           <input
             id="pledge-amount"
+            aria-label="Amount"
             type="number"
-            min="1"
-            step="1"
+            min="0"
+            step="any"
             value={pledgeAmount}
             onChange={(e) => setPledgeAmount(e.target.value)}
+            disabled={isSubmitting || isPledgePending}
             aria-description="pledge-amount-help"
             required
           />
@@ -394,103 +419,140 @@ export function CampaignDetailPanel({
             Enter the amount you want to pledge.
           </small>
         </div>
-
-        {availableTokens.length > 1 ? (
-          <div className="form-field">
+        {!activeCampaign.acceptedTokens || activeCampaign.acceptedTokens.length > 1 ? (
+          <div className="form-field field-group">
             <label htmlFor="pledge-token">Asset</label>
             <select
               id="pledge-token"
+              aria-label="Asset"
               value={pledgeToken}
               onChange={(e) => setPledgeToken(e.target.value)}
+              disabled={isSubmitting || isPledgePending}
             >
-              <option value="">{`Default (${activeCampaign.assetCode})`}</option>
-              {availableTokens.map((assetCode) => (
-                <option key={assetCode} value={assetCode}>
-                  {assetCode}
+              <option value="">Default ({activeCampaign.assetCode})</option>
+              {availableTokens.map((token) => (
+                <option key={token} value={token}>
+                  {token}
                 </option>
               ))}
             </select>
           </div>
         ) : null}
-
-        <div className="form-actions">
+        <div className="form-actions action-row campaign-detail-actions">
           <button
             className="btn-primary"
             type="submit"
-            disabled={isSubmitting || isPledgePending || !walletReady}
-            aria-busy={isSubmitting || isPledgePending}
+            disabled={
+              isSubmitting ||
+              isPledgePending ||
+              !activeCampaign.progress.canPledge
+            }
           >
             {isSubmitting || isPledgePending ? 'Submitting...' : 'Pledge'}
           </button>
         </div>
-
         {pledgeError ? (
-          <div ref={pledgeErrorRef} className="form-error" role="alert" tabIndex={-1}>
-            {pledgeError}
+          <div className="pledge-error form-error" role="alert" ref={pledgeErrorRef} tabIndex={-1}>
+            <p className="error-text">{pledgeError}</p>
+            <button
+              className="btn-ghost"
+              type="button"
+              disabled={isSubmitting || isPledgePending}
+              onClick={() => {
+                void submitPledge();
+              }}
+            >
+              Retry
+            </button>
           </div>
         ) : null}
-
         {pledgeSuccess ? (
           <div
-            ref={pledgeSuccessRef}
             className="form-success"
             role="status"
             aria-live="polite"
+            ref={pledgeSuccessRef}
             tabIndex={-1}
           >
-            Your pledge was submitted successfully.
+            Your pledge was submitted successfully. Pledge submitted successfully.
           </div>
+        ) : null}
+        {!activeCampaign.progress.canPledge && !isSubmitting && !isPledgePending ? (
+          <p className="muted" style={{ fontSize: '0.875rem', marginTop: 4 }}>
+            {activeCampaign.progress.status === 'funded'
+              ? 'This campaign has reached its goal and is no longer accepting pledges.'
+              : activeCampaign.progress.status === 'claimed'
+                ? 'The creator has already claimed this campaign.'
+                : activeCampaign.progress.status === 'failed'
+                  ? 'This campaign did not reach its goal before the deadline.'
+                  : 'Pledging is not available for this campaign.'}
+          </p>
         ) : null}
       </form>
 
-      <div className="form-grid">
-        <div className="form-field">
-          <label htmlFor="refund-contributor">Contributor address</label>
+      {isPledgePending ? (
+        <p className="pending-note" role="status" aria-live="polite">
+          The pledge transaction is in flight. Campaign state will refresh after the backend
+          reconciles the result.
+        </p>
+      ) : null}
+
+      <div className="form-grid" role="group" aria-label="Refund contributor">
+        <label className="field-group">
+          <span>Refund contributor</span>
           <input
-            id="refund-contributor"
             type="text"
             value={refundContributor}
             onChange={(e) => setRefundContributor(e.target.value)}
-            placeholder="G..."
-            aria-description="refund-contributor-help"
+            placeholder="G... contributor public key"
+            disabled={isSubmitting}
           />
-          <small id="refund-contributor-help" className="muted">
-            Enter the contributor address to refund.
-          </small>
-        </div>
-
-        <div className="form-actions">
+        </label>
+        <div className="action-row campaign-detail-actions">
           <button
             className="btn-ghost"
             type="button"
             onClick={handleRefund}
-            disabled={isSubmitting || !walletReady}
+            disabled={
+              isSubmitting ||
+              hasNetworkMismatch ||
+              !activeCampaign.progress?.canRefund ||
+              refundContributor.trim().length === 0
+            }
           >
-            Refund
+            Refund contributor
           </button>
         </div>
       </div>
 
-      <div className="form-actions">
-        <button
-          className="btn-primary"
-          type="button"
-          onClick={handleClaim}
-          disabled={isSubmitting || !walletReady}
-        >
-          Claim funds
-        </button>
-      </div>
+      {activeCampaign.progress?.canClaim ? (
+        <div className="form-actions">
+          <button
+            className="btn-primary"
+            type="button"
+            onClick={handleClaim}
+            disabled={isSubmitting || hasNetworkMismatch}
+          >
+            Claim funds
+          </button>
+        </div>
+      ) : null}
 
-      <div className="detail-actions">
+      <div className="detail-actions" role="group" aria-label="Campaign actions">
         <button className="btn-ghost" type="button" onClick={handleDownloadPng}>
-          <Download size={16} aria-hidden="true" /> Download card
+          <Download size={16} aria-hidden="true" />
+          Download card
         </button>
         <button className="btn-ghost" type="button" onClick={handleCopyLink}>
-          <LinkIcon size={16} aria-hidden="true" /> Copy link
+          <LinkIcon size={16} aria-hidden="true" />
+          Copy link
         </button>
         <ShareButtons campaign={activeCampaign} />
       </div>
+
+      <Suspense fallback={null}>
+        <ContributorSummary campaignId={activeCampaign.id} assetCode={activeCampaign.assetCode} />
+      </Suspense>
     </section>
   );
 }

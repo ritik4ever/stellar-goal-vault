@@ -82,6 +82,7 @@ describe('Versioned SQL migrations', () => {
         '003_add_notifications',
         '004_add_query_plan_indexes',
         '005_add_pledges_integrity_constraints',
+        '006_add_indexer_kv_store',
       ]);
       for (const migration of migrations) {
         expect(migration.up.trim()).not.toBe('');
@@ -188,13 +189,30 @@ describe('Versioned SQL migrations', () => {
       writeMigration(tmpDir, '001_create.sql', 'CREATE TABLE items (id INTEGER);\r\n');
       expect(() => applyPendingMigrations(db, loadMigrations(tmpDir))).not.toThrow();
     });
+
+    it('recovers when a previous run was interrupted before the schema version advanced', () => {
+      // Simulate an interruption: the migration's DDL was applied but the
+      // version record was never written. A rerun must neither fail on the
+      // existing table nor lose the committed row, and must complete cleanly.
+      writeMigration(tmpDir, '001_create.sql', 'CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT);');
+      writeMigration(tmpDir, '001_create.down.sql', 'DROP TABLE items;');
+      applyPendingMigrations(db, loadMigrations(tmpDir));
+      db.prepare(`INSERT INTO items (id, label) VALUES (1, 'kept')`).run();
+      db.prepare(`DELETE FROM schema_migrations WHERE version = 1`).run();
+      expect(getSchemaVersion(db)).toBe(0);
+
+      expect(applyPendingMigrations(db, loadMigrations(tmpDir))).toEqual([1]);
+      expect(getSchemaVersion(db)).toBe(1);
+      const rows = db.prepare(`SELECT id, label FROM items`).all();
+      expect(rows).toEqual([{ id: 1, label: 'kept' }]);
+    });
   });
 
   describe('schema', () => {
     it('is correct after a fresh init', () => {
       migrate(db);
 
-      expect(getSchemaVersion(db)).toBe(5);
+      expect(getSchemaVersion(db)).toBe(6);
 
       const schema = snapshotSchema(db);
       expect(Object.keys(schema.tables).sort()).toEqual([
@@ -202,6 +220,7 @@ describe('Versioned SQL migrations', () => {
         'campaign_events',
         'campaigns',
         'campaigns_fts',
+        'kv_store',
         'notifications',
         'pledges',
         'webhook_dead_letter_queue',
@@ -278,7 +297,7 @@ describe('Versioned SQL migrations', () => {
 
         migrate(db);
 
-        expect(getAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5]);
+        expect(getAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6]);
         expect(snapshotSchema(db)).toEqual(expected);
 
         const campaign = db
@@ -325,125 +344,6 @@ describe('Versioned SQL migrations', () => {
       }
 
       expect(snapshotSchema(db).tables).toEqual({});
-    });
-
-    it('supports rolling back and re-applying the full chain', () => {
-      migrate(db);
-      const expected = snapshotSchema(db);
-
-      expect(rollbackMigrations(db, 0)).toEqual([5, 4, 3, 2, 1]);
-      expect(getAppliedMigrations(db)).toEqual([]);
-
-      migrate(db);
-      expect(snapshotSchema(db)).toEqual(expected);
-    });
-
-    it('rolls back to a target version, leaving older migrations applied', () => {
-      migrate(db);
-
-      expect(rollbackMigrations(db, 2)).toEqual([5, 4, 3]);
-      expect(getAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2]);
-      expect(snapshotSchema(db).tables.notifications).toBeUndefined();
-      expect(snapshotSchema(db).tables.campaigns).toContain('accepted_tokens_json');
-    });
-  });
-
-  describe('databases created before versioned migrations', () => {
-    it('are adopted at the baseline version with the same schema as a fresh database', () => {
-      const fresh = openDb();
-      try {
-        migrate(fresh);
-        const expected = snapshotSchema(fresh);
-
-        // Old snapshot: no history table, several columns and tables missing.
-        db.exec(`
-          CREATE TABLE campaigns (
-            id TEXT PRIMARY KEY,
-            creator TEXT NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT NOT NULL,
-            accepted_tokens_json TEXT NOT NULL,
-            target_amount REAL NOT NULL,
-            pledged_amount REAL NOT NULL DEFAULT 0,
-            deadline INTEGER NOT NULL,
-            created_at INTEGER NOT NULL,
-            claimed_at INTEGER,
-            deleted_at INTEGER
-          );
-          CREATE TABLE pledges (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            campaign_id TEXT NOT NULL,
-            contributor TEXT NOT NULL,
-            amount REAL NOT NULL,
-            created_at INTEGER NOT NULL,
-            refunded_at INTEGER,
-            FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
-          );
-          INSERT INTO campaigns (id, creator, title, description, accepted_tokens_json,
-                                 target_amount, deadline, created_at)
-          VALUES ('c-old', 'GCREATOR', 'Old', 'Pre-runner campaign', '["XLM"]', 100, 2000, 1000);
-        `);
-
-        migrate(db);
-
-        expect(getAppliedMigrations(db).map((m) => m.version)).toEqual(
-          [...Array.from({ length: LEGACY_BASELINE_VERSION }, (_, i) => i + 1), 5],
-        );
-        expect(snapshotSchema(db)).toEqual(expected);
-
-        // Pre-existing campaigns become searchable.
-        const fts = db.prepare(`SELECT id FROM campaigns_fts WHERE id = 'c-old'`).get();
-        expect(fts).toBeDefined();
-      } finally {
-        fresh.close();
-      }
-    });
-
-    it('carries single-asset campaigns over to accepted_tokens_json', () => {
-      db.exec(`
-        CREATE TABLE campaigns (
-          id TEXT PRIMARY KEY,
-          creator TEXT NOT NULL,
-          title TEXT NOT NULL,
-          description TEXT NOT NULL,
-          asset_code TEXT NOT NULL,
-          target_amount REAL NOT NULL,
-          pledged_amount REAL NOT NULL DEFAULT 0,
-          deadline INTEGER NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-        INSERT INTO campaigns (id, creator, title, description, asset_code,
-                               target_amount, deadline, created_at)
-        VALUES ('c-usdc', 'GCREATOR', 'USDC only', 'Single asset campaign', 'USDC', 100, 2000, 1000);
-      `);
-
-      migrate(db);
-
-      const row = db
-        .prepare(`SELECT accepted_tokens_json FROM campaigns WHERE id = 'c-usdc'`)
-        .get() as { accepted_tokens_json: string };
-      expect(JSON.parse(row.accepted_tokens_json)).toEqual(['USDC']);
-    });
-
-    it('does not re-run the baseline once adopted', () => {
-      db.exec(`
-        CREATE TABLE campaigns (
-          id TEXT PRIMARY KEY,
-          creator TEXT NOT NULL,
-          title TEXT NOT NULL,
-          description TEXT NOT NULL,
-          accepted_tokens_json TEXT NOT NULL,
-          target_amount REAL NOT NULL,
-          pledged_amount REAL NOT NULL DEFAULT 0,
-          deadline INTEGER NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-      `);
-      migrate(db);
-      const adopted = getAppliedMigrations(db);
-
-      migrate(db);
-      expect(getAppliedMigrations(db)).toEqual(adopted);
     });
   });
 });

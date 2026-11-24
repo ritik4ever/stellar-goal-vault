@@ -332,6 +332,41 @@ describe('Query parameter validation', () => {
     }
   });
 
+
+  it('supports sortBy and order including percentFunded and remains stable with filters', () => {
+    const { fixtures } = buildCampaignList();
+
+    const parsed = parseCampaignListQuery({
+      asset: 'USDC',
+      sortBy: 'percentFunded',
+      order: 'desc',
+    });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.data.sort).toBe('percentFunded');
+      expect(parsed.data.order).toBe('desc');
+    }
+
+    const { campaigns: descCampaigns } = listCampaigns({
+      assetCodes: ['USDC'],
+      sort: 'percentFunded',
+      sortOrder: 'desc',
+    });
+    expect(descCampaigns).toHaveLength(4);
+    expect([fixtures.fundedUsdc.id, fixtures.claimedUsdc.id]).toContain(descCampaigns[0].id);
+
+    const { campaigns: ascCampaigns } = listCampaigns({
+      assetCodes: ['USDC'],
+      sort: 'percentFunded',
+      sortOrder: 'asc',
+    });
+    expect(ascCampaigns).toHaveLength(4);
+    expect([fixtures.openUsdc.id, fixtures.failedUsdc.id]).toContain(ascCampaigns[0].id);
+
+    const invalidSortBy = parseCampaignListQuery({ sortBy: 'invalidField' });
+    expect(invalidSortBy.ok).toBe(false);
+  });
+
   it('requires both page and limit for pagination', () => {
     const resultPageOnly = parseCampaignListQuery({ page: '1' });
     expect(resultPageOnly.ok).toBe(false);

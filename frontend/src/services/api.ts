@@ -16,6 +16,7 @@ import {
   SorobanRefundMetadata,
 } from '../types/campaign';
 import { HISTORY_PAGE_SIZE, sortHistoryEvents } from '../lib/campaignDetailLoading';
+import { describeErrorForLog } from '../lib/signingErrors';
 import { apiRequest } from './httpClient';
 
 export type CampaignListResponse = {
@@ -379,7 +380,7 @@ export async function getContributorProfile(address: string): Promise<Contributo
       });
     }
   } catch (err) {
-    console.error('Error fetching contributor pledges', err);
+    console.error('Error fetching contributor pledges', describeErrorForLog(err));
   }
 
   const campaignCount = backedCampaigns.length;
