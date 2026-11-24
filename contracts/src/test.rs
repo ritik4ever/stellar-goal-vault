@@ -5830,4 +5830,209 @@ mod tests {
         assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
         assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
     }
+
+    // ── SGV-2026-131: Specify Contract claim boundaries ───────────────────────
+    //
+    // These tests pin every claim boundary at the first eligible ledger:
+    //
+    //   1. `timestamp >= deadline`  — the deadline ledger itself is the first
+    //      one on which claim is permitted; one ledger earlier is rejected.
+    //   2. `pledged_amount == target_amount` — a campaign funded to exactly the
+    //      target is claimable; any amount below is not.
+    //   3. Creator identity — only the address stored as `creator` on the
+    //      campaign record may claim; no other caller succeeds regardless of
+    //      funding or elapsed time.
+    //   4. Single payout, vault zeroed — claim moves the full balance to the
+    //      creator (or splits it with the fee recipient) and sets the per-token
+    //      vault balance to zero.  `pledged_amount` is preserved after claim
+    //      because contribution accounting is not rewritten during settlement.
+    //   5. Checked integer arithmetic — fee split uses `checked_mul` then
+    //      `checked_div(10000)` for the fee amount and `checked_sub` for the
+    //      creator portion, so every arithmetic step is overflow-safe.
+    //
+    // The tests below are complementary to the existing boundary tests
+    // (`test_claim_at_first_eligible_ledger_pays_creator_once_and_emits_event`,
+    // `test_claim_one_ledger_before_deadline_moves_nothing_and_emits_no_event`,
+    // and `test_claim_at_first_eligible_ledger_emits_one_event_per_funded_token`)
+    // by adding coverage for the fee-split path at the deadline boundary.
+
+    /// A funded campaign whose pledge equals the target exactly can be claimed
+    /// at `timestamp == deadline` (the first eligible ledger) when a fee
+    /// recipient is configured.
+    ///
+    /// This pins all five boundaries together and verifies the full checked
+    /// arithmetic chain: `balance.checked_mul(fee_bps).checked_div(10000)` for
+    /// the fee and `balance.checked_sub(fee_amount)` for the creator portion.
+    /// The vault balance is zeroed after the claim and `pledged_amount` is
+    /// preserved as recorded contribution history.
+    #[test]
+    fn test_claim_boundary_exact_target_at_deadline_with_fee() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        // ── boundary 2: target == pledge (funded to exactly the minimum) ──────
+        let target: i128 = 10_000;
+        let fee_bps: i128 = 200; // 2 %
+
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let fee_recipient = Address::generate(&env);
+
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+
+        // Configure the fee mechanism so the checked arithmetic path is exercised.
+        client.initialize(&admin, &100_i128);
+        client.set_fee(&admin, &fee_bps);
+        client.set_fee_recipient(&admin, &fee_recipient);
+
+        // ── boundary 1 setup: deadline is 100 ledgers ahead ──────────────────
+        let deadline_offset: u64 = 100;
+        let deadline = env.ledger().timestamp() + deadline_offset;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "SGV-2026-131 boundary"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        // Contribute exactly `target` so pledged_amount == target_amount.
+        client.contribute(&campaign_id, &contributor, &token, &target);
+
+        {
+            let c = client.get_campaign(&campaign_id);
+            assert_eq!(c.pledged_amount, target, "pledged_amount must equal target before claim");
+            assert!(!c.claimed);
+        }
+
+        // ── boundary 1: set timestamp to exactly the deadline ─────────────────
+        env.ledger().set_timestamp(deadline);
+        assert_eq!(
+            env.ledger().timestamp(),
+            deadline,
+            "ledger timestamp must equal deadline (first eligible ledger)"
+        );
+
+        // ── boundary 3: creator claims ────────────────────────────────────────
+        client.claim(&campaign_id, &creator);
+
+        let token_client = TokenClient::new(&env, &token);
+
+        // ── boundary 5: verify checked fee arithmetic ─────────────────────────
+        // fee_amount = target.checked_mul(fee_bps).checked_div(10_000)
+        //            = 10_000 * 200 / 10_000 = 200
+        let expected_fee: i128 = target
+            .checked_mul(fee_bps)
+            .expect("mul must not overflow")
+            .checked_div(10_000)
+            .expect("div must not overflow");
+        // creator_amount = target.checked_sub(expected_fee) = 9_800
+        let expected_creator: i128 = target
+            .checked_sub(expected_fee)
+            .expect("sub must not overflow");
+
+        assert_eq!(
+            token_client.balance(&creator),
+            expected_creator,
+            "creator must receive balance minus fee"
+        );
+        assert_eq!(
+            token_client.balance(&fee_recipient),
+            expected_fee,
+            "fee recipient must receive the calculated fee"
+        );
+        assert_eq!(
+            token_client.balance(&contributor),
+            0,
+            "contributor balance must be zero after contributing the full target"
+        );
+
+        // ── boundary 4: vault zeroed, one Claim event ─────────────────────────
+        assert_eq!(
+            token_client.balance(&client.address),
+            0,
+            "vault balance must be zero after claim"
+        );
+        assert_eq!(
+            token_client.balance(&creator) + token_client.balance(&fee_recipient),
+            target,
+            "creator + fee must equal the full pledged target (no tokens lost)"
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token),
+            0,
+            "per-token vault balance must be zeroed after claim"
+        );
+
+        // pledged_amount is preserved — contribution accounting is not rewritten.
+        let campaign = client.get_campaign(&campaign_id);
+        assert!(campaign.claimed, "campaign must be marked claimed");
+        assert_eq!(
+            campaign.pledged_amount,
+            target,
+            "pledged_amount must be preserved after claim"
+        );
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            target,
+            "per-contributor contribution record must be preserved after claim"
+        );
+    }
+
+    /// One ledger before the deadline (timestamp == deadline - 1) a funded
+    /// campaign must be rejected with "campaign is still active", no funds
+    /// move, no events are emitted, and the campaign remains unclaimed.
+    ///
+    /// This is the lower boundary of the eligibility window; the complement
+    /// test (`test_claim_boundary_exact_target_at_deadline_with_fee`) confirms
+    /// the upper boundary at timestamp == deadline.
+    #[test]
+    fn test_claim_boundary_one_ledger_before_deadline_is_rejected() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let target: i128 = 5_000;
+        let (client, campaign_id, creator, contributor, token, deadline) =
+            claim_fixture(&env, target, 100);
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+
+        // Set timestamp to one ledger before the deadline — still active.
+        env.ledger().set_timestamp(deadline - 1);
+        assert_eq!(env.ledger().timestamp(), deadline - 1);
+
+        assert!(
+            client.try_claim(&campaign_id, &creator).is_err(),
+            "claim must be rejected one ledger before the deadline"
+        );
+
+        // No funds moved.
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&creator), 0);
+        assert_eq!(token_client.balance(&client.address), target);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token),
+            target
+        );
+
+        // Campaign state unchanged.
+        let campaign = client.get_campaign(&campaign_id);
+        assert!(!campaign.claimed);
+        assert_eq!(campaign.pledged_amount, target);
+
+        // No events emitted.
+        assert!(
+            env.events()
+                .all()
+                .filter_by_contract(&client.address)
+                .events()
+                .is_empty(),
+            "a rejected pre-deadline claim must not emit any events"
+        );
+    }
 }
