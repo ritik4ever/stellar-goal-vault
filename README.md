@@ -80,6 +80,14 @@ npm run gen:bindings
 3. `frontend/src/services/soroban.ts` imports from generated bindings via `GoalVaultContract` client
 4. CI checks for ABI drift on every PR that touches contracts
 
+### Rerun safety and drift check
+
+- `CONTRACT_ID` is optional. When it is not set, `npm run gen:bindings` reads `contracts/contract_id.txt`.
+- If no ID is found, or it is still a placeholder like `YOUR_CONTRACT_ID`, the script stops before touching `frontend/src/generated/` and prints how to recover.
+- Bindings are generated into a temp directory first, so a failed run leaves the committed bindings unchanged.
+- Each successful run writes `frontend/src/generated/.contract-id` with the contract the bindings came from. Rerunning against the same contract produces the same file, so there is no diff.
+- `npm run gen:bindings:check` compares that stamp with the deployed ID without calling the network, and exits with code 1 on drift so CI can fail on it.
+
 ### Mainnet
 
 ```bash

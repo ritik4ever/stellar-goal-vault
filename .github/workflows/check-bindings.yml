@@ -6,6 +6,7 @@ on:
       - 'contracts/src/**'
       - 'frontend/src/generated/**'
       - '.github/workflows/check-bindings.yml'
+      - 'scripts/**'
 
 jobs:
   check-bindings:
@@ -26,6 +27,11 @@ jobs:
           curl -L https://github.com/stellar/js-stellar-sdk/releases/download/v14.0.0/stellar-cli-linux-x86_64.tar.gz -o stellar-cli.tar.gz
           tar -xzf stellar-cli.tar.gz
           chmod +x stellar
+
+      - name: Check bindings contract stamp
+        run: |
+          (cd backend && npm ci --legacy-peer-deps)
+          npm run gen:bindings:check
 
       - name: Regenerate bindings
         run: npm run gen:bindings
