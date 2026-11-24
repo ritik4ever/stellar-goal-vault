@@ -287,6 +287,8 @@ fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: S
 | `creator` | `Address` | Must match the campaign's stored creator |
 | `new_metadata` | `String` | Replacement metadata string |
 
+**Authorization:** Requires `creator.require_auth()` and verifies `campaign.creator == creator` before mutating campaign storage. Unsigned calls or calls signed by any non-creator fail atomically, leaving campaign metadata, pledges, and token balances unchanged.
+
 **Errors:**
 
 | Error Condition | Panic Message | Severity | Recovery Action |
@@ -299,6 +301,25 @@ fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: S
 | Past deadline | `"campaign deadline reached"` | Medium | Metadata cannot be updated after the deadline |
 
 **Emits:** `MetadataUpdated`
+
+**Event ordering and exactly-once semantics (issue #1524):** a successful call
+publishes exactly one `("Goal", "MetaUpd")` event, and it is published after
+the campaign record has been written. Its payload therefore always describes
+committed state: `old_metadata` is the value stored before the call and
+`new_metadata` is the value `get_campaign()` returns afterwards. A rejected
+call — paused contract, unknown campaign, creator mismatch, already claimed,
+canceled, past deadline, or failed authorization — panics before the write and
+publishes no event at all.
+
+Because each event carries both ends of the change, a consumer can replay
+metadata from the creation event's `metadata` field and apply every
+`MetadataUpdated` in ledger order to reproduce the committed value. Each
+committed change appears exactly once, so a replay never applies an update
+twice. Covered by
+`test_update_metadata_emits_one_event_with_old_and_new_values`,
+`test_metadata_update_events_replay_to_committed_metadata`, and
+`test_rejected_metadata_update_commits_nothing_and_emits_no_event` in
+`src/test.rs`.
 
 **Gas estimate:** 16,000 + storage write + event ≈ 22,000 units + 20% headroom = **26,400**
 
@@ -368,6 +389,36 @@ fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, 
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 | Contributor is the vault contract | `"contributor cannot be the vault contract"` | High | Pledge from a real account; the vault cannot fund itself |
 
+**Minimum contribution boundary:** `amount` is compared as an `i128` against
+`get_min_contribution()`. The accepted range is `amount >= minimum`:
+
+- `amount == minimum` is accepted.
+- `amount == minimum - 1` (one stroop below) is rejected with
+  `"contribution below minimum"`.
+
+The floor defaults to 100 stroops when `initialize()` has not been called and
+can be changed with `initialize()`. The minimum check runs before the campaign
+is read, before the token transfer, and before any storage write, so a rejected
+call leaves the contributor balance, the campaign pledge, and the vault balance
+unchanged.
+
+**Per-contributor cap boundary & cumulative enforcement (SGV-2026-120):**
+When `max_per_contributor > 0`, the sum of existing contributions across all
+accepted tokens plus the new contribution amount cannot exceed the cap:
+`already + amount <= cap`.
+- Multiple contributions that sum exactly to the configured cap are accepted in full.
+- Any attempt exceeding the cap (whether upfront or following prior successful or failed pledges)
+  is atomically rejected with `"per-contributor cap exceeded"`.
+- Atomic rollback ensures no tokens move, balances remain unchanged, and no pledge events are emitted.
+- The contributor's cumulative recorded pledge remains strictly within the cap.
+
+**Per-contributor cap authority enforcement (SGV-2026-118):**
+Pledges made to a capped campaign strictly require the contributor's explicit authorization (`contributor.require_auth()`).
+- Neither the campaign creator nor the contract administrator may sign on behalf of a contributor or bypass the per-contributor cap.
+- Unsigned calls and calls signed by unauthorized parties are rejected before any balance deduction, storage update, or token movement.
+- Multiple contributions summing exactly to the cap require valid contributor authorization for each pledge.
+- Over-cap attempts following prior failures or boundary pledges are atomically rejected, preserving contributor balances, vault escrow, and campaign valuation without releasing funds.
+
 **Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
 
 **Indexer note:** The `CampaignPledgedEvent` event is emitted exactly once per successful `contribute` call, after all validations, token transfer, and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Pledged")` and use `campaign_id` + `contributor` + `pledged_at` for deduplication and reconstructing pledge state without auxiliary contract reads.
@@ -400,12 +451,41 @@ fn claim(env: Env, campaign_id: u64, creator: Address)
 | Campaign canceled | `"campaign canceled"` | Medium | Campaign was canceled; no funds to claim |
 | Still active | `"campaign is still active"` | Medium | Wait for deadline to pass |
 | Underfunded | `"campaign is not funded"` | Medium | `pledged_amount < target_amount`; contributors should use `refund()` |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry (or rely on `extend_ttl`) before retrying. No funds move and the campaign is not marked claimed |
 | Caller not authorized | Soroban auth failure | High | Ensure `creator` signs the transaction |
+
+**Atomicity guarantee:** `claim` is all-or-nothing. Every validation — the
+`creator` signature, the creator-match check, the `claimed` and `canceled`
+flags, the deadline, the funding check, and the storage-integrity check — runs
+before the first storage write or token transfer. A failed claim therefore
+leaves campaign storage, `pledged_amount`, the `claimed` flag, per-token
+balances, and token balances exactly as they were: no partial pledge or payout
+is possible. This holds for a duplicate claim (already `claimed`), a
+non-creator caller (auth failure or `"creator mismatch"`), and any other
+rejected call. Because the invocation aborts before any externally visible
+effect, no `CampaignClaimed` or `FeeCollected` success event is emitted for a
+failed claim.
 
 **Emits:** `CampaignClaimed` (one per token with a non-zero balance), and
 `FeeCollected` for each token whose fee transfer is positive. `CampaignClaimed.amount`
 is the gross campaign balance claimed for that token, before any fee split.
 Failed calls commit no claim or fee success events.
+
+**Eligibility boundary (issue #1515):** the first eligible ledger is the one
+whose timestamp equals `campaign.deadline` — the guard is
+`timestamp >= deadline`, so the deadline ledger itself may claim. One ledger
+earlier the call is rejected with `"campaign is still active"`. Covered by
+`test_claim_at_first_eligible_ledger_pays_creator_once_and_emits_event`,
+`test_claim_at_first_eligible_ledger_emits_one_event_per_funded_token`, and
+`test_claim_one_ledger_before_deadline_moves_nothing_and_emits_no_event` in
+`src/test.rs`. Each asserts the exact post-conditions indexers rely on: a
+single payout to the creator, a vault balance of zero, unchanged pledge
+accounting, and the exact `("Goal", "Claim")` event payload (one per funded
+token) — or, on the rejected side, no balance change and no event at all. The
+rejected second-claim and non-creator paths keep their #1512 regression tests
+(`test_second_claim_is_atomic_and_leaves_no_partial_payout`,
+`test_non_creator_claim_is_atomic_and_leaves_no_partial_payout`), which assert
+that neither path can move funds or emit an event.
 
 **Gas estimate:** 20,000 + 15,000 per accepted token (transfer + storage) ≈ base 20,000 + 15,000 per token + 20% headroom: **42,000** (1 token) / **102,000** (5 tokens)
 
@@ -434,6 +514,7 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 | Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or campaign cancellation |
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target; creator can claim |
 | Nothing to refund | `"nothing to refund"` | Low | Contributor had no contributions to this campaign |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry before retrying. Nothing is transferred |
 | Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; investigate |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 
@@ -445,6 +526,17 @@ event are atomic: if any token transfer fails, the call commits no refund
 transfers, accounting changes, or refund events. After a successful refund,
 another individual refund for the same contribution fails with
 `"nothing to refund"`.
+**Partial refunds and retries (issue #1518):** a campaign can be refunded one
+contributor at a time, so `pledged_amount` may sit between `0` and its pre-refund
+value while funds remain for other contributors. Within a single call the refund
+is all-or-nothing: if any token transfer fails, the whole invocation reverts and
+no contribution is zeroed, no token moves and no event is emitted. Retrying is
+safe — only the address passed as `contributor` may sign, so neither the creator,
+the admin nor another contributor can release those funds, and once the
+contributor has been refunded a duplicate call fails with `"nothing to refund"`
+without paying twice. Covered by
+`test_pledge_auth::refund_after_a_failed_token_transfer_pays_nothing_and_only_the_contributor_can_retry`
+and `test_pledge_auth::partially_refunded_campaign_lets_only_each_contributor_release_their_own_pledge`.
 
 **Gas estimate:** 22,000 + 12,000 per token contributed ≈ base 22,000 + 12,000 per token + 20% headroom: **40,800** (1 token) / **74,400** (3 tokens)
 
@@ -472,6 +564,7 @@ fn refund_all(env: Env, campaign_id: u64)
 | Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or cancellation |
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target |
 | Nothing to refund (no contributors) | `"nothing to refund"` | Low | No contributors found |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry before retrying. No contributor is refunded |
 | Contract not initialized | `"not initialized"` | High | Call `initialize` to set an admin first |
 | Caller not authorized | Soroban auth failure | High | Ensure the stored `admin` signs the transaction |
 
@@ -481,6 +574,28 @@ Contributors whose recorded balances are already zero (for example, because
 they individually claimed a refund earlier) are skipped.
 
 **Gas estimate:** 15,000 base + 25,000 per contributor ≈ highly variable. For 10 contributors with 1 token each: **290,000** + 20% headroom = **348,000**
+
+---
+
+### Storage lifetime and settlement atomicity
+
+Campaign data lives in persistent storage. The campaign record, the contributor
+list, each per-token balance and each individual contribution are separate
+entries with independent lifetimes, so one of them can be archived while the
+rest of the campaign is still present. Soroban reads a missing entry as zero,
+which previously allowed a settlement to skip an archived token and still
+report success (issue #1527).
+
+`contribute`, `claim`, `refund` and `refund_all` first refresh the TTL of every
+entry they are about to read or rewrite. Before moving any funds, `claim`,
+`refund` and `refund_all` also rebuild each per-token total from the live
+contribution entries and require it to match both the stored per-token balance
+and the campaign's `pledged_amount`. Any disagreement aborts the invocation
+with `"campaign storage expired"` before the first token transfer.
+
+Because the abort happens before any externally visible effect, Soroban rolls
+the invocation back: no balance changes, no token movement, and the campaign is
+not marked claimed. Callers can restore the archived entry and retry.
 
 ---
 
@@ -552,11 +667,14 @@ fn request_deadline_extension(
 | Deadline not later | `"new deadline must be after current deadline"` | Low | Choose a timestamp after the current deadline |
 | Exceeds max duration | `"new deadline exceeds maximum campaign duration"` | Low | Limit extension to within 180 days of campaign creation |
 | Not a contributor | `"caller is not a contributor"` | Medium | Only existing contributors can request extensions |
+| Request already pending | `"extension request already pending"` | Low | Approve or wait for the current request to resolve before proposing another |
 | Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
 
-**Emits:** `ExtensionRequested`
+**Emits:** `ExtensionRequested`, then `ExtensionApproved` for the requester's auto-approval. If that first vote already exceeds 50% of the contributor count (for example, a campaign with a single contributor), the deadline is committed in the same call and `DeadlineExtended` follows. All events are emitted after the storage writes.
 
-**Gas estimate:** 18,000 + storage writes + event ≈ 26,000 units + 20% headroom = **31,200**
+Only one request may be pending at a time. A second proposal is rejected instead of overwriting the first, so every vote remains attributable to exactly one request.
+
+**Gas estimate:** 18,000 + storage writes + events ≈ 28,000 units + 20% headroom = **33,600**
 
 ---
 
@@ -586,9 +704,17 @@ fn approve_extension(env: Env, campaign_id: u64, caller: Address)
 | No pending request | `"no extension request"` | Low | Call `request_deadline_extension()` first |
 | Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
 
-**Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither.
+**Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither. When the extension is committed, the votes recorded for that request are cleared so the next request starts a fresh tally.
 
 **Gas estimate:** 20,000 + storage write + conditional deadline apply + event ≈ 30,000 units + 20% headroom = **36,000**
+
+#### Deadline Extension Vote Boundaries (SGV-2026-126)
+
+- **Smallest Strict Majority Threshold:** An extension proposal is approved when `approval_count * 2 > contributor_count` ($\lfloor N/2 \rfloor + 1$ distinct contributor votes).
+  - For $N=3$ contributors, 2 approvals commit the extension (1 approval leaves the proposal pending).
+  - For $N=4$ contributors, 3 approvals commit the extension (2 approvals is a 50% tie and remains pending).
+- **Checked Arithmetic on Governance Counters:** Calculation of vote majorities (`checked_mul`), approval counts (`checked_add`), and maximum allowed extension durations (`checked_add`) use checked integer arithmetic to eliminate overflow and wrapping risks.
+- **Auditable Unique Votes & Single Extension:** Each distinct contributor can vote at most once per proposal round (`ExtensionVote` deduplication). Once the smallest majority is reached, the extension commits immediately, the pending request is removed, and subsequent approvals are rejected with `"no extension request"`, preserving exactly one valid extension per round.
 
 ---
 
@@ -1061,10 +1187,14 @@ committed only if the full claim transaction succeeds.
 |-------|------|-------------|
 | `campaign_id` | `u64` | Campaign ID |
 | `creator` | `Address` | Creator who updated |
-| `old_metadata` | `String` | Previous metadata value |
-| `new_metadata` | `String` | New metadata value |
+| `old_metadata` | `String` | Metadata value stored before this call |
+| `new_metadata` | `String` | Metadata value stored by this call |
 
-**Emitted by:** `update_metadata`
+**Emitted by:** `update_metadata`, exactly once per successful call and after
+the campaign record is written. Replaying `old_metadata` -> `new_metadata` in
+ledger order (seeded by the creation event's `metadata`) reconstructs the
+committed metadata; rejected calls emit nothing. See the
+[`update_metadata`](#update_metadata) section.
 
 ---
 
@@ -1083,7 +1213,10 @@ committed only if the full claim transaction succeeds.
 | `requested_by` | `Address` | Contributor who requested |
 | `new_deadline` | `u64` | Proposed new deadline |
 
-**Emitted by:** `request_deadline_extension`
+**Emitted by:** `request_deadline_extension` (first event of a successful request)
+
+Each request is followed by the requester's auto-approval, reported as an
+`ExtensionApproved` event, so the vote tally can be rebuilt from events alone.
 
 ---
 
@@ -1102,7 +1235,7 @@ committed only if the full claim transaction succeeds.
 | `approver` | `Address` | Contributor who approved |
 | `approval_count` | `u32` | Total approvals after this vote |
 
-**Emitted by:** `approve_extension` (every successful call)
+**Emitted by:** `request_deadline_extension` (the requester's auto-approval) and `approve_extension` (every successful call)
 
 ---
 
@@ -1121,9 +1254,9 @@ committed only if the full claim transaction succeeds.
 | `old_deadline` | `u64` | Deadline before the change |
 | `new_deadline` | `u64` | Deadline now stored on the campaign |
 
-Emitted once per extension, immediately after the `ExtensionApproved` event for the vote that reached a majority. The deadline decides whether a campaign still accepts pledges or can be claimed or refunded, so a consumer rebuilding campaign availability from events needs this event to see the change.
+Emitted once per committed extension, immediately after the `ExtensionApproved` event for the vote that reached a majority. The deadline decides whether a campaign still accepts pledges or can be claimed or refunded, so a consumer rebuilding campaign availability from events needs this event to see the change.
 
-**Emitted by:** `approve_extension` (only when the vote reaches a majority)
+**Emitted by:** `request_deadline_extension` when the requester's auto-approval is already a majority, otherwise `approve_extension` when a later vote reaches a majority
 
 ---
 
@@ -1345,6 +1478,19 @@ Campaign accepts multiple token types.
 //   → Transfers USDC(5k) + EURC(3k) + BRL(7k) to creator
 //   → 3 CampaignClaimed events emitted (one per token)
 ```
+
+#### Multi-Token Accounting Boundaries (SGV-2026-121)
+
+- **Independent Token Ledgers:** Each accepted token maintains its own isolated escrow balance in `CampaignTokenBalance(campaign_id, token)` and per-contributor accounting in `Contribution(campaign_id, contributor, token)`.
+- **Different Precision Support:** Tokens with different precisions (e.g., native XLM at 7 decimals and USDC at 6/7 decimals) are managed in their exact native integer base units (stroops/units).
+- **Checked Integer Arithmetic:** All pledge additions, valuation sums, contributor cap checks, platform fee deductions, and refund calculations use checked arithmetic (`checked_add`, `checked_sub`, `checked_mul`), eliminating overflow and underflow vulnerabilities.
+- **Exact Transfers:** Claims and refunds operate on per-token balance boundaries, transferring exact integer amounts with zero rounding loss.
+
+#### Multi-Token Failure Atomicity (SGV-2026-122)
+
+- **Atomic Rejection of Unaccepted Assets:** Any attempt to pledge in an unaccepted token (`!campaign.accepted_tokens.contains(token)`) fails atomically with `"token not accepted by this campaign"` before storage writes or token transfers occur.
+- **Isolated State Integrity:** Injecting an unaccepted asset payment before, between, or after valid pledges in accepted tokens leaves contributor balances, accepted token escrows, campaign pledged valuation, and contributor counts unchanged.
+- **Zero Partial Pledge or Payout:** Failed unaccepted asset invocations create no partial pledge entries and leave no unaccepted funds in the vault. Campaign settlement (`claim` and `refund`) operates exclusively over accepted tokens, ensuring exact payouts and fee deductions with zero leakage or stranded assets.
 
 ### Example 5: Read-Only Queries
 
