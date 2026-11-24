@@ -1251,7 +1251,8 @@ impl StellarGoalVaultContract {
                         let fee_amount = balance
                             .checked_mul(fee_bps)
                             .unwrap_or_else(|| panic!("arithmetic overflow"))
-                            / 10000;
+                            .checked_div(10000)
+                            .unwrap_or_else(|| panic!("arithmetic overflow"));
                         let creator_amount = balance
                             .checked_sub(fee_amount)
                             .unwrap_or_else(|| panic!("arithmetic overflow"));

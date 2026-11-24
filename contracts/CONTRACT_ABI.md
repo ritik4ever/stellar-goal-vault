@@ -510,8 +510,8 @@ failed claim.
 is the gross campaign balance claimed for that token, before any fee split.
 Failed calls commit no claim or fee success events.
 
-**Eligibility boundary (issue #1515):** the first eligible ledger is the one
-whose timestamp equals `campaign.deadline` — the guard is
+**Eligibility boundary (issue #1515, SGV-2026-131):** the first eligible ledger
+is the one whose timestamp equals `campaign.deadline` — the guard is
 `timestamp >= deadline`, so the deadline ledger itself may claim. One ledger
 earlier the call is rejected with `"campaign is still active"`. Covered by
 `test_claim_at_first_eligible_ledger_pays_creator_once_and_emits_event`,
@@ -525,6 +525,25 @@ rejected second-claim and non-creator paths keep their #1512 regression tests
 (`test_second_claim_is_atomic_and_leaves_no_partial_payout`,
 `test_non_creator_claim_is_atomic_and_leaves_no_partial_payout`), which assert
 that neither path can move funds or emit an event.
+
+**Claim boundary specification (SGV-2026-131):** five conditions must all be
+satisfied at the moment `claim` is called:
+
+1. `ledger.timestamp >= campaign.deadline` — deadline ledger is first eligible.
+2. `campaign.pledged_amount >= campaign.target_amount` — funded to at least the target.
+3. `creator == campaign.creator` — only the stored creator address may claim.
+4. Single payout, vault zeroed — the vault per-token balance is set to zero after
+   the transfer; `pledged_amount` is preserved as historical contribution accounting.
+5. Fully checked fee arithmetic — `balance.checked_mul(fee_bps)` then
+   `.checked_div(10_000)` for the fee and `balance.checked_sub(fee_amount)` for the
+   creator portion; every step uses `checked_*` so no arithmetic step can overflow.
+
+Covered together by `test_claim_boundary_exact_target_at_deadline_with_fee`
+(exercises all five conditions at once: `pledged == target`, `timestamp == deadline`,
+configured fee recipient, checked fee arithmetic, vault zeroed) and
+`test_claim_boundary_one_ledger_before_deadline_is_rejected` (confirms the lower
+boundary: `timestamp == deadline - 1` is rejected, no funds move, no events
+emitted) in `src/test.rs`.
 
 **Gas estimate:** 20,000 + 15,000 per accepted token (transfer + storage) ≈ base 20,000 + 15,000 per token + 20% headroom: **42,000** (1 token) / **102,000** (5 tokens)
 
