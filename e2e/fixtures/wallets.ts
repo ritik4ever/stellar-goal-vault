@@ -6,8 +6,6 @@ import {
   setWalletMockSignBehavior,
   readBridgeLog,
   readWalletMockSnapshot,
-  TESTNET_PASSPHRASE,
-  MAINNET_PASSPHRASE,
   type FreighterBridgeOptions,
   type SignBehavior,
 } from './freighter-bridge';
@@ -65,12 +63,8 @@ export async function mockFreighter(
   options: MockFreighterOptions = {},
 ): Promise<void> {
   await installFreighterBridge(page, {
+    ...options,
     publicKey,
-    networkPassphrase: options.networkPassphrase ?? TESTNET_PASSPHRASE,
-    sorobanRpcUrl: options.sorobanRpcUrl,
-    access: options.access ?? 'grant',
-    sign: options.sign ?? 'approve',
-    signRejectMessage: options.signRejectMessage,
   });
 }
 
