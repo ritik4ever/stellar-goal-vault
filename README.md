@@ -62,6 +62,8 @@ Architecture decision records
 Type-safe bindings are auto-generated from the Soroban contract ABI and committed to `frontend/src/generated/`.
 See [`docs/SOROBAN_BINDINGS_RUNBOOK.md`](docs/SOROBAN_BINDINGS_RUNBOOK.md) for
 regeneration, contract-ID checks, and ABI drift failure signals.
+See [`docs/ENVIRONMENT_DEPLOYMENT_RUNBOOK.md`](docs/ENVIRONMENT_DEPLOYMENT_RUNBOOK.md)
+for startup validation and deployment network configuration.
 
 ### Regenerating Bindings
 

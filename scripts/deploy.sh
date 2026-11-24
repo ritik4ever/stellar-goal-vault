@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Deploy Stellar Goal Vault contract to Stellar testnet
-# 
+#
 # Required environment variables:
 #   SECRET_KEY - Stellar account secret key for deployment
 #
@@ -25,12 +25,42 @@ CONTRACTS_DIR="contracts"
 CONTRACT_ID_FILE="contract_id.txt"
 NETWORK_PASSPHRASE="${NETWORK_PASSPHRASE:-Test SDF Network ; September 2015}"
 RPC_URL="${RPC_URL:-https://soroban-testnet.stellar.org:443}"
+NETWORK="${NETWORK:-testnet}"
 
 # Check for required environment variables
 if [ -z "$SECRET_KEY" ]; then
     echo -e "${RED}Error: SECRET_KEY environment variable is required${NC}"
     echo "Please set SECRET_KEY to your Stellar account secret key"
     echo "Example: SECRET_KEY=\"S...\" ./scripts/deploy.sh"
+    exit 1
+fi
+
+if [ "$NETWORK" != "testnet" ] && [ "$NETWORK" != "mainnet" ]; then
+    echo -e "${RED}Error: NETWORK must be either testnet or mainnet${NC}"
+    exit 1
+fi
+
+if [ "$NETWORK" = "testnet" ] && [ "$NETWORK_PASSPHRASE" != "Test SDF Network ; September 2015" ]; then
+    echo -e "${RED}Error: NETWORK_PASSPHRASE conflicts with NETWORK=testnet${NC}"
+    echo "Use the testnet passphrase or set NETWORK=mainnet."
+    exit 1
+fi
+
+if [ "$NETWORK" = "mainnet" ] && [ "$NETWORK_PASSPHRASE" != "Public Global Stellar Network ; September 2015" ]; then
+    echo -e "${RED}Error: NETWORK_PASSPHRASE conflicts with NETWORK=mainnet${NC}"
+    echo "Use the public network passphrase or set NETWORK=testnet."
+    exit 1
+fi
+
+if [ "$NETWORK" = "testnet" ] && [[ "$RPC_URL" == *"soroban-mainnet.stellar.org"* ]]; then
+    echo -e "${RED}Error: RPC_URL conflicts with NETWORK=testnet${NC}"
+    echo "Use a testnet RPC endpoint or set NETWORK=mainnet."
+    exit 1
+fi
+
+if [ "$NETWORK" = "mainnet" ] && [[ "$RPC_URL" == *"soroban-testnet.stellar.org"* ]]; then
+    echo -e "${RED}Error: RPC_URL conflicts with NETWORK=mainnet${NC}"
+    echo "Use a mainnet RPC endpoint or set NETWORK=testnet."
     exit 1
 fi
 
@@ -42,7 +72,7 @@ if ! command -v soroban &> /dev/null; then
 fi
 
 echo -e "${GREEN}Starting contract deployment...${NC}"
-echo "Network: Testnet"
+echo "Network: $NETWORK"
 echo "RPC URL: $RPC_URL"
 echo ""
 
@@ -68,7 +98,7 @@ echo -e "${YELLOW}Deploying contract to testnet...${NC}"
 DEPLOY_OUTPUT=$(soroban contract deploy \
     --wasm target/wasm32v1-none/release/stellar_goal_vault.wasm \
     --source-account "$SECRET_KEY" \
-    --network testnet \
+    --network "$NETWORK" \
     --network-passphrase "$NETWORK_PASSPHRASE" \
     --rpc-url "$RPC_URL" \
     2>&1)

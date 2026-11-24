@@ -126,6 +126,45 @@ export const envSchema = z
     }
 
     const isProduction = nodeEnv === 'production';
+    const rpcUrl = data.SOROBAN_RPC_URL?.trim();
+    const networkPassphrase = data.SOROBAN_NETWORK_PASSPHRASE?.trim();
+    const hasRpc = Boolean(rpcUrl);
+    const hasPassphrase = Boolean(networkPassphrase);
+
+    if (!isProduction && hasRpc !== hasPassphrase) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [hasRpc ? 'SOROBAN_NETWORK_PASSPHRASE' : 'SOROBAN_RPC_URL'],
+        message:
+          'SOROBAN_RPC_URL and SOROBAN_NETWORK_PASSPHRASE must be configured together; set both or leave both unset to use development testnet defaults.',
+      });
+    }
+
+    if (
+      rpcUrl?.includes('soroban-testnet.stellar.org') &&
+      networkPassphrase &&
+      networkPassphrase !== 'Test SDF Network ; September 2015'
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SOROBAN_NETWORK_PASSPHRASE'],
+        message:
+          'SOROBAN_NETWORK_PASSPHRASE conflicts with the Soroban testnet RPC URL; use the testnet passphrase or configure a matching RPC endpoint.',
+      });
+    }
+
+    if (
+      rpcUrl?.includes('soroban-mainnet.stellar.org') &&
+      networkPassphrase &&
+      networkPassphrase !== 'Public Global Stellar Network ; September 2015'
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SOROBAN_NETWORK_PASSPHRASE'],
+        message:
+          'SOROBAN_NETWORK_PASSPHRASE conflicts with the Soroban mainnet RPC URL; use the public network passphrase or configure a matching RPC endpoint.',
+      });
+    }
 
     if (isProduction) {
       if (!data.CONTRACT_ID || !data.CONTRACT_ID.trim()) {
