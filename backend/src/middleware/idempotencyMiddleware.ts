@@ -1,9 +1,12 @@
 import crypto from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
 import {
-  getIdempotencyCacheEntry,
-  setIdempotencyCacheEntry,
   buildIdempotencyCacheKey,
+  claimIdempotencyKey,
+  completeIdempotencyKey,
+  pollIdempotencyKey,
+  releaseIdempotencyKey,
+  type IdempotencyCacheEntry,
 } from '../services/idempotencyCache';
 import type { RequestWithApiKey } from './apiKeyAuth';
 
@@ -13,13 +16,7 @@ interface IdempotencyRequest extends Request {
 
 /** How long a request waits for an identical request that is already running. */
 export const IN_FLIGHT_WAIT_MS = 10_000;
-
-/**
- * Keys whose first request is still being processed in this process. A second
- * request with the same key waits for it instead of starting a second effect.
- * This is per process: it does not coordinate separate workers.
- */
-const inFlight = new Map<string, Promise<void>>();
+const CROSS_WORKER_POLL_MS = 25;
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {
@@ -49,17 +46,199 @@ function sendError(res: Response, status: number, code: string, message: string)
   res.status(status).json({ error: { code, message } });
 }
 
+function sendReplay(res: Response, req: IdempotencyRequest, entry: IdempotencyCacheEntry): void {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('X-Idempotency-Cache', 'HIT');
+  for (const [name, value] of Object.entries(entry.headers)) {
+    res.setHeader(name, value);
+  }
+  (req as IdempotencyRequest & { finalOutcome?: string }).finalOutcome = 'idempotent_replay';
+  res.status(entry.statusCode).send(entry.body);
+}
+
 /** Resolves true when the in-flight request finished, false if the wait timed out. */
-async function waitFor(pending: Promise<void>): Promise<boolean> {
+async function waitFor(pending: Promise<void>, timeoutMs: number): Promise<boolean> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<false>((resolve) => {
-    timer = setTimeout(() => resolve(false), IN_FLIGHT_WAIT_MS);
+    timer = setTimeout(() => resolve(false), timeoutMs);
   });
   try {
     return await Promise.race([pending.then(() => true as const), timeout]);
   } finally {
     clearTimeout(timer);
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Create an idempotency middleware instance with its own in-process flight map.
+ * Multiple instances (e.g. separate worker processes) coordinate through the
+ * durable SQLite idempotency store.
+ */
+export function createIdempotencyMiddleware() {
+  const inFlight = new Map<string, Promise<void>>();
+
+  return function idempotencyMiddlewareInstance(
+    req: IdempotencyRequest,
+    res: Response,
+    next: NextFunction,
+  ): void {
+    const idempotencyKey = req.header('Idempotency-Key');
+
+    if (!idempotencyKey) {
+      return next();
+    }
+
+    const apiKey = (req as unknown as RequestWithApiKey).apiKey ?? 'anonymous';
+    const campaignId = req.params.id as string;
+    const cacheKey = buildIdempotencyCacheKey(
+      apiKey,
+      campaignId,
+      idempotencyKey,
+      contributorOf(req),
+    );
+    const fingerprint = fingerprintRequestBody(req.body);
+    const ownerId = crypto.randomUUID();
+    let acquired = false;
+    let completed = false;
+
+    const handle = async (): Promise<void> => {
+      const deadline = Date.now() + IN_FLIGHT_WAIT_MS;
+
+      while (true) {
+        // Fast path: wait on an identical request running in this same process.
+        let pending = inFlight.get(cacheKey);
+        while (pending) {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0 || !(await waitFor(pending, remaining))) {
+            sendError(
+              res,
+              409,
+              'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+              'A request with this Idempotency-Key is still being processed. Retry shortly.',
+            );
+            return;
+          }
+          pending = inFlight.get(cacheKey);
+        }
+
+        const claim = await claimIdempotencyKey(cacheKey, fingerprint, ownerId);
+
+        if (claim.status === 'conflict') {
+          sendError(
+            res,
+            422,
+            'IDEMPOTENCY_KEY_REUSED',
+            'This Idempotency-Key was already used with a different request body.',
+          );
+          return;
+        }
+
+        if (claim.status === 'completed') {
+          sendReplay(res, req, claim.entry);
+          return;
+        }
+
+        if (claim.status === 'acquired') {
+          acquired = true;
+          break;
+        }
+
+        // Another worker process holds the durable in-progress claim: poll until
+        // it completes, releases on failure, or our wait budget expires.
+        while (true) {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) {
+            sendError(
+              res,
+              409,
+              'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+              'A request with this Idempotency-Key is still being processed. Retry shortly.',
+            );
+            return;
+          }
+          await sleep(Math.min(CROSS_WORKER_POLL_MS, remaining));
+
+          const polled = await pollIdempotencyKey(cacheKey, fingerprint);
+          if (polled.status === 'conflict') {
+            sendError(
+              res,
+              422,
+              'IDEMPOTENCY_KEY_REUSED',
+              'This Idempotency-Key was already used with a different request body.',
+            );
+            return;
+          }
+          if (polled.status === 'completed') {
+            sendReplay(res, req, polled.entry);
+            return;
+          }
+          if (polled.status === 'missing') {
+            break;
+          }
+        }
+      }
+
+      // Claim the key in-process as well until this response has been sent and stored.
+      let release!: () => void;
+      inFlight.set(
+        cacheKey,
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      );
+      let released = false;
+      const releaseOnce = (): void => {
+        if (released) return;
+        released = true;
+        if (acquired && !completed) {
+          releaseIdempotencyKey(cacheKey, ownerId);
+        }
+        inFlight.delete(cacheKey);
+        release();
+      };
+      res.once('close', releaseOnce);
+
+      const originalSend = res.send.bind(res);
+      res.send = function (data: unknown) {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          completed = true;
+          const body = typeof data === 'string' ? data : JSON.stringify(data);
+          const entry: IdempotencyCacheEntry = {
+            statusCode: res.statusCode,
+            body,
+            headers: {
+              'Content-Type': res.getHeader('Content-Type') as string,
+            },
+            fingerprint,
+          };
+          // SQLite and memory updates happen synchronously before the response is sent.
+          completeIdempotencyKey(cacheKey, entry, ownerId).catch(() => {
+            // Silently fail async Redis replication; durable SQLite write already succeeded
+          });
+          res.setHeader('X-Idempotency-Cache', 'MISS');
+        } else {
+          releaseIdempotencyKey(cacheKey, ownerId);
+        }
+
+        return originalSend(data);
+      };
+
+      next();
+    };
+
+    handle().catch(() => {
+      if (acquired && !completed) {
+        releaseIdempotencyKey(cacheKey, ownerId);
+      }
+      if (!res.headersSent) {
+        next();
+      }
+    });
+  };
 }
 
 /**
@@ -75,105 +254,8 @@ async function waitFor(pending: Promise<void>): Promise<boolean> {
  * - An identical request that arrives while the first is still running waits
  *   for it and then replays its response (409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`
  *   if the first does not finish within IN_FLIGHT_WAIT_MS).
+ * - Claims and completed responses are persisted in SQLite so separate workers
+ *   coordinate safely and replays survive process restarts without Redis.
  * - A stored response is replayable for 24 hours.
  */
-export function idempotencyMiddleware(
-  req: IdempotencyRequest,
-  res: Response,
-  next: NextFunction,
-): void {
-  const idempotencyKey = req.header('Idempotency-Key');
-
-  if (!idempotencyKey) {
-    return next();
-  }
-
-  const apiKey = (req as unknown as RequestWithApiKey).apiKey ?? 'anonymous';
-  const campaignId = req.params.id as string;
-  const cacheKey = buildIdempotencyCacheKey(apiKey, campaignId, idempotencyKey, contributorOf(req));
-  const fingerprint = fingerprintRequestBody(req.body);
-
-  const handle = async (): Promise<void> => {
-    // Wait out any identical request that is already running.
-    let pending = inFlight.get(cacheKey);
-    while (pending) {
-      if (!(await waitFor(pending))) {
-        sendError(
-          res,
-          409,
-          'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-          'A request with this Idempotency-Key is still being processed. Retry shortly.',
-        );
-        return;
-      }
-      pending = inFlight.get(cacheKey);
-    }
-
-    const cached = await getIdempotencyCacheEntry(cacheKey);
-    if (cached) {
-      if (cached.fingerprint && cached.fingerprint !== fingerprint) {
-        sendError(
-          res,
-          422,
-          'IDEMPOTENCY_KEY_REUSED',
-          'This Idempotency-Key was already used with a different request body.',
-        );
-        return;
-      }
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('X-Idempotency-Cache', 'HIT');
-      for (const [name, value] of Object.entries(cached.headers)) {
-        res.setHeader(name, value);
-      }
-      (req as IdempotencyRequest & { finalOutcome?: string }).finalOutcome = 'idempotent_replay';
-      res.status(cached.statusCode).send(cached.body);
-      return;
-    }
-
-    // Claim the key until this response has been sent and stored.
-    let release!: () => void;
-    inFlight.set(
-      cacheKey,
-      new Promise<void>((resolve) => {
-        release = resolve;
-      }),
-    );
-    let released = false;
-    const releaseOnce = (): void => {
-      if (released) return;
-      released = true;
-      inFlight.delete(cacheKey);
-      release();
-    };
-    res.once('close', releaseOnce);
-
-    const originalSend = res.send.bind(res);
-    res.send = function (data: unknown) {
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        const body = typeof data === 'string' ? data : JSON.stringify(data);
-        const entry = {
-          statusCode: res.statusCode,
-          body,
-          headers: {
-            'Content-Type': res.getHeader('Content-Type') as string,
-          },
-          fingerprint,
-        };
-        setIdempotencyCacheEntry(cacheKey, entry).catch(() => {
-          // Silently fail cache writes
-        });
-        res.setHeader('X-Idempotency-Cache', 'MISS');
-      }
-
-      return originalSend(data);
-    };
-
-    next();
-  };
-
-  handle().catch(() => {
-    if (!res.headersSent) {
-      next();
-    }
-  });
-}
+export const idempotencyMiddleware = createIdempotencyMiddleware();

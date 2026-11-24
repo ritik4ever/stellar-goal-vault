@@ -1,10 +1,21 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import express from 'express';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDb, initDb, resetDbForTests } from '../db';
 import { addPledge, createCampaign } from '../campaignStore';
-import { clearIdempotencyCache, IDEMPOTENCY_TTL_SECONDS } from '../idempotencyCache';
-import { idempotencyMiddleware } from '../../middleware/idempotencyMiddleware';
+import {
+  buildIdempotencyCacheKey,
+  clearIdempotencyCache,
+  IDEMPOTENCY_TTL_SECONDS,
+  IN_FLIGHT_LEASE_MS,
+} from '../idempotencyCache';
+import {
+  createIdempotencyMiddleware,
+  idempotencyMiddleware,
+} from '../../middleware/idempotencyMiddleware';
 
 // A stand-in for Redis: the store that survives a process restart.
 const shared = vi.hoisted(() => ({ available: false, map: new Map<string, string>() }));
@@ -32,11 +43,11 @@ let campaignId: string;
 let executions: number;
 let gate: Promise<void> | null;
 
-function buildApp() {
+function buildApp(middleware = idempotencyMiddleware) {
   const app = express();
   app.use(express.json());
   // The same chain as the pledge route: idempotency first, then the real write.
-  app.post('/api/campaigns/:id/pledges', idempotencyMiddleware, async (req, res) => {
+  app.post('/api/campaigns/:id/pledges', middleware, async (req, res) => {
     if (gate) await gate;
     executions += 1;
     try {
@@ -330,19 +341,187 @@ describe('pledge idempotency: across a restart', () => {
     expect(pledgeCount()).toBe(1);
   });
 
-  it('forgets the key after a restart when there is no shared cache', async () => {
-    // Documents the limit of the in-memory store: without Redis, a repeat that
-    // arrives after a restart is a new request and creates a second pledge.
+  it('replays after a restart even when there is no shared Redis cache', async () => {
     shared.available = false;
     const app = buildApp();
     const body = { contributor: ALICE, amount: 100 };
 
-    await pledge(app, 'key-restart-memory', body);
-    clearIdempotencyCache();
+    const first = await pledge(app, 'key-restart-memory', body);
+    clearIdempotencyCache(); // simulate a fresh process with an empty in-memory cache
     const afterRestart = await pledge(app, 'key-restart-memory', body);
 
-    expect(afterRestart.headers['x-idempotency-cache']).toBe('MISS');
-    expect(executions).toBe(2);
-    expect(pledgeCount()).toBe(2);
+    expect(afterRestart.status).toBe(201);
+    expect(afterRestart.headers['x-idempotency-cache']).toBe('HIT');
+    expect(afterRestart.body).toEqual(first.body);
+    expect(executions).toBe(1);
+    expect(pledgeCount()).toBe(1);
+  });
+
+  it('survives a full SQLite database close and reopen without dropping or duplicating pledges', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sgv-idemp-restart-'));
+    const dbPath = path.join(tmpDir, 'campaigns.db');
+
+    try {
+      shared.available = false;
+      resetDbForTests();
+      process.env.DB_PATH = dbPath;
+      initDb(dbPath);
+      clearIdempotencyCache();
+
+      const campaign = createCampaign({
+        creator: CREATOR,
+        title: 'Restart Safety',
+        description: 'File-backed SQLite restart safety test.',
+        acceptedTokens: ['USDC'],
+        targetAmount: 1000,
+        deadline: Math.floor(Date.now() / 1000) + 3 * 24 * 3600,
+      });
+      campaignId = campaign.id;
+
+      const workerBeforeRestart = buildApp(createIdempotencyMiddleware());
+      const body = { contributor: ALICE, amount: 150 };
+      const first = await pledge(workerBeforeRestart, 'key-disk-restart', body);
+      expect(first.status).toBe(201);
+      expect(first.headers['x-idempotency-cache']).toBe('MISS');
+      expect(pledgeCount()).toBe(1);
+
+      // Simulate full process restart: close DB, clear in-memory LRU, reopen DB.
+      resetDbForTests();
+      clearIdempotencyCache();
+      initDb(dbPath);
+
+      const workerAfterRestart = buildApp(createIdempotencyMiddleware());
+      const replay = await pledge(workerAfterRestart, 'key-disk-restart', body);
+
+      expect(replay.status).toBe(201);
+      expect(replay.headers['x-idempotency-cache']).toBe('HIT');
+      expect(replay.body).toEqual(first.body);
+      expect(executions).toBe(1);
+      expect(pledgeCount()).toBe(1);
+
+      const storedCampaign = getDb()
+        .prepare(`SELECT pledged_amount FROM campaigns WHERE id = ?`)
+        .get(campaignId) as { pledged_amount: number };
+      expect(storedCampaign.pledged_amount).toBe(150);
+    } finally {
+      resetDbForTests();
+      delete process.env.DB_PATH;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('pledge idempotency: two workers receiving the same key concurrently', () => {
+  beforeEach(setup);
+  afterEach(() => resetDbForTests());
+
+  it('coordinates across two separate worker middleware instances and commits only one pledge', async () => {
+    const workerA = buildApp(createIdempotencyMiddleware());
+    const workerB = buildApp(createIdempotencyMiddleware());
+    let open!: () => void;
+    gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const body = { contributor: ALICE, amount: 100 };
+
+    const reqA = pledge(workerA, 'key-two-workers', body).then((r) => r);
+    // Let worker A claim the key in SQLite and enter the handler before worker B arrives.
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const reqB = pledge(workerB, 'key-two-workers', body).then((r) => r);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    open();
+
+    const [resA, resB] = await Promise.all([reqA, reqB]);
+
+    expect(resA.status).toBe(201);
+    expect(resB.status).toBe(201);
+    expect(resB.body).toEqual(resA.body);
+    expect([resA, resB].map((r) => r.headers['x-idempotency-cache']).sort()).toEqual([
+      'HIT',
+      'MISS',
+    ]);
+    expect(executions).toBe(1);
+    expect(pledgeCount()).toBe(1);
+  });
+
+  it('rejects a second worker reusing the same key concurrently with a different body', async () => {
+    const workerA = buildApp(createIdempotencyMiddleware());
+    const workerB = buildApp(createIdempotencyMiddleware());
+    let open!: () => void;
+    gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+
+    const reqA = pledge(workerA, 'key-two-workers-conflict', {
+      contributor: ALICE,
+      amount: 100,
+    }).then((r) => r);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const reqB = pledge(workerB, 'key-two-workers-conflict', {
+      contributor: ALICE,
+      amount: 250,
+    }).then((r) => r);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    open();
+
+    const [resA, resB] = await Promise.all([reqA, reqB]);
+    expect(resA.status).toBe(201);
+    expect(resB.status).toBe(422);
+    expect(resB.body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+    expect(executions).toBe(1);
+    expect(pledgeCount()).toBe(1);
+  });
+
+  it('releases the durable claim when the first worker fails so a second worker can run', async () => {
+    const workerA = buildApp(createIdempotencyMiddleware());
+    const workerB = buildApp(createIdempotencyMiddleware());
+    let open!: () => void;
+    gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+
+    const reqA = pledge(workerA, 'key-two-workers-fail', {
+      contributor: ALICE,
+      amount: 5000,
+    }).then((r) => r);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const reqB = pledge(workerB, 'key-two-workers-fail', {
+      contributor: ALICE,
+      amount: 5000,
+    }).then((r) => r);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    open();
+
+    const [resA, resB] = await Promise.all([reqA, reqB]);
+    expect([resA.status, resB.status]).toEqual([400, 400]);
+    expect(pledgeCount()).toBe(0);
+
+    gate = null;
+    const retry = await pledge(workerB, 'key-two-workers-fail', {
+      contributor: ALICE,
+      amount: 100,
+    });
+    expect(retry.status).toBe(201);
+    expect(retry.headers['x-idempotency-cache']).toBe('MISS');
+    expect(pledgeCount()).toBe(1);
+  });
+
+  it('reclaims a stale in_progress row left behind by a crashed worker', async () => {
+    const app = buildApp(createIdempotencyMiddleware());
+    const cacheKey = buildIdempotencyCacheKey('anonymous', campaignId, 'key-stale-lock', ALICE);
+    const staleAt = Date.now() - IN_FLIGHT_LEASE_MS - 1000;
+
+    getDb()
+      .prepare(
+        `INSERT INTO idempotency_keys
+           (key, fingerprint, status, owner_id, status_code, body, headers_json, stored_at, updated_at)
+         VALUES (?, ?, 'in_progress', 'crashed-worker', NULL, NULL, NULL, ?, ?)`,
+      )
+      .run(cacheKey, 'any-fingerprint', staleAt, staleAt);
+
+    const res = await pledge(app, 'key-stale-lock', { contributor: ALICE, amount: 100 });
+    expect(res.status).toBe(201);
+    expect(res.headers['x-idempotency-cache']).toBe('MISS');
+    expect(pledgeCount()).toBe(1);
   });
 });
