@@ -433,6 +433,22 @@ failed claim.
 is the gross campaign balance claimed for that token, before any fee split.
 Failed calls commit no claim or fee success events.
 
+**Eligibility boundary (issue #1515):** the first eligible ledger is the one
+whose timestamp equals `campaign.deadline` — the guard is
+`timestamp >= deadline`, so the deadline ledger itself may claim. One ledger
+earlier the call is rejected with `"campaign is still active"`. Covered by
+`test_claim_at_first_eligible_ledger_pays_creator_once_and_emits_event`,
+`test_claim_at_first_eligible_ledger_emits_one_event_per_funded_token`, and
+`test_claim_one_ledger_before_deadline_moves_nothing_and_emits_no_event` in
+`src/test.rs`. Each asserts the exact post-conditions indexers rely on: a
+single payout to the creator, a vault balance of zero, unchanged pledge
+accounting, and the exact `("Goal", "Claim")` event payload (one per funded
+token) — or, on the rejected side, no balance change and no event at all. The
+rejected second-claim and non-creator paths keep their #1512 regression tests
+(`test_second_claim_is_atomic_and_leaves_no_partial_payout`,
+`test_non_creator_claim_is_atomic_and_leaves_no_partial_payout`), which assert
+that neither path can move funds or emit an event.
+
 **Gas estimate:** 20,000 + 15,000 per accepted token (transfer + storage) ≈ base 20,000 + 15,000 per token + 20% headroom: **42,000** (1 token) / **102,000** (5 tokens)
 
 ---
