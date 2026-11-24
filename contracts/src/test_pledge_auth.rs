@@ -1215,3 +1215,341 @@ fn contribute_with_per_contributor_cap_enforces_contributor_authority_at_boundar
     );
     assert_eq!(balance(&f, &f.client.address), 500);
 }
+
+// ── Multi-token (XLM + USDC) and unaccepted asset authority ───────────────────
+
+#[test]
+fn multi_token_xlm_usdc_and_unaccepted_asset_contribute_and_claim_authority() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StellarGoalVaultContract, ());
+    let client = StellarGoalVaultContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    // XLM (7 decimals: 1 XLM = 10_000_000 stroops), USDC (6 decimals: 1 USDC = 1_000_000 units),
+    // and an unaccepted asset (e.g. EURC).
+    let xlm = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let usdc = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let unaccepted = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+
+    let xlm_amount: i128 = 10_000_000;
+    let usdc_amount: i128 = 1_000_000;
+    let unaccepted_amount: i128 = 5_000_000;
+    let target: i128 = xlm_amount + usdc_amount;
+
+    StellarAssetClient::new(&env, &xlm).mint(&alice, &(xlm_amount * 2));
+    StellarAssetClient::new(&env, &usdc).mint(&bob, &(usdc_amount * 2));
+    StellarAssetClient::new(&env, &unaccepted).mint(&alice, &unaccepted_amount);
+    StellarAssetClient::new(&env, &unaccepted).mint(&bob, &unaccepted_amount);
+
+    client.initialize(&admin, &1);
+
+    let campaign_id = client.create_campaign(
+        &creator,
+        &soroban_sdk::vec![&env, xlm.clone(), usdc.clone()],
+        &target,
+        &(env.ledger().timestamp() + DURATION),
+        &String::from_str(&env, "xlm-usdc-auth"),
+        &0_i128,
+        &soroban_sdk::vec![&env],
+        &0_u32,
+    );
+
+    let xlm_client = TokenClient::new(&env, &xlm);
+    let usdc_client = TokenClient::new(&env, &usdc);
+    let unaccepted_client = TokenClient::new(&env, &unaccepted);
+
+    // 1. Unsigned and wrong-signer contributions in XLM are rejected without moving funds.
+    env.mock_auths(&[]);
+    assert!(
+        client
+            .try_contribute(&campaign_id, &alice, &xlm, &xlm_amount)
+            .is_err(),
+        "unsigned XLM contribution must fail"
+    );
+
+    env.mock_auths(&[MockAuth {
+        address: &creator,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "contribute",
+            args: (campaign_id, alice.clone(), xlm.clone(), xlm_amount).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        client
+            .try_contribute(&campaign_id, &alice, &xlm, &xlm_amount)
+            .is_err(),
+        "creator cannot sign XLM contribution on behalf of alice"
+    );
+    assert_eq!(xlm_client.balance(&alice), xlm_amount * 2);
+    assert_eq!(xlm_client.balance(&client.address), 0);
+    assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+
+    // 2. Valid contributor-signed XLM pledge succeeds.
+    env.mock_all_auths();
+    client.contribute(&campaign_id, &alice, &xlm, &xlm_amount);
+    assert_sole_signer_on(&env, &client.address, &alice, "contribute");
+    assert_eq!(xlm_client.balance(&client.address), xlm_amount);
+    assert_eq!(client.get_campaign_token_balance(&campaign_id, &xlm), xlm_amount);
+    assert_eq!(client.get_campaign(&campaign_id).pledged_amount, xlm_amount);
+
+    // 3. Payment in an unaccepted asset fails both unsigned and contributor-signed,
+    //    leaving XLM/USDC escrow and campaign state untouched.
+    env.mock_auths(&[]);
+    assert!(
+        client
+            .try_contribute(&campaign_id, &alice, &unaccepted, &1_000_000)
+            .is_err(),
+        "unsigned unaccepted asset contribution must fail"
+    );
+
+    env.mock_auths(&[MockAuth {
+        address: &alice,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "contribute",
+            args: (campaign_id, alice.clone(), unaccepted.clone(), 1_000_000_i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        client
+            .try_contribute(&campaign_id, &alice, &unaccepted, &1_000_000)
+            .is_err(),
+        "signed unaccepted asset contribution must fail"
+    );
+    assert_eq!(unaccepted_client.balance(&alice), unaccepted_amount);
+    assert_eq!(unaccepted_client.balance(&client.address), 0);
+    assert_eq!(client.get_campaign_token_balance(&campaign_id, &unaccepted), 0);
+    assert_eq!(client.get_campaign(&campaign_id).pledged_amount, xlm_amount);
+
+    // 4. Wrong-signer USDC pledge (admin signing for bob) fails; valid bob-signed USDC pledge succeeds.
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "contribute",
+            args: (campaign_id, bob.clone(), usdc.clone(), usdc_amount).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        client
+            .try_contribute(&campaign_id, &bob, &usdc, &usdc_amount)
+            .is_err(),
+        "admin cannot sign USDC contribution on behalf of bob"
+    );
+    assert_eq!(usdc_client.balance(&client.address), 0);
+
+    env.mock_all_auths();
+    client.contribute(&campaign_id, &bob, &usdc, &usdc_amount);
+    assert_sole_signer_on(&env, &client.address, &bob, "contribute");
+    assert_eq!(usdc_client.balance(&client.address), usdc_amount);
+    assert_eq!(client.get_campaign_token_balance(&campaign_id, &usdc), usdc_amount);
+    assert_eq!(client.get_campaign(&campaign_id).pledged_amount, target);
+
+    // 5. After deadline, only the creator can claim and release XLM + USDC escrow.
+    past_deadline(&env);
+
+    env.mock_auths(&[]);
+    assert!(
+        client.try_claim(&campaign_id, &creator).is_err(),
+        "unsigned claim must fail"
+    );
+
+    for non_creator in [&admin, &alice, &bob] {
+        env.mock_auths(&[MockAuth {
+            address: non_creator,
+            invoke: &MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "claim",
+                args: (campaign_id, non_creator.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            client.try_claim(&campaign_id, non_creator).is_err(),
+            "non-creator claim must fail"
+        );
+    }
+    assert!(!client.get_campaign(&campaign_id).claimed);
+    assert_eq!(xlm_client.balance(&client.address), xlm_amount);
+    assert_eq!(usdc_client.balance(&client.address), usdc_amount);
+
+    env.mock_all_auths();
+    client.claim(&campaign_id, &creator);
+    assert_sole_signer_on(&env, &client.address, &creator, "claim");
+
+    assert!(client.get_campaign(&campaign_id).claimed);
+    assert_eq!(xlm_client.balance(&creator), xlm_amount);
+    assert_eq!(usdc_client.balance(&creator), usdc_amount);
+    assert_eq!(unaccepted_client.balance(&creator), 0);
+    assert_eq!(xlm_client.balance(&client.address), 0);
+    assert_eq!(usdc_client.balance(&client.address), 0);
+    assert_eq!(unaccepted_client.balance(&client.address), 0);
+}
+
+#[test]
+fn multi_token_xlm_usdc_and_unaccepted_asset_cancel_and_refund_authority() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StellarGoalVaultContract, ());
+    let client = StellarGoalVaultContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    let xlm = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let usdc = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let unaccepted = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+
+    let xlm_amount: i128 = 10_000_000;
+    let usdc_amount: i128 = 1_000_000;
+    let unaccepted_amount: i128 = 2_500_000;
+
+    StellarAssetClient::new(&env, &xlm).mint(&alice, &xlm_amount);
+    StellarAssetClient::new(&env, &usdc).mint(&bob, &usdc_amount);
+    StellarAssetClient::new(&env, &unaccepted).mint(&bob, &unaccepted_amount);
+
+    client.initialize(&admin, &1);
+
+    let campaign_id = client.create_campaign(
+        &creator,
+        &soroban_sdk::vec![&env, xlm.clone(), usdc.clone()],
+        &20_000_000_i128,
+        &(env.ledger().timestamp() + DURATION),
+        &String::from_str(&env, "xlm-usdc-refund-auth"),
+        &0_i128,
+        &soroban_sdk::vec![&env],
+        &0_u32,
+    );
+
+    client.contribute(&campaign_id, &alice, &xlm, &xlm_amount);
+    client.contribute(&campaign_id, &bob, &usdc, &usdc_amount);
+
+    let xlm_client = TokenClient::new(&env, &xlm);
+    let usdc_client = TokenClient::new(&env, &usdc);
+    let unaccepted_client = TokenClient::new(&env, &unaccepted);
+
+    // Unaccepted asset payment fails atomically without affecting XLM/USDC escrow.
+    assert!(
+        client
+            .try_contribute(&campaign_id, &bob, &unaccepted, &unaccepted_amount)
+            .is_err(),
+        "unaccepted asset payment must fail"
+    );
+    assert_eq!(unaccepted_client.balance(&bob), unaccepted_amount);
+    assert_eq!(unaccepted_client.balance(&client.address), 0);
+
+    // 1. Only creator can cancel the campaign.
+    env.mock_auths(&[]);
+    assert!(
+        client.try_cancel_campaign(&campaign_id, &creator).is_err(),
+        "unsigned cancel_campaign must fail"
+    );
+    for non_creator in [&admin, &alice, &bob] {
+        env.mock_auths(&[MockAuth {
+            address: non_creator,
+            invoke: &MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "cancel_campaign",
+                args: (campaign_id, non_creator.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            client.try_cancel_campaign(&campaign_id, non_creator).is_err(),
+            "non-creator cannot cancel campaign"
+        );
+    }
+    assert!(!client.get_campaign(&campaign_id).canceled);
+
+    env.mock_all_auths();
+    client.cancel_campaign(&campaign_id, &creator);
+    assert_sole_signer_on(&env, &client.address, &creator, "cancel_campaign");
+    assert!(client.get_campaign(&campaign_id).canceled);
+
+    // 2. Only the contributor can refund their own XLM pledge.
+    env.mock_auths(&[]);
+    assert!(
+        client.try_refund(&campaign_id, &alice).is_err(),
+        "unsigned refund must fail"
+    );
+    for wrong_signer in [&creator, &admin, &bob] {
+        env.mock_auths(&[MockAuth {
+            address: wrong_signer,
+            invoke: &MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "refund",
+                args: (campaign_id, alice.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            client.try_refund(&campaign_id, &alice).is_err(),
+            "wrong signer cannot trigger alice's refund"
+        );
+    }
+    assert_eq!(xlm_client.balance(&client.address), xlm_amount);
+    assert_eq!(usdc_client.balance(&client.address), usdc_amount);
+
+    env.mock_all_auths();
+    client.refund(&campaign_id, &alice);
+    assert_sole_signer_on(&env, &client.address, &alice, "refund");
+    assert_eq!(xlm_client.balance(&alice), xlm_amount);
+    assert_eq!(xlm_client.balance(&client.address), 0);
+    assert_eq!(usdc_client.balance(&client.address), usdc_amount);
+
+    // 3. Only the stored admin can execute refund_all for remaining USDC escrow.
+    env.mock_auths(&[]);
+    assert!(
+        client.try_refund_all(&campaign_id).is_err(),
+        "unsigned refund_all must fail"
+    );
+    for non_admin in [&creator, &alice, &bob] {
+        env.mock_auths(&[MockAuth {
+            address: non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "refund_all",
+                args: (campaign_id,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            client.try_refund_all(&campaign_id).is_err(),
+            "non-admin cannot execute refund_all"
+        );
+    }
+    assert_eq!(usdc_client.balance(&client.address), usdc_amount);
+
+    env.mock_all_auths();
+    client.refund_all(&campaign_id);
+    assert_sole_signer_on(&env, &client.address, &admin, "refund_all");
+    assert_eq!(usdc_client.balance(&bob), usdc_amount);
+    assert_eq!(usdc_client.balance(&client.address), 0);
+    assert_eq!(unaccepted_client.balance(&bob), unaccepted_amount);
+    assert_eq!(unaccepted_client.balance(&client.address), 0);
+}
