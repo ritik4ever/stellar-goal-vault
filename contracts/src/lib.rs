@@ -813,7 +813,7 @@ impl StellarGoalVaultContract {
                     .checked_add(prev_c)
                     .unwrap_or_else(|| panic!("per-contributor cap exceeded"));
             }
-            if already.checked_add(amount).map_or(true, |sum| sum > cap) {
+            if already.checked_add(amount).is_none_or(|sum| sum > cap) {
                 panic!("per-contributor cap exceeded");
             }
         }
@@ -959,18 +959,14 @@ impl StellarGoalVaultContract {
         require_not_paused(&env);
         caller.require_auth();
         let mut campaign = read_campaign(&env, campaign_id);
+        refresh_campaign_ttl(&env, campaign_id, &campaign);
         if campaign.claimed {
             panic!("campaign already claimed");
         }
         if campaign.canceled {
             panic!("campaign canceled");
         }
-        if new_deadline <= campaign.deadline {
-            panic!("new deadline must be after current deadline");
-        }
-        if new_deadline > campaign.created_at + MAX_CAMPAIGN_DURATION_SECONDS {
-            panic!("new deadline exceeds maximum campaign duration");
-        }
+        validate_extension_deadline(&campaign, new_deadline);
 
         // Caller must be a contributor
         let is_contributor = campaign.accepted_tokens.iter().any(|token| {
@@ -986,6 +982,7 @@ impl StellarGoalVaultContract {
         // request would reset its tally while the earlier votes stay in
         // storage, so a vote could no longer be attributed to one request.
         let request_key = DataKey::ExtensionRequest(campaign_id);
+        refresh_persistent_ttl(&env, &request_key);
         if env.storage().persistent().has(&request_key) {
             panic!("extension request already pending");
         }
@@ -995,10 +992,11 @@ impl StellarGoalVaultContract {
             requested_by: caller.clone(),
             approval_count: 1, // requester auto-approves
         };
-        // Mark requester as having voted
-        env.storage()
-            .persistent()
-            .set(&DataKey::ExtensionVote(campaign_id, caller.clone()), &true);
+        // Mark requester as having voted. Extension state is refreshed so a
+        // vote cannot silently archive mid-round and be counted twice.
+        let vote_key = DataKey::ExtensionVote(campaign_id, caller.clone());
+        env.storage().persistent().set(&vote_key, &true);
+        refresh_persistent_ttl(&env, &vote_key);
 
         // The requester's auto-approval counts toward the majority just like an
         // explicit `approve_extension` vote. Commit the change when it already
@@ -1014,6 +1012,7 @@ impl StellarGoalVaultContract {
             clear_extension_votes(&env, campaign_id);
         } else {
             env.storage().persistent().set(&request_key, &request);
+            refresh_persistent_ttl(&env, &request_key);
         }
 
         // Events are emitted only after every storage write above, so a failed
@@ -1057,6 +1056,7 @@ impl StellarGoalVaultContract {
         require_not_paused(&env);
         caller.require_auth();
         let mut campaign = read_campaign(&env, campaign_id);
+        refresh_campaign_ttl(&env, campaign_id, &campaign);
         if campaign.claimed {
             panic!("campaign already claimed");
         }
@@ -1075,19 +1075,28 @@ impl StellarGoalVaultContract {
         }
 
         let vote_key = DataKey::ExtensionVote(campaign_id, caller.clone());
+        refresh_persistent_ttl(&env, &vote_key);
         let already_voted: bool = env.storage().persistent().get(&vote_key).unwrap_or(false);
         if already_voted {
             panic!("already voted");
         }
 
         let request_key = DataKey::ExtensionRequest(campaign_id);
+        refresh_persistent_ttl(&env, &request_key);
         let mut request: ExtensionRequest = env
             .storage()
             .persistent()
             .get(&request_key)
             .unwrap_or_else(|| panic!("no extension request"));
 
+        // Re-validate the stored proposal before it can be committed. Approval
+        // must never apply a deadline the requester could not have created
+        // today (for example a request restored from an older snapshot or
+        // created before the cap changed).
+        validate_extension_deadline(&campaign, request.new_deadline);
+
         env.storage().persistent().set(&vote_key, &true);
+        refresh_persistent_ttl(&env, &vote_key);
         request.approval_count += 1;
 
         // Majority threshold: approval_count * 2 > contributor_count
@@ -1105,6 +1114,7 @@ impl StellarGoalVaultContract {
             clear_extension_votes(&env, campaign_id);
         } else {
             env.storage().persistent().set(&request_key, &request);
+            refresh_persistent_ttl(&env, &request_key);
         }
 
         // Events are emitted only after every storage write above, so a failed
@@ -1606,14 +1616,30 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .unwrap_or_else(|| panic!("campaign not found"))
 }
 
+/// Rejects an extension deadline that is not strictly later than the
+/// campaign's current deadline or that would push it past the maximum campaign
+/// duration. Called when a request is created and again when it is committed,
+/// so a stored request can never apply a deadline that has since become valid
+/// only for a different campaign state.
+fn validate_extension_deadline(campaign: &Campaign, new_deadline: u64) {
+    if new_deadline <= campaign.deadline {
+        panic!("new deadline must be after current deadline");
+    }
+    if new_deadline > campaign.created_at + MAX_CAMPAIGN_DURATION_SECONDS {
+        panic!("new deadline exceeds maximum campaign duration");
+    }
+}
+
 /// Removes every per-contributor vote for a campaign's extension request. A
 /// committed extension ends the voting round; keeping the flags would prevent
 /// those contributors from voting on a later request.
 fn clear_extension_votes(env: &Env, campaign_id: u64) {
+    let contributors_key = DataKey::Contributors(campaign_id);
+    refresh_persistent_ttl(env, &contributors_key);
     let contributors: Vec<Address> = env
         .storage()
         .persistent()
-        .get(&DataKey::Contributors(campaign_id))
+        .get(&contributors_key)
         .unwrap_or_else(|| Vec::new(env));
     for contributor in contributors.iter() {
         env.storage()

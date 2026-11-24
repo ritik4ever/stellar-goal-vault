@@ -180,9 +180,15 @@ stellar contract invoke --id $CONTRACT_ID -- approve_extension \
 
 The extension is applied once **more than 50%** of unique contributors have approved. Constraints:
 
+- Only addresses with a positive contribution may request or approve; the creator, admin, and unrelated accounts are rejected unless they also contributed
 - New deadline must be later than the current deadline
-- New deadline cannot exceed `MAX_CAMPAIGN_DURATION_SECONDS` (180 days) from the campaign creation timestamp
+- New deadline cannot exceed `MAX_CAMPAIGN_DURATION_SECONDS` (180 days) from the campaign creation timestamp; the exact maximum is allowed
 - Reverts on claimed or canceled campaigns
+- Only one request may be pending per campaign, and each contributor may vote once per round
+- The pending proposal is revalidated when the majority vote commits it, and the campaign, contributor list, request, and vote entries are refreshed on every request/approval so a vote record cannot silently archive and be counted twice
+- Committed rounds clear their vote records; the next request starts from a fresh tally
+
+A majority is strictly more than half of the distinct contributor count: 1 of 1, 2 of 2, 2 of 3, and 3 of 4 approvals commit; 2 of 4 does not. The requester's own vote counts toward that majority, so a single-contributor campaign commits immediately. Extension votes never move escrowed funds.
 
 ## Mutation testing
 

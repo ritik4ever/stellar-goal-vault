@@ -667,7 +667,11 @@ fn approve_extension(env: Env, campaign_id: u64, caller: Address)
 | Not a contributor | `"caller is not a contributor"` | Medium | Only existing contributors can vote |
 | Already voted | `"already voted"` | Low | Each contributor votes once per extension request |
 | No pending request | `"no extension request"` | Low | Call `request_deadline_extension()` first |
+| Stored deadline no longer later | `"new deadline must be after current deadline"` | Medium | The pending proposal is stale; start a new request |
+| Stored deadline exceeds max duration | `"new deadline exceeds maximum campaign duration"` | Medium | The pending proposal violates the 180-day cap and cannot be committed |
 | Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
+
+The stored proposal is revalidated when the majority vote commits it, not only when it was created, so an approval can never apply a deadline that is no longer later than the campaign's current deadline or that exceeds the maximum campaign duration. The campaign, contributor list, pending request, and vote entries are refreshed on every request/approval so a vote record cannot silently archive mid-round and be counted again.
 
 **Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither. When the extension is committed, the votes recorded for that request are cleared so the next request starts a fresh tally.
 
