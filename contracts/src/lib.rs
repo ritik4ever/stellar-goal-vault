@@ -934,9 +934,12 @@ impl StellarGoalVaultContract {
     }
 
     /// Requests a deadline extension for a campaign. The caller must be an
-    /// existing contributor. The requester auto-approves their own request.
+    /// existing contributor. The requester auto-approves their own request,
+    /// which is reported as an [`ExtensionApproved`] event. If that vote is
+    /// already a majority the extension is committed immediately.
     /// new_deadline must be later than the current deadline and within
     /// MAX_CAMPAIGN_DURATION_SECONDS of the campaign's creation (issue #192).
+    /// Only one request may be pending per campaign.
     pub fn request_deadline_extension(
         env: Env,
         campaign_id: u64,
@@ -945,7 +948,7 @@ impl StellarGoalVaultContract {
     ) {
         require_not_paused(&env);
         caller.require_auth();
-        let campaign = read_campaign(&env, campaign_id);
+        let mut campaign = read_campaign(&env, campaign_id);
         if campaign.claimed {
             panic!("campaign already claimed");
         }
@@ -969,33 +972,77 @@ impl StellarGoalVaultContract {
             panic!("caller is not a contributor");
         }
 
+        // Only one extension request may be pending at a time. Overwriting a
+        // request would reset its tally while the earlier votes stay in
+        // storage, so a vote could no longer be attributed to one request.
+        let request_key = DataKey::ExtensionRequest(campaign_id);
+        if env.storage().persistent().has(&request_key) {
+            panic!("extension request already pending");
+        }
+
         let request = ExtensionRequest {
             new_deadline,
             requested_by: caller.clone(),
             approval_count: 1, // requester auto-approves
         };
-        env.storage()
-            .persistent()
-            .set(&DataKey::ExtensionRequest(campaign_id), &request);
         // Mark requester as having voted
         env.storage()
             .persistent()
             .set(&DataKey::ExtensionVote(campaign_id, caller.clone()), &true);
 
+        // The requester's auto-approval counts toward the majority just like an
+        // explicit `approve_extension` vote. Commit the change when it already
+        // reaches the threshold so the emitted events match stored state.
+        let old_deadline = campaign.deadline;
+        let extended = campaign.contributor_count > 0
+            && request.approval_count * 2 > campaign.contributor_count;
+        if extended {
+            campaign.deadline = request.new_deadline;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Campaign(campaign_id), &campaign);
+            clear_extension_votes(&env, campaign_id);
+        } else {
+            env.storage().persistent().set(&request_key, &request);
+        }
+
+        // Events are emitted only after every storage write above, so a failed
+        // transaction never leaves an event for state that was not committed.
+        // The request is announced first, then its auto-approval, and the
+        // committed deadline change (if any) follows them.
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("ExtReq")),
             ExtensionRequested {
                 campaign_id,
-                requested_by: caller,
+                requested_by: caller.clone(),
                 new_deadline,
             },
         );
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("ExtAppr")),
+            ExtensionApproved {
+                campaign_id,
+                approver: caller,
+                approval_count: 1,
+            },
+        );
+        if extended {
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Extended")),
+                DeadlineExtended {
+                    campaign_id,
+                    old_deadline,
+                    new_deadline: request.new_deadline,
+                },
+            );
+        }
     }
 
     /// Votes to approve a pending deadline extension. The caller must be an
     /// existing contributor and must not have already voted. When approvals
-    /// exceed 50% of the contributor count, the new deadline is applied and
-    /// the pending request is cleared (issue #192).
+    /// exceed 50% of the contributor count, the new deadline is applied, the
+    /// pending request is cleared, and the round's votes are discarded so a
+    /// later request starts with a fresh tally (issue #192).
     pub fn approve_extension(env: Env, campaign_id: u64, caller: Address) {
         require_not_paused(&env);
         caller.require_auth();
@@ -1043,6 +1090,9 @@ impl StellarGoalVaultContract {
                 .persistent()
                 .set(&DataKey::Campaign(campaign_id), &campaign);
             env.storage().persistent().remove(&request_key);
+            // Drop this round's votes so the next extension request starts
+            // from a clean tally instead of inheriting stale vote records.
+            clear_extension_votes(&env, campaign_id);
         } else {
             env.storage().persistent().set(&request_key, &request);
         }
@@ -1539,6 +1589,22 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .persistent()
         .get(&DataKey::Campaign(campaign_id))
         .unwrap_or_else(|| panic!("campaign not found"))
+}
+
+/// Removes every per-contributor vote for a campaign's extension request. A
+/// committed extension ends the voting round; keeping the flags would prevent
+/// those contributors from voting on a later request.
+fn clear_extension_votes(env: &Env, campaign_id: u64) {
+    let contributors: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Contributors(campaign_id))
+        .unwrap_or_else(|| Vec::new(env));
+    for contributor in contributors.iter() {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::ExtensionVote(campaign_id, contributor));
+    }
 }
 
 /// Refresh a persistent entry that is still present. An already archived entry
