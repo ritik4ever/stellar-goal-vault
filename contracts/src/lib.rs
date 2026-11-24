@@ -1029,15 +1029,23 @@ impl StellarGoalVaultContract {
             panic!("funded campaigns cannot be refunded");
         }
 
-        let total_refunded = refund_contributor(&env, &mut campaign, campaign_id, &contributor);
+        // Checks-effects-interactions: clear the contributor's pledges and
+        // accounting before any token contract is called, then persist the
+        // campaign, and only then move tokens. If a transfer fails, the
+        // panic reverts the whole invocation, so no pledge is cleared and no
+        // payout is made (issue #1517).
+        let mut batch = RefundBatch::new(&env);
+        clear_contributor_pledges(&env, &mut campaign, campaign_id, &contributor, &mut batch);
 
-        if total_refunded == 0 {
+        if batch.is_empty() {
             panic!("nothing to refund");
         }
 
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        pay_out_refunds(&env, campaign_id, &batch);
     }
 
     /// Refund every contributor of a failed or canceled campaign in one call.
@@ -1075,21 +1083,25 @@ impl StellarGoalVaultContract {
             .get(&contributors_key)
             .unwrap_or_else(|| Vec::new(&env));
 
-        let mut any_refunded = false;
+        // Collect every payout first and persist the final campaign state
+        // before calling any token contract. A reentrant or duplicate refund
+        // sees zeroed pledges and an empty batch, and a failed transfer in
+        // the middle of the batch reverts the entire invocation — the batch is
+        // all-or-nothing rather than partially applied (issue #1517).
+        let mut batch = RefundBatch::new(&env);
         for contributor in contributors.iter() {
-            let refunded = refund_contributor(&env, &mut campaign, campaign_id, &contributor);
-            if refunded > 0 {
-                any_refunded = true;
-            }
+            clear_contributor_pledges(&env, &mut campaign, campaign_id, &contributor, &mut batch);
         }
 
-        if !any_refunded {
+        if batch.is_empty() {
             panic!("nothing to refund");
         }
 
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        pay_out_refunds(&env, campaign_id, &batch);
     }
 
     pub fn get_campaign(env: Env, campaign_id: u64) -> Campaign {
@@ -1328,14 +1340,45 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .unwrap_or_else(|| panic!("campaign not found"))
 }
 
-fn refund_contributor(
+/// Payouts collected while clearing refund state, applied only after every
+/// storage effect for the refund has been written.
+///
+/// Kept as three parallel vectors because the contract-side `Vec` type does
+/// not need a custom element type for what is at most
+/// `MAX_ACCEPTED_TOKENS * contributors` entries.
+struct RefundBatch {
+    contributors: Vec<Address>,
+    tokens: Vec<Address>,
+    amounts: Vec<i128>,
+}
+
+impl RefundBatch {
+    fn new(env: &Env) -> Self {
+        Self {
+            contributors: Vec::new(env),
+            tokens: Vec::new(env),
+            amounts: Vec::new(env),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.amounts.is_empty()
+    }
+}
+
+/// Clears every pledge `contributor` has on `campaign_id` and records the
+/// matching payouts in `batch`, **without** calling any token contract.
+///
+/// Storage effects are applied first so that a token contract which calls back
+/// into the vault during `pay_out_refunds` observes zeroed pledges and cannot
+/// trigger a duplicate refund (checks-effects-interactions, issue #1517).
+fn clear_contributor_pledges(
     env: &Env,
     campaign: &mut Campaign,
     campaign_id: u64,
     contributor: &Address,
-) -> i128 {
-    let mut total_refunded = 0_i128;
-    let contract_address = env.current_contract_address();
+    batch: &mut RefundBatch,
+) {
     for token in campaign.accepted_tokens.iter() {
         let contribution_key =
             DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
@@ -1345,8 +1388,6 @@ fn refund_contributor(
             .get(&contribution_key)
             .unwrap_or(0);
         if amount > 0 {
-            let token_client = TokenClient::new(env, &token);
-            token_client.transfer(&contract_address, contributor, &amount);
             env.storage().persistent().set(&contribution_key, &0_i128);
             let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
             let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
@@ -1354,17 +1395,30 @@ fn refund_contributor(
                 .persistent()
                 .set(&balance_key, &(balance - amount));
             campaign.pledged_amount -= amount;
-            total_refunded += amount;
-            env.events().publish(
-                (symbol_short!("Goal"), symbol_short!("Refund")),
-                CampaignRefunded {
-                    campaign_id,
-                    contributor: contributor.clone(),
-                    token: token.clone(),
-                    amount,
-                },
-            );
+            batch.contributors.push_back(contributor.clone());
+            batch.tokens.push_back(token.clone());
+            batch.amounts.push_back(amount);
         }
     }
-    total_refunded
+}
+
+/// Performs the token transfers and refund events for a fully applied refund
+/// batch. Every storage write has already happened when this runs.
+fn pay_out_refunds(env: &Env, campaign_id: u64, batch: &RefundBatch) {
+    let contract_address = env.current_contract_address();
+    for i in 0..batch.amounts.len() {
+        let contributor = batch.contributors.get(i).unwrap();
+        let token = batch.tokens.get(i).unwrap();
+        let amount = batch.amounts.get(i).unwrap();
+        TokenClient::new(env, &token).transfer(&contract_address, &contributor, &amount);
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Refund")),
+            CampaignRefunded {
+                campaign_id,
+                contributor,
+                token,
+                amount,
+            },
+        );
+    }
 }

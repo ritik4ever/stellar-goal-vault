@@ -333,10 +333,12 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 | Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or campaign cancellation |
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target; creator can claim |
 | Nothing to refund | `"nothing to refund"` | Low | Contributor had no contributions to this campaign |
-| Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; investigate |
+| Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; the whole refund is reverted (see **Atomicity**); top up and retry |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 
 **Emits:** `CampaignRefunded` (one per token the contributor used)
+
+**Atomicity (issue #1517):** the refund is all-or-nothing. Every storage write — clearing the contributor's `Contribution` entries, reducing `CampaignTokenBalance`, and reducing `Campaign.pledged_amount` — happens **before** the token contracts are called (checks-effects-interactions). If any token transfer fails, the panic reverts the whole invocation, so the contributor's pledges and balances are left exactly as they were and the refund can be retried. Because pledges are already zeroed when the transfers run, a token that calls back into the vault cannot trigger a second refund; a repeat call after a successful refund fails with `"nothing to refund"` and moves no funds.
 
 **Gas estimate:** 22,000 + 12,000 per token contributed ≈ base 22,000 + 12,000 per token + 20% headroom: **40,800** (1 token) / **74,400** (3 tokens)
 
@@ -368,6 +370,8 @@ fn refund_all(env: Env, campaign_id: u64)
 | Caller not authorized | Soroban auth failure | High | Ensure the stored `admin` signs the transaction |
 
 **Emits:** `CampaignRefunded` (one per contributor per token)
+
+**Atomicity (issue #1517):** the batch is all-or-nothing. All contributors' pledges, campaign token balances and `Campaign.pledged_amount` are cleared and the campaign record is persisted **before** the first token transfer. A failed transfer anywhere in the batch reverts the entire invocation: no earlier contributor is paid, every pledge stays intact, and the admin can restore token liquidity and retry. A repeat call after a successful batch fails with `"nothing to refund"` and pays nobody twice.
 
 **Gas estimate:** 15,000 base + 25,000 per contributor ≈ highly variable. For 10 contributors with 1 token each: **290,000** + 20% headroom = **348,000**
 

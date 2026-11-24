@@ -195,9 +195,10 @@ mod tests {
         );
 
         assert_eq!(campaign_id, 1);
+        // `ContractEvents` no longer exposes `is_empty`; inspect the XDR slice.
         let events = env.events().all();
         assert!(
-            !events.is_empty(),
+            !events.events().is_empty(),
             "campaign creation must emit an event"
         );
     }
@@ -227,7 +228,7 @@ mod tests {
         }));
         assert!(result.is_err(), "creation must be rejected");
         assert!(
-            env.events().all().is_empty(),
+            env.events().all().events().is_empty(),
             "failed creation must not emit a success event"
         );
     }
@@ -2893,6 +2894,193 @@ mod tests {
         advance_time(&env, deadline_offset + 1);
         // Stranger never pledged — nothing to refund.
         client.refund(&campaign_id, &stranger);
+    }
+
+    // ---- #1517: refund atomicity -----------------------------------------
+    // Refunds must write every storage effect before calling a token contract
+    // and must be all-or-nothing: a failure part-way through a payout leaves
+    // pledges, campaign accounting and token balances exactly as they were.
+
+    #[test]
+    fn test_refund_failure_is_atomic_and_retryable() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token_a = deploy_token(&env, &admin, &contributor, 1_000);
+        let token_b = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let deadline_offset: u64 = 50;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_a.clone(), token_b.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + deadline_offset),
+            &String::from_str(&env, "atomic refund"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor, &token_a, &300);
+        client.contribute(&campaign_id, &contributor, &token_b, &200);
+        // Deadline passes while the campaign is underfunded, so refunds are open.
+        advance_time(&env, deadline_offset + 1);
+
+        let vault = client.address.clone();
+        // Drain the vault's token B balance so the second payout fails after the
+        // token A transfer has already been attempted.
+        StellarAssetClient::new(&env, &token_b).burn(&vault, &200);
+
+        assert!(client.try_refund(&campaign_id, &contributor).is_err());
+
+        // No partial refund: pledges, accounting and balances are untouched.
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token_a),
+            300
+        );
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token_b),
+            200
+        );
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 500);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token_a),
+            300
+        );
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token_b),
+            200
+        );
+        assert_eq!(TokenClient::new(&env, &token_a).balance(&contributor), 700);
+        assert_eq!(TokenClient::new(&env, &token_b).balance(&contributor), 800);
+
+        // Restore liquidity and retry: the refund completes exactly once.
+        StellarAssetClient::new(&env, &token_b).mint(&vault, &200);
+        client.refund(&campaign_id, &contributor);
+
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token_a),
+            0
+        );
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token_b),
+            0
+        );
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_a), 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_b), 0);
+        assert_eq!(
+            TokenClient::new(&env, &token_a).balance(&contributor),
+            1_000
+        );
+        assert_eq!(
+            TokenClient::new(&env, &token_b).balance(&contributor),
+            1_000
+        );
+    }
+
+    #[test]
+    fn test_duplicate_refund_after_success_is_rejected_without_second_payout() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 10_000),
+            &String::from_str(&env, "duplicate refund"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor, &token, &400);
+        client.cancel_campaign(&campaign_id, &creator);
+
+        client.refund(&campaign_id, &contributor);
+        assert_eq!(TokenClient::new(&env, &token).balance(&contributor), 1_000);
+
+        // A second refund must fail and must not move funds again.
+        assert!(client.try_refund(&campaign_id, &contributor).is_err());
+        assert_eq!(TokenClient::new(&env, &token).balance(&contributor), 1_000);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            0
+        );
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+    }
+
+    #[test]
+    fn test_refund_all_failure_refunds_nobody_and_is_retryable() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &alice, 1_000);
+        StellarAssetClient::new(&env, &token).mint(&bob, &1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 10_000),
+            &String::from_str(&env, "atomic refund all"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &alice, &token, &300);
+        client.contribute(&campaign_id, &bob, &token, &700);
+        client.cancel_campaign(&campaign_id, &creator);
+
+        let vault = client.address.clone();
+        // Leave only enough of the vault's balance for Alice's payout, so Bob's
+        // transfer fails after Alice's already ran.
+        StellarAssetClient::new(&env, &token).burn(&vault, &500);
+
+        assert!(client.try_refund_all(&campaign_id).is_err());
+
+        // Alice must NOT have been paid: the batch is all-or-nothing.
+        assert_eq!(client.get_contribution(&campaign_id, &alice, &token), 300);
+        assert_eq!(client.get_contribution(&campaign_id, &bob, &token), 700);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 1_000);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token),
+            1_000
+        );
+        assert_eq!(TokenClient::new(&env, &token).balance(&alice), 700);
+        assert_eq!(TokenClient::new(&env, &token).balance(&bob), 300);
+
+        // Restore liquidity and retry: everyone is refunded exactly once.
+        StellarAssetClient::new(&env, &token).mint(&vault, &500);
+        client.refund_all(&campaign_id);
+
+        assert_eq!(client.get_contribution(&campaign_id, &alice, &token), 0);
+        assert_eq!(client.get_contribution(&campaign_id, &bob, &token), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+        assert_eq!(TokenClient::new(&env, &token).balance(&alice), 1_000);
+        assert_eq!(TokenClient::new(&env, &token).balance(&bob), 1_000);
+
+        // A duplicate batch refund is rejected and pays nothing further.
+        assert!(client.try_refund_all(&campaign_id).is_err());
+        assert_eq!(TokenClient::new(&env, &token).balance(&alice), 1_000);
+        assert_eq!(TokenClient::new(&env, &token).balance(&bob), 1_000);
     }
 
     #[test]
