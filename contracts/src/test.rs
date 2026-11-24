@@ -5,7 +5,7 @@ mod tests {
     use soroban_sdk::{
         testutils::{storage::Persistent as _, Address as _, Events as _, Ledger},
         token::{Client as TokenClient, StellarAssetClient},
-        Address, Env, IntoVal, String,
+        Address, Env, IntoVal, String, Symbol, Val,
     };
 
     use crate::{
@@ -796,6 +796,227 @@ mod tests {
         advance_time(&env, deadline_offset + 1);
         client.claim(&campaign_id, &creator);
         client.claim(&campaign_id, &creator);
+    }
+
+    // ---- #1515: claim regression coverage ----------------------------------
+    // Existing tests assert the claim guards mostly by panic message, and the
+    // #1512 tests cover rejected second-claim / non-creator calls. What was
+    // not pinned is the happy-path money movement and event payload at the
+    // eligibility boundary: `timestamp == deadline` is the first ledger on
+    // which a claim may run, and every funded token must produce exactly one
+    // `CampaignClaimed` payout marker with its gross amount.
+
+    /// One campaign on an isolated env with `target` minted to a fresh
+    /// contributor, so `contribute(target)` funds it exactly.
+    /// Returns `(client, campaign_id, creator, contributor, token, deadline)`.
+    fn claim_fixture<'a>(
+        env: &'a Env,
+        target: i128,
+        deadline_offset: u64,
+    ) -> (
+        StellarGoalVaultContractClient<'a>,
+        u64,
+        Address,
+        Address,
+        Address,
+        u64,
+    ) {
+        let admin = Address::generate(env);
+        let creator = Address::generate(env);
+        let contributor = Address::generate(env);
+        let token = deploy_token(env, &admin, &contributor, target);
+        let client = deploy_contract(env);
+        let deadline = env.ledger().timestamp() + deadline_offset;
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(env, "claim regression"),
+            &0_i128,
+            &soroban_sdk::vec![env],
+            &0_u32,
+        );
+
+        (client, campaign_id, creator, contributor, token, deadline)
+    }
+
+    /// The `CampaignClaimed` events emitted by the vault for the last call,
+    /// in publish order. Token-contract events are filtered out.
+    fn claim_events_for(
+        env: &Env,
+        vault: &Address,
+        claimed: CampaignClaimed,
+    ) -> soroban_sdk::Vec<(Address, soroban_sdk::Vec<Val>, Val)> {
+        soroban_sdk::vec![
+            env,
+            (
+                vault.clone(),
+                soroban_sdk::vec![
+                    env,
+                    Symbol::new(env, "Goal").into_val(env),
+                    Symbol::new(env, "Claim").into_val(env),
+                ],
+                claimed.into_val(env),
+            ),
+        ]
+    }
+
+    #[test]
+    fn test_claim_at_first_eligible_ledger_pays_creator_once_and_emits_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let target: i128 = 1_000;
+        let (client, campaign_id, creator, contributor, token, deadline) =
+            claim_fixture(&env, target, 100);
+        client.contribute(&campaign_id, &contributor, &token, &target);
+
+        // `claim` requires `timestamp >= deadline`: the deadline ledger itself
+        // is the first one on which the payout is allowed.
+        env.ledger().set_timestamp(deadline);
+        assert_eq!(env.ledger().timestamp(), deadline);
+
+        client.claim(&campaign_id, &creator);
+
+        // `all()` describes the last invocation, so read the event log before
+        // any further contract call (the balance reads below are invocations).
+        let emitted = env.events().all().filter_by_contract(&client.address);
+
+        // Exactly one payout, to the creator, and nothing left in escrow.
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&creator), target);
+        assert_eq!(token_client.balance(&contributor), 0);
+        assert_eq!(token_client.balance(&client.address), 0);
+
+        // Claiming moves funds but does not rewrite pledge accounting.
+        let campaign = client.get_campaign(&campaign_id);
+        assert!(campaign.claimed);
+        assert_eq!(campaign.pledged_amount, target);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            target
+        );
+
+        // One `("Goal", "Claim")` event carrying the gross claimed amount.
+        let expected = claim_events_for(
+            &env,
+            &client.address,
+            CampaignClaimed {
+                campaign_id,
+                creator: creator.clone(),
+                token: token.clone(),
+                amount: target,
+            },
+        );
+        assert_eq!(
+            emitted, expected,
+            "claim must emit exactly one CampaignClaimed event"
+        );
+    }
+
+    #[test]
+    fn test_claim_one_ledger_before_deadline_moves_nothing_and_emits_no_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let target: i128 = 500;
+        let (client, campaign_id, creator, contributor, token, deadline) =
+            claim_fixture(&env, target, 100);
+        client.contribute(&campaign_id, &contributor, &token, &target);
+
+        // One ledger short of eligibility: still active.
+        env.ledger().set_timestamp(deadline - 1);
+
+        assert!(
+            client.try_claim(&campaign_id, &creator).is_err(),
+            "claim must fail before the deadline ledger"
+        );
+
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&creator), 0);
+        assert_eq!(token_client.balance(&client.address), target);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &token),
+            target
+        );
+        assert!(!client.get_campaign(&campaign_id).claimed);
+        assert!(
+            env.events()
+                .all()
+                .filter_by_contract(&client.address)
+                .events()
+                .is_empty(),
+            "a rejected claim must not emit a success event"
+        );
+    }
+
+    #[test]
+    fn test_claim_at_first_eligible_ledger_emits_one_event_per_funded_token() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let client = deploy_contract(&env);
+        let (campaign_id, token_a, token_b) =
+            two_token_campaign(&env, &client, &creator, &contributor);
+        client.contribute(&campaign_id, &contributor, &token_a, &400);
+        client.contribute(&campaign_id, &contributor, &token_b, &600);
+
+        let campaign = client.get_campaign(&campaign_id);
+        env.ledger().set_timestamp(campaign.deadline);
+        client.claim(&campaign_id, &creator);
+
+        // One `CampaignClaimed` per funded token, each carrying that token's
+        // own gross amount and the same campaign/creator pair.
+        let expected = soroban_sdk::vec![
+            &env,
+            (
+                client.address.clone(),
+                soroban_sdk::vec![
+                    &env,
+                    Symbol::new(&env, "Goal").into_val(&env),
+                    Symbol::new(&env, "Claim").into_val(&env),
+                ],
+                CampaignClaimed {
+                    campaign_id,
+                    creator: creator.clone(),
+                    token: token_a.clone(),
+                    amount: 400,
+                }
+                .into_val(&env),
+            ),
+            (
+                client.address.clone(),
+                soroban_sdk::vec![
+                    &env,
+                    Symbol::new(&env, "Goal").into_val(&env),
+                    Symbol::new(&env, "Claim").into_val(&env),
+                ],
+                CampaignClaimed {
+                    campaign_id,
+                    creator: creator.clone(),
+                    token: token_b.clone(),
+                    amount: 600,
+                }
+                .into_val(&env),
+            ),
+        ];
+        assert_eq!(
+            env.events().all().filter_by_contract(&client.address),
+            expected,
+            "claim must emit one CampaignClaimed event per funded token"
+        );
+
+        assert_eq!(TokenClient::new(&env, &token_a).balance(&creator), 400);
+        assert_eq!(TokenClient::new(&env, &token_b).balance(&creator), 600);
+        assert_eq!(TokenClient::new(&env, &token_a).balance(&client.address), 0);
+        assert_eq!(TokenClient::new(&env, &token_b).balance(&client.address), 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_a), 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token_b), 0);
     }
 
     #[test]
@@ -3849,7 +4070,10 @@ mod tests {
 
         let campaign_after = client.get_campaign(&campaign_id);
         assert!(campaign_after.claimed);
-        assert_eq!(campaign_after.pledged_amount, campaign_before.pledged_amount);
+        assert_eq!(
+            campaign_after.pledged_amount,
+            campaign_before.pledged_amount
+        );
         assert_eq!(campaign_after.creator, campaign_before.creator);
         assert_eq!(campaign_after.target_amount, campaign_before.target_amount);
         assert_eq!(campaign_after.deadline, campaign_before.deadline);
@@ -3915,7 +4139,10 @@ mod tests {
 
         let campaign_after = client.get_campaign(&campaign_id);
         assert!(!campaign_after.claimed);
-        assert_eq!(campaign_after.pledged_amount, campaign_before.pledged_amount);
+        assert_eq!(
+            campaign_after.pledged_amount,
+            campaign_before.pledged_amount
+        );
         assert_eq!(campaign_after.creator, campaign_before.creator);
         assert_eq!(campaign_after.target_amount, campaign_before.target_amount);
         assert_eq!(campaign_after.deadline, campaign_before.deadline);
