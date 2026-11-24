@@ -120,4 +120,21 @@ describe('Environment & Request Input Configuration Validation', () => {
     };
     expect(() => validateEnv(devEnv)).not.toThrow();
   });
+
+  it('fails before startup when only one Soroban network setting is provided', () => {
+    const env = { ...validDevEnv, SOROBAN_NETWORK_PASSPHRASE: '' };
+    expect(() => validateEnv(env)).toThrow(
+      /SOROBAN_RPC_URL and SOROBAN_NETWORK_PASSPHRASE must be configured together/,
+    );
+  });
+
+  it('fails before startup when the RPC endpoint and passphrase target different networks', () => {
+    const env = {
+      ...validDevEnv,
+      SOROBAN_RPC_URL: 'https://soroban-mainnet.stellar.org:443',
+    };
+    expect(() => validateEnv(env)).toThrow(
+      /SOROBAN_NETWORK_PASSPHRASE conflicts with the Soroban mainnet RPC URL/,
+    );
+  });
 });

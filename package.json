@@ -15,7 +15,7 @@
     "format": "npx prettier --write \"**/*.{ts,tsx,json}\"",
     "format:check": "npx prettier --check \"**/*.{ts,tsx,json}\"",
     "deploy:contract": "./scripts/deploy.sh",
-    "gen:bindings": "cd backend && npx ts-node-dev --respawn --transpile-only ../scripts/gen-bindings.ts",
+    "gen:bindings": "cd backend && npx ts-node --skip-project --transpile-only --compiler-options '{\"module\":\"Node16\",\"moduleResolution\":\"Node16\"}' ../scripts/gen-bindings.ts",
     "gen:bindings:mainnet": "NETWORK=mainnet npm run gen:bindings"
   },
   "license": "MIT",

@@ -4,6 +4,7 @@ import {
   recoverWalletMock,
   resetWalletMock,
   resolveDelayedSignatures,
+  readBridgeLog,
   setWalletMockSignBehavior,
   readWalletMockSnapshot,
   TEST_CONTRIBUTORS,
@@ -91,6 +92,9 @@ test.describe('Wallet flow E2E fixtures (rerun-safe)', () => {
     const snapshot = await readWalletMockSnapshot(page);
     expect(snapshot.status).toBe('idle');
     expect(snapshot.pendingCount).toBe(0);
+    expect(snapshot.log).toContainEqual(
+      expect.objectContaining({ type: 'SUBMIT_TRANSACTION', outcome: 'approved' }),
+    );
   });
 
   test('reject stops signing immediately and recovers for a later approve', async ({ page }) => {
@@ -106,6 +110,9 @@ test.describe('Wallet flow E2E fixtures (rerun-safe)', () => {
     let snapshot = await readWalletMockSnapshot(page);
     expect(snapshot.status).toBe('stopped');
     expect(snapshot.pendingCount).toBe(0);
+    expect(await readBridgeLog(page)).toContainEqual(
+      expect.objectContaining({ type: 'SUBMIT_TRANSACTION', outcome: 'rejected' }),
+    );
 
     // Recovery path: reset + approve, then a second attempt succeeds on the
     // same page (rerun-safe without navigation or live wallet state).
@@ -177,6 +184,64 @@ test.describe('Wallet flow E2E fixtures (rerun-safe)', () => {
     expect(snapshot.status).toBe('idle');
     expect(snapshot.pendingCount).toBe(0);
     expect(snapshot.sign).toBe('approve');
+    expect(await readBridgeLog(page)).toContainEqual(
+      expect.objectContaining({ type: 'SUBMIT_TRANSACTION', outcome: 'approved' }),
+    );
+  });
+
+  test('delay can be resolved as a rejection with an observable stop', async ({ page }) => {
+    await mockFreighter(page, CONTRIBUTOR, { sign: 'delay' });
+    await openFixturePage(page);
+
+    const delayed = page.evaluate(
+      ({ xdr }) => {
+        const messageId = `sgv-delayed-reject-${Date.now()}`;
+        return new Promise<Record<string, unknown>>((resolve) => {
+          function onMessage(event: MessageEvent) {
+            const data = event.data as {
+              source?: string;
+              messageId?: string;
+              messagedId?: string;
+            } | null;
+            if (!data || data.source !== 'FREIGHTER_EXTERNAL_MSG_RESPONSE') {
+              return;
+            }
+            if (data.messageId !== messageId && data.messagedId !== messageId) {
+              return;
+            }
+            window.removeEventListener('message', onMessage);
+            resolve(data as Record<string, unknown>);
+          }
+          window.addEventListener('message', onMessage);
+          window.postMessage(
+            {
+              source: 'FREIGHTER_EXTERNAL_MSG_REQUEST',
+              messageId,
+              type: 'SUBMIT_TRANSACTION',
+              transactionXdr: xdr,
+            },
+            '*',
+          );
+        });
+      },
+      { xdr: SAMPLE_XDR },
+    );
+
+    await expect.poll(async () => (await readWalletMockSnapshot(page)).pendingCount).toBe(1);
+
+    expect(await resolveDelayedSignatures(page, 'reject')).toBe(1);
+
+    const response = await delayed;
+    expect(response.signedTransaction).toBe('');
+    expect(String(response.error)).toMatch(/declin/i);
+
+    const snapshot = await readWalletMockSnapshot(page);
+    expect(snapshot.status).toBe('stopped');
+    expect(snapshot.pendingCount).toBe(0);
+    expect(snapshot.sign).toBe('approve');
+    expect(await readBridgeLog(page)).toContainEqual(
+      expect.objectContaining({ type: 'SUBMIT_TRANSACTION', outcome: 'rejected' }),
+    );
   });
 
   test('reset cancels a delayed signature so the next run is not stuck', async ({ page }) => {
