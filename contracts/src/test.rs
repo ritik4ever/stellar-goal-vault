@@ -4502,4 +4502,115 @@ mod tests {
         assert_eq!(client.get_campaign_token_balance(&campaign_id, &usdc_token), 0);
         assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
     }
+
+    // ── #1513: claim authority tests (SGV-2026-133) ───────────────────────────
+
+    /// The creator can claim at the exact deadline ledger timestamp.
+    /// `timestamp >= deadline` is the allowed window; this tests the boundary.
+    #[test]
+    fn test_claim_at_exact_deadline_succeeds() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let target: i128 = 400;
+        let deadline_offset: u64 = 100;
+        let (client, campaign_id, creator, contributor, token, deadline) =
+            claim_fixture(&env, target, deadline_offset);
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+
+        // Set timestamp to exactly the deadline — the first eligible ledger.
+        env.ledger().set_timestamp(deadline);
+        client.claim(&campaign_id, &creator);
+
+        assert!(client.get_campaign(&campaign_id).claimed);
+    }
+
+    /// A non-creator caller is rejected with "creator mismatch" on a fully
+    /// funded, expired campaign. Confirms the creator identity check holds
+    /// regardless of funding state or elapsed time.
+    #[test]
+    #[should_panic(expected = "creator mismatch")]
+    fn test_claim_non_creator_rejected_after_deadline() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let target: i128 = 1_000;
+        let deadline_offset: u64 = 75;
+        let (client, campaign_id, _creator, contributor, token, _deadline) =
+            claim_fixture(&env, target, deadline_offset);
+
+        let non_creator = Address::generate(&env);
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        advance_time(&env, deadline_offset + 1);
+
+        // non_creator did not create the campaign — must panic
+        client.claim(&campaign_id, &non_creator);
+    }
+
+    /// A second claim by the legitimate creator after a successful first claim
+    /// must be rejected: funds are already released and the flag is set.
+    #[test]
+    #[should_panic(expected = "campaign already claimed")]
+    fn test_claim_second_attempt_by_creator_rejected() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let target: i128 = 500;
+        let deadline_offset: u64 = 60;
+        let (client, campaign_id, creator, contributor, token, deadline) =
+            claim_fixture(&env, target, deadline_offset);
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        env.ledger().set_timestamp(deadline);
+
+        client.claim(&campaign_id, &creator); // first claim — must succeed
+        client.claim(&campaign_id, &creator); // second claim — must panic
+    }
+
+    /// The contract admin, who controls pause and fee settings, cannot claim
+    /// a campaign they did not create. Admin privilege is orthogonal to creator
+    /// authority over individual campaigns.
+    #[test]
+    #[should_panic(expected = "creator mismatch")]
+    fn test_claim_admin_cannot_claim_non_owned_campaign() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let target: i128 = 800;
+        let deadline_offset: u64 = 100;
+        let (client, campaign_id, _creator, contributor, token, deadline) =
+            claim_fixture(&env, target, deadline_offset);
+
+        // Initialize a separate admin address (not the campaign creator)
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &100_i128);
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        env.ledger().set_timestamp(deadline);
+
+        // Admin tries to claim a campaign they did not create — must be rejected
+        client.claim(&campaign_id, &admin);
+    }
+
+    /// A contributor address (not the creator) cannot claim funds even when the
+    /// campaign is fully funded and past the deadline. Only the stored creator
+    /// field is authoritative for settlement.
+    #[test]
+    #[should_panic(expected = "creator mismatch")]
+    fn test_claim_contributor_cannot_claim_their_own_funded_campaign() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let target: i128 = 300;
+        let deadline_offset: u64 = 50;
+        let (client, campaign_id, _creator, contributor, token, deadline) =
+            claim_fixture(&env, target, deadline_offset);
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+        env.ledger().set_timestamp(deadline);
+
+        // The contributor funded the campaign but is not its creator
+        client.claim(&campaign_id, &contributor);
+    }
 }
