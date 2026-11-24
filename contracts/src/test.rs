@@ -9,9 +9,9 @@ mod tests {
     };
 
     use crate::{
-        CampaignClaimed, DataKey, DeadlineExtended, ExtensionApproved, ExtensionRequested,
-        FeeCollected, MetadataUpdated, StellarGoalVaultContract, StellarGoalVaultContractClient,
-        CAMPAIGN_STORAGE_TTL_EXTEND_TO,
+        CampaignClaimed, CampaignCreatedEvent, CampaignPledged, CampaignPledgedEvent, DataKey,
+        DeadlineExtended, ExtensionApproved, ExtensionRequested, FeeCollected, MetadataUpdated,
+        StellarGoalVaultContract, StellarGoalVaultContractClient, CAMPAIGN_STORAGE_TTL_EXTEND_TO,
     };
     // Keep contract tests independent of the machine clock and local timezone.
     // Soroban timestamps are UTC Unix seconds; epoch zero preserves the mock
@@ -2280,6 +2280,228 @@ mod tests {
             "a rejected update must not publish a metadata event"
         );
         assert_eq!(client.get_campaign(&campaign_id).metadata, original);
+    }
+
+    // ── Per-contributor cap event data, ordering & exactly-once replay ────────
+    // A consumer that only sees the event log must be able to reconstruct each
+    // committed pledge once and verify that a contributor's cumulative amount
+    // across all accepted tokens stays within `max_per_contributor`.
+
+    #[test]
+    fn test_capped_pledge_emits_ordered_events_with_committed_state() {
+        use soroban_sdk::FromVal;
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let cap = 600_i128;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "capped campaign"),
+            &cap,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let created_events = goal_events(&env, soroban_sdk::symbol_short!("Created"));
+        assert_eq!(created_events.len(), 1);
+        let created = CampaignCreatedEvent::from_val(&env, &Val::from_val(&env, &created_events[0].1));
+        assert_eq!(created.campaign_id, campaign_id);
+        assert_eq!(created.max_per_contributor, cap);
+
+        client.contribute(&campaign_id, &contributor, &token, &400_i128);
+
+        let emitted = env.events().all().filter_by_contract(&client.address);
+        assert_eq!(
+            emitted.events().len(),
+            2,
+            "a committed contribute must publish exactly Pledge then Pledged"
+        );
+
+        let legacy = goal_events(&env, soroban_sdk::symbol_short!("Pledge"));
+        let structured = goal_events(&env, soroban_sdk::symbol_short!("Pledged"));
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(structured.len(), 1);
+        assert!(
+            legacy[0].0 < structured[0].0,
+            "legacy Pledge event must be published before structured Pledged event"
+        );
+
+        let legacy_ev = CampaignPledged::from_val(&env, &Val::from_val(&env, &legacy[0].1));
+        let structured_ev =
+            CampaignPledgedEvent::from_val(&env, &Val::from_val(&env, &structured[0].1));
+
+        assert_eq!(legacy_ev.campaign_id, campaign_id);
+        assert_eq!(legacy_ev.contributor, contributor);
+        assert_eq!(legacy_ev.token, token);
+        assert_eq!(legacy_ev.amount, 400);
+
+        assert_eq!(structured_ev.campaign_id, campaign_id);
+        assert_eq!(structured_ev.contributor, contributor);
+        assert_eq!(structured_ev.token, token);
+        assert_eq!(structured_ev.amount, 400);
+        assert_eq!(structured_ev.total_pledged, 400);
+        assert_eq!(structured_ev.contributor_count, 1);
+        assert_eq!(structured_ev.token_balance, 400);
+        assert_eq!(structured_ev.contributor_total, 400);
+        assert!(structured_ev.contributor_total <= created.max_per_contributor);
+
+        let stored = client.get_campaign(&campaign_id);
+        assert_eq!(stored.pledged_amount, structured_ev.total_pledged);
+        assert_eq!(stored.contributor_count, structured_ev.contributor_count);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            structured_ev.contributor_total
+        );
+    }
+
+    #[test]
+    fn test_capped_multi_token_pledge_events_replay_cumulative_total_once() {
+        use soroban_sdk::FromVal;
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token_a = deploy_token(&env, &admin, &contributor, 1_000);
+        let token_b = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let cap = 500_i128;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_a.clone(), token_b.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "multi-token cap"),
+            &cap,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let created_events = goal_events(&env, soroban_sdk::symbol_short!("Created"));
+        let created = CampaignCreatedEvent::from_val(&env, &Val::from_val(&env, &created_events[0].1));
+        assert_eq!(created.max_per_contributor, cap);
+
+        let mut replayed_events: std::vec::Vec<CampaignPledgedEvent> = std::vec::Vec::new();
+
+        for (token, amount) in [(&token_a, 200_i128), (&token_b, 300_i128)] {
+            client.contribute(&campaign_id, &contributor, token, &amount);
+            let pledged = goal_events(&env, soroban_sdk::symbol_short!("Pledged"));
+            assert_eq!(
+                pledged.len(),
+                1,
+                "each committed pledge must emit exactly one Pledged event"
+            );
+            replayed_events.push(CampaignPledgedEvent::from_val(
+                &env,
+                &Val::from_val(&env, &pledged[0].1),
+            ));
+        }
+
+        // Replay the log in ledger order: each committed change applies once
+        // and the contributor's cross-token cumulative total stays within cap.
+        let mut cumulative_across_tokens = 0_i128;
+        let mut token_a_total = 0_i128;
+        let mut token_b_total = 0_i128;
+        for ev in &replayed_events {
+            assert_eq!(ev.campaign_id, campaign_id);
+            assert_eq!(ev.contributor, contributor);
+            cumulative_across_tokens += ev.amount;
+            assert!(
+                cumulative_across_tokens <= created.max_per_contributor,
+                "replayed cumulative amount must never exceed max_per_contributor"
+            );
+            if ev.token == token_a {
+                token_a_total += ev.amount;
+                assert_eq!(ev.contributor_total, token_a_total);
+            } else {
+                token_b_total += ev.amount;
+                assert_eq!(ev.contributor_total, token_b_total);
+            }
+        }
+
+        assert_eq!(cumulative_across_tokens, cap);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token_a),
+            token_a_total
+        );
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token_b),
+            token_b_total
+        );
+        assert_eq!(
+            client.get_campaign(&campaign_id).pledged_amount,
+            cumulative_across_tokens
+        );
+    }
+
+    #[test]
+    fn test_rejected_over_cap_pledge_commits_nothing_and_emits_no_events() {
+        use soroban_sdk::FromVal;
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token_a = deploy_token(&env, &admin, &contributor, 1_000);
+        let token_b = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+
+        let cap = 500_i128;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token_a.clone(), token_b.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "over-cap rejection"),
+            &cap,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token_a, &300_i128);
+        let committed = goal_events(&env, soroban_sdk::symbol_short!("Pledged"));
+        assert_eq!(committed.len(), 1);
+        let committed_ev =
+            CampaignPledgedEvent::from_val(&env, &Val::from_val(&env, &committed[0].1));
+        assert_eq!(committed_ev.amount, 300);
+
+        // Over-cap attempt across a second token must panic and emit zero events.
+        assert!(
+            client
+                .try_contribute(&campaign_id, &contributor, &token_b, &201_i128)
+                .is_err(),
+            "cross-token contribution exceeding per-contributor cap must fail"
+        );
+        assert!(
+            env.events()
+                .all()
+                .filter_by_contract(&client.address)
+                .events()
+                .is_empty(),
+            "a rejected over-cap pledge must not publish any contract events"
+        );
+
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token_a),
+            300
+        );
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token_b),
+            0
+        );
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 300);
     }
 
     // ── #192: deadline extension governance tests ─────────────────────────────

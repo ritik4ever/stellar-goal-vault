@@ -317,6 +317,14 @@ pub struct CampaignCreatedEvent {
 /// token balances, contributor counts, and timestamp so indexers can reconstruct
 /// campaign and contributor pledge state without additional reads. Sensitive data
 /// (none exists here) is not duplicated.
+///
+/// Published exactly once per committed `contribute` call, immediately after
+/// `("Goal", "Pledge")` and only after all validations (including the
+/// per-contributor cap check), token transfer, and storage writes succeed.
+/// `contributor_total` is the contributor's cumulative total for `token`;
+/// summing `amount` across accepted tokens in ledger order (against
+/// `CampaignCreatedEvent.max_per_contributor`) reconstructs the contributor's
+/// cross-token cumulative total exactly once. Rejected calls emit nothing.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CampaignPledgedEvent {
@@ -910,8 +918,8 @@ impl StellarGoalVaultContract {
                 amount,
                 total_pledged: campaign.pledged_amount,
                 contributor_count: campaign.contributor_count,
-                token_balance: current_balance + amount,
-                contributor_total: current_contribution + amount,
+                token_balance: new_balance,
+                contributor_total: new_contribution,
                 pledged_at: env.ledger().timestamp(),
             },
         );
