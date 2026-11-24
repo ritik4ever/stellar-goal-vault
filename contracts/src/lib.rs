@@ -29,6 +29,13 @@ const MAX_ACCEPTED_TOKENS: u32 = 10;
 /// (see `backend/src/validation/schemas.ts`).
 const MAX_METADATA_LEN: u32 = 500;
 
+/// Keep campaign records alive while a state-changing operation is using them.
+/// Persistent entries can be archived between polls, and a missing entry reads
+/// as zero; refreshing the entries a contribution or settlement touches keeps
+/// that window closed without making the rent horizon unbounded.
+const CAMPAIGN_STORAGE_TTL_THRESHOLD: u32 = 1_000;
+const CAMPAIGN_STORAGE_TTL_EXTEND_TO: u32 = 4_096;
+
 /// Validates that `token` is an actual, callable token contract before the
 /// campaign boundary persists it. Uses the `try_*` variant of the generated
 /// client so a non-token address (or an arbitrary contract that does not
@@ -761,6 +768,7 @@ impl StellarGoalVaultContract {
         }
 
         let mut campaign = read_campaign(&env, campaign_id);
+        refresh_campaign_ttl(&env, campaign_id, &campaign);
         if campaign.claimed {
             panic!("campaign already claimed");
         }
@@ -769,11 +777,9 @@ impl StellarGoalVaultContract {
         }
         // Campaign must be approved before accepting contributions
         if campaign.approval_threshold > 0 {
-            let approval_count: u32 = env
-                .storage()
-                .persistent()
-                .get(&DataKey::CampaignApproval(campaign_id))
-                .unwrap_or(0);
+            let approval_key = DataKey::CampaignApproval(campaign_id);
+            refresh_persistent_ttl(&env, &approval_key);
+            let approval_count: u32 = env.storage().persistent().get(&approval_key).unwrap_or(0);
             if approval_count < campaign.approval_threshold {
                 panic!("campaign not approved");
             }
@@ -790,20 +796,17 @@ impl StellarGoalVaultContract {
 
         // Enforce the per-contributor cap recorded at creation time. Before
         // this check the cap was written but never read (issue #895).
-        let cap: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::ContributorCap(campaign_id))
-            .unwrap_or(0);
+        let cap_key = DataKey::ContributorCap(campaign_id);
+        refresh_persistent_ttl(&env, &cap_key);
+        let cap: i128 = env.storage().persistent().get(&cap_key).unwrap_or(0);
         if cap > 0 {
             let already: i128 = campaign
                 .accepted_tokens
                 .iter()
                 .map(|t| {
-                    env.storage()
-                        .persistent()
-                        .get(&DataKey::Contribution(campaign_id, contributor.clone(), t))
-                        .unwrap_or(0)
+                    let key = DataKey::Contribution(campaign_id, contributor.clone(), t);
+                    refresh_persistent_ttl(&env, &key);
+                    env.storage().persistent().get(&key).unwrap_or(0)
                 })
                 .sum();
             if already + amount > cap {
@@ -820,6 +823,7 @@ impl StellarGoalVaultContract {
 
         // Only increment contributor_count on first-time pledge
         let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
+        refresh_persistent_ttl(&env, &has_contributed_key);
         let has_contributed: bool = env
             .storage()
             .persistent()
@@ -1078,6 +1082,7 @@ impl StellarGoalVaultContract {
         creator.require_auth();
 
         let mut campaign = read_campaign(&env, campaign_id);
+        refresh_campaign_ttl(&env, campaign_id, &campaign);
         if campaign.creator != creator {
             panic!("creator mismatch");
         }
@@ -1107,6 +1112,11 @@ impl StellarGoalVaultContract {
         if campaign.pledged_amount < campaign.target_amount {
             panic!("campaign is not funded");
         }
+
+        // Every contribution and per-token balance must still be readable
+        // before the campaign is marked claimed: an expired entry would
+        // otherwise make this loop skip a token and strand its escrow.
+        require_campaign_accounting_intact(&env, campaign_id, &campaign);
 
         // Authorization is enforced above: only the campaign creator (the
         // stored `creator`) can claim, and the signature covers campaign_id.
@@ -1179,6 +1189,7 @@ impl StellarGoalVaultContract {
         contributor.require_auth();
 
         let mut campaign = read_campaign(&env, campaign_id);
+        refresh_campaign_ttl(&env, campaign_id, &campaign);
         if campaign.claimed {
             panic!("campaign already claimed");
         }
@@ -1188,6 +1199,8 @@ impl StellarGoalVaultContract {
         if !campaign.canceled && campaign.pledged_amount >= campaign.target_amount {
             panic!("funded campaigns cannot be refunded");
         }
+
+        require_campaign_accounting_intact(&env, campaign_id, &campaign);
 
         let total_refunded = refund_contributor(&env, &mut campaign, campaign_id, &contributor);
 
@@ -1218,6 +1231,7 @@ impl StellarGoalVaultContract {
         admin.require_auth();
 
         let mut campaign = read_campaign(&env, campaign_id);
+        refresh_campaign_ttl(&env, campaign_id, &campaign);
         if campaign.claimed {
             panic!("campaign already claimed");
         }
@@ -1227,6 +1241,8 @@ impl StellarGoalVaultContract {
         if !campaign.canceled && campaign.pledged_amount >= campaign.target_amount {
             panic!("funded campaigns cannot be refunded");
         }
+
+        require_campaign_accounting_intact(&env, campaign_id, &campaign);
 
         let contributors_key = DataKey::Contributors(campaign_id);
         let contributors: Vec<Address> = env
@@ -1504,6 +1520,79 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .unwrap_or_else(|| panic!("campaign not found"))
 }
 
+/// Refresh a persistent entry that is still present. An already archived entry
+/// cannot be revived; [`require_campaign_accounting_intact`] detects that case
+/// before any funds move.
+fn refresh_persistent_ttl(env: &Env, key: &DataKey) {
+    let storage = env.storage().persistent();
+    if storage.has(key) {
+        storage.extend_ttl(
+            key,
+            CAMPAIGN_STORAGE_TTL_THRESHOLD,
+            CAMPAIGN_STORAGE_TTL_EXTEND_TO,
+        );
+    }
+}
+
+/// Refresh the campaign record and the per-token balance entries a settlement
+/// will read or rewrite, so they cannot be archived part-way through the call.
+fn refresh_campaign_ttl(env: &Env, campaign_id: u64, campaign: &Campaign) {
+    refresh_persistent_ttl(env, &DataKey::Campaign(campaign_id));
+    refresh_persistent_ttl(env, &DataKey::Contributors(campaign_id));
+    for token in campaign.accepted_tokens.iter() {
+        refresh_persistent_ttl(
+            env,
+            &DataKey::CampaignTokenBalance(campaign_id, token.clone()),
+        );
+    }
+}
+
+/// Storage-lifetime preflight for every path that moves escrowed funds.
+///
+/// Persistent entries expire independently: the campaign can still be present
+/// while one contribution or one per-token balance has been archived. Soroban
+/// reads a missing entry as zero, so without this check a settlement would
+/// silently skip that token, mark the campaign claimed, and leave the funds
+/// stranded. Rebuild each per-token total from the live contribution entries
+/// first; any disagreement means an entry went missing, so abort before the
+/// first transfer (Soroban rolls the whole invocation back) instead of paying
+/// part of the campaign.
+fn require_campaign_accounting_intact(env: &Env, campaign_id: u64, campaign: &Campaign) {
+    let contributors: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Contributors(campaign_id))
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut total: i128 = 0;
+    for token in campaign.accepted_tokens.iter() {
+        let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+        let stored: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        refresh_persistent_ttl(env, &balance_key);
+
+        let mut summed: i128 = 0;
+        for contributor in contributors.iter() {
+            let contribution_key =
+                DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
+            summed += env
+                .storage()
+                .persistent()
+                .get(&contribution_key)
+                .unwrap_or(0);
+            refresh_persistent_ttl(env, &contribution_key);
+        }
+
+        if stored != summed {
+            panic!("campaign storage expired");
+        }
+        total += stored;
+    }
+
+    if total != campaign.pledged_amount {
+        panic!("campaign storage expired");
+    }
+}
+
 fn refund_contributor(
     env: &Env,
     campaign: &mut Campaign,
@@ -1521,10 +1610,12 @@ fn refund_contributor(
             .get(&contribution_key)
             .unwrap_or(0);
         if amount > 0 {
+            refresh_persistent_ttl(env, &contribution_key);
+            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
+            refresh_persistent_ttl(env, &balance_key);
             let token_client = TokenClient::new(env, &token);
             token_client.transfer(&contract_address, contributor, &amount);
             env.storage().persistent().set(&contribution_key, &0_i128);
-            let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
             let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
             env.storage()
                 .persistent()

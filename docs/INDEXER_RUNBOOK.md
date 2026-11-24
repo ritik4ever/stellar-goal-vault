@@ -18,6 +18,35 @@ When the indexer is healthy, you will see the following behavior:
 
 ---
 
+## Reorganization handling
+
+The indexer persists an event only after `SOROBAN_INDEXER_CONFIRMATIONS`
+ledgers have followed the ledger that contains it (default `1`). Events inside
+that window are *tentative*: they are not written to `campaign_events`, and the
+persisted cursor is not allowed to move past them.
+
+This means a reorganization never requires local cleanup. If the RPC later
+returns a different event at the same position, the next poll simply reads the
+surviving event from the unchanged cursor; the replaced event was never
+persisted. The same property makes restarts and replays idempotent: the cursor
+and the recorded events are always committed together, and re-fetched events at
+or before the cursor are skipped.
+
+Signals to watch:
+
+- `soroban_indexer_tentative_events` — number of events waiting for
+  confirmations, the chain head, the configured depth and the resume position.
+  A steadily growing count means the chain head is not advancing.
+- `indexer_reorg_pending` / `indexer_reorg_committed` — per-event decision made
+  by `IndexerReorgHandler.evaluateEvent`.
+
+Raising `SOROBAN_INDEXER_CONFIRMATIONS` increases reorg safety at the cost of
+event latency. Do not lower it below the depth at which the network is known to
+reorganize; the default of `1` matches the previous behavior while still
+refusing to persist an event from the current chain head.
+
+---
+
 ## Common Failure Signatures and First Actions
 
 | Signal / Symptom | What it usually means | First diagnostic action | Recovery action |

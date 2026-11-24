@@ -413,6 +413,7 @@ fn claim(env: Env, campaign_id: u64, creator: Address)
 | Campaign canceled | `"campaign canceled"` | Medium | Campaign was canceled; no funds to claim |
 | Still active | `"campaign is still active"` | Medium | Wait for deadline to pass |
 | Underfunded | `"campaign is not funded"` | Medium | `pledged_amount < target_amount`; contributors should use `refund()` |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry (or rely on `extend_ttl`) before retrying. No funds move and the campaign is not marked claimed |
 | Caller not authorized | Soroban auth failure | High | Ensure `creator` signs the transaction |
 
 **Emits:** `CampaignClaimed` (one per token with a non-zero balance), and
@@ -447,6 +448,7 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 | Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or campaign cancellation |
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target; creator can claim |
 | Nothing to refund | `"nothing to refund"` | Low | Contributor had no contributions to this campaign |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry before retrying. Nothing is transferred |
 | Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; investigate |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 
@@ -478,12 +480,35 @@ fn refund_all(env: Env, campaign_id: u64)
 | Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or cancellation |
 | Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target |
 | Nothing to refund (no contributors) | `"nothing to refund"` | Low | No contributors found |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry before retrying. No contributor is refunded |
 | Contract not initialized | `"not initialized"` | High | Call `initialize` to set an admin first |
 | Caller not authorized | Soroban auth failure | High | Ensure the stored `admin` signs the transaction |
 
 **Emits:** `CampaignRefunded` (one per contributor per token)
 
 **Gas estimate:** 15,000 base + 25,000 per contributor ≈ highly variable. For 10 contributors with 1 token each: **290,000** + 20% headroom = **348,000**
+
+---
+
+### Storage lifetime and settlement atomicity
+
+Campaign data lives in persistent storage. The campaign record, the contributor
+list, each per-token balance and each individual contribution are separate
+entries with independent lifetimes, so one of them can be archived while the
+rest of the campaign is still present. Soroban reads a missing entry as zero,
+which previously allowed a settlement to skip an archived token and still
+report success (issue #1527).
+
+`contribute`, `claim`, `refund` and `refund_all` first refresh the TTL of every
+entry they are about to read or rewrite. Before moving any funds, `claim`,
+`refund` and `refund_all` also rebuild each per-token total from the live
+contribution entries and require it to match both the stored per-token balance
+and the campaign's `pledged_amount`. Any disagreement aborts the invocation
+with `"campaign storage expired"` before the first token transfer.
+
+Because the abort happens before any externally visible effect, Soroban rolls
+the invocation back: no balance changes, no token movement, and the campaign is
+not marked claimed. Callers can restore the archived entry and retry.
 
 ---
 

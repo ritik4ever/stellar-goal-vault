@@ -11,6 +11,7 @@ import {
   writeIndexerCursor,
 } from './eventIndexerCursor';
 import { redactReference } from './indexerBackfill';
+import { isConfirmed } from './indexerReorgHandler';
 import dotenv from 'dotenv';
 import { config } from '../config';
 import { logError, logInfo } from '../logger';
@@ -19,6 +20,19 @@ dotenv.config();
 
 const SOROBAN_RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org:443';
 const CONTRACT_ID = process.env.CONTRACT_ID || '';
+
+/**
+ * How many ledgers must follow an event's ledger before it is persisted.
+ * Events in younger ledgers can still be replaced by a reorganization, so the
+ * indexer leaves them pending and re-reads them on a later poll.
+ */
+export function loadConfirmationDepth(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.SOROBAN_INDEXER_CONFIRMATIONS);
+  if (!Number.isFinite(raw) || raw < 1) return 1;
+  return Math.floor(raw);
+}
+
+const CONFIRMATION_DEPTH = loadConfirmationDepth();
 
 /**
  * Poll interval in milliseconds. Defaults to 15 seconds per the issue spec.
@@ -80,8 +94,10 @@ export interface SorobanEvent {
   [key: string]: unknown;
 }
 
-async function fetchSorobanEvents(startLedger: number): Promise<SorobanEvent[]> {
-  if (!CONTRACT_ID) return [];
+async function fetchSorobanEvents(
+  startLedger: number,
+): Promise<{ events: SorobanEvent[]; latestLedger: number }> {
+  if (!CONTRACT_ID) return { events: [], latestLedger: 0 };
   const res = await axios.post(
     SOROBAN_RPC_URL,
     {
@@ -97,14 +113,23 @@ async function fetchSorobanEvents(startLedger: number): Promise<SorobanEvent[]> 
     },
     { headers: { 'Content-Type': 'application/json' }, timeout: 10_000 },
   );
-  if (res.data?.result?.latestLedger != null) {
-    lastKnownLedger = Number(res.data.result.latestLedger);
-  }
 
-  if (res.data?.result?.events && Array.isArray(res.data.result.events)) {
-    return res.data.result.events as SorobanEvent[];
+  // Treat an incomplete response as a failed poll, not as "no events": moving
+  // on quietly would skip every event the page was supposed to contain.
+  const result = res.data?.result;
+  if (result == null || typeof result !== 'object') {
+    throw new Error('soroban getEvents: malformed RPC response');
   }
-  return [];
+  const latestLedger = Number(result.latestLedger);
+  if (!Number.isFinite(latestLedger)) {
+    throw new Error('soroban getEvents: response is missing latestLedger');
+  }
+  lastKnownLedger = latestLedger;
+
+  if (Array.isArray(result.events)) {
+    return { events: result.events as SorobanEvent[], latestLedger };
+  }
+  return { events: [], latestLedger };
 }
 
 // ---------------------------------------------------------------------------
@@ -542,17 +567,68 @@ export function processSorobanEvents(events: SorobanEvent[]): BatchResult {
   return result;
 }
 
-async function indexSorobanEvents(): Promise<void> {
-  if (!CONTRACT_ID) return;
+export interface PollResult {
+  /** Events old enough to be persisted. */
+  confirmed: number;
+  /** Events inside the confirmation window; nothing was written for them. */
+  tentative: number;
+  /** Chain head reported by the RPC for this poll. */
+  latestLedger: number;
+}
+
+/**
+ * Fetches one page of events and persists only those buried under
+ * `minConfirmations` ledgers.
+ *
+ * Tentative events are deliberately not written and the cursor is not allowed
+ * to move past them. A reorganization can replace them, so the next poll
+ * re-reads the same range and only then persists the surviving events. This is
+ * also why no local tentative row ever has to be purged after a reorg.
+ */
+export async function pollSorobanEventsOnce(
+  minConfirmations: number = CONFIRMATION_DEPTH,
+): Promise<PollResult | null> {
+  if (!CONTRACT_ID) return null;
 
   // Start at the cursor's own ledger, not the one after it: the previous batch
   // may have stopped part-way through that ledger. Events already consumed are
   // skipped by position inside processSorobanEvents.
-  const events = await fetchSorobanEvents(getLastProcessedLedger());
-  if (events.length === 0) return;
+  const { events, latestLedger } = await fetchSorobanEvents(getLastProcessedLedger());
 
-  processSorobanEvents(events);
+  const confirmedEvents: SorobanEvent[] = [];
+  let tentative = 0;
+  for (const event of events) {
+    const ledger = Number(event.ledger);
+    if (!Number.isFinite(ledger) || !isConfirmed(latestLedger, ledger, minConfirmations)) {
+      tentative += 1;
+      continue;
+    }
+    confirmedEvents.push(event);
+  }
+
+  if (confirmedEvents.length > 0) {
+    processSorobanEvents(confirmedEvents);
+  }
+
+  if (tentative > 0) {
+    const cursor = getIndexerCursor();
+    logInfo(
+      'soroban_indexer_tentative_events',
+      {
+        message: `${tentative} event(s) waiting for ${minConfirmations} confirmation(s).`,
+        tentative,
+        latestLedger,
+        minConfirmations,
+        resumeLedger: cursor.ledger,
+        resumeEventIndex: cursor.eventIndex,
+      },
+      config.logLevel,
+    );
+  }
+
+  return { confirmed: confirmedEvents.length, tentative, latestLedger };
 }
+
 
 // ---------------------------------------------------------------------------
 // Scheduler with exponential backoff on RPC failures
@@ -609,7 +685,7 @@ export function getIndexerStatus() {
 function scheduleNextPoll(delayMs: number): void {
   pollerTimer = setTimeout(async () => {
     try {
-      await indexSorobanEvents();
+      await pollSorobanEventsOnce();
 
       if (consecutiveFailures > 0) {
         logInfo(
