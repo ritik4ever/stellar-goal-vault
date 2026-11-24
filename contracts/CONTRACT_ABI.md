@@ -482,6 +482,18 @@ fn refund(env: Env, campaign_id: u64, contributor: Address)
 
 **Emits:** `CampaignRefunded` (one per token the contributor used)
 
+**Partial refunds and retries (issue #1518):** a campaign can be refunded one
+contributor at a time, so `pledged_amount` may sit between `0` and its pre-refund
+value while funds remain for other contributors. Within a single call the refund
+is all-or-nothing: if any token transfer fails, the whole invocation reverts and
+no contribution is zeroed, no token moves and no event is emitted. Retrying is
+safe — only the address passed as `contributor` may sign, so neither the creator,
+the admin nor another contributor can release those funds, and once the
+contributor has been refunded a duplicate call fails with `"nothing to refund"`
+without paying twice. Covered by
+`test_pledge_auth::refund_after_a_failed_token_transfer_pays_nothing_and_only_the_contributor_can_retry`
+and `test_pledge_auth::partially_refunded_campaign_lets_only_each_contributor_release_their_own_pledge`.
+
 **Gas estimate:** 22,000 + 12,000 per token contributed ≈ base 22,000 + 12,000 per token + 20% headroom: **40,800** (1 token) / **74,400** (3 tokens)
 
 ---
