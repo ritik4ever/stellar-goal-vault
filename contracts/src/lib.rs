@@ -787,7 +787,11 @@ impl StellarGoalVaultContract {
         if env.ledger().timestamp() >= campaign.deadline {
             panic!("campaign deadline reached");
         }
-        if campaign.pledged_amount + amount > campaign.target_amount {
+        let new_pledged = match campaign.pledged_amount.checked_add(amount) {
+            Some(sum) => sum,
+            None => panic!("campaign funding cap exceeded"),
+        };
+        if new_pledged > campaign.target_amount {
             panic!("campaign funding cap exceeded");
         }
         if !campaign.accepted_tokens.iter().any(|t| t == token) {
@@ -800,16 +804,16 @@ impl StellarGoalVaultContract {
         refresh_persistent_ttl(&env, &cap_key);
         let cap: i128 = env.storage().persistent().get(&cap_key).unwrap_or(0);
         if cap > 0 {
-            let already: i128 = campaign
-                .accepted_tokens
-                .iter()
-                .map(|t| {
-                    let key = DataKey::Contribution(campaign_id, contributor.clone(), t);
-                    refresh_persistent_ttl(&env, &key);
-                    env.storage().persistent().get(&key).unwrap_or(0)
-                })
-                .sum();
-            if already + amount > cap {
+            let mut already: i128 = 0;
+            for t in campaign.accepted_tokens.iter() {
+                let key = DataKey::Contribution(campaign_id, contributor.clone(), t);
+                refresh_persistent_ttl(&env, &key);
+                let prev_c: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+                already = already
+                    .checked_add(prev_c)
+                    .unwrap_or_else(|| panic!("per-contributor cap exceeded"));
+            }
+            if already.checked_add(amount).map_or(true, |sum| sum > cap) {
                 panic!("per-contributor cap exceeded");
             }
         }
@@ -819,7 +823,7 @@ impl StellarGoalVaultContract {
         token_client.transfer(&contributor, &contract_address, &amount);
 
         // Update campaign pledged amount (valuation)
-        campaign.pledged_amount += amount;
+        campaign.pledged_amount = new_pledged;
 
         // Only increment contributor_count on first-time pledge
         let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
@@ -852,9 +856,12 @@ impl StellarGoalVaultContract {
 
         let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
         let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        let new_balance = current_balance
+            .checked_add(amount)
+            .unwrap_or_else(|| panic!("arithmetic overflow"));
         env.storage()
             .persistent()
-            .set(&balance_key, &(current_balance + amount));
+            .set(&balance_key, &new_balance);
 
         let contribution_key =
             DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
@@ -863,9 +870,12 @@ impl StellarGoalVaultContract {
             .persistent()
             .get(&contribution_key)
             .unwrap_or(0);
+        let new_contribution = current_contribution
+            .checked_add(amount)
+            .unwrap_or_else(|| panic!("arithmetic overflow"));
         env.storage()
             .persistent()
-            .set(&contribution_key, &(current_contribution + amount));
+            .set(&contribution_key, &new_contribution);
 
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("Pledge")),
@@ -1201,8 +1211,13 @@ impl StellarGoalVaultContract {
 
                 if take_fee {
                     if let Some(ref recipient) = fee_recipient {
-                        let fee_amount = balance * fee_bps / 10000;
-                        let creator_amount = balance - fee_amount;
+                        let fee_amount = balance
+                            .checked_mul(fee_bps)
+                            .unwrap_or_else(|| panic!("arithmetic overflow"))
+                            / 10000;
+                        let creator_amount = balance
+                            .checked_sub(fee_amount)
+                            .unwrap_or_else(|| panic!("arithmetic overflow"));
 
                         if fee_amount > 0 {
                             token_client.transfer(&contract_address, recipient, &fee_amount);
@@ -1661,18 +1676,25 @@ fn require_campaign_accounting_intact(env: &Env, campaign_id: u64, campaign: &Ca
         for contributor in contributors.iter() {
             let contribution_key =
                 DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-            summed += env
+            let amount: i128 = env
                 .storage()
                 .persistent()
                 .get(&contribution_key)
                 .unwrap_or(0);
+            summed = match summed.checked_add(amount) {
+                Some(s) => s,
+                None => panic!("campaign storage expired"),
+            };
             refresh_persistent_ttl(env, &contribution_key);
         }
 
         if stored != summed {
             panic!("campaign storage expired");
         }
-        total += stored;
+        total = match total.checked_add(stored) {
+            Some(t) => t,
+            None => panic!("campaign storage expired"),
+        };
     }
 
     if total != campaign.pledged_amount {
@@ -1704,11 +1726,19 @@ fn refund_contributor(
             token_client.transfer(&contract_address, contributor, &amount);
             env.storage().persistent().set(&contribution_key, &0_i128);
             let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+            let new_balance = balance
+                .checked_sub(amount)
+                .unwrap_or_else(|| panic!("arithmetic underflow"));
             env.storage()
                 .persistent()
-                .set(&balance_key, &(balance - amount));
-            campaign.pledged_amount -= amount;
-            total_refunded += amount;
+                .set(&balance_key, &new_balance);
+            campaign.pledged_amount = campaign
+                .pledged_amount
+                .checked_sub(amount)
+                .unwrap_or_else(|| panic!("arithmetic underflow"));
+            total_refunded = total_refunded
+                .checked_add(amount)
+                .unwrap_or_else(|| panic!("arithmetic overflow"));
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Refund")),
                 CampaignRefunded {
