@@ -878,6 +878,18 @@ transfers and campaign balance clearing). `amount` is the gross amount removed
 from campaign accounting; when a fee applies, `FeeCollected` describes the fee
 portion of this amount. The event contains no contributor-specific data.
 
+**Contract claim events & committed state alignment (SGV-2026-134):**
+For campaign settlement and creator claim payouts:
+- The authorized creator invokes `claim(&campaign_id, &creator)` after deadline expires or target is met.
+- For each token with balance `> 0`:
+  1. If platform fee applies, fee is transferred to `fee_recipient` and `FeeCollected` is emitted (`campaign_id`, `token`, `fee_amount`, `fee_recipient`).
+  2. Net payout (`amount - fee_amount`) is transferred to the authorized creator.
+  3. `CampaignTokenBalance` persistent storage entry is cleared to `0`.
+  4. `CampaignClaimed` event is emitted (`campaign_id`, `creator`, `token`, `amount`), indicating successful gross claim.
+- All events are committed strictly after token transfers and persistent storage updates (`campaign.claimed = true`, balance zeroed).
+- Indexers can reconstruct the creator payout and fee distribution unambiguously once.
+- Duplicate claim calls are rejected (`"campaign already claimed"`), emitting zero events and making no redundant payouts.
+
 ---
 
 ### `FeeCollected`

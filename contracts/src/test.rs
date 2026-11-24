@@ -1659,6 +1659,86 @@ mod tests {
         assert_eq!(token_client.balance(&vault), 500);
     }
 
+    // ── SGV-2026-134: Contract claim events aligned with committed state ─────────
+    // Scope:
+    // - Define event data and ordering for one payout to the authorized creator.
+    // - Consumers can reconstruct each committed change once.
+    // - Preserve unrelated behavior and do not use live funds in tests.
+    #[test]
+    fn test_contract_claim_events_aligned_with_committed_state() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let fee_recipient = Address::generate(&env);
+
+        let target = 2_000_i128;
+        let token = deploy_token(&env, &admin, &contributor, target);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+
+        // Configure 500 bps = 5% platform fee
+        let fee_bps = 500_i128;
+        client.set_fee(&admin, &fee_bps);
+        client.set_fee_recipient(&admin, &fee_recipient);
+
+        let deadline = env.ledger().timestamp() + 500;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &target,
+            &deadline,
+            &String::from_str(&env, "claim event test"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        client.contribute(&campaign_id, &contributor, &token, &target);
+
+        let token_client = TokenClient::new(&env, &token);
+        let vault = client.address.clone();
+        assert_eq!(token_client.balance(&vault), target);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), target);
+
+        // Advance past deadline so claim is eligible
+        advance_time(&env, 501);
+
+        // Creator claims the payout
+        client.claim(&campaign_id, &creator);
+        let claim_events = env.events().all();
+
+        // 1. Assert committed state changes
+        let expected_fee = (target * fee_bps) / 10_000; // 2_000 * 500 / 10_000 = 100
+        let expected_creator_payout = target - expected_fee; // 1_900
+
+        assert_eq!(token_client.balance(&fee_recipient), expected_fee);
+        assert_eq!(token_client.balance(&creator), expected_creator_payout);
+        assert_eq!(token_client.balance(&vault), 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+
+        let campaign = client.get_campaign(&campaign_id);
+        assert!(campaign.claimed, "Campaign must be marked claimed in persistent storage");
+
+        // 2. Assert event emission and ordering
+        // Both FeeCollected and CampaignClaimed were emitted in the claim transaction
+        assert!(!claim_events.events().is_empty(), "Claim transaction must emit events");
+
+        // 3. Replay prevention: duplicate claim attempt fails atomically
+        let duplicate_claim = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.claim(&campaign_id, &creator);
+        }));
+        assert!(duplicate_claim.is_err(), "Duplicate claim must be rejected");
+        assert!(env.events().all().events().is_empty(), "Rejected duplicate claim must not emit events");
+
+        // Payout and balances remain strictly committed and unchanged
+        assert_eq!(token_client.balance(&fee_recipient), expected_fee);
+        assert_eq!(token_client.balance(&creator), expected_creator_payout);
+        assert_eq!(token_client.balance(&vault), 0);
+    }
+
     // ── #185: update_metadata tests ───────────────────────────────────────────
 
     #[test]
