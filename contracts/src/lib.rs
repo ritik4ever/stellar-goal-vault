@@ -212,6 +212,12 @@ pub struct ContractUnpaused {
 }
 
 /// Emitted when a campaign creator updates the campaign metadata (issue #185).
+///
+/// Published exactly once per successful `update_metadata` call, after the
+/// campaign record has been written. `old_metadata` is the value that was
+/// stored before the call and `new_metadata` is the value stored afterwards,
+/// so replaying these events (starting from the creation event's metadata)
+/// reproduces the committed metadata without additional reads (issue #1524).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetadataUpdated {
@@ -813,7 +819,7 @@ impl StellarGoalVaultContract {
                     .checked_add(prev_c)
                     .unwrap_or_else(|| panic!("per-contributor cap exceeded"));
             }
-            if already.checked_add(amount).map_or(true, |sum| sum > cap) {
+            if already.checked_add(amount).is_none_or(|sum| sum > cap) {
                 panic!("per-contributor cap exceeded");
             }
         }
@@ -911,6 +917,13 @@ impl StellarGoalVaultContract {
     /// Updates the campaign metadata. Only the original creator can call this,
     /// and only before the campaign deadline. Emits a MetadataUpdated event
     /// containing both old and new values (issue #185).
+    ///
+    /// The event is published last, after the campaign record is written, so a
+    /// consumer never sees an event for a value that was not committed. A
+    /// rejected call panics before the write and publishes nothing. The event
+    /// carries the complete change (`old_metadata` -> `new_metadata`), so each
+    /// committed update can be reconstructed from the log exactly once
+    /// (issue #1524).
     pub fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: String) {
         require_not_paused(&env);
         creator.require_auth();

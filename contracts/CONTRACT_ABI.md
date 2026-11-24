@@ -302,6 +302,25 @@ fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: S
 
 **Emits:** `MetadataUpdated`
 
+**Event ordering and exactly-once semantics (issue #1524):** a successful call
+publishes exactly one `("Goal", "MetaUpd")` event, and it is published after
+the campaign record has been written. Its payload therefore always describes
+committed state: `old_metadata` is the value stored before the call and
+`new_metadata` is the value `get_campaign()` returns afterwards. A rejected
+call — paused contract, unknown campaign, creator mismatch, already claimed,
+canceled, past deadline, or failed authorization — panics before the write and
+publishes no event at all.
+
+Because each event carries both ends of the change, a consumer can replay
+metadata from the creation event's `metadata` field and apply every
+`MetadataUpdated` in ledger order to reproduce the committed value. Each
+committed change appears exactly once, so a replay never applies an update
+twice. Covered by
+`test_update_metadata_emits_one_event_with_old_and_new_values`,
+`test_metadata_update_events_replay_to_committed_metadata`, and
+`test_rejected_metadata_update_commits_nothing_and_emits_no_event` in
+`src/test.rs`.
+
 **Gas estimate:** 16,000 + storage write + event ≈ 22,000 units + 20% headroom = **26,400**
 
 ---
@@ -1144,10 +1163,14 @@ committed only if the full claim transaction succeeds.
 |-------|------|-------------|
 | `campaign_id` | `u64` | Campaign ID |
 | `creator` | `Address` | Creator who updated |
-| `old_metadata` | `String` | Previous metadata value |
-| `new_metadata` | `String` | New metadata value |
+| `old_metadata` | `String` | Metadata value stored before this call |
+| `new_metadata` | `String` | Metadata value stored by this call |
 
-**Emitted by:** `update_metadata`
+**Emitted by:** `update_metadata`, exactly once per successful call and after
+the campaign record is written. Replaying `old_metadata` -> `new_metadata` in
+ledger order (seeded by the creation event's `metadata`) reconstructs the
+committed metadata; rejected calls emit nothing. See the
+[`update_metadata`](#update_metadata) section.
 
 ---
 
