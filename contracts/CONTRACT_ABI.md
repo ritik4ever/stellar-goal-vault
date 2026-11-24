@@ -693,9 +693,19 @@ fn approve_extension(env: Env, campaign_id: u64, caller: Address)
 | Not a contributor | `"caller is not a contributor"` | Medium | Only existing contributors can vote |
 | Already voted | `"already voted"` | Low | Each contributor votes once per extension request |
 | No pending request | `"no extension request"` | Low | Call `request_deadline_extension()` first |
+| Stored proposal is stale | `"new deadline must be after current deadline"` | High | The pending proposal no longer advances the campaign; request a new one |
+| Stored proposal exceeds the cap | `"new deadline exceeds maximum campaign duration"` | High | The pending proposal is past 180 days from creation; request a valid one |
 | Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
 
 **Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither. When the extension is committed, the votes recorded for that request are cleared so the next request starts a fresh tally.
+
+**Commit-time validation:** the stored request is validated again on the vote
+that would commit it. A proposal that was legal when written but is no longer
+legal (restored snapshot, injected storage, or a campaign whose deadline moved)
+is rejected before the deadline changes, so the campaign cannot be pushed past
+`MAX_CAMPAIGN_DURATION_SECONDS`. The campaign, pending request, per-contributor
+vote flag and contributor list are all TTL-refreshed around the round so no part
+of the vote state can silently archive mid-round.
 
 **Gas estimate:** 20,000 + storage write + conditional deadline apply + event ≈ 30,000 units + 20% headroom = **36,000**
 

@@ -184,6 +184,27 @@ The extension is applied once **more than 50%** of unique contributors have appr
 - New deadline cannot exceed `MAX_CAMPAIGN_DURATION_SECONDS` (180 days) from the campaign creation timestamp
 - Reverts on claimed or canceled campaigns
 
+**Authority rules:**
+
+- Only an address that has actually pledged an accepted token can request or
+  approve. The creator and the platform admin have no automatic vote; their
+  signature alone is rejected with `"caller is not a contributor"`.
+- `caller` must sign every request and vote (Soroban host auth).
+- Each contributor has at most one vote per round. The requester auto-approves,
+  so their request counts as vote 1; repeating it is rejected with
+  `"already voted"`.
+- A round commits on a strict majority of distinct contributors
+  (`approval_count * 2 > contributor_count`), for example 2 of 3, 3 of 4 or
+  3 of 5. Exactly 50% (2 of 4) does not commit.
+- The stored proposal is re-validated when the vote that would commit it is
+  cast. A proposal that is stale (not later than the current deadline) or past
+  the 180-day cap is rejected at commit time and cannot change the campaign.
+- A deadline change moves no funds: contributor balances, the vault balance and
+  `pledged_amount` are unchanged.
+- The campaign, pending request, vote flags and contributor list are refreshed
+  together, so a long voting round cannot archive part of its state and let a
+  vote be counted twice.
+
 ## Mutation testing
 
 Mutation testing is used to verify that the test suite is effective at catching real bugs, not just achieving line coverage.

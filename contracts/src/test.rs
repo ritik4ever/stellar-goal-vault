@@ -9,9 +9,9 @@ mod tests {
     };
 
     use crate::{
-        CampaignClaimed, DataKey, DeadlineExtended, ExtensionApproved, ExtensionRequested,
-        FeeCollected, MetadataUpdated, StellarGoalVaultContract, StellarGoalVaultContractClient,
-        CAMPAIGN_STORAGE_TTL_EXTEND_TO,
+        CampaignClaimed, DataKey, DeadlineExtended, ExtensionApproved, ExtensionRequest,
+        ExtensionRequested, FeeCollected, MetadataUpdated, StellarGoalVaultContract,
+        StellarGoalVaultContractClient, CAMPAIGN_STORAGE_TTL_EXTEND_TO,
     };
     // Keep contract tests independent of the machine clock and local timezone.
     // Soroban timestamps are UTC Unix seconds; epoch zero preserves the mock
@@ -5266,5 +5266,117 @@ mod tests {
             "Late vote after majority commit rejected"
         );
         assert_eq!(client.get_campaign(&campaign_id).deadline, new_deadline);
+    }
+
+    // ── SGV-2026-128: authority is re-checked when the deadline moves ─────────
+    // The stored proposal is the only thing `approve_extension` trusts when it
+    // mutates the campaign. These tests inject a proposal that was legal when
+    // written but is no longer legal at commit time, and prove the commit
+    // revalidates instead of applying it.
+
+    fn setup_three_contributor_campaign(
+        env: &Env,
+    ) -> (StellarGoalVaultContractClient<'_>, u64, Address, Address) {
+        let creator = Address::generate(env);
+        let admin = Address::generate(env);
+        let c1 = Address::generate(env);
+        let c2 = Address::generate(env);
+        let c3 = Address::generate(env);
+        let token = deploy_token(env, &admin, &c1, 1_000);
+        let minter = StellarAssetClient::new(env, &token);
+        minter.mint(&c2, &1_000);
+        minter.mint(&c3, &1_000);
+        let client = deploy_contract(env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![env, token.clone()],
+            &5_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(env, "stored proposal"),
+            &0_i128,
+            &soroban_sdk::vec![env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &c1, &token, &100);
+        client.contribute(&campaign_id, &c2, &token, &100);
+        client.contribute(&campaign_id, &c3, &token, &100);
+        (client, campaign_id, c1, c2)
+    }
+
+    #[test]
+    #[should_panic(expected = "new deadline must be after current deadline")]
+    fn test_approve_extension_rejects_a_stale_stored_request() {
+        let env = test_env();
+        env.mock_all_auths();
+        let (client, campaign_id, c1, c2) = setup_three_contributor_campaign(&env);
+        let current = client.get_campaign(&campaign_id).deadline;
+        client.request_deadline_extension(&campaign_id, &c1, &(current + 500));
+
+        // A proposal that was valid when written but is stale by commit time
+        // (e.g. restored from a snapshot or written against an older deadline).
+        env.as_contract(&client.address, || {
+            env.storage().persistent().set(
+                &DataKey::ExtensionRequest(campaign_id),
+                &ExtensionRequest {
+                    new_deadline: current,
+                    requested_by: c1.clone(),
+                    approval_count: 1,
+                },
+            );
+        });
+
+        client.approve_extension(&campaign_id, &c2);
+    }
+
+    #[test]
+    #[should_panic(expected = "new deadline exceeds maximum campaign duration")]
+    fn test_approve_extension_rejects_a_stored_request_past_the_cap() {
+        let env = test_env();
+        env.mock_all_auths();
+        let (client, campaign_id, c1, c2) = setup_three_contributor_campaign(&env);
+        let current = client.get_campaign(&campaign_id).deadline;
+        client.request_deadline_extension(&campaign_id, &c1, &(current + 500));
+
+        let over_max = env.ledger().timestamp() + (60 * 60 * 24 * 180) + 1;
+        env.as_contract(&client.address, || {
+            env.storage().persistent().set(
+                &DataKey::ExtensionRequest(campaign_id),
+                &ExtensionRequest {
+                    new_deadline: over_max,
+                    requested_by: c1.clone(),
+                    approval_count: 1,
+                },
+            );
+        });
+
+        client.approve_extension(&campaign_id, &c2);
+    }
+
+    #[test]
+    fn test_request_extension_accepts_exactly_the_maximum_deadline() {
+        let env = test_env();
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "exact max extension"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+        client.contribute(&campaign_id, &contributor, &token, &100);
+
+        let max_deadline = env.ledger().timestamp() + (60 * 60 * 24 * 180);
+        client.request_deadline_extension(&campaign_id, &contributor, &max_deadline);
+
+        assert_eq!(client.get_campaign(&campaign_id).deadline, max_deadline);
+        assert!(client.get_extension_request(&campaign_id).is_none());
     }
 }
