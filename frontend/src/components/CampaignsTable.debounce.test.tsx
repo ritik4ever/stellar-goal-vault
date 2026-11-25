@@ -34,7 +34,14 @@ const STUB_CAMPAIGN: Campaign = {
   pledgedAmount: 0,
   deadline: Date.now() / 1000 + 86400,
   createdAt: Date.now() / 1000,
-  progress: { percentage: 0, pledgedAmount: 0, targetAmount: 1000 },
+  progress: {
+    status: 'open',
+    percentFunded: 0,
+    hoursLeft: 24,
+    canPledge: true,
+    canClaim: false,
+    canRefund: false,
+  },
 };
 
 function renderTable(onSearchChange: (q: string) => void) {
@@ -47,6 +54,7 @@ function renderTable(onSearchChange: (q: string) => void) {
         isLoading={false}
         hasMore={false}
         onSearchChange={onSearchChange}
+        error={null}
       />
     </MemoryRouter>,
   );
@@ -88,7 +96,9 @@ describe('CampaignsTable debounced search (#254)', () => {
     expect(onSearchChange).not.toHaveBeenCalledWith('rock');
 
     // Advance past the debounce delay
-    await act(async () => { vi.advanceTimersByTime(300); });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
 
     const rocketCalls = onSearchChange.mock.calls.filter(([v]) => v === 'rock');
     expect(rocketCalls).toHaveLength(1);
@@ -103,7 +113,9 @@ describe('CampaignsTable debounced search (#254)', () => {
 
     const input = screen.getByRole('textbox', { name: /search campaigns/i });
     fireEvent.change(input, { target: { value: 'abc' } });
-    await act(async () => { vi.advanceTimersByTime(300); });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
     onSearchChange.mockClear();
 
     // Simulate clear button click by changing value to empty string

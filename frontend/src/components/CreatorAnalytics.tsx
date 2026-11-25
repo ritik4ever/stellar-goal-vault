@@ -12,6 +12,8 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { Campaign } from '../types/campaign';
+import { SkeletonAnalytics } from './SkeletonAnalytics';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 interface CreatorAnalyticsProps {
   creatorAddress: string;
@@ -80,26 +82,9 @@ export const CreatorAnalytics: React.FC<CreatorAnalyticsProps> = ({
     };
   }, [creatorAddress, campaigns]);
 
-  if (isLoading) {
-    return (
-      <div className="creator-metrics-container">
-        <h3 className="creator-metrics-title">Creator Performance</h3>
-        <div className="metric-grid">
-          <div className="metric-card">
-            <span>Campaigns Created</span>
-            <strong>—</strong>
-          </div>
-          <div className="metric-card">
-            <span>Funded Campaigns</span>
-            <strong>—</strong>
-          </div>
-          <div className="metric-card">
-            <span>Claimed Vaults</span>
-            <strong>—</strong>
-          </div>
-        </div>
-      </div>
-    );
+  const showSkeleton = useMinDisplayTime(isLoading);
+  if (showSkeleton) {
+    return <SkeletonAnalytics />;
   }
 
   const hasChartData = pledgeData.length > 0;
@@ -130,10 +115,7 @@ export const CreatorAnalytics: React.FC<CreatorAnalyticsProps> = ({
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={statusData} aria-label="Bar chart showing campaign count per status">
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis
-                dataKey="status"
-                aria-hidden="true"
-              />
+              <XAxis dataKey="status" aria-hidden="true" />
               <YAxis aria-hidden="true" />
               <Tooltip />
               <Legend />
@@ -157,10 +139,7 @@ export const CreatorAnalytics: React.FC<CreatorAnalyticsProps> = ({
               aria-label="Line chart showing pledge volume over the last 30 days"
             >
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis
-                dataKey="date"
-                aria-hidden="true"
-              />
+              <XAxis dataKey="date" aria-hidden="true" />
               <YAxis aria-hidden="true" />
               <Tooltip />
               <Legend />

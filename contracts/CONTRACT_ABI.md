@@ -1,0 +1,1577 @@
+# Stellar Goal Vault — Contract ABI Reference
+
+**Contract:** `StellarGoalVaultContract`
+**Language:** Rust (Soroban SDK 21.0.0)
+**Deployment target:** Stellar Soroban
+**Version:** 0.1.0
+
+---
+
+## Table of Contents
+
+1. [Type Definitions](#type-definitions)
+2. [Administration](#administration)
+3. [Campaign Lifecycle](#campaign-lifecycle)
+4. [Contributions & Funds](#contributions--funds)
+5. [Governance](#governance)
+6. [Read-Only Queries](#read-only-queries)
+7. [Events](#events)
+8. [Error Codes Reference](#error-codes-reference)
+9. [Gas Estimates](#gas-estimates)
+10. [Worked Examples](#worked-examples)
+
+---
+
+## Type Definitions
+
+### `Campaign`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `creator` | `Address` | Campaign creator's Stellar address |
+| `accepted_tokens` | `Vec<Address>` | List of token addresses this campaign accepts (max 10) |
+| `target_amount` | `i128` | Funding goal in stroops (1 stroop = 1e-7 lumen) |
+| `pledged_amount` | `i128` | Total amount pledged across all tokens |
+| `deadline` | `u64` | Unix timestamp (seconds) when the campaign ends |
+| `claimed` | `bool` | Whether the creator has claimed the funds |
+| `canceled` | `bool` | Whether the campaign was canceled by the creator |
+| `metadata` | `String` | Arbitrary metadata string (campaign description, URI, etc.) |
+| `contributor_count` | `u32` | Number of unique contributors |
+| `created_at` | `u64` | Unix timestamp of campaign creation |
+
+### `DeployInfo`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | `String` | Contract version from `CARGO_PKG_VERSION` |
+| `deployed_at` | `u64` | Unix timestamp of first `get_deploy_info()` call |
+
+### `ExtensionRequest`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `new_deadline` | `u64` | Proposed new deadline timestamp |
+| `requested_by` | `Address` | Contributor who requested the extension |
+| `approval_count` | `u32` | Number of approval votes received |
+
+### Campaign Event Structs
+
+See [Events](#events) section for all event payloads.
+
+---
+
+## Administration
+
+### `initialize`
+
+Sets the admin address and minimum contribution floor. One-time setup — panics if called twice.
+
+```
+fn initialize(env: Env, admin: Address, min_contribution: i128)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Admin Stellar address (cannot be changed later) |
+| `min_contribution` | `i128` | Minimum contribution amount in stroops (must be > 0) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Already initialized | `"already initialized"` | High | Do not call again; contract is already set up |
+| `min_contribution <= 0` | `"min_contribution must be positive"` | High | Call with a positive integer (minimum 1 stroop) |
+| Caller not authorized | Soroban auth failure | High | Ensure caller signs with the `admin` address |
+
+**Gas estimate:** 15,000 + 5,000 per storage write (~20,000 units total + 20% headroom = **24,000**)
+
+---
+
+### `set_fee`
+
+Sets the platform fee in basis points (e.g. 50 = 0.5%). Admin only. Pass 0 to disable platform fees.
+
+```
+fn set_fee(env: Env, admin: Address, bps: i128)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Stored admin address (must authenticate) |
+| `bps` | `i128` | Fee in basis points (must be >= 0) |
+
+**Emits:** `PlatformFeeUpdatedEvent` with topic pair `("Goal", "FeeSet")`
+
+---
+
+### `set_fee_recipient`
+
+Sets the recipient address that receives platform fees upon campaign claims. Admin only.
+
+```
+fn set_fee_recipient(env: Env, admin: Address, recipient: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Stored admin address (must authenticate) |
+| `recipient` | `Address` | Address designated to receive fee deductions |
+
+**Emits:** `FeeRecipientUpdatedEvent` with topic pair `("Goal", "RecipSet")`
+
+---
+
+### `set_paused`
+
+Pauses or unpauses all state-mutating entry points. Admin only.
+
+```
+fn set_paused(env: Env, caller: Address, paused: bool)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `caller` | `Address` | Must match the stored admin address |
+| `paused` | `bool` | `true` to pause, `false` to unpause |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller is not admin | `"caller is not admin"` | Critical | Only the admin address stored during `initialize()` can call this |
+
+**Emits:** `ContractPaused` or `ContractUnpaused`
+
+**Gas estimate:** 12,000 + event cost (~4,000) ≈ 16,000 units + 20% headroom = **19,200**
+
+---
+
+### `set_fee`
+
+Sets the platform fee in basis points (e.g. 50 = 0.5%). Admin only. Pass 0 to disable the fee. Maximum is 10000 bps (100%).
+
+```
+fn set_fee(env: Env, admin: Address, bps: i128)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Must match the stored admin address and authorize the call |
+| `bps` | `i128` | Platform fee in basis points (0–10000) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller is not admin | `"caller is not admin"` | Critical | Only the admin address stored during `initialize()` can call this |
+| `bps < 0` | `"fee must be non-negative"` | Medium | Provide a fee >= 0 bps |
+| `bps > 10000` | `"fee must not exceed 10000 basis points"` | Medium | Limit fee to 10000 basis points (100%) or lower |
+
+---
+
+### `set_fee_recipient`
+
+Sets the address that receives platform fees on campaign claims. Admin only.
+
+```
+fn set_fee_recipient(env: Env, admin: Address, recipient: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Must match the stored admin address and authorize the call |
+| `recipient` | `Address` | Address to receive platform fee deductions (cannot be the vault contract) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller is not admin | `"caller is not admin"` | Critical | Only the admin address stored during `initialize()` can call this |
+| Recipient is vault | `"fee recipient cannot be the vault contract"` | Medium | Provide a recipient address other than the vault contract address |
+
+---
+
+## Campaign Lifecycle
+
+### `create_campaign`
+
+Creates a new fundraising campaign. Returns the unique numeric campaign ID.
+
+```
+fn create_campaign(
+    env: Env,
+    creator: Address,
+    accepted_tokens: Vec<Address>,
+    target_amount: i128,
+    deadline: u64,
+    metadata: String,
+    max_per_contributor: i128,
+) -> u64
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `creator` | `Address` | Campaign creator's address (must authenticate) |
+| `accepted_tokens` | `Vec<Address>` | Token addresses this campaign accepts (1–10) |
+| `target_amount` | `i128` | Funding goal in stroops (must be > 0) |
+| `deadline` | `u64` | Unix deadline timestamp (must be in the future, ≤180 days from now) |
+| `metadata` | `String` | Campaign metadata (description, URI, etc.) |
+| `max_per_contributor` | `i128` | Per-contributor cap (0 = no cap, must not be negative) |
+
+**Returns:** `u64` — sequential campaign ID (1-based, auto-incremented)
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Non-positive target | `"target amount must be positive"` | High | Set `target_amount` to a value > 0 |
+| Deadline in the past | `"deadline must be in the future"` | Medium | Set a deadline timestamp after the current ledger time |
+| Deadline > 180 days | `"deadline exceeds maximum campaign duration"` | Medium | Set deadline within 180 days (15,552,000 seconds) of now |
+| Empty tokens list | `"accepted_tokens must not be empty"` | High | Provide at least one valid token address |
+| Duplicate token | `"duplicate token addresses"` | Medium | Remove duplicate token entries |
+| Too many tokens (>10) | `"too many accepted tokens"` | Medium | Limit `accepted_tokens` to 10 or fewer |
+| Negative per-contributor cap | `"max_per_contributor must not be negative"` | Low | Use 0 for no cap or a positive integer |
+| Caller not authorized | Soroban auth failure | High | Ensure `creator` signs the transaction |
+
+**Emits:** `CampaignCreated` (with the first token from the accepted list)
+
+**Indexer note:** The `CampaignCreated` event is emitted exactly once per successful `create_campaign` call, after all validation and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Create")` and use `campaign_id` as the primary dedup key.
+
+**Gas estimate:** base 25,000 + 3,000 per accepted token + 5,000 per storage write ≈ 45,000 units + 20% headroom = **54,000**
+
+---
+
+### `cancel_campaign`
+
+Cancels an active (unclaimed) campaign, allowing contributors to claim refunds. Creator only.
+
+```
+fn cancel_campaign(env: Env, campaign_id: u64, creator: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | ID of the campaign to cancel |
+| `creator` | `Address` | Must match the campaign's stored creator |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Contract paused | `"contract is paused"` | Medium | Wait for admin to unpause |
+| Campaign not found | `"campaign not found"` | High | Verify `campaign_id` exists via `get_campaign()` |
+| Creator mismatch | `"creator mismatch"` | Critical | Only the original `creator` address can cancel |
+| Already claimed | `"campaign already claimed"` | Medium | Funds already withdrawn; no cancellation possible |
+| Already canceled | `"campaign already canceled"` | Low | Campaign is already in a canceled state |
+
+**Emits:** `CampaignCanceled`
+
+**Gas estimate:** 14,000 + event ≈ 18,000 units + 20% headroom = **21,600**
+
+---
+
+### `update_metadata`
+
+Updates the campaign metadata string. Creator only, before deadline.
+
+```
+fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: String)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | ID of the campaign to update |
+| `creator` | `Address` | Must match the campaign's stored creator |
+| `new_metadata` | `String` | Replacement metadata string |
+
+**Authorization & deadline boundary:** Requires `creator.require_auth()` and verifies `campaign.creator == creator` before mutating campaign storage. Updates are permitted strictly before the deadline (`ledger.timestamp < deadline`, including the last second `deadline - 1`) and rejected once `ledger.timestamp >= deadline`. Unsigned calls, calls signed by any non-creator, or calls at/after the deadline fail atomically, emitting no events and leaving campaign metadata, pledges, and token balances unchanged.
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Contract paused | `"contract is paused"` | Medium | Wait for admin to unpause |
+| Campaign not found | `"campaign not found"` | High | Verify `campaign_id` |
+| Creator mismatch | `"creator mismatch"` | Critical | Only the original creator can update metadata |
+| Already claimed | `"campaign already claimed"` | Medium | Cannot update metadata after claim |
+| Campaign canceled | `"campaign canceled"` | Low | Campaign is terminated |
+| Past deadline | `"campaign deadline reached"` | Medium | Metadata cannot be updated after the deadline |
+
+**Emits:** `MetadataUpdated`
+
+**Event ordering and exactly-once semantics (issue #1524):** a successful call
+publishes exactly one `("Goal", "MetaUpd")` event, and it is published after
+the campaign record has been written. Its payload therefore always describes
+committed state: `old_metadata` is the value stored before the call and
+`new_metadata` is the value `get_campaign()` returns afterwards. A rejected
+call — paused contract, unknown campaign, creator mismatch, already claimed,
+canceled, past deadline, or failed authorization — panics before the write and
+publishes no event at all.
+
+Because each event carries both ends of the change, a consumer can replay
+metadata from the creation event's `metadata` field and apply every
+`MetadataUpdated` in ledger order to reproduce the committed value. Each
+committed change appears exactly once, so a replay never applies an update
+twice. Covered by
+`test_update_metadata_emits_one_event_with_old_and_new_values`,
+`test_metadata_update_events_replay_to_committed_metadata`, and
+`test_rejected_metadata_update_commits_nothing_and_emits_no_event` in
+`src/test.rs`, and
+`update_metadata_at_last_moment_before_deadline_enforces_creator_auth_and_emits_event`
+in `src/test_pledge_auth.rs`.
+
+**Gas estimate:** 16,000 + storage write + event ≈ 22,000 units + 20% headroom = **26,400**
+
+---
+
+## Contributions & Funds
+
+### Configuration-path authorization (issue #913)
+
+Every configuration entry point is guarded by `require_admin`, which requires
+the caller to sign **and** checks that the caller is the address stored by
+`initialize`. Keeping the check in one helper means a setter cannot ship with
+only one half of the check. Covered by `src/test_admin_auth.rs`.
+
+| Entry point | Required signer | Extra check |
+|---|---|---|
+| `initialize` | the `admin` argument | contract not already initialized |
+| `set_paused` | stored `admin` | contract must be initialized |
+| `set_fee` | stored `admin` | contract must be initialized |
+| `set_fee_recipient` | stored `admin` | contract must be initialized |
+| `migrate` | stored `admin` | contract must be initialized |
+
+### Pledge-path authorization (issue #898)
+
+Every state transition on the pledge path requires exactly one signer, and
+the signature covers all arguments. The auth check runs before any campaign
+state is read, so a call without the right signature fails the same way
+whatever state the campaign is in. Covered by `src/test_pledge_auth.rs`.
+
+| Entry point | Required signer | Extra identity check |
+|---|---|---|
+| `contribute` | `contributor` | `contributor` must not be the vault contract |
+| `claim` | `creator` | must equal the campaign's stored creator |
+| `cancel_campaign` | `creator` | must equal the campaign's stored creator |
+| `refund` | `contributor` | refunds only that contributor's own pledges |
+| `refund_all` | stored `admin` | contract must be initialized |
+
+For multi-token campaigns accepting assets with different decimal precision
+(such as 7-decimal XLM stroops and 6-decimal USDC units), these authority
+guarantees apply uniformly across all accepted tokens and rejected unaccepted
+assets: unauthorized calls cannot mutate campaign state or release escrowed
+funds, and payments in unaccepted assets fail atomically without altering
+accepted-token balances. Covered by
+`multi_token_xlm_usdc_and_unaccepted_asset_contribute_and_claim_authority` and
+`multi_token_xlm_usdc_and_unaccepted_asset_cancel_and_refund_authority` in
+`src/test_pledge_auth.rs`.
+
+### `contribute`
+
+Contribute tokens to a campaign. Tokens are transferred from the contributor to the contract.
+
+```
+fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, amount: i128)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | Target campaign ID |
+| `contributor` | `Address` | Contributor's address (must authenticate and have token balance) |
+| `token` | `Address` | Token contract address (must be in campaign's `accepted_tokens`) |
+| `amount` | `i128` | Amount to contribute in stroops |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Contract paused | `"contract is paused"` | Medium | Wait for admin to unpause |
+| Below minimum contribution | `"contribution below minimum"` | Medium | Increase amount to at least `get_min_contribution()` |
+| Campaign not found | `"campaign not found"` | High | Verify `campaign_id` |
+| Already claimed | `"campaign already claimed"` | Medium | Campaign has ended; cannot contribute |
+| Campaign canceled | `"campaign canceled"` | Medium | Campaign was canceled; use `refund()` if you already contributed |
+| Deadline passed | `"campaign deadline reached"` | Medium | Campaign funding period has ended |
+| Funding cap exceeded | `"campaign funding cap exceeded"` | Medium | Campaign has reached its `target_amount`; wait for next campaign |
+| Token not accepted | `"token not accepted by this campaign"` | Medium | Contribute one of `campaign.accepted_tokens` |
+| Per-contributor cap exceeded | `"per-contributor cap exceeded"` | Medium | Check `max_per_contributor` set at campaign creation |
+| Insufficient token balance | Soroban token transfer error | High | Ensure contributor has enough tokens and has approved transfer |
+| Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
+| Contributor is the vault contract | `"contributor cannot be the vault contract"` | High | Pledge from a real account; the vault cannot fund itself |
+
+**Minimum contribution boundary:** `amount` is compared as an `i128` against
+`get_min_contribution()`. The accepted range is `amount >= minimum`:
+
+- `amount == minimum` is accepted.
+- `amount == minimum - 1` (one stroop below) is rejected with
+  `"contribution below minimum"`.
+
+The floor defaults to 100 stroops when `initialize()` has not been called and
+can be changed with `initialize()`. The minimum check runs before the campaign
+is read, before the token transfer, and before any storage write, so a rejected
+call leaves the contributor balance, the campaign pledge, and the vault balance
+unchanged. A rejection emits neither the legacy `"Pledge"` event nor the
+structured `"Pledged"` event.
+
+`initialize()` rejects `0` and negative minimum values with
+`"min_contribution must be positive"` before persisting deployment state or
+publishing an initialization event. Valid deployments require a positive
+minimum in stroops; invalid deployment attempts leave the default minimum
+(100 stroops) observable.
+
+**Per-contributor cap boundary & cumulative enforcement (SGV-2026-120):**
+When `max_per_contributor > 0`, the sum of existing contributions across all
+accepted tokens plus the new contribution amount cannot exceed the cap:
+`already + amount <= cap`.
+- Multiple contributions that sum exactly to the configured cap are accepted in full.
+- Any attempt exceeding the cap (whether upfront or following prior successful or failed pledges)
+  is atomically rejected with `"per-contributor cap exceeded"`.
+- Atomic rollback ensures no tokens move, balances remain unchanged, and no pledge events are emitted.
+- The contributor's cumulative recorded pledge remains strictly within the cap.
+- Cumulative cap checks, campaign token balances, contributor totals, and emitted `CampaignPledgedEvent` totals all use checked `i128` arithmetic so overflow and over-cap attempts are rejected cleanly.
+
+**Per-contributor cap authority enforcement (SGV-2026-118):**
+Pledges made to a capped campaign strictly require the contributor's explicit authorization (`contributor.require_auth()`).
+- Neither the campaign creator nor the contract administrator may sign on behalf of a contributor or bypass the per-contributor cap.
+- Unsigned calls and calls signed by unauthorized parties are rejected before any balance deduction, storage update, or token movement.
+- Multiple contributions summing exactly to the cap require valid contributor authorization for each pledge.
+- Over-cap attempts following prior failures or boundary pledges are atomically rejected, preserving contributor balances, vault escrow, and campaign valuation without releasing funds.
+
+**Per-contributor cap event data, ordering & exactly-once semantics:**
+Every committed `contribute` call publishes two contract events in fixed order,
+only after cap validation, token transfer, and all storage writes succeed:
+1. `("Goal", "Pledge")` (`CampaignPledged`) — legacy pledge event carrying `(campaign_id, contributor, token, amount)`.
+2. `("Goal", "Pledged")` (`CampaignPledgedEvent`) — structured indexer event carrying `amount`, `total_pledged`, `contributor_count`, `token_balance`, `contributor_total` (cumulative for `token`), and `pledged_at`.
+
+To reconstruct a contributor's cumulative amount within `max_per_contributor`
+without extra storage reads, consumers seed the cap from
+`CampaignCreatedEvent.max_per_contributor` and replay `CampaignPledgedEvent` in
+ledger order, summing `amount` across all accepted tokens for that contributor
+(while `contributor_total` tracks the per-token cumulative total). Each
+committed pledge appears exactly once; rejected calls — including single-token
+and cross-token over-cap attempts — panic before token transfer and storage
+writes and emit zero events. Covered by
+`test_capped_pledge_emits_ordered_events_with_committed_state`,
+`test_capped_multi_token_pledge_events_replay_cumulative_total_once`, and
+`test_rejected_over_cap_pledge_commits_nothing_and_emits_no_events` in
+`src/test.rs`.
+
+**Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
+
+**Indexer note:** The `CampaignPledgedEvent` event is emitted exactly once per successful `contribute` call, after all validations, token transfer, and storage writes complete. Failed calls (validation panic, auth failure, paused contract) emit no event. Indexers can key on topic pair `("Goal", "Pledged")` and use `campaign_id` + `contributor` + `pledged_at` for deduplication and reconstructing pledge state without auxiliary contract reads.
+
+**Gas estimate:** 30,000 + token transfer cost (~10,000) + storage writes ≈ 50,000 units + 20% headroom = **60,000**
+
+---
+
+### `claim`
+
+Creators claim all accumulated funds after a successful campaign (deadline passed and target met).
+
+```
+fn claim(env: Env, campaign_id: u64, creator: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | ID of the funded campaign |
+| `creator` | `Address` | Must match the campaign's stored creator |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Contract paused | `"contract is paused"` | Medium | Wait for admin to unpause |
+| Campaign not found | `"campaign not found"` | High | Verify `campaign_id` |
+| Creator mismatch | `"creator mismatch"` | Critical | Only the original creator can claim |
+| Already claimed | `"campaign already claimed"` | Medium | Funds already withdrawn |
+| Campaign canceled | `"campaign canceled"` | Medium | Campaign was canceled; no funds to claim |
+| Still active | `"campaign is still active"` | Medium | Wait for deadline to pass |
+| Underfunded | `"campaign is not funded"` | Medium | `pledged_amount < target_amount`; contributors should use `refund()` |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry (or rely on `extend_ttl`) before retrying. No funds move and the campaign is not marked claimed |
+| Caller not authorized | Soroban auth failure | High | Ensure `creator` signs the transaction |
+
+**Atomicity guarantee:** `claim` is all-or-nothing. Every validation — the
+`creator` signature, the creator-match check, the `claimed` and `canceled`
+flags, the deadline, the funding check, and the storage-integrity check — runs
+before the first storage write or token transfer. A failed claim therefore
+leaves campaign storage, `pledged_amount`, the `claimed` flag, per-token
+balances, and token balances exactly as they were: no partial pledge or payout
+is possible. This holds for a duplicate claim (already `claimed`), a
+non-creator caller (auth failure or `"creator mismatch"`), and any other
+rejected call. Because the invocation aborts before any externally visible
+effect, no `CampaignClaimed` or `FeeCollected` success event is emitted for a
+failed claim.
+
+**Emits:** `CampaignClaimed` (one per token with a non-zero balance), and
+`FeeCollected` for each token whose fee transfer is positive. `CampaignClaimed.amount`
+is the gross campaign balance claimed for that token, before any fee split.
+Failed calls commit no claim or fee success events.
+
+**Eligibility boundary (issue #1515, SGV-2026-131):** the first eligible ledger
+is the one whose timestamp equals `campaign.deadline` — the guard is
+`timestamp >= deadline`, so the deadline ledger itself may claim. One ledger
+earlier the call is rejected with `"campaign is still active"`. Covered by
+`test_claim_at_first_eligible_ledger_pays_creator_once_and_emits_event`,
+`test_claim_at_first_eligible_ledger_emits_one_event_per_funded_token`, and
+`test_claim_one_ledger_before_deadline_moves_nothing_and_emits_no_event` in
+`src/test.rs`. Each asserts the exact post-conditions indexers rely on: a
+single payout to the creator, a vault balance of zero, unchanged pledge
+accounting, and the exact `("Goal", "Claim")` event payload (one per funded
+token) — or, on the rejected side, no balance change and no event at all. The
+rejected second-claim and non-creator paths keep their #1512 regression tests
+(`test_second_claim_is_atomic_and_leaves_no_partial_payout`,
+`test_non_creator_claim_is_atomic_and_leaves_no_partial_payout`), which assert
+that neither path can move funds or emit an event.
+
+**Claim boundary specification (SGV-2026-131):** five conditions must all be
+satisfied at the moment `claim` is called:
+
+1. `ledger.timestamp >= campaign.deadline` — deadline ledger is first eligible.
+2. `campaign.pledged_amount >= campaign.target_amount` — funded to at least the target.
+3. `creator == campaign.creator` — only the stored creator address may claim.
+4. Single payout, vault zeroed — the vault per-token balance is set to zero after
+   the transfer; `pledged_amount` is preserved as historical contribution accounting.
+5. Fully checked fee arithmetic — `balance.checked_mul(fee_bps)` then
+   `.checked_div(10_000)` for the fee and `balance.checked_sub(fee_amount)` for the
+   creator portion; every step uses `checked_*` so no arithmetic step can overflow.
+
+Covered together by `test_claim_boundary_exact_target_at_deadline_with_fee`
+(exercises all five conditions at once: `pledged == target`, `timestamp == deadline`,
+configured fee recipient, checked fee arithmetic, vault zeroed) and
+`test_claim_boundary_one_ledger_before_deadline_is_rejected` (confirms the lower
+boundary: `timestamp == deadline - 1` is rejected, no funds move, no events
+emitted) in `src/test.rs`.
+
+**Gas estimate:** 20,000 + 15,000 per accepted token (transfer + storage) ≈ base 20,000 + 15,000 per token + 20% headroom: **42,000** (1 token) / **102,000** (5 tokens)
+
+---
+
+### `refund`
+
+Individual contributor refund after campaign cancellation or underfunded deadline expiry.
+
+```
+fn refund(env: Env, campaign_id: u64, contributor: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | ID of the campaign to refund from |
+| `contributor` | `Address` | Contributor's address (must have contributed) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Contract paused | `"contract is paused"` | Medium | Wait for admin to unpause |
+| Campaign not found | `"campaign not found"` | High | Verify `campaign_id` |
+| Already claimed | `"campaign already claimed"` | Medium | Funds already withdrawn; no refunds possible |
+| Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or campaign cancellation |
+| Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target; creator can claim |
+| Nothing to refund | `"nothing to refund"` | Low | Contributor had no contributions to this campaign |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry before retrying. Nothing is transferred |
+| Insufficient contract balance | Soroban token transfer error | Critical | Contract does not hold enough tokens; investigate |
+| Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
+
+**Emits:** `CampaignRefunded` (one per token the contributor used)
+
+**Partial refunds and retries (issue #1518):** a campaign can be refunded one
+contributor at a time, so `pledged_amount` may sit between `0` and its pre-refund
+value while funds remain for other contributors. Within a single call the refund
+is all-or-nothing: if any token transfer fails, the whole invocation reverts and
+no contribution is zeroed, no token moves and no event is emitted. Retrying is
+safe — only the address passed as `contributor` may sign, so neither the creator,
+the admin nor another contributor can release those funds, and once the
+contributor has been refunded a duplicate call fails with `"nothing to refund"`
+without paying twice. Covered by
+`test_pledge_auth::refund_after_a_failed_token_transfer_pays_nothing_and_only_the_contributor_can_retry`
+and `test_pledge_auth::partially_refunded_campaign_lets_only_each_contributor_release_their_own_pledge`.
+
+**Gas estimate:** 22,000 + 12,000 per token contributed ≈ base 22,000 + 12,000 per token + 20% headroom: **40,800** (1 token) / **74,400** (3 tokens)
+
+---
+
+### `refund_all`
+
+Batch refund all contributors at once, after a failed or canceled campaign. **Admin only** (issue #898): the admin set by `initialize` must sign. Contributors can always reclaim their own funds with `refund`.
+
+```
+fn refund_all(env: Env, campaign_id: u64)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | ID of the campaign to refund all contributors from |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Contract paused | `"contract is paused"` | Medium | Wait for admin to unpause |
+| Campaign not found | `"campaign not found"` | High | Verify `campaign_id` |
+| Already claimed | `"campaign already claimed"` | Medium | Funds already withdrawn |
+| Still active (not canceled) | `"campaign is still active"` | Medium | Wait for deadline or cancellation |
+| Campaign is funded (not canceled) | `"funded campaigns cannot be refunded"` | Medium | Campaign met its target |
+| Nothing to refund (no contributors) | `"nothing to refund"` | Low | No contributors found |
+| Archived storage entry | `"campaign storage expired"` | High | A contribution or per-token balance entry was archived; restore the entry before retrying. No contributor is refunded |
+| Contract not initialized | `"not initialized"` | High | Call `initialize` to set an admin first |
+| Caller not authorized | Soroban auth failure | High | Ensure the stored `admin` signs the transaction |
+
+**Emits:** `CampaignRefunded` (one per contributor per token)
+
+**Gas estimate:** 15,000 base + 25,000 per contributor ≈ highly variable. For 10 contributors with 1 token each: **290,000** + 20% headroom = **348,000**
+
+---
+
+### Storage lifetime and settlement atomicity
+
+Campaign data lives in persistent storage. The campaign record, the contributor
+list, each per-token balance and each individual contribution are separate
+entries with independent lifetimes, so one of them can be archived while the
+rest of the campaign is still present. Soroban reads a missing entry as zero,
+which previously allowed a settlement to skip an archived token and still
+report success (issue #1527).
+
+`contribute`, `claim`, `refund` and `refund_all` first refresh the TTL of every
+entry they are about to read or rewrite. Before moving any funds, `claim`,
+`refund` and `refund_all` also rebuild each per-token total from the live
+contribution entries and require it to match both the stored per-token balance
+and the campaign's `pledged_amount`. Any disagreement aborts the invocation
+with `"campaign storage expired"` before the first token transfer.
+
+Because the abort happens before any externally visible effect, Soroban rolls
+the invocation back: no balance changes, no token movement, and the campaign is
+not marked claimed. Callers can restore the archived entry and retry.
+
+---
+
+### `migrate`
+
+Admin-only bulk migration of campaign records from an old contract instance. Idempotent — already-migrated source IDs are silently skipped.
+
+```
+fn migrate(
+    env: Env,
+    admin: Address,
+    old_contract_id: Address,
+    source_ids: Vec<u64>,
+    campaigns: Vec<Campaign>,
+)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `admin` | `Address` | Must match the stored admin address |
+| `old_contract_id` | `Address` | Contract ID of the old/previous instance |
+| `source_ids` | `Vec<u64>` | Original campaign IDs from the old contract |
+| `campaigns` | `Vec<Campaign>` | Campaign structs pre-fetched from the old contract (must match `source_ids` length) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+| Caller not admin | `"caller is not admin"` | Critical | Only the stored admin can migrate |
+| Length mismatch | `"source_ids and campaigns must have the same length"` (assert) | High | Ensure both vectors have equal length |
+| Caller not authorized | Soroban auth failure | High | Ensure `admin` signs the transaction |
+
+**Emits:** `Migrated` (one per newly imported campaign)
+
+**Gas estimate:** 12,000 base + 8,000 per campaign ≈ 12,000 + 8,000 × _n_ + 20% headroom. For 10 campaigns: **105,600**
+
+---
+
+## Governance
+
+### `request_deadline_extension`
+
+Propose a deadline extension for a campaign. The caller must be an existing contributor. The requester auto-approves their own request.
+
+```
+fn request_deadline_extension(
+    env: Env,
+    campaign_id: u64,
+    caller: Address,
+    new_deadline: u64,
+)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | ID of the campaign to extend |
+| `caller` | `Address` | Contributor's address (must have a positive contribution) |
+| `new_deadline` | `u64` | Proposed new deadline (must be after current, within 180 days of campaign creation) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Contract paused | `"contract is paused"` | Medium | Wait for admin to unpause |
+| Campaign not found | `"campaign not found"` | High | Verify `campaign_id` |
+| Already claimed | `"campaign already claimed"` | Medium | Campaign has ended |
+| Campaign canceled | `"campaign canceled"` | Medium | Campaign is terminated |
+| Deadline not later | `"new deadline must be after current deadline"` | Low | Choose a timestamp after the current deadline |
+| Exceeds max duration | `"new deadline exceeds maximum campaign duration"` | Low | Limit extension to within 180 days of campaign creation |
+| Not a contributor | `"caller is not a contributor"` | Medium | Only existing contributors can request extensions |
+| Request already pending | `"extension request already pending"` | Low | Approve or wait for the current request to resolve before proposing another |
+| Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
+
+**Emits:** `ExtensionRequested`, then `ExtensionApproved` for the requester's auto-approval. If that first vote already exceeds 50% of the contributor count (for example, a campaign with a single contributor), the deadline is committed in the same call and `DeadlineExtended` follows. All events are emitted after the storage writes.
+
+Only one request may be pending at a time. A second proposal is rejected instead of overwriting the first, so every vote remains attributable to exactly one request.
+
+**Gas estimate:** 18,000 + storage writes + events ≈ 28,000 units + 20% headroom = **33,600**
+
+---
+
+### `approve_extension`
+
+Vote to approve a pending deadline extension. When approvals exceed 50% of the contributor count, the new deadline is applied and the pending request is cleared.
+
+```
+fn approve_extension(env: Env, campaign_id: u64, caller: Address)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | ID of the campaign with a pending extension request |
+| `caller` | `Address` | Contributor's address (must not have already voted) |
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Contract paused | `"contract is paused"` | Medium | Wait for admin to unpause |
+| Campaign not found | `"campaign not found"` | High | Verify `campaign_id` |
+| Already claimed | `"campaign already claimed"` | Medium | Campaign has ended |
+| Campaign canceled | `"campaign canceled"` | Medium | Campaign is terminated |
+| Not a contributor | `"caller is not a contributor"` | Medium | Only existing contributors can vote |
+| Already voted | `"already voted"` | Low | Each contributor votes once per extension request |
+| No pending request | `"no extension request"` | Low | Call `request_deadline_extension()` first |
+| Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
+
+**Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither. When the extension is committed, the votes recorded for that request are cleared so the next request starts a fresh tally.
+
+**Gas estimate:** 20,000 + storage write + conditional deadline apply + event ≈ 30,000 units + 20% headroom = **36,000**
+
+#### Deadline Extension Vote Boundaries (SGV-2026-126)
+
+- **Smallest Strict Majority Threshold:** An extension proposal is approved when `approval_count * 2 > contributor_count` ($\lfloor N/2 \rfloor + 1$ distinct contributor votes).
+  - For $N=3$ contributors, 2 approvals commit the extension (1 approval leaves the proposal pending).
+  - For $N=4$ contributors, 3 approvals commit the extension (2 approvals is a 50% tie and remains pending).
+- **Checked Arithmetic on Governance Counters:** Calculation of vote majorities (`checked_mul`), approval counts (`checked_add`), and maximum allowed extension durations (`checked_add`) use checked integer arithmetic to eliminate overflow and wrapping risks.
+- **Auditable Unique Votes & Single Extension:** Each distinct contributor can vote at most once per proposal round (`ExtensionVote` deduplication). Once the smallest majority is reached, the extension commits immediately, the pending request is removed, and subsequent approvals are rejected with `"no extension request"`, preserving exactly one valid extension per round.
+- **Failure Atomicity Around Pledges and Settlement:** Injecting a duplicate vote (`"already voted"`) or an extension request beyond `MAX_CAMPAIGN_DURATION_SECONDS` (`"new deadline exceeds maximum campaign duration"`) fails before any storage writes or event emissions. Pending extension state, campaign deadlines, contribution records, and vault/contributor token balances remain unchanged with no partial pledge or payout.
+
+---
+
+## Read-Only Queries
+
+### `get_campaign`
+
+Returns the full `Campaign` struct for a given ID.
+
+```
+fn get_campaign(env: Env, campaign_id: u64) -> Campaign
+```
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Campaign not found | `"campaign not found"` | High | Verify `campaign_id` via `get_campaign_count()` |
+
+**Gas estimate:** 3,000 + storage read ≈ 5,000 units + 20% headroom = **6,000**
+
+---
+
+### `get_contribution`
+
+Returns the amount a specific contributor has contributed using a specific token.
+
+```
+fn get_contribution(env: Env, campaign_id: u64, contributor: Address, token: Address) -> i128
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `contributor` | `Address` | Contributor's address |
+| `token` | `Address` | Token address |
+
+**Returns:** `i128` — contribution amount in stroops (0 if none)
+
+**Gas estimate:** 3,500 + storage read ≈ 5,000 units + 20% headroom = **6,000**
+
+---
+
+### `get_campaign_token_balance`
+
+Returns the total balance of a specific token held for a campaign.
+
+```
+fn get_campaign_token_balance(env: Env, campaign_id: u64, token: Address) -> i128
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `token` | `Address` | Token address |
+
+**Returns:** `i128` — token balance held by the contract for this campaign (0 if none)
+
+**Gas estimate:** 3,000 + storage read ≈ 4,500 units + 20% headroom = **5,400**
+
+---
+
+### `get_contributor_count`
+
+Returns the number of unique contributors to a campaign.
+
+```
+fn get_contributor_count(env: Env, campaign_id: u64) -> u32
+```
+
+**Gas estimate:** 3,000 + storage read ≈ 5,000 units + 20% headroom = **6,000**
+
+---
+
+### `get_min_contribution`
+
+Returns the current minimum contribution threshold in stroops. Defaults to 100 if `initialize()` was not called.
+
+```
+fn get_min_contribution(env: Env) -> i128
+```
+
+**Gas estimate:** 2,500 + storage read ≈ 4,000 units + 20% headroom = **4,800**
+
+---
+
+### `get_paused`
+
+Returns whether the contract is currently paused.
+
+```
+fn get_paused(env: Env) -> bool
+```
+
+**Gas estimate:** 2,000 + storage read ≈ 3,000 units + 20% headroom = **3,600**
+
+---
+
+### `get_admin`
+
+Returns the stored admin address. Panics if not initialized.
+
+```
+fn get_admin(env: Env) -> Address
+```
+
+**Errors:**
+
+| Error Condition | Panic Message | Severity | Recovery Action |
+|----------------|---------------|----------|-----------------|
+| Not initialized | `"not initialized"` | High | Call `initialize()` first |
+
+**Gas estimate:** 2,500 + storage read ≈ 4,000 units + 20% headroom = **4,800**
+
+---
+
+### `get_next_campaign_id`
+
+Returns the next campaign ID that will be assigned. Also used as the campaign count (sequential 1-based IDs).
+
+```
+fn get_next_campaign_id(env: Env) -> u64
+```
+
+**Returns:** `u64` — next available campaign ID (0 before any campaign is created)
+
+**Gas estimate:** 2,500 + storage read ≈ 4,000 units + 20% headroom = **4,800**
+
+---
+
+### `get_campaign_count`
+
+Returns the total number of campaigns created. Equivalent to `get_next_campaign_id()`.
+
+```
+fn get_campaign_count(env: Env) -> u64
+```
+
+**Gas estimate:** 2,500 + storage read ≈ 4,000 units + 20% headroom = **4,800**
+
+---
+
+### `get_version`
+
+Returns the contract version string.
+
+```
+fn get_version(env: Env) -> String
+```
+
+**Gas estimate:** 3,000 + conditional storage write (first call only) ≈ 5,000 units + 20% headroom = **6,000**
+
+---
+
+### `get_deploy_info`
+
+Returns version and deployment timestamp.
+
+```
+fn get_deploy_info(env: Env) -> DeployInfo
+```
+
+**Gas estimate:** 4,000 + storage reads + conditional storage write ≈ 7,000 units + 20% headroom = **8,400**
+
+---
+
+### `get_extension_request`
+
+Returns the pending extension request for a campaign, if one exists.
+
+```
+fn get_extension_request(env: Env, campaign_id: u64) -> Option<ExtensionRequest>
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+
+**Returns:** `Option<ExtensionRequest>` — `Some(request)` if a pending request exists, `None` otherwise
+
+**Gas estimate:** 3,000 + storage read ≈ 5,000 units + 20% headroom = **6,000**
+
+---
+
+## Events
+
+All events use the topic prefix `(symbol_short!("Goal"), ...)`.
+
+### `CampaignCreated`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Create"` |
+
+**Data** (`CampaignCreated`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Newly created campaign ID |
+| `creator` | `Address` | Campaign creator |
+| `token` | `Address` | First accepted token |
+| `target_amount` | `i128` | Funding target |
+| `deadline` | `u64` | Campaign deadline |
+| `metadata` | `String` | Campaign metadata |
+
+**Emitted by:** `create_campaign`
+
+**Stability contract:** Topic symbols `"Goal"` and `"Create"` are frozen for the lifetime of this contract version. Payload fields are append-only; existing field order and types must not change without a major version bump. `metadata` is the creator-supplied string and may contain arbitrary UTF-8 — indexers should treat it as untrusted display data, not as a key.
+
+---
+
+### `CampaignPledged`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Pledge"` |
+
+**Data** (`CampaignPledged`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `contributor` | `Address` | Contributor address |
+| `token` | `Address` | Token contributed |
+| `amount` | `i128` | Contribution amount |
+
+**Emitted by:** `contribute`
+
+---
+
+### `CampaignPledgedEvent`
+
+Structured event emitted for off-chain indexers and audit pipelines upon successful pledge execution.
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Pledged"` |
+
+**Data** (`CampaignPledgedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `contributor` | `Address` | Contributor address |
+| `token` | `Address` | Token contract address contributed |
+| `amount` | `i128` | Amount contributed in this transaction (in stroops) |
+| `total_pledged` | `i128` | Total amount pledged across all tokens for the campaign after this pledge |
+| `contributor_count` | `u32` | Total unique contributors to the campaign after this pledge |
+| `token_balance` | `i128` | Total balance of this specific token held by the campaign after this pledge |
+| `contributor_total` | `i128` | Cumulative amount this contributor has contributed with this token |
+| `pledged_at` | `u64` | Unix timestamp (seconds) of the pledge transaction ledger |
+
+**Emitted by:** `contribute`
+
+**Stability contract & Indexer guidelines:**
+- Topic symbols `"Goal"` and `"Pledged"` are frozen for this contract version.
+- Emitted exactly once per committed `contribute` call, immediately after `("Goal", "Pledge")` and only after all validations (including the per-contributor cap check), auth checks, token transfer, and storage writes succeed. Reverted or rejected transactions emit no event.
+- All amounts are represented as `i128` stroops.
+- `contributor_total` is the contributor's cumulative total for `token`. For capped campaigns (`max_per_contributor > 0` in `CampaignCreatedEvent`), summing `amount` across accepted tokens in ledger order reconstructs the contributor's cross-token cumulative total (`<= max_per_contributor`) exactly once without additional contract storage reads.
+
+---
+
+### `CampaignClaimed`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Claim"` |
+
+**Data** (`CampaignClaimed`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `creator` | `Address` | Creator who claimed |
+| `token` | `Address` | Token claimed |
+| `amount` | `i128` | Amount claimed |
+
+**Emitted by:** `claim` (one per token with a non-zero balance, after successful
+transfers and campaign balance clearing). `amount` is the gross amount removed
+from campaign accounting; when a fee applies, `FeeCollected` describes the fee
+portion of this amount. The event contains no contributor-specific data.
+
+---
+
+### `FeeCollected`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Fee"` |
+
+**Data** (`FeeCollected`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `token` | `Address` | Token from which the fee was collected |
+| `fee_amount` | `i128` | Positive fee transferred to the recipient |
+| `fee_recipient` | `Address` | Address receiving the fee |
+
+**Emitted by:** `claim`, once per token only when a fee recipient is configured
+and the calculated fee is greater than zero. No event is emitted for zero fees,
+or when no fee recipient is configured. As with `CampaignClaimed`, the event is
+committed only if the full claim transaction succeeds.
+
+---
+
+### `CampaignRefunded`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Refund"` |
+
+**Data** (`CampaignRefunded`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `contributor` | `Address` | Contributor refunded |
+| `token` | `Address` | Token refunded |
+| `amount` | `i128` | Amount refunded |
+
+**Emitted by:** `refund`, `refund_all`
+
+---
+
+### `CampaignCanceled`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Cancel"` |
+
+**Data** (`CampaignCanceled`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `creator` | `Address` | Creator who canceled |
+
+**Emitted by:** `cancel_campaign`
+
+---
+
+### `ContractInitializedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Init"` |
+
+**Data** (`ContractInitializedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Initialized admin address |
+| `min_contribution` | `i128` | Minimum contribution floor in stroops |
+| `contract_version` | `String` | Contract version deployed |
+
+**Emitted by:** `initialize`
+
+---
+
+### `ContractPausedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"CfgPause"` |
+
+**Data** (`ContractPausedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin address initiating pause state change |
+| `paused` | `bool` | New pause status (`true` = paused, `false` = unpaused) |
+| `contract_version` | `String` | Contract version at time of change |
+
+**Emitted by:** `set_paused`
+
+---
+
+### `PlatformFeeUpdatedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"FeeSet"` |
+
+**Data** (`PlatformFeeUpdatedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin updating fee |
+| `old_fee_bps` | `i128` | Previous fee in basis points |
+| `new_fee_bps` | `i128` | New fee in basis points |
+
+**Emitted by:** `set_fee`
+
+---
+
+### `FeeRecipientUpdatedEvent`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"RecipSet"` |
+
+**Data** (`FeeRecipientUpdatedEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin updating recipient |
+| `old_recipient` | `Option<Address>` | Previous recipient address if configured |
+| `new_recipient` | `Address` | Newly designated recipient address |
+
+**Emitted by:** `set_fee_recipient`
+
+---
+
+### `ContractPaused`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Pause"` |
+
+**Data** (`ContractPaused`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `contract_version` | `String` | Contract version at time of pause |
+
+**Emitted by:** `set_paused(paused: true)`
+
+---
+
+### `ContractUnpaused`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Unpause"` |
+
+**Data** (`ContractUnpaused`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `contract_version` | `String` | Contract version at time of unpause |
+
+**Emitted by:** `set_paused(paused: false)`
+
+---
+
+### `MetadataUpdated`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"MetaUpd"` |
+
+**Data** (`MetadataUpdated`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `creator` | `Address` | Creator who updated |
+| `old_metadata` | `String` | Metadata value stored before this call |
+| `new_metadata` | `String` | Metadata value stored by this call |
+
+**Emitted by:** `update_metadata`, exactly once per successful call and after
+the campaign record is written. Replaying `old_metadata` -> `new_metadata` in
+ledger order (seeded by the creation event's `metadata`) reconstructs the
+committed metadata; rejected calls emit nothing. See the
+[`update_metadata`](#update_metadata) section.
+
+---
+
+### `ExtensionRequested`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"ExtReq"` |
+
+**Data** (`ExtensionRequested`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `requested_by` | `Address` | Contributor who requested |
+| `new_deadline` | `u64` | Proposed new deadline |
+
+**Emitted by:** `request_deadline_extension` (first event of a successful request)
+
+Each request is followed by the requester's auto-approval, reported as an
+`ExtensionApproved` event, so the vote tally can be rebuilt from events alone.
+
+---
+
+### `ExtensionApproved`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"ExtAppr"` |
+
+**Data** (`ExtensionApproved`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `approver` | `Address` | Contributor who approved |
+| `approval_count` | `u32` | Total approvals after this vote |
+
+**Emitted by:** `request_deadline_extension` (the requester's auto-approval) and `approve_extension` (every successful call)
+
+---
+
+### `DeadlineExtended`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Extended"` |
+
+**Data** (`DeadlineExtended`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `campaign_id` | `u64` | Campaign ID |
+| `old_deadline` | `u64` | Deadline before the change |
+| `new_deadline` | `u64` | Deadline now stored on the campaign |
+
+Emitted once per committed extension, immediately after the `ExtensionApproved` event for the vote that reached a majority. The deadline decides whether a campaign still accepts pledges or can be claimed or refunded, so a consumer rebuilding campaign availability from events needs this event to see the change.
+
+**Emitted by:** `request_deadline_extension` when the requester's auto-approval is already a majority, otherwise `approve_extension` when a later vote reaches a majority
+
+---
+
+### `Migrated`
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"Migrated"` |
+
+**Data**: `(Address, u64, u64)` — tuple of `(old_contract_id, source_campaign_id, new_campaign_id)`
+
+**Emitted by:** `migrate`
+
+---
+
+## Error Codes Reference
+
+| Panic Message | Functions | Severity | Recovery |
+|---------------|-----------|----------|----------|
+| `"already initialized"` | `initialize` | High | Do not call `initialize()` again |
+| `"min_contribution must be positive"` | `initialize` | High | Pass `min_contribution > 0` |
+| `"not initialized"` | `set_paused`, `set_fee`, `set_fee_recipient`, `get_admin`, `migrate` | High | Call `initialize()` with admin address |
+| `"caller is not admin"` | `set_paused`, `set_fee`, `set_fee_recipient`, `migrate` | Critical | Only the admin address stored during `initialize()` may call configuration setters |
+| `"fee must be non-negative"` | `set_fee` | Medium | Provide a fee >= 0 bps |
+| `"fee must not exceed 10000 basis points"` | `set_fee` | Medium | Limit fee to 10000 basis points (100%) or lower |
+| `"fee recipient cannot be the vault contract"` | `set_fee_recipient` | Medium | Provide a fee recipient address other than the vault contract address |
+| `"contract is paused"` | all state-mutating functions | Medium | Wait for admin to unpause |
+| `"campaign not found"` | all campaign-specific functions | High | Verify `campaign_id` via `get_campaign()` |
+| `"target amount must be positive"` | `create_campaign` | High | Set `target_amount > 0` |
+| `"deadline must be in the future"` | `create_campaign` | Medium | Set `deadline > env.ledger().timestamp()` |
+| `"deadline exceeds maximum campaign duration"` | `create_campaign`, `request_deadline_extension` | Medium | Deadline must be within 180 days of creation |
+| `"accepted_tokens must not be empty"` | `create_campaign` | High | Provide at least one token address |
+| `"duplicate token addresses"` | `create_campaign` | Medium | Remove duplicate entries |
+| `"too many accepted tokens"` | `create_campaign` | Medium | Max 10 tokens per campaign |
+| `"max_per_contributor must not be negative"` | `create_campaign` | Low | Use 0 for no cap or a positive value |
+| `"contribution below minimum"` | `contribute` | Medium | Increase to `get_min_contribution()` or higher |
+| `"campaign already claimed"` | `contribute`, `claim`, `refund`, `refund_all`, `cancel_campaign`, `update_metadata`, `request_deadline_extension`, `approve_extension` | Medium | Campaign ended; check claim/refund options |
+| `"campaign canceled"` | `contribute`, `claim`, `refund`, `update_metadata`, `request_deadline_extension`, `approve_extension` | Medium | Use `refund()` if you contributed |
+| `"already canceled"` | `cancel_campaign` | Low | Campaign is already canceled |
+| `"campaign deadline reached"` | `contribute`, `update_metadata` | Medium | Campaign ended; check claim/refund |
+| `"campaign funding cap exceeded"` | `contribute` | Medium | Campaign reached its target; try another |
+| `"token not accepted by this campaign"` | `contribute` | Medium | Use one of `campaign.accepted_tokens` |
+| `"campaign is still active"` | `claim`, `refund`, `refund_all` | Medium | Wait for deadline or cancel first |
+| `"campaign is not funded"` | `claim` | Medium | `pledged_amount < target_amount` |
+| `"funded campaigns cannot be refunded"` | `refund`, `refund_all` | Medium | Campaign met its target; creator can claim |
+| `"creator mismatch"` | `cancel_campaign`, `claim`, `update_metadata` | Critical | Only the campaign's `creator` address can perform this action |
+| `"nothing to refund"` | `refund`, `refund_all` | Low | No contributions found for this contributor/campaign |
+| `"caller is not a contributor"` | `request_deadline_extension`, `approve_extension` | Medium | Contribute to the campaign first |
+| `"new deadline must be after current deadline"` | `request_deadline_extension` | Low | Choose a later timestamp |
+| `"new deadline exceeds maximum campaign duration"` | `request_deadline_extension` | Low | Limit extension to within 180 days of creation |
+| `"no extension request"` | `approve_extension` | Low | Call `request_deadline_extension()` first |
+| `"already voted"` | `approve_extension` | Low | Each contributor votes once per request |
+| `"source_ids and campaigns must have the same length"` | `migrate` | High | Ensure both vectors have equal length |
+
+---
+
+## Gas Estimates
+
+All estimates are in Soroban **CPU instruction units**. Estimates include **20% headroom** as required by the deployment policy.
+
+| Function | Base Estimate | With 20% Headroom | Notes |
+|----------|--------------|-------------------|-------|
+| `initialize` | 20,000 | **24,000** | One-time setup |
+| `set_paused` | 16,000 | **19,200** | Includes event emission |
+| `create_campaign` | 45,000 | **54,000** | +3,000 per accepted token |
+| `cancel_campaign` | 18,000 | **21,600** | Single storage write + event |
+| `update_metadata` | 22,000 | **26,400** | Storage + event |
+| `contribute` | 50,000 | **60,000** | Token transfer + 2–3 storage writes |
+| `claim` | 20,000 + 15,000/token | **42,000** (1 token) | Token transfer per accepted token |
+| `refund` | 22,000 + 12,000/token | **40,800** (1 token) | Token transfer per contributor token |
+| `refund_all` | 15,000 + 25,000/contributor | **348,000** (10 contributors) | Highly variable |
+| `request_deadline_extension` | 26,000 | **31,200** | Storage writes + event |
+| `approve_extension` | 30,000 | **36,000** | Conditional deadline update |
+| `migrate` | 12,000 + 8,000/campaign | **105,600** (10 campaigns) | Per-campaign storage |
+| `get_campaign` | 5,000 | **6,000** | Read-only |
+| `get_contribution` | 5,000 | **6,000** | Read-only |
+| `get_campaign_token_balance` | 4,500 | **5,400** | Read-only |
+| `get_contributor_count` | 5,000 | **6,000** | Read-only |
+| `get_min_contribution` | 4,000 | **4,800** | Read-only |
+| `get_paused` | 3,000 | **3,600** | Read-only |
+| `get_admin` | 4,000 | **4,800** | Read-only |
+| `get_next_campaign_id` | 4,000 | **4,800** | Read-only |
+| `get_campaign_count` | 4,000 | **4,800** | Read-only |
+| `get_version` | 5,000 | **6,000** | Conditional first-call storage write |
+| `get_deploy_info` | 7,000 | **8,400** | Conditional first-call storage write |
+| `get_extension_request` | 5,000 | **6,000** | Read-only |
+
+---
+
+## Worked Examples
+
+### Example 1: Full Campaign Lifecycle
+
+Deploy and initialize the contract, create a campaign, contribute, wait for deadline, and claim.
+
+```typescript
+// --- Setup ---
+// 1. Initialize contract (admin = GABC..., min_contribution = 100 stroops)
+//    This is called once when the contract is first deployed.
+//    Cost: ~24,000 gas units
+//    Storage: sets Admin, Paused=false, MinContribution=100
+
+// 2. Create campaign
+//    creator = GBCD..., target = 10_000 stroops, deadline = now + 7 days
+//    accepted_tokens = [USDC_token_address], metadata = "Help build a school"
+//    Returns: campaign_id = 1
+//    Cost: ~54,000 gas units
+//    Storage: Campaign(1), NextCampaignId=1, ContributorCap(1) not stored (0 = no cap)
+//    Event: CampaignCreated { campaign_id: 1, creator: GBCD..., ... }
+
+// --- Contributing ---
+// 3. Contributor GEFG... contributes 500 USDC
+//    contribute(campaign_id=1, contributor=GEFG..., token=USDC, amount=500)
+//    Cost: ~60,000 gas units
+//    Effects:
+//      - TokenClient.transfer(GEFG..., contract_address, 500)
+//      - Campaign(1).pledged_amount: 0 → 500
+//      - Campaign(1).contributor_count: 0 → 1
+//      - HasContributed(1, GEFG...) = true
+//      - CampaignTokenBalance(1, USDC) = 500
+//    Event: CampaignPledged { campaign_id: 1, contributor: GEFG..., ... }
+
+// --- Waiting ---
+// 4. Wait until deadline passes (env.ledger().timestamp() > campaign.deadline)
+
+// --- Claiming ---
+// 5. Creator claims funds
+//    claim(campaign_id=1, creator=GBCD...)
+//    Cost: ~42,000 gas units (1 token)
+//    Effects:
+//      - Campaign(1).claimed = true
+//      - TokenClient.transfer(contract_address, GBCD..., 500)
+//      - CampaignTokenBalance(1, USDC) = 0
+//    Event: CampaignClaimed { campaign_id: 1, creator: GBCD..., ... }
+```
+
+### Example 2: Cancel + Refund
+
+Create a campaign, contribute, cancel before deadline, and refund.
+
+```typescript
+// --- Setup ---
+// initialize(admin=GABC..., min_contribution=100)
+// create_campaign(creator=GBCD..., target=10_000, deadline=now+30d, ...)
+//   → campaign_id = 1
+
+// --- Contribute ---
+// contribute(campaign_id=1, contributor=GEFG..., token=USDC, amount=500)
+//   → Campaign(1).pledged_amount = 500, contributor_count = 1
+
+// --- Cancel ---
+// cancel_campaign(campaign_id=1, creator=GBCD...)
+//   → Campaign(1).canceled = true
+//   Event: CampaignCanceled { campaign_id: 1, creator: GBCD... }
+
+// --- Refund (individual) ---
+// refund(campaign_id=1, contributor=GEFG...)
+//   → Tokens transferred back to GEFG...
+//   → Campaign(1).pledged_amount = 0
+//   Event: CampaignRefunded { campaign_id: 1, contributor: GEFG..., ... }
+```
+
+### Example 3: Deadline Extension Governance
+
+Multiple contributors vote to extend a campaign deadline.
+
+```typescript
+// --- Setup ---
+// create_campaign(creator=GBCD..., target=10_000, deadline=now+14d, ...)
+//   → campaign_id = 1
+
+// Contributors GEFG... and GHIF... each contribute
+// contribute(campaign_id=1, contributor=GEFG..., token=USDC, amount=5_000)
+// contribute(campaign_id=1, contributor=GHIF..., token=USDC, amount=3_000)
+//   → contributor_count = 2
+
+// --- Extension Request ---
+//   contributor_count = 2, need >50% → need 2 approvals
+// request_deadline_extension(campaign_id=1, caller=GEFG..., new_deadline=now+21d)
+//   → ExtensionRequest(1) = { new_deadline: now+21d, requested_by: GEFG..., approval_count: 1 }
+//   Event: ExtensionRequested { campaign_id: 1, requested_by: GEFG..., new_deadline: now+21d }
+
+// --- Approval (majority reached) ---
+// approve_extension(campaign_id=1, caller=GHIF...)
+//   → approval_count: 1 → 2
+//   → 2 * 2 > 2 = true → deadline applied
+//   → Campaign(1).deadline = now+21d
+//   → ExtensionRequest(1) cleared
+//   No new event (the extension application is implicit in approve_extension)
+```
+
+### Example 4: Multi-Token Campaign
+
+Campaign accepts multiple token types.
+
+```typescript
+// --- Create multi-token campaign ---
+// accepted_tokens = [USDC, EURC, BRL]
+// create_campaign(creator=GBCD..., accepted_tokens=[USDC, EURC, BRL], target=15_000, ...)
+//   → campaign_id = 1
+
+// --- Contribute with different tokens ---
+// contribute(campaign_id=1, contributor=GEFG..., token=USDC, amount=5_000)
+//   → CampaignTokenBalance(1, USDC) = 5_000
+//   → pledged_amount = 5_000
+
+// contribute(campaign_id=1, contributor=GEFG..., token=EURC, amount=3_000)
+//   → CampaignTokenBalance(1, EURC) = 3_000
+//   → pledged_amount = 8_000 (contributor_count stays 1, same contributor)
+
+// contribute(campaign_id=1, contributor=GHIF..., token=BRL, amount=7_000)
+//   → CampaignTokenBalance(1, BRL) = 7_000
+//   → pledged_amount = 15_000 (reached target)
+//   → contributor_count = 2
+
+// --- Claim ---
+// claim(campaign_id=1, creator=GBCD...)
+//   → Transfers USDC(5k) + EURC(3k) + BRL(7k) to creator
+//   → 3 CampaignClaimed events emitted (one per token)
+```
+
+#### Multi-Token Accounting Boundaries (SGV-2026-121)
+
+- **Independent Token Ledgers:** Each accepted token maintains its own isolated escrow balance in `CampaignTokenBalance(campaign_id, token)` and per-contributor accounting in `Contribution(campaign_id, contributor, token)`.
+- **Different Precision Support:** Tokens with different precisions (e.g., native XLM at 7 decimals and USDC at 6/7 decimals) are managed in their exact native integer base units (stroops/units).
+- **Checked Integer Arithmetic:** All pledge additions, valuation sums, contributor cap checks, platform fee deductions, and refund calculations use checked arithmetic (`checked_add`, `checked_sub`, `checked_mul`), eliminating overflow and underflow vulnerabilities.
+- **Exact Transfers:** Claims and refunds operate on per-token balance boundaries, transferring exact integer amounts with zero rounding loss.
+
+#### Multi-Token Failure Atomicity (SGV-2026-122)
+
+- **Atomic Rejection of Unaccepted Assets:** Any attempt to pledge in an unaccepted token (`!campaign.accepted_tokens.contains(token)`) fails atomically with `"token not accepted by this campaign"` before storage writes or token transfers occur.
+- **Isolated State Integrity:** Injecting an unaccepted asset payment before, between, or after valid pledges in accepted tokens leaves contributor balances, accepted token escrows, campaign pledged valuation, and contributor counts unchanged.
+- **Zero Partial Pledge or Payout:** Failed unaccepted asset invocations create no partial pledge entries and leave no unaccepted funds in the vault. Campaign settlement (`claim` and `refund`) operates exclusively over accepted tokens, ensuring exact payouts and fee deductions with zero leakage or stranded assets.
+
+### Example 5: Read-Only Queries
+
+Checking campaign state without mutation.
+
+```typescript
+// --- Check campaign state ---
+// get_campaign(campaign_id=1)
+//   → Returns full Campaign struct:
+//     { creator, accepted_tokens, target_amount: 10_000,
+//       pledged_amount: 5_000, deadline: ..., claimed: false,
+//       canceled: false, metadata: "Help build a school",
+//       contributor_count: 1, created_at: ... }
+
+// --- Check specific contribution ---
+// get_contribution(campaign_id=1, contributor=GEFG..., token=USDC)
+//   → Returns 5_000
+
+// --- Check admin ---
+// get_admin() → GABC...
+
+// --- Check version ---
+// get_version() → "0.1.0"
+
+// --- Check extension status ---
+// get_extension_request(campaign_id=1)
+//   → Returns Option<ExtensionRequest>
+//     None if no pending request, Some(request) if one exists
+```
+
+---
+
+*Last updated: 2026-07-29*
+

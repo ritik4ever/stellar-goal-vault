@@ -212,6 +212,12 @@ pub struct ContractUnpaused {
 }
 
 /// Emitted when a campaign creator updates the campaign metadata (issue #185).
+///
+/// Published exactly once per successful `update_metadata` call, after the
+/// campaign record has been written. `old_metadata` is the value that was
+/// stored before the call and `new_metadata` is the value stored afterwards,
+/// so replaying these events (starting from the creation event's metadata)
+/// reproduces the committed metadata without additional reads (issue #1524).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetadataUpdated {
@@ -311,6 +317,14 @@ pub struct CampaignCreatedEvent {
 /// token balances, contributor counts, and timestamp so indexers can reconstruct
 /// campaign and contributor pledge state without additional reads. Sensitive data
 /// (none exists here) is not duplicated.
+///
+/// Published exactly once per committed `contribute` call, immediately after
+/// `("Goal", "Pledge")` and only after all validations (including the
+/// per-contributor cap check), token transfer, and storage writes succeed.
+/// `contributor_total` is the contributor's cumulative total for `token`;
+/// summing `amount` across accepted tokens in ledger order (against
+/// `CampaignCreatedEvent.max_per_contributor`) reconstructs the contributor's
+/// cross-token cumulative total exactly once. Rejected calls emit nothing.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CampaignPledgedEvent {
@@ -813,7 +827,7 @@ impl StellarGoalVaultContract {
                     .checked_add(prev_c)
                     .unwrap_or_else(|| panic!("per-contributor cap exceeded"));
             }
-            if already.checked_add(amount).map_or(true, |sum| sum > cap) {
+            if already.checked_add(amount).is_none_or(|sum| sum > cap) {
                 panic!("per-contributor cap exceeded");
             }
         }
@@ -834,7 +848,10 @@ impl StellarGoalVaultContract {
             .get(&has_contributed_key)
             .unwrap_or(false);
         if !has_contributed {
-            campaign.contributor_count += 1;
+            campaign.contributor_count = campaign
+                .contributor_count
+                .checked_add(1)
+                .unwrap_or_else(|| panic!("arithmetic overflow"));
             env.storage().persistent().set(&has_contributed_key, &true);
             // Track contributor for refund_all
             let contributors_key = DataKey::Contributors(campaign_id);
@@ -901,8 +918,8 @@ impl StellarGoalVaultContract {
                 amount,
                 total_pledged: campaign.pledged_amount,
                 contributor_count: campaign.contributor_count,
-                token_balance: current_balance + amount,
-                contributor_total: current_contribution + amount,
+                token_balance: new_balance,
+                contributor_total: new_contribution,
                 pledged_at: env.ledger().timestamp(),
             },
         );
@@ -911,6 +928,13 @@ impl StellarGoalVaultContract {
     /// Updates the campaign metadata. Only the original creator can call this,
     /// and only before the campaign deadline. Emits a MetadataUpdated event
     /// containing both old and new values (issue #185).
+    ///
+    /// The event is published last, after the campaign record is written, so a
+    /// consumer never sees an event for a value that was not committed. A
+    /// rejected call panics before the write and publishes nothing. The event
+    /// carries the complete change (`old_metadata` -> `new_metadata`), so each
+    /// committed update can be reconstructed from the log exactly once
+    /// (issue #1524).
     pub fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: String) {
         require_not_paused(&env);
         creator.require_auth();
@@ -968,7 +992,11 @@ impl StellarGoalVaultContract {
         if new_deadline <= campaign.deadline {
             panic!("new deadline must be after current deadline");
         }
-        if new_deadline > campaign.created_at + MAX_CAMPAIGN_DURATION_SECONDS {
+        let max_deadline = match campaign.created_at.checked_add(MAX_CAMPAIGN_DURATION_SECONDS) {
+            Some(max) => max,
+            None => panic!("new deadline exceeds maximum campaign duration"),
+        };
+        if new_deadline > max_deadline {
             panic!("new deadline exceeds maximum campaign duration");
         }
 
@@ -1005,7 +1033,10 @@ impl StellarGoalVaultContract {
         // reaches the threshold so the emitted events match stored state.
         let old_deadline = campaign.deadline;
         let extended = campaign.contributor_count > 0
-            && request.approval_count * 2 > campaign.contributor_count;
+            && request
+                .approval_count
+                .checked_mul(2)
+                .is_none_or(|doubled| doubled > campaign.contributor_count);
         if extended {
             campaign.deadline = request.new_deadline;
             env.storage()
@@ -1088,12 +1119,18 @@ impl StellarGoalVaultContract {
             .unwrap_or_else(|| panic!("no extension request"));
 
         env.storage().persistent().set(&vote_key, &true);
-        request.approval_count += 1;
+        request.approval_count = request
+            .approval_count
+            .checked_add(1)
+            .unwrap_or_else(|| panic!("arithmetic overflow"));
 
         // Majority threshold: approval_count * 2 > contributor_count
         let old_deadline = campaign.deadline;
         let extended = campaign.contributor_count > 0
-            && request.approval_count * 2 > campaign.contributor_count;
+            && request
+                .approval_count
+                .checked_mul(2)
+                .is_none_or(|doubled| doubled > campaign.contributor_count);
         if extended {
             campaign.deadline = request.new_deadline;
             env.storage()
@@ -1214,7 +1251,8 @@ impl StellarGoalVaultContract {
                         let fee_amount = balance
                             .checked_mul(fee_bps)
                             .unwrap_or_else(|| panic!("arithmetic overflow"))
-                            / 10000;
+                            .checked_div(10000)
+                            .unwrap_or_else(|| panic!("arithmetic overflow"));
                         let creator_amount = balance
                             .checked_sub(fee_amount)
                             .unwrap_or_else(|| panic!("arithmetic overflow"));

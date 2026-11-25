@@ -44,6 +44,7 @@ afterAll(() => {
 beforeEach(() => {
   const db = getDb();
   db.prepare(`DELETE FROM campaign_events`).run();
+  db.prepare(`DELETE FROM notifications`).run();
   db.prepare(`DELETE FROM pledges`).run();
   db.prepare(`DELETE FROM campaigns`).run();
 });
@@ -135,9 +136,7 @@ describe('GET /api/campaigns/:id/history pagination', () => {
       deadline: nowInSeconds() + 3600,
     });
 
-    const response = await request(app).get(
-      `/api/campaigns/${campaign.id}/history?pageSize=101`,
-    );
+    const response = await request(app).get(`/api/campaigns/${campaign.id}/history?pageSize=101`);
 
     expect(response.status).toBe(400);
   });

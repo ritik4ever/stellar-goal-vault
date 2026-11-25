@@ -74,6 +74,8 @@ Each campaign is currently tied to a single token at creation time. There is no 
 - **Claim Flow**: The `claim` function iterates over all `accepted_tokens` and transfers the full balance of each token to the creator.
 - **Refund Flow**: The `refund` function iterates over all `accepted_tokens` and returns the specific tokens contributed by the user.
 
+**Token identity conventions**: The API examples use `code:issuer` notation (e.g., `USDC:GA...`) to disambiguate classic Stellar assets that share the same asset code but have different issuers. On-chain, this maps to the Stellar Asset Contract (SAC) address for the corresponding issuer. Soroban-native tokens are identified by their contract address directly. The backend currently normalizes token codes to uppercase strings, which does not include issuer information — see `adr/0006-multi-token-design.md` for the canonical token identity gap.
+
 ### API for Integrators
 
 #### Campaign Creation

@@ -1,6 +1,9 @@
+import { useEffect, useRef } from 'react';
 import { History } from 'lucide-react';
 import { CampaignEvent } from '../types/campaign';
 import { EmptyState } from './EmptyState';
+import { SkeletonTimeline } from './SkeletonTimeline';
+import { useMinDisplayTime } from '../hooks/useMinDisplayTime';
 
 const MILESTONES = [25, 50, 75] as const;
 
@@ -9,6 +12,9 @@ interface CampaignTimelineProps {
   isLoading?: boolean;
   targetAmount?: number;
   pledgedAmount?: number;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 function formatTimestamp(unixSeconds: number): string {
@@ -90,22 +96,32 @@ export function CampaignTimeline({
   isLoading = false,
   targetAmount,
   pledgedAmount,
+  hasMore = false,
+  isLoadingMore = false,
+  onLoadMore,
 }: CampaignTimelineProps) {
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!hasMore || !onLoadMore || isLoadingMore) return;
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) onLoadMore();
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, onLoadMore, isLoadingMore]);
   const percentFunded =
-    targetAmount && targetAmount > 0
-      ? Math.min((pledgedAmount ?? 0) / targetAmount, 1) * 100
-      : 0;
+    targetAmount && targetAmount > 0 ? Math.min((pledgedAmount ?? 0) / targetAmount, 1) * 100 : 0;
 
   const showProgress = typeof targetAmount === 'number' && targetAmount > 0;
-  if (isLoading) {
-    return (
-      <section className="card">
-        <div className="section-heading">
-          <h2>Timeline</h2>
-          <p className="muted">Loading campaign activity...</p>
-        </div>
-      </section>
-    );
+  const showSkeleton = useMinDisplayTime(isLoading);
+  if (showSkeleton) {
+    return <SkeletonTimeline />;
   }
 
   if (history.length === 0) {
@@ -139,10 +155,7 @@ export function CampaignTimeline({
             aria-valuemax={100}
             aria-label={`Campaign funded ${Math.round(percentFunded)}%`}
           >
-            <div
-              className="timeline-progress-fill"
-              style={{ width: `${percentFunded}%` }}
-            />
+            <div className="timeline-progress-fill" style={{ width: `${percentFunded}%` }} />
             {MILESTONES.map((pct) => {
               const milestoneAmount = (targetAmount! * pct) / 100;
               const isExceeded = (pledgedAmount ?? 0) >= milestoneAmount;
@@ -163,12 +176,9 @@ export function CampaignTimeline({
               );
             })}
           </div>
-          <span className="timeline-progress-label muted">
-            {Math.round(percentFunded)}% funded
-          </span>
+          <span className="timeline-progress-label muted">{Math.round(percentFunded)}% funded</span>
         </div>
       )}
-
 
       <div className="timeline">
         {history.map((event) => {
@@ -198,6 +208,17 @@ export function CampaignTimeline({
           );
         })}
       </div>
+      {hasMore ? (
+        <div ref={loadMoreRef} style={{ padding: '12px 0', textAlign: 'center' }}>
+          {isLoadingMore ? (
+            <span className="muted">Loading more history…</span>
+          ) : (
+            <button type="button" className="btn-ghost" onClick={() => onLoadMore?.()}>
+              Load more
+            </button>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }

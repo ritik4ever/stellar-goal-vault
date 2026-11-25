@@ -35,7 +35,13 @@ export class DashboardPage {
     await this.page.goto('/');
   }
 
-  async createCampaign(creator: string, title: string, description: string, target: string, deadlineHours: string = '24') {
+  async createCampaign(
+    creator: string,
+    title: string,
+    description: string,
+    target: string,
+    deadlineHours: string = '24',
+  ) {
     await this.creatorInput.fill(creator);
     await this.titleInput.fill(title);
     await this.descriptionInput.fill(description);
@@ -59,7 +65,7 @@ export class DashboardPage {
   async pledge(amount: string) {
     await this.pledgeAmountInput.fill(amount);
     await this.addPledgeButton.click();
-    await expect(this.page.locator('text=Pledge recorded')).toBeVisible();
+    await expect(this.page.locator(`text=Pledged ${amount} USDC`)).toBeVisible();
   }
 
   async claim() {

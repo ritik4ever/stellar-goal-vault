@@ -1,108 +1,223 @@
+import pino from 'pino';
+import { getRequestId } from './requestContext';
+
+/**
+ * Keys that must never appear in logs.
+ * Covers auth headers, wallet material, and secret-configuration env/config fields
+ * (API_KEYS, WEBHOOK_SECRET, SECRET_KEY, SERVER_PRIVATE_KEY, REDIS_URL, etc.).
+ */
+const SENSITIVE_KEY_RE =
+  /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-wallet-secret|x-secret-key|x-webhook-secret|api[_-]?keys?|secret|password|passwd|passphrase|private[_-]?key|seed|mnemonic|token|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|secret[_-]?key|server[_-]?private[_-]?key|redis[_-]?url|database[_-]?url|db[_-]?url|connection[_-]?string|signature|signing[_-]?secret)$/i;
+
+/** Secret-configuration env var names (uppercase) used for presence-only summaries. */
+export const SECRET_CONFIG_ENV_KEYS = [
+  'API_KEYS',
+  'WEBHOOK_SECRET',
+  'SECRET_KEY',
+  'SERVER_PRIVATE_KEY',
+  'REDIS_URL',
+  'DATABASE_URL',
+] as const;
+
+function redactUrlCredentials(value: string): string {
+  // redis://:password@host / postgres://user:pass@host → keep structure, drop secrets
+  return value.replace(
+    /^([a-z][a-z0-9+.-]*:\/\/)([^/@]*?)(:[^@]*)?@/i,
+    (_m, scheme: string, user: string, _pass?: string) => {
+      if (user === '' || user === ':') {
+        return `${scheme}:***@`;
+      }
+      return `${scheme}${user}:***@`;
+    },
+  );
+}
+
+// Stellar secret seeds: "S" + 55 base32 characters (StrKey ed25519 secret seed).
+const STELLAR_SECRET_SEED_RE = /\bS[A-Z2-7]{55}\b/g;
+// Base64 XDR transaction envelopes (signed or unsigned) start with "AAAA".
+const XDR_BLOB_RE = /\bAAAA[A-Za-z0-9+/]{76,}={0,2}/g;
+
+/**
+ * Removes Stellar secret seeds and transaction envelope XDR from free text
+ * such as error messages and stack traces.
+ */
+export function redactSecretMaterial(text: string): string {
+  return text
+    .replace(STELLAR_SECRET_SEED_RE, '[REDACTED_SECRET]')
+    .replace(XDR_BLOB_RE, '[REDACTED_XDR]');
+}
+
+/**
+ * Deep-redact sensitive keys and credential-bearing URL strings from log payloads.
+ */
+export function redactSensitive(value: unknown, depth = 0): unknown {
+  if (depth > 6 || value == null) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^(Bearer|Basic)\s+\S+/i.test(trimmed)) {
+      const scheme = trimmed.split(/\s+/)[0];
+      return `${scheme} [REDACTED]`;
+    }
+    if (
+      /^(Authorization|Proxy-Authorization|X-API-Key|X-Wallet-Secret|X-Secret-Key|X-Webhook-Secret)\s*:/i.test(
+        trimmed,
+      )
+    ) {
+      return trimmed.replace(/:\s*.+$/, ': [REDACTED]');
+    }
+    if (/^ghp_[A-Za-z0-9]+/.test(value) || /^gho_[A-Za-z0-9]+/.test(value))
+      return '[REDACTED_TOKEN]';
+    if (/^[a-z][a-z0-9+.-]*:\/\/[^\s]*@[^\s]+/i.test(value)) return redactUrlCredentials(value);
+    if (
+      /[?&](?:token|secret|password|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|private[_-]?key|signature)=[^&\s]+/i.test(
+        value,
+      )
+    ) {
+      return value.replace(
+        /([?&](?:token|secret|password|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|wallet[_-]?secret|webhook[_-]?secret|private[_-]?key|signature)=)([^&#\s]+)/gi,
+        '$1[REDACTED]',
+      );
+    }
+    return redactSecretMaterial(value);
+  }
+  if (Array.isArray(value)) return value.map((v) => redactSensitive(v, depth + 1));
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = SENSITIVE_KEY_RE.test(k) ? '[REDACTED]' : redactSensitive(v, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Redact a secret-configuration object (env snapshot / config dump) while keeping
+ * useful diagnostic context: which secrets are set, without their values.
+ */
+export function redactSecretConfig(
+  config: Record<string, unknown> | NodeJS.ProcessEnv,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (value === undefined) continue;
+    if (SENSITIVE_KEY_RE.test(key)) {
+      if (typeof value === 'string' && value.length === 0) {
+        out[key] = '';
+      } else if (typeof value === 'string' && key.toUpperCase().includes('API_KEY')) {
+        const count = value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean).length;
+        out[key] = `[REDACTED:${count} key${count === 1 ? '' : 's'}]`;
+      } else if (typeof value === 'string' && /url/i.test(key) && /:\/\//.test(value)) {
+        out[key] = redactUrlCredentials(value).replace(/:\/\/[^@]*@/, '://***@');
+        // still fully redact password-bearing URLs for secret config dumps
+        out[key] = '[REDACTED_URL]';
+      } else {
+        out[key] = '[REDACTED]';
+      }
+      continue;
+    }
+    out[key] = redactSensitive(value);
+  }
+  return out;
+}
+
+/**
+ * Presence-only summary of secret configuration for startup / failure-path logs.
+ * Never includes secret values — only whether each known secret env var is set.
+ */
+export function summarizeSecretConfig(
+  env: Record<string, string | undefined> = process.env,
+): Record<string, boolean> {
+  const summary: Record<string, boolean> = {};
+  for (const key of SECRET_CONFIG_ENV_KEYS) {
+    const raw = env[key];
+    summary[`${key}_configured`] = Boolean(raw && String(raw).trim());
+  }
+  return summary;
+}
+
 export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
-
 export type LogLevel = (typeof LOG_LEVELS)[number];
-
 type LogFields = Record<string, unknown>;
-
-const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
-  debug: 10,
-  info: 20,
-  warn: 30,
-  error: 40,
-};
 
 export function normalizeLogLevel(rawLevel: string | undefined): LogLevel {
   const normalized = rawLevel?.trim().toLowerCase();
   return LOG_LEVELS.includes(normalized as LogLevel) ? (normalized as LogLevel) : 'info';
 }
 
-export function shouldLog(level: LogLevel, configuredLevel: LogLevel): boolean {
-  return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[configuredLevel];
-}
+const isProduction = process.env.NODE_ENV === 'production';
 
-export function createLogLine(
-  level: LogLevel,
-  event: string,
-  fields: LogFields,
-  now: Date = new Date(),
-): string {
-  return JSON.stringify({
-    timestamp: now.toISOString(),
-    level,
-    event,
-    ...fields,
-  });
-}
-
-/* eslint-disable no-console */
-function getConsoleMethod(
-  level: LogLevel,
-): (message?: unknown, ...optionalParams: unknown[]) => void {
-  switch (level) {
-    case 'debug':
-      return console.debug;
-    case 'warn':
-      return console.warn;
-    case 'error':
-      return console.error;
-    case 'info':
-    default:
-      return console.info;
-  }
-}
-/* eslint-enable no-console */
-
-import { getRequestId } from './requestContext';
-
-function withRequestContext(fields: LogFields): LogFields {
-  const requestId = getRequestId();
-  if (requestId && fields.requestId === undefined) {
-    return { requestId, ...fields };
-  }
-  return fields;
-}
-
-export function logLine(
-  level: LogLevel,
-  event: string,
-  fields: LogFields,
-  configuredLevel: LogLevel,
-): void {
-  if (!shouldLog(level, configuredLevel)) {
-    return;
-  }
-
-  getConsoleMethod(level)(createLogLine(level, event, withRequestContext(fields)));
-}
-
-export function logInfo(event: string, fields: LogFields, configuredLevel: LogLevel): void {
-  logLine('info', event, fields, configuredLevel);
-}
-
-export function logRequest(
-  request: {
-    requestId?: string;
-    method: string;
-    path: string;
-    status: number;
-    durationMs: number;
-  },
-  configuredLevel: LogLevel,
-): void {
-  const durationMs = Number(request.durationMs.toFixed(2));
-
-  logInfo(
-    'http_request',
-    {
-      message: `${request.method} ${request.path} ${request.status} ${durationMs}ms`,
-      requestId: request.requestId,
-      method: request.method,
-      path: request.path,
-      status: request.status,
-      durationMs,
+export const logger = pino({
+  level: normalizeLogLevel(process.env.LOG_LEVEL),
+  transport: isProduction
+    ? undefined
+    : {
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          translateTime: 'SYS:standard',
+        },
+      },
+  formatters: {
+    level: (label) => {
+      return { level: label };
     },
-    configuredLevel,
-  );
+  },
+  redact: {
+    paths: [
+      'req.headers.authorization',
+      'headers.authorization',
+      'req.headers.cookie',
+      'headers.cookie',
+      'req.body.password',
+      'req.body.secret',
+      'req.body.token',
+      'req.body.api_key',
+      'req.body.apiKey',
+      'req.body.apiKeys',
+      'req.body.wallet_secret',
+      'req.body.walletSecret',
+      'req.body.private_key',
+      'req.body.privateKey',
+      'req.body.mnemonic',
+      'req.body.seed',
+      'req.body.webhookSecret',
+      'req.body.webhook_secret',
+      'apiKeys',
+      'API_KEYS',
+      'webhookSecret',
+      'WEBHOOK_SECRET',
+      'SECRET_KEY',
+      'SERVER_PRIVATE_KEY',
+      'REDIS_URL',
+      'redisUrl',
+      'address',
+      'creator',
+    ],
+    censor: (value: any, path: string[]) => {
+      if (
+        typeof value === 'string' &&
+        (path.includes('address') || path.includes('creator')) &&
+        value.startsWith('G') &&
+        value.length > 50
+      ) {
+        return `${value.slice(0, 5)}...${value.slice(-5)}`;
+      }
+      return '[REDACTED]';
+    },
+  },
+  mixin() {
+    const requestId = getRequestId();
+    return requestId ? { requestId } : {};
+  },
+});
+
+export function logInfo(event: string, fields: LogFields, _configuredLevel?: LogLevel): void {
+  const safeFields = redactSensitive(fields) as LogFields;
+  logger.info({ event, ...safeFields });
 }
 
 export function logError(
@@ -115,20 +230,75 @@ export function logError(
     status?: number;
     [key: string]: unknown;
   },
-  configuredLevel: LogLevel,
+  _configuredLevel?: LogLevel,
 ): void {
   const normalizedError =
     error instanceof Error ? error : new Error(typeof error === 'string' ? error : 'Unknown error');
 
-  logLine(
-    'error',
-    typeof context.event === 'string' ? context.event : 'error',
-    {
-      ...context,
-      message: normalizedError.message,
-      stack: normalizedError.stack,
-      errorName: normalizedError.name,
+  const safeContext = redactSensitive(context) as typeof context;
+  const safeMessage = redactSensitive(normalizedError.message);
+  logger.error({
+    ...safeContext,
+    event: safeContext.event ?? 'error',
+    err: {
+      message: typeof safeMessage === 'string' ? safeMessage : normalizedError.message,
+      stack: normalizedError.stack ? redactSecretMaterial(normalizedError.stack) : undefined,
+      name: normalizedError.name,
     },
-    configuredLevel,
-  );
+  });
+}
+
+export function logRequest(
+  request: {
+    requestId?: string;
+    method: string;
+    path: string;
+    status: number;
+    durationMs: number;
+    headers?: Record<string, string>;
+    ip?: string;
+    userAgent?: string;
+    retryCount?: number;
+    retryReason?: string;
+    finalOutcome?: string;
+  },
+  _configuredLevel?: LogLevel,
+): void {
+  const durationMs = Number(request.durationMs.toFixed(2));
+
+  // Always emit http_request at info level so operators can filter by event name
+  // without having to cross-correlate warn/error streams.  The status field
+  // carries sufficient information to derive severity programmatically.
+  logger.info({
+    event: 'http_request',
+    message: `${request.method} ${request.path} ${request.status} ${durationMs}ms`,
+    requestId: request.requestId,
+    method: request.method,
+    path: request.path,
+    status: request.status,
+    duration_ms: durationMs,
+    ip: request.ip,
+    userAgent: request.userAgent,
+    ...(request.retryCount !== undefined ? { retryCount: request.retryCount } : {}),
+    ...(request.retryReason ? { retryReason: redactSensitive(request.retryReason) } : {}),
+    ...(request.finalOutcome ? { finalOutcome: request.finalOutcome } : {}),
+  });
+}
+
+export function logLine(
+  level: LogLevel,
+  event: string,
+  fields: LogFields,
+  _configuredLevel?: LogLevel,
+): void {
+  const safeFields = redactSensitive(fields) as LogFields;
+  if (level === 'debug') {
+    logger.debug({ event, ...safeFields });
+  } else if (level === 'warn') {
+    logger.warn({ event, ...safeFields });
+  } else if (level === 'error') {
+    logger.error({ event, ...safeFields });
+  } else {
+    logger.info({ event, ...safeFields });
+  }
 }

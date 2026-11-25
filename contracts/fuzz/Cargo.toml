@@ -1,0 +1,1 @@
+[package]\nname = "fuzz"\nversion = "0.0.0"\nedition = "2021"\n[dependencies]\nlibfuzzer_sys = "0.4"\n[[bin]\nname = "contribute"\npath = "fuzz_targets/contribute.rs"\n

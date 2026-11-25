@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useState } from 'react';
 import './TransactionPreviewModal.css';
 
@@ -26,13 +27,61 @@ export function TransactionPreviewModal({
   onCancel,
 }: TransactionPreviewModalProps) {
   const [showXdr, setShowXdr] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    confirmRef.current?.focus();
+  }, []);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      onCancel();
+      return;
+    }
+
+    if (event.key !== 'Tab') {
+      return;
+    }
+
+    const focusable = modalRef.current?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+
+    if (!focusable || focusable.length === 0) {
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
     <div className="modal-overlay">
-      <div className="card modal-content animate-fade-in">
+      <div
+        className="card modal-content animate-fade-in"
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="transaction-preview-title"
+        aria-describedby="transaction-preview-description"
+        onKeyDown={handleKeyDown}
+      >
         <div className="section-heading">
-          <h2>Transaction Preview</h2>
-          <p className="muted">Review the operation details before signing.</p>
+          <h2 id="transaction-preview-title">Transaction Preview</h2>
+          <p id="transaction-preview-description" className="muted">
+            Review the operation details before signing.
+          </p>
         </div>
 
         <div className="detail-grid" style={{ marginBottom: '24px' }}>
@@ -83,14 +132,18 @@ export function TransactionPreviewModal({
             <span>Show raw XDR</span>
           </label>
 
-          {showXdr && <div className="xdr-content mono">{preview.xdr}</div>}
+          {showXdr && (
+            <div className="xdr-content mono" aria-live="polite">
+              {preview.xdr}
+            </div>
+          )}
         </div>
 
         <div className="action-row" style={{ marginTop: '32px', justifyContent: 'flex-end' }}>
           <button className="btn-ghost" type="button" onClick={onCancel}>
             Cancel
           </button>
-          <button className="btn-primary" type="button" onClick={onConfirm}>
+          <button className="btn-primary" type="button" onClick={onConfirm} ref={confirmRef}>
             Confirm and Sign
           </button>
         </div>

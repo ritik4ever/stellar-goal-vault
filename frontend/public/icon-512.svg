@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#16213e;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="starGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8d76b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f0a500;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="vaultGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#4fc3f7;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0288d1;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Background rounded rect -->
+  <rect width="512" height="512" rx="100" ry="100" fill="url(#bgGrad)" />
+  <!-- Vault body -->
+  <rect x="116" y="216" width="280" height="200" rx="24" ry="24" fill="url(#vaultGrad)" />
+  <!-- Vault door top arch -->
+  <path d="M 180 216 A 76 76 0 0 1 332 216" fill="#0277bd" />
+  <!-- Vault handle / dial -->
+  <circle cx="256" cy="308" r="48" fill="#01579b" stroke="#4fc3f7" stroke-width="8" />
+  <circle cx="256" cy="308" r="22" fill="#4fc3f7" />
+  <line x1="256" y1="260" x2="256" y2="286" stroke="#4fc3f7" stroke-width="6" stroke-linecap="round" />
+  <line x1="256" y1="330" x2="256" y2="356" stroke="#4fc3f7" stroke-width="6" stroke-linecap="round" />
+  <line x1="208" y1="308" x2="234" y2="308" stroke="#4fc3f7" stroke-width="6" stroke-linecap="round" />
+  <line x1="278" y1="308" x2="304" y2="308" stroke="#4fc3f7" stroke-width="6" stroke-linecap="round" />
+  <!-- Stellar star above vault -->
+  <polygon points="256,64 274,128 340,128 288,168 308,232 256,192 204,232 224,168 172,128 238,128"
+    fill="url(#starGrad)" />
+</svg>
