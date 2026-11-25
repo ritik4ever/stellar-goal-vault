@@ -83,6 +83,11 @@ fn initialize(env: Env, admin: Address, min_contribution: i128)
 | `min_contribution <= 0` | `"min_contribution must be positive"` | High | Call with a positive integer (minimum 1 stroop) |
 | Caller not authorized | Soroban auth failure | High | Ensure caller signs with the `admin` address |
 
+**Emits:** `ContractInitializedEvent` with topic pair `("Goal", "Init")`, then
+`MinContributionConfiguredEvent` with topic pair `("Goal", "MinConf")`. Both are
+published after the `MinContribution` entry is stored, so the event log
+describes the committed floor (SGV-2026-114).
+
 **Gas estimate:** 15,000 + 5,000 per storage write (~20,000 units total + 20% headroom = **24,000**)
 
 ---
@@ -413,7 +418,8 @@ can be changed with `initialize()`. The minimum check runs before the campaign
 is read, before the token transfer, and before any storage write, so a rejected
 call leaves the contributor balance, the campaign pledge, and the vault balance
 unchanged. A rejection emits neither the legacy `"Pledge"` event nor the
-structured `"Pledged"` event.
+structured `"Pledged"` event, and — because the floor itself is unchanged — no
+`("Goal", "MinConf")` configuration event either (SGV-2026-114).
 
 `initialize()` rejects `0` and negative minimum values with
 `"min_contribution must be positive"` before persisting deployment state or
@@ -1130,6 +1136,44 @@ committed only if the full claim transaction succeeds.
 | `contract_version` | `String` | Contract version deployed |
 
 **Emitted by:** `initialize`
+
+---
+
+### `MinContributionConfiguredEvent`
+
+Structured event carrying the minimum contribution floor committed by
+`initialize`. Mirrors the `min_contribution` field of
+`ContractInitializedEvent` so consumers that only replay events can reconstruct
+the configured floor exactly once.
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"MinConf"` |
+
+**Data** (`MinContributionConfiguredEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin address that configured the floor |
+| `min_contribution` | `i128` | Committed minimum contribution in stroops |
+| `contract_version` | `String` | Contract version that committed the value |
+| `configured_at` | `u64` | Ledger timestamp (seconds) at configuration |
+
+**Emitted by:** `initialize`, exactly once per successful initialization and
+immediately after `("Goal", "Init")`.
+
+**Stability contract & ordering:**
+- Topic symbols `"Goal"` and `"MinConf"` are frozen for this contract version.
+- Published after the `MinContribution` storage write, so replaying
+  `("Goal", "MinConf")` reproduces the committed floor in ledger order;
+  reverted initializations publish nothing.
+- A rejected pledge (`"contribution below minimum"`) publishes no event and
+  deducts no balance: the floor check runs before the campaign read and before
+  the token transfer.
+- Covered by
+  `test_initialize_emits_min_contribution_event_after_committed_state` and
+  `test_below_minimum_rejection_deducts_nothing_and_emits_no_event`.
 
 ---
 

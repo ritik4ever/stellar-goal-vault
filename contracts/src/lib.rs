@@ -172,6 +172,22 @@ pub struct ContractInitializedEvent {
     pub contract_version: String,
 }
 
+/// Emitted when the minimum contribution floor is committed by `initialize`.
+///
+/// Published exactly once per successful initialization, after the
+/// `MinContribution` entry has been written and after the legacy
+/// `("Goal", "Init")` event. A consumer that only replays the event log can
+/// therefore reconstruct the configured floor from the committed state without
+/// additional contract reads, and reverted initializations emit nothing.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MinContributionConfiguredEvent {
+    pub admin: Address,
+    pub min_contribution: i128,
+    pub contract_version: String,
+    pub configured_at: u64,
+}
+
 /// Emitted when the contract pause status changes, with stable fields for off-chain indexers.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -411,7 +427,19 @@ impl StellarGoalVaultContract {
             ContractInitializedEvent {
                 admin: admin.clone(),
                 min_contribution,
+                contract_version: version.clone(),
+            },
+        );
+        // Structured event for the configured floor. Published after the
+        // `MinContribution` write and after the legacy `Init` event so the
+        // committed change is described exactly once, in order.
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("MinConf")),
+            MinContributionConfiguredEvent {
+                admin,
+                min_contribution,
                 contract_version: version,
+                configured_at: env.ledger().timestamp(),
             },
         );
     }

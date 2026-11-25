@@ -11,7 +11,8 @@ mod tests {
     use crate::{
         CampaignClaimed, CampaignCreatedEvent, CampaignPledged, CampaignPledgedEvent, DataKey,
         DeadlineExtended, ExtensionApproved, ExtensionRequested, FeeCollected, MetadataUpdated,
-        StellarGoalVaultContract, StellarGoalVaultContractClient, CAMPAIGN_STORAGE_TTL_EXTEND_TO,
+        MinContributionConfiguredEvent, StellarGoalVaultContract,
+        StellarGoalVaultContractClient, CAMPAIGN_STORAGE_TTL_EXTEND_TO,
     };
     // Keep contract tests independent of the machine clock and local timezone.
     // Soroban timestamps are UTC Unix seconds; epoch zero preserves the mock
@@ -1931,6 +1932,104 @@ mod tests {
         );
         assert_eq!(token_client.balance(&contributor), 500);
         assert_eq!(token_client.balance(&vault), 500);
+    }
+
+    // ── SGV-2026-114: minimum-contribution configuration events ─────────────
+    // `initialize` publishes the legacy `("Goal", "Init")` event first and, once
+    // the floor is committed, exactly one structured `("Goal", "MinConf")` event
+    // carrying the value now stored. A below-minimum pledge is rejected before
+    // the campaign read and before any transfer: it emits nothing, records no
+    // pledge, and deducts nothing.
+
+    #[test]
+    fn test_initialize_emits_min_contribution_event_after_committed_state() {
+        use soroban_sdk::{FromVal, Val};
+        let env = test_env();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+        let admin = Address::generate(&env);
+
+        client.initialize(&admin, &750_i128);
+
+        // The event log describes the most recent invocation, so read it before
+        // any further contract call.
+        let emitted = env.events().all().filter_by_contract(&client.address);
+        assert_eq!(
+            emitted.events().len(),
+            2,
+            "initialize must publish Init then MinConf, and nothing else"
+        );
+
+        let init_events = goal_events(&env, soroban_sdk::symbol_short!("Init"));
+        let configured_events = goal_events(&env, soroban_sdk::symbol_short!("MinConf"));
+        assert_eq!(init_events.len(), 1);
+        assert_eq!(configured_events.len(), 1);
+        assert!(
+            init_events[0].0 < configured_events[0].0,
+            "the committed MinConf event must follow Init"
+        );
+
+        let configured = MinContributionConfiguredEvent::from_val(
+            &env,
+            &Val::from_val(&env, &configured_events[0].1),
+        );
+        assert_eq!(configured.admin, admin);
+        assert_eq!(configured.min_contribution, 750);
+        assert_eq!(
+            configured.contract_version,
+            String::from_str(&env, crate::CONTRACT_VERSION)
+        );
+        assert_eq!(configured.configured_at, env.ledger().timestamp());
+        assert_eq!(client.get_min_contribution(), configured.min_contribution);
+    }
+
+    #[test]
+    fn test_below_minimum_rejection_deducts_nothing_and_emits_no_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &500_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "minimum rejection atomicity"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let token_client = TokenClient::new(&env, &token);
+        let rejected = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &contributor, &token, &499);
+        }));
+
+        assert!(rejected.is_err(), "one stroop below the floor must panic");
+        assert!(
+            env.events().all().events().is_empty(),
+            "a rejected pledge must emit nothing (no Pledge, Pledged or MinConf)"
+        );
+
+        assert_eq!(
+            client.get_min_contribution(),
+            500,
+            "rejection must not change the committed floor"
+        );
+        assert_eq!(token_client.balance(&contributor), 1_000);
+        assert_eq!(token_client.balance(&client.address), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            0
+        );
     }
 
     // ── SGV-2026-120: per-contributor cap regression ──────────────────────────
