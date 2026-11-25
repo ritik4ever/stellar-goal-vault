@@ -5343,6 +5343,12 @@ mod tests {
     fn test_multi_token_accounting_refund_atomicity_with_unaccepted_asset_injection() {
         let env = test_env();
         env.mock_all_auths();
+        let client = deploy_contract(&env);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        client.initialize(&admin, &100_i128);
+        client.set_paused(&attacker, &true);
+    }
 
         let admin = Address::generate(&env);
         let creator = Address::generate(&env);
@@ -5448,6 +5454,7 @@ mod tests {
         minter.mint(&contributor3, &10_000);
 
         let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
 
         let initial_deadline = env.ledger().timestamp() + 1_000;
         let campaign_id = client.create_campaign(
@@ -5560,7 +5567,6 @@ mod tests {
     fn test_deadline_extension_vote_boundaries_smallest_majority_even_contributors() {
         let env = test_env();
         env.mock_all_auths();
-
         let creator = Address::generate(&env);
         let c1 = Address::generate(&env);
         let c2 = Address::generate(&env);
@@ -5575,6 +5581,7 @@ mod tests {
         minter.mint(&c4, &10_000);
 
         let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
 
         let initial_deadline = env.ledger().timestamp() + 1_000;
         let campaign_id = client.create_campaign(
@@ -5587,6 +5594,8 @@ mod tests {
             &soroban_sdk::vec![&env],
             &0_u32,
         );
+        client.contribute(&campaign_id, &contributor, &token, &1_000);
+        advance_time(&env, deadline_offset + 1);
 
         // 4 distinct contributors pledge
         client.contribute(&campaign_id, &c1, &token, &200);
@@ -5639,7 +5648,6 @@ mod tests {
     fn test_duplicate_extension_vote_around_pledge_and_claim_leaves_state_and_balances_valid() {
         let env = test_env();
         env.mock_all_auths();
-
         let creator = Address::generate(&env);
         let c1 = Address::generate(&env);
         let c2 = Address::generate(&env);
@@ -5655,6 +5663,7 @@ mod tests {
         let token_client = TokenClient::new(&env, &token);
 
         let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
 
         let initial_deadline = env.ledger().timestamp() + 1_000;
         let campaign_id = client.create_campaign(
@@ -5667,6 +5676,8 @@ mod tests {
             &soroban_sdk::vec![&env],
             &0_u32,
         );
+        client.contribute(&campaign_id, &contributor, &token, &500);
+        advance_time(&env, deadline_offset + 1);
 
         // Initial pledges (storage + token transfers)
         client.contribute(&campaign_id, &c1, &token, &250);
@@ -5742,7 +5753,6 @@ mod tests {
     {
         let env = test_env();
         env.mock_all_auths();
-
         let creator = Address::generate(&env);
         let c1 = Address::generate(&env);
         let c2 = Address::generate(&env);
@@ -5753,6 +5763,7 @@ mod tests {
         let token_client = TokenClient::new(&env, &token);
 
         let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
 
         let created_at = env.ledger().timestamp();
         let initial_deadline = created_at + 1_000;
@@ -5881,6 +5892,7 @@ mod tests {
 
         let token = deploy_token(&env, &admin, &contributor, target);
         let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
 
         // Configure the fee mechanism so the checked arithmetic path is exercised.
         client.initialize(&admin, &100_i128);
@@ -5900,6 +5912,7 @@ mod tests {
             &soroban_sdk::vec![&env],
             &0_u32,
         );
+        client.set_paused(&admin, &true);
 
         // Contribute exactly `target` so pledged_amount == target_amount.
         client.contribute(&campaign_id, &contributor, &token, &target);
