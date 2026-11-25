@@ -10,6 +10,13 @@
  * Each migration runs inside its own transaction. When called inside an outer
  * transaction (as `migrate()` does), better-sqlite3 turns these into
  * savepoints, so a failure rolls back the whole startup migration.
+ *
+ * Interruption safety: a migration's DDL/DML and its `schema_migrations` row
+ * are committed atomically in the same transaction. If the process dies before
+ * that commit, the migration is not recorded and is re-run in full on restart.
+ * Re-running is therefore safe only because each migration's effects are rolled
+ * back with the transaction; migrations must never rely on partial progress
+ * committed outside this transaction.
  */
 
 import crypto from 'crypto';
@@ -184,6 +191,10 @@ export function markMigrationsApplied(database: MigrationDatabase, migrations: M
 /**
  * Applies every migration not yet recorded in `schema_migrations`, in version
  * order. Already-applied migrations are skipped. Returns the applied versions.
+ *
+ * Each migration and its bookkeeping row commit together. An interruption
+ * before commit leaves the version unrecorded, so a rerun applies it from the
+ * beginning without dropping or duplicating committed data.
  */
 export function applyPendingMigrations(
   database: MigrationDatabase,

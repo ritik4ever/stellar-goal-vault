@@ -18,6 +18,7 @@ vi.mock('../cache', async (importOriginal) => {
     setCacheValue: async (key: string, value: string) => {
       shared.map.set(key, value);
     },
+    deleteCacheValue: async (key: string) => shared.map.delete(key),
   };
 });
 
@@ -275,7 +276,21 @@ describe('pledge idempotency: 24-hour expiry', () => {
     expect(pledgeCount()).toBe(2);
   });
 
-  it('applies the same boundary when the entry comes from the shared store', async () => {
+  it('treats the key as new just after 24-hour expiry', async () => {
+    const app = buildApp();
+    const body = { contributor: ALICE, amount: 100 };
+
+    await pledge(app, 'key-ttl-after', body);
+    vi.setSystemTime(T0 + TTL_MS + 1000);
+    const afterExpiry = await pledge(app, 'key-ttl-after', body);
+
+    expect(afterExpiry.status).toBe(201);
+    expect(afterExpiry.headers['x-idempotency-cache']).toBe('MISS');
+    expect(executions).toBe(2);
+    expect(pledgeCount()).toBe(2);
+  });
+
+  it('applies the same boundary when the entry comes from the shared store and cleans expired state', async () => {
     shared.available = true;
     const app = buildApp();
     const body = { contributor: ALICE, amount: 100 };
@@ -291,6 +306,8 @@ describe('pledge idempotency: 24-hour expiry', () => {
     const expired = await pledge(app, 'key-ttl-shared', body);
     expect(expired.headers['x-idempotency-cache']).toBe('MISS');
     expect(pledgeCount()).toBe(2);
+    // Expired entry evicted from shared store at worker boundary
+    expect(shared.map.size).toBe(1); // Only the newly created entry remains
   });
 });
 

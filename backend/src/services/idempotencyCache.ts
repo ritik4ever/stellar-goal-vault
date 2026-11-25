@@ -1,5 +1,5 @@
 import { LRUCache } from 'lru-cache';
-import { getCacheValue, setCacheValue, isCacheAvailable } from './cache';
+import { getCacheValue, setCacheValue, deleteCacheValue, isCacheAvailable } from './cache';
 
 export const IDEMPOTENCY_TTL_SECONDS = 86_400;
 
@@ -38,7 +38,7 @@ export function buildIdempotencyCacheKey(
  * here, against the stored timestamp, rather than left to each backing store's
  * own clock and rounding, so the boundary is the same in memory and in Redis.
  */
-function isExpired(entry: IdempotencyCacheEntry, now: number): boolean {
+export function isExpired(entry: IdempotencyCacheEntry, now: number = Date.now()): boolean {
   return entry.storedAt !== undefined && now - entry.storedAt >= IDEMPOTENCY_TTL_SECONDS * 1000;
 }
 
@@ -48,9 +48,16 @@ export async function getIdempotencyCacheEntry(key: string): Promise<Idempotency
   if (isCacheAvailable()) {
     const cached = await getCacheValue(key);
     if (cached) {
-      const entry = JSON.parse(cached) as IdempotencyCacheEntry;
-      if (!isExpired(entry, now)) {
-        return entry;
+      try {
+        const entry = JSON.parse(cached) as IdempotencyCacheEntry;
+        if (!isExpired(entry, now)) {
+          return entry;
+        }
+        await deleteCacheValue(key).catch(() => {});
+        memoryCache.delete(key);
+      } catch {
+        await deleteCacheValue(key).catch(() => {});
+        memoryCache.delete(key);
       }
     }
   }
@@ -81,6 +88,13 @@ export async function setIdempotencyCacheEntry(
     await setCacheValue(key, JSON.stringify(stored), IDEMPOTENCY_TTL_SECONDS).catch(() => {
       // Silently fail Redis writes; memory cache still works
     });
+  }
+}
+
+export async function deleteIdempotencyCacheEntry(key: string): Promise<void> {
+  memoryCache.delete(key);
+  if (isCacheAvailable()) {
+    await deleteCacheValue(key).catch(() => {});
   }
 }
 

@@ -258,6 +258,7 @@ export function applyStartupInvariants(database: SQLiteDatabase): void {
   `);
 
   ensureSeedWorkflowIndexes(database);
+  ensureSeedMetadataTable(database);
   ensureQueryLayerIndexes(database);
   ensureCampaignsIntegrityConstraints(database);
   ensurePledgesIntegrityConstraints(database);
@@ -339,6 +340,12 @@ export function ensureSeedMetadataTable(database: SQLiteDatabase = getDb()): voi
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS seed_markers (
+      id INTEGER PRIMARY KEY,
+      version TEXT NOT NULL,
+      count INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
 }
 
@@ -355,9 +362,10 @@ export function getSeedMetadata(database: SQLiteDatabase = getDb()): Record<stri
     return {};
   }
 
-  const rows = database
-    .prepare('SELECT key, value FROM seed_metadata')
-    .all() as Array<{ key: string; value: string }>;
+  const rows = database.prepare('SELECT key, value FROM seed_metadata').all() as Array<{
+    key: string;
+    value: string;
+  }>;
 
   const metadata: Record<string, string> = {};
   for (const row of rows) {

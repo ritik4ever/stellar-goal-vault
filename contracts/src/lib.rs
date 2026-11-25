@@ -175,6 +175,22 @@ pub struct ContractInitializedEvent {
     pub contract_version: String,
 }
 
+/// Emitted when the minimum contribution floor is committed by `initialize`.
+///
+/// Published exactly once per successful initialization, after the
+/// `MinContribution` entry has been written and after the legacy
+/// `("Goal", "Init")` event. A consumer that only replays the event log can
+/// therefore reconstruct the configured floor from the committed state without
+/// additional contract reads, and reverted initializations emit nothing.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MinContributionConfiguredEvent {
+    pub admin: Address,
+    pub min_contribution: i128,
+    pub contract_version: String,
+    pub configured_at: u64,
+}
+
 /// Emitted when the contract pause status changes, with stable fields for off-chain indexers.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -215,6 +231,12 @@ pub struct ContractUnpaused {
 }
 
 /// Emitted when a campaign creator updates the campaign metadata (issue #185).
+///
+/// Published exactly once per successful `update_metadata` call, after the
+/// campaign record has been written. `old_metadata` is the value that was
+/// stored before the call and `new_metadata` is the value stored afterwards,
+/// so replaying these events (starting from the creation event's metadata)
+/// reproduces the committed metadata without additional reads (issue #1524).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetadataUpdated {
@@ -314,6 +336,14 @@ pub struct CampaignCreatedEvent {
 /// token balances, contributor counts, and timestamp so indexers can reconstruct
 /// campaign and contributor pledge state without additional reads. Sensitive data
 /// (none exists here) is not duplicated.
+///
+/// Published exactly once per committed `contribute` call, immediately after
+/// `("Goal", "Pledge")` and only after all validations (including the
+/// per-contributor cap check), token transfer, and storage writes succeed.
+/// `contributor_total` is the contributor's cumulative total for `token`;
+/// summing `amount` across accepted tokens in ledger order (against
+/// `CampaignCreatedEvent.max_per_contributor`) reconstructs the contributor's
+/// cross-token cumulative total exactly once. Rejected calls emit nothing.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CampaignPledgedEvent {
@@ -400,7 +430,19 @@ impl StellarGoalVaultContract {
             ContractInitializedEvent {
                 admin: admin.clone(),
                 min_contribution,
+                contract_version: version.clone(),
+            },
+        );
+        // Structured event for the configured floor. Published after the
+        // `MinContribution` write and after the legacy `Init` event so the
+        // committed change is described exactly once, in order.
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("MinConf")),
+            MinContributionConfiguredEvent {
+                admin,
+                min_contribution,
                 contract_version: version,
+                configured_at: env.ledger().timestamp(),
             },
         );
     }
@@ -790,7 +832,11 @@ impl StellarGoalVaultContract {
         if env.ledger().timestamp() >= campaign.deadline {
             panic!("campaign deadline reached");
         }
-        if campaign.pledged_amount + amount > campaign.target_amount {
+        let new_pledged = match campaign.pledged_amount.checked_add(amount) {
+            Some(sum) => sum,
+            None => panic!("campaign funding cap exceeded"),
+        };
+        if new_pledged > campaign.target_amount {
             panic!("campaign funding cap exceeded");
         }
         if !campaign.accepted_tokens.iter().any(|t| t == token) {
@@ -803,16 +849,16 @@ impl StellarGoalVaultContract {
         refresh_persistent_ttl(&env, &cap_key);
         let cap: i128 = env.storage().persistent().get(&cap_key).unwrap_or(0);
         if cap > 0 {
-            let already: i128 = campaign
-                .accepted_tokens
-                .iter()
-                .map(|t| {
-                    let key = DataKey::Contribution(campaign_id, contributor.clone(), t);
-                    refresh_persistent_ttl(&env, &key);
-                    env.storage().persistent().get(&key).unwrap_or(0)
-                })
-                .sum();
-            if already + amount > cap {
+            let mut already: i128 = 0;
+            for t in campaign.accepted_tokens.iter() {
+                let key = DataKey::Contribution(campaign_id, contributor.clone(), t);
+                refresh_persistent_ttl(&env, &key);
+                let prev_c: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+                already = already
+                    .checked_add(prev_c)
+                    .unwrap_or_else(|| panic!("per-contributor cap exceeded"));
+            }
+            if already.checked_add(amount).is_none_or(|sum| sum > cap) {
                 panic!("per-contributor cap exceeded");
             }
         }
@@ -822,7 +868,7 @@ impl StellarGoalVaultContract {
         token_client.transfer(&contributor, &contract_address, &amount);
 
         // Update campaign pledged amount (valuation)
-        campaign.pledged_amount += amount;
+        campaign.pledged_amount = new_pledged;
 
         // Only increment contributor_count on first-time pledge
         let has_contributed_key = DataKey::HasContributed(campaign_id, contributor.clone());
@@ -833,7 +879,10 @@ impl StellarGoalVaultContract {
             .get(&has_contributed_key)
             .unwrap_or(false);
         if !has_contributed {
-            campaign.contributor_count += 1;
+            campaign.contributor_count = campaign
+                .contributor_count
+                .checked_add(1)
+                .unwrap_or_else(|| panic!("arithmetic overflow"));
             env.storage().persistent().set(&has_contributed_key, &true);
             // Track contributor for refund_all
             let contributors_key = DataKey::Contributors(campaign_id);
@@ -855,9 +904,12 @@ impl StellarGoalVaultContract {
 
         let balance_key = DataKey::CampaignTokenBalance(campaign_id, token.clone());
         let current_balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        let new_balance = current_balance
+            .checked_add(amount)
+            .unwrap_or_else(|| panic!("arithmetic overflow"));
         env.storage()
             .persistent()
-            .set(&balance_key, &(current_balance + amount));
+            .set(&balance_key, &new_balance);
 
         let contribution_key =
             DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
@@ -866,9 +918,12 @@ impl StellarGoalVaultContract {
             .persistent()
             .get(&contribution_key)
             .unwrap_or(0);
+        let new_contribution = current_contribution
+            .checked_add(amount)
+            .unwrap_or_else(|| panic!("arithmetic overflow"));
         env.storage()
             .persistent()
-            .set(&contribution_key, &(current_contribution + amount));
+            .set(&contribution_key, &new_contribution);
 
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("Pledge")),
@@ -894,27 +949,23 @@ impl StellarGoalVaultContract {
                 amount,
                 total_pledged: campaign.pledged_amount,
                 contributor_count: campaign.contributor_count,
-                token_balance: current_balance + amount,
-                contributor_total: current_contribution + amount,
+                token_balance: new_balance,
+                contributor_total: new_contribution,
                 pledged_at: env.ledger().timestamp(),
             },
         );
     }
 
-    /// Updates the campaign metadata (issues #185, #1521).
+    /// Updates the campaign metadata. Only the original creator can call this,
+    /// and only before the campaign deadline. Emits a MetadataUpdated event
+    /// containing both old and new values (issue #185).
     ///
-    /// Boundaries:
-    /// - Caller must be the campaign creator and provide authorization.
-    /// - The contract must not be paused.
-    /// - The campaign must not be claimed or canceled.
-    /// - The ledger timestamp must be strictly before the deadline; the
-    ///   deadline itself is closed (`deadline - 1` is the last valid moment).
-    /// - `new_metadata` may be any string, including the empty string.
-    ///
-    /// On success the metadata is replaced and a `MetadataUpdated` event is
-    /// emitted with both the previous and the new value. Rejected calls panic
-    /// before writing storage and emit no event. See
-    /// `contracts/METADATA_UPDATE_BOUNDARIES.md` for the full specification.
+    /// The event is published last, after the campaign record is written, so a
+    /// consumer never sees an event for a value that was not committed. A
+    /// rejected call panics before the write and publishes nothing. The event
+    /// carries the complete change (`old_metadata` -> `new_metadata`), so each
+    /// committed update can be reconstructed from the log exactly once
+    /// (issue #1524).
     pub fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: String) {
         require_not_paused(&env);
         creator.require_auth();
@@ -948,9 +999,12 @@ impl StellarGoalVaultContract {
     }
 
     /// Requests a deadline extension for a campaign. The caller must be an
-    /// existing contributor. The requester auto-approves their own request.
+    /// existing contributor. The requester auto-approves their own request,
+    /// which is reported as an [`ExtensionApproved`] event. If that vote is
+    /// already a majority the extension is committed immediately.
     /// new_deadline must be later than the current deadline and within
     /// MAX_CAMPAIGN_DURATION_SECONDS of the campaign's creation (issue #192).
+    /// Only one request may be pending per campaign.
     pub fn request_deadline_extension(
         env: Env,
         campaign_id: u64,
@@ -959,7 +1013,7 @@ impl StellarGoalVaultContract {
     ) {
         require_not_paused(&env);
         caller.require_auth();
-        let campaign = read_campaign(&env, campaign_id);
+        let mut campaign = read_campaign(&env, campaign_id);
         if campaign.claimed {
             panic!("campaign already claimed");
         }
@@ -969,7 +1023,11 @@ impl StellarGoalVaultContract {
         if new_deadline <= campaign.deadline {
             panic!("new deadline must be after current deadline");
         }
-        if new_deadline > campaign.created_at + MAX_CAMPAIGN_DURATION_SECONDS {
+        let max_deadline = match campaign.created_at.checked_add(MAX_CAMPAIGN_DURATION_SECONDS) {
+            Some(max) => max,
+            None => panic!("new deadline exceeds maximum campaign duration"),
+        };
+        if new_deadline > max_deadline {
             panic!("new deadline exceeds maximum campaign duration");
         }
 
@@ -983,33 +1041,80 @@ impl StellarGoalVaultContract {
             panic!("caller is not a contributor");
         }
 
+        // Only one extension request may be pending at a time. Overwriting a
+        // request would reset its tally while the earlier votes stay in
+        // storage, so a vote could no longer be attributed to one request.
+        let request_key = DataKey::ExtensionRequest(campaign_id);
+        if env.storage().persistent().has(&request_key) {
+            panic!("extension request already pending");
+        }
+
         let request = ExtensionRequest {
             new_deadline,
             requested_by: caller.clone(),
             approval_count: 1, // requester auto-approves
         };
-        env.storage()
-            .persistent()
-            .set(&DataKey::ExtensionRequest(campaign_id), &request);
         // Mark requester as having voted
         env.storage()
             .persistent()
             .set(&DataKey::ExtensionVote(campaign_id, caller.clone()), &true);
 
+        // The requester's auto-approval counts toward the majority just like an
+        // explicit `approve_extension` vote. Commit the change when it already
+        // reaches the threshold so the emitted events match stored state.
+        let old_deadline = campaign.deadline;
+        let extended = campaign.contributor_count > 0
+            && request
+                .approval_count
+                .checked_mul(2)
+                .is_none_or(|doubled| doubled > campaign.contributor_count);
+        if extended {
+            campaign.deadline = request.new_deadline;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Campaign(campaign_id), &campaign);
+            clear_extension_votes(&env, campaign_id);
+        } else {
+            env.storage().persistent().set(&request_key, &request);
+        }
+
+        // Events are emitted only after every storage write above, so a failed
+        // transaction never leaves an event for state that was not committed.
+        // The request is announced first, then its auto-approval, and the
+        // committed deadline change (if any) follows them.
         env.events().publish(
             (symbol_short!("Goal"), symbol_short!("ExtReq")),
             ExtensionRequested {
                 campaign_id,
-                requested_by: caller,
+                requested_by: caller.clone(),
                 new_deadline,
             },
         );
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("ExtAppr")),
+            ExtensionApproved {
+                campaign_id,
+                approver: caller,
+                approval_count: 1,
+            },
+        );
+        if extended {
+            env.events().publish(
+                (symbol_short!("Goal"), symbol_short!("Extended")),
+                DeadlineExtended {
+                    campaign_id,
+                    old_deadline,
+                    new_deadline: request.new_deadline,
+                },
+            );
+        }
     }
 
     /// Votes to approve a pending deadline extension. The caller must be an
     /// existing contributor and must not have already voted. When approvals
-    /// exceed 50% of the contributor count, the new deadline is applied and
-    /// the pending request is cleared (issue #192).
+    /// exceed 50% of the contributor count, the new deadline is applied, the
+    /// pending request is cleared, and the round's votes are discarded so a
+    /// later request starts with a fresh tally (issue #192).
     pub fn approve_extension(env: Env, campaign_id: u64, caller: Address) {
         require_not_paused(&env);
         caller.require_auth();
@@ -1045,18 +1150,27 @@ impl StellarGoalVaultContract {
             .unwrap_or_else(|| panic!("no extension request"));
 
         env.storage().persistent().set(&vote_key, &true);
-        request.approval_count += 1;
+        request.approval_count = request
+            .approval_count
+            .checked_add(1)
+            .unwrap_or_else(|| panic!("arithmetic overflow"));
 
         // Majority threshold: approval_count * 2 > contributor_count
         let old_deadline = campaign.deadline;
         let extended = campaign.contributor_count > 0
-            && request.approval_count * 2 > campaign.contributor_count;
+            && request
+                .approval_count
+                .checked_mul(2)
+                .is_none_or(|doubled| doubled > campaign.contributor_count);
         if extended {
             campaign.deadline = request.new_deadline;
             env.storage()
                 .persistent()
                 .set(&DataKey::Campaign(campaign_id), &campaign);
             env.storage().persistent().remove(&request_key);
+            // Drop this round's votes so the next extension request starts
+            // from a clean tally instead of inheriting stale vote records.
+            clear_extension_votes(&env, campaign_id);
         } else {
             env.storage().persistent().set(&request_key, &request);
         }
@@ -1165,8 +1279,14 @@ impl StellarGoalVaultContract {
 
                 if take_fee {
                     if let Some(ref recipient) = fee_recipient {
-                        let fee_amount = balance * fee_bps / 10000;
-                        let creator_amount = balance - fee_amount;
+                        let fee_amount = balance
+                            .checked_mul(fee_bps)
+                            .unwrap_or_else(|| panic!("arithmetic overflow"))
+                            .checked_div(10000)
+                            .unwrap_or_else(|| panic!("arithmetic overflow"));
+                        let creator_amount = balance
+                            .checked_sub(fee_amount)
+                            .unwrap_or_else(|| panic!("arithmetic overflow"));
 
                         if fee_amount > 0 {
                             token_client.transfer(&contract_address, recipient, &fee_amount);
@@ -1555,6 +1675,22 @@ fn read_campaign(env: &Env, campaign_id: u64) -> Campaign {
         .unwrap_or_else(|| panic!("campaign not found"))
 }
 
+/// Removes every per-contributor vote for a campaign's extension request. A
+/// committed extension ends the voting round; keeping the flags would prevent
+/// those contributors from voting on a later request.
+fn clear_extension_votes(env: &Env, campaign_id: u64) {
+    let contributors: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Contributors(campaign_id))
+        .unwrap_or_else(|| Vec::new(env));
+    for contributor in contributors.iter() {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::ExtensionVote(campaign_id, contributor));
+    }
+}
+
 /// Refresh a persistent entry that is still present. An already archived entry
 /// cannot be revived; [`require_campaign_accounting_intact`] detects that case
 /// before any funds move.
@@ -1609,18 +1745,25 @@ fn require_campaign_accounting_intact(env: &Env, campaign_id: u64, campaign: &Ca
         for contributor in contributors.iter() {
             let contribution_key =
                 DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
-            summed += env
+            let amount: i128 = env
                 .storage()
                 .persistent()
                 .get(&contribution_key)
                 .unwrap_or(0);
+            summed = match summed.checked_add(amount) {
+                Some(s) => s,
+                None => panic!("campaign storage expired"),
+            };
             refresh_persistent_ttl(env, &contribution_key);
         }
 
         if stored != summed {
             panic!("campaign storage expired");
         }
-        total += stored;
+        total = match total.checked_add(stored) {
+            Some(t) => t,
+            None => panic!("campaign storage expired"),
+        };
     }
 
     if total != campaign.pledged_amount {
@@ -1652,11 +1795,19 @@ fn refund_contributor(
             token_client.transfer(&contract_address, contributor, &amount);
             env.storage().persistent().set(&contribution_key, &0_i128);
             let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+            let new_balance = balance
+                .checked_sub(amount)
+                .unwrap_or_else(|| panic!("arithmetic underflow"));
             env.storage()
                 .persistent()
-                .set(&balance_key, &(balance - amount));
-            campaign.pledged_amount -= amount;
-            total_refunded += amount;
+                .set(&balance_key, &new_balance);
+            campaign.pledged_amount = campaign
+                .pledged_amount
+                .checked_sub(amount)
+                .unwrap_or_else(|| panic!("arithmetic underflow"));
+            total_refunded = total_refunded
+                .checked_add(amount)
+                .unwrap_or_else(|| panic!("arithmetic overflow"));
             env.events().publish(
                 (symbol_short!("Goal"), symbol_short!("Refund")),
                 CampaignRefunded {
