@@ -11,7 +11,8 @@ mod tests {
     use crate::{
         CampaignClaimed, CampaignCreatedEvent, CampaignPledged, CampaignPledgedEvent, DataKey,
         DeadlineExtended, ExtensionApproved, ExtensionRequested, FeeCollected, MetadataUpdated,
-        StellarGoalVaultContract, StellarGoalVaultContractClient, CAMPAIGN_STORAGE_TTL_EXTEND_TO,
+        MinContributionConfiguredEvent, StellarGoalVaultContract,
+        StellarGoalVaultContractClient, CAMPAIGN_STORAGE_TTL_EXTEND_TO,
     };
     // Keep contract tests independent of the machine clock and local timezone.
     // Soroban timestamps are UTC Unix seconds; epoch zero preserves the mock
@@ -1932,6 +1933,104 @@ mod tests {
         );
         assert_eq!(token_client.balance(&contributor), 500);
         assert_eq!(token_client.balance(&vault), 500);
+    }
+
+    // ── SGV-2026-114: minimum-contribution configuration events ─────────────
+    // `initialize` publishes the legacy `("Goal", "Init")` event first and, once
+    // the floor is committed, exactly one structured `("Goal", "MinConf")` event
+    // carrying the value now stored. A below-minimum pledge is rejected before
+    // the campaign read and before any transfer: it emits nothing, records no
+    // pledge, and deducts nothing.
+
+    #[test]
+    fn test_initialize_emits_min_contribution_event_after_committed_state() {
+        use soroban_sdk::{FromVal, Val};
+        let env = test_env();
+        env.mock_all_auths();
+        let client = deploy_contract(&env);
+        let admin = Address::generate(&env);
+
+        client.initialize(&admin, &750_i128);
+
+        // The event log describes the most recent invocation, so read it before
+        // any further contract call.
+        let emitted = env.events().all().filter_by_contract(&client.address);
+        assert_eq!(
+            emitted.events().len(),
+            2,
+            "initialize must publish Init then MinConf, and nothing else"
+        );
+
+        let init_events = goal_events(&env, soroban_sdk::symbol_short!("Init"));
+        let configured_events = goal_events(&env, soroban_sdk::symbol_short!("MinConf"));
+        assert_eq!(init_events.len(), 1);
+        assert_eq!(configured_events.len(), 1);
+        assert!(
+            init_events[0].0 < configured_events[0].0,
+            "the committed MinConf event must follow Init"
+        );
+
+        let configured = MinContributionConfiguredEvent::from_val(
+            &env,
+            &Val::from_val(&env, &configured_events[0].1),
+        );
+        assert_eq!(configured.admin, admin);
+        assert_eq!(configured.min_contribution, 750);
+        assert_eq!(
+            configured.contract_version,
+            String::from_str(&env, crate::CONTRACT_VERSION)
+        );
+        assert_eq!(configured.configured_at, env.ledger().timestamp());
+        assert_eq!(client.get_min_contribution(), configured.min_contribution);
+    }
+
+    #[test]
+    fn test_below_minimum_rejection_deducts_nothing_and_emits_no_event() {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = deploy_token(&env, &admin, &contributor, 1_000);
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &500_i128);
+
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, token.clone()],
+            &1_000_i128,
+            &(env.ledger().timestamp() + 1_000),
+            &String::from_str(&env, "minimum rejection atomicity"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let token_client = TokenClient::new(&env, &token);
+        let rejected = crate::std::panic::catch_unwind(crate::std::panic::AssertUnwindSafe(|| {
+            client.contribute(&campaign_id, &contributor, &token, &499);
+        }));
+
+        assert!(rejected.is_err(), "one stroop below the floor must panic");
+        assert!(
+            env.events().all().events().is_empty(),
+            "a rejected pledge must emit nothing (no Pledge, Pledged or MinConf)"
+        );
+
+        assert_eq!(
+            client.get_min_contribution(),
+            500,
+            "rejection must not change the committed floor"
+        );
+        assert_eq!(token_client.balance(&contributor), 1_000);
+        assert_eq!(token_client.balance(&client.address), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &token), 0);
+        assert_eq!(
+            client.get_contribution(&campaign_id, &contributor, &token),
+            0
+        );
     }
 
     // ── SGV-2026-120: per-contributor cap regression ──────────────────────────
@@ -5253,6 +5352,331 @@ mod tests {
         assert_eq!(TokenClient::new(&env, &usdc_token).balance(&bob), usdc_amount);
         assert_eq!(client.get_campaign_token_balance(&campaign_id, &usdc_token), 0);
         assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+    }
+
+    // ── SGV-2026-125: multi-token accounting regression (XLM + USDC) ──────────
+    // The sibling tests above pin balance preservation and failure atomicity,
+    // and `test_pledge_auth.rs` pins who may sign. This test pins the remaining
+    // observable contract: exact transfer amounts and the event log for two
+    // assets with different precision, plus an unaccepted asset. All assets
+    // are mock Stellar Asset contracts minted inside the isolated `Env`; no
+    // live funds or network state are involved.
+    //
+    // The contract sums raw units into `pledged_amount` (see
+    // `adr/0006-multi-token-design.md`), so the target below is the exact raw
+    // sum of the stroop and USDC-unit amounts rather than a normalized value.
+
+    /// The last vault call was authorized by `expected` for `fn_name`.
+    /// Token contracts may add their own sub-invocation auths, so filter by
+    /// the vault entry point instead of assuming a single auth in the log.
+    fn assert_vault_auth(env: &Env, vault: &Address, expected: &Address, fn_name: &str) {
+        use soroban_sdk::testutils::AuthorizedFunction;
+
+        let expected_name = Symbol::new(env, fn_name);
+        let auths = env.auths();
+        let matching: std::vec::Vec<_> = auths
+            .iter()
+            .filter(|(_, invocation)| {
+                matches!(
+                    &invocation.function,
+                    AuthorizedFunction::Contract((contract, name, _))
+                        if contract == vault && name == &expected_name
+                )
+            })
+            .collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "{fn_name}: expected exactly one authorization of the vault entry point"
+        );
+        let (signer, _) = matching[0];
+        assert_eq!(
+            signer, expected,
+            "{fn_name}: authorized by the wrong address"
+        );
+    }
+
+    #[test]
+    fn test_multi_token_xlm_usdc_exact_transfers_events_and_authorization() {
+        use soroban_sdk::FromVal;
+
+        let env = test_env();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let fee_recipient = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let eve = Address::generate(&env);
+
+        // 7-decimal XLM (stroops) and 6-decimal USDC (units). Non-round amounts
+        // make the 1% fee truncate differently in each token without rounding
+        // either transfer into a different integer.
+        let xlm_amount = 12_345_678_i128; // 1.2345678 XLM in stroops
+        let usdc_amount = 1_234_567_i128; // 1.234567 USDC in units
+        let unaccepted_amount = 9_000_000_i128;
+
+        let xlm = deploy_token(&env, &admin, &alice, xlm_amount);
+        let usdc = deploy_token(&env, &admin, &bob, usdc_amount);
+        let unaccepted = deploy_token(&env, &admin, &eve, unaccepted_amount);
+
+        let client = deploy_contract(&env);
+        client.initialize(&admin, &100_i128);
+        client.set_fee(&admin, &100_i128); // 100 bps = 1%
+        client.set_fee_recipient(&admin, &fee_recipient);
+
+        let deadline = env.ledger().timestamp() + 1_000;
+        let campaign_id = client.create_campaign(
+            &creator,
+            &soroban_sdk::vec![&env, xlm.clone(), usdc.clone()],
+            &(xlm_amount + usdc_amount),
+            &deadline,
+            &String::from_str(&env, "XLM/USDC precision regression"),
+            &0_i128,
+            &soroban_sdk::vec![&env],
+            &0_u32,
+        );
+
+        let xlm_client = TokenClient::new(&env, &xlm);
+        let usdc_client = TokenClient::new(&env, &usdc);
+        let unaccepted_client = TokenClient::new(&env, &unaccepted);
+        let vault = client.address.clone();
+
+        // No signature: neither an accepted nor an unaccepted payment may move
+        // funds or publish an event.
+        env.mock_auths(&[]);
+        assert!(
+            client
+                .try_contribute(&campaign_id, &alice, &xlm, &xlm_amount)
+                .is_err(),
+            "unsigned XLM contribution must fail"
+        );
+        assert!(
+            client
+                .try_contribute(&campaign_id, &eve, &unaccepted, &unaccepted_amount)
+                .is_err(),
+            "unsigned unaccepted-asset contribution must fail"
+        );
+        assert!(
+            env.events()
+                .all()
+                .filter_by_contract(&vault)
+                .events()
+                .is_empty(),
+            "rejected pledges must emit no events"
+        );
+        assert_eq!(xlm_client.balance(&alice), xlm_amount);
+        assert_eq!(xlm_client.balance(&vault), 0);
+        assert_eq!(unaccepted_client.balance(&eve), unaccepted_amount);
+        assert_eq!(unaccepted_client.balance(&vault), 0);
+        assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+
+        // Contributor-signed XLM pledge: the exact stroop amount crosses into
+        // escrow and both pledge events carry that token's own amount/balance.
+        env.mock_all_auths();
+        client.contribute(&campaign_id, &alice, &xlm, &xlm_amount);
+        assert_vault_auth(&env, &vault, &alice, "contribute");
+
+        let xlm_pledges = goal_events(&env, soroban_sdk::symbol_short!("Pledged"));
+        assert_eq!(xlm_pledges.len(), 1);
+        let xlm_pledge =
+            CampaignPledgedEvent::from_val(&env, &Val::from_val(&env, &xlm_pledges[0].1));
+        assert_eq!(xlm_pledge.campaign_id, campaign_id);
+        assert_eq!(xlm_pledge.contributor, alice);
+        assert_eq!(xlm_pledge.token, xlm);
+        assert_eq!(xlm_pledge.amount, xlm_amount);
+        assert_eq!(xlm_pledge.token_balance, xlm_amount);
+        assert_eq!(xlm_pledge.total_pledged, xlm_amount);
+        assert_eq!(xlm_pledge.contributor_total, xlm_amount);
+        assert_eq!(xlm_pledge.contributor_count, 1);
+
+        let xlm_legacy = goal_events(&env, soroban_sdk::symbol_short!("Pledge"));
+        assert_eq!(xlm_legacy.len(), 1);
+        let xlm_legacy = CampaignPledged::from_val(&env, &Val::from_val(&env, &xlm_legacy[0].1));
+        assert_eq!(xlm_legacy.token, xlm);
+        assert_eq!(xlm_legacy.amount, xlm_amount);
+
+        assert_eq!(xlm_client.balance(&alice), 0);
+        assert_eq!(xlm_client.balance(&vault), xlm_amount);
+        assert_eq!(usdc_client.balance(&vault), 0);
+
+        // Contributor-signed USDC pledge: units stay separate from stroops.
+        client.contribute(&campaign_id, &bob, &usdc, &usdc_amount);
+        assert_vault_auth(&env, &vault, &bob, "contribute");
+
+        let usdc_pledges = goal_events(&env, soroban_sdk::symbol_short!("Pledged"));
+        assert_eq!(usdc_pledges.len(), 1);
+        let usdc_pledge =
+            CampaignPledgedEvent::from_val(&env, &Val::from_val(&env, &usdc_pledges[0].1));
+        assert_eq!(usdc_pledge.campaign_id, campaign_id);
+        assert_eq!(usdc_pledge.contributor, bob);
+        assert_eq!(usdc_pledge.token, usdc);
+        assert_eq!(usdc_pledge.amount, usdc_amount);
+        assert_eq!(usdc_pledge.token_balance, usdc_amount);
+        assert_eq!(usdc_pledge.total_pledged, xlm_amount + usdc_amount);
+        assert_eq!(usdc_pledge.contributor_total, usdc_amount);
+        assert_eq!(usdc_pledge.contributor_count, 2);
+
+        let usdc_legacy = goal_events(&env, soroban_sdk::symbol_short!("Pledge"));
+        assert_eq!(usdc_legacy.len(), 1);
+        let usdc_legacy = CampaignPledged::from_val(&env, &Val::from_val(&env, &usdc_legacy[0].1));
+        assert_eq!(usdc_legacy.token, usdc);
+        assert_eq!(usdc_legacy.amount, usdc_amount);
+
+        assert_eq!(usdc_client.balance(&bob), 0);
+        assert_eq!(xlm_client.balance(&vault), xlm_amount);
+        assert_eq!(usdc_client.balance(&vault), usdc_amount);
+        assert_eq!(
+            client.get_campaign(&campaign_id).pledged_amount,
+            usdc_pledge.total_pledged
+        );
+
+        // Even correctly signed, an unaccepted asset cannot enter the vault or
+        // change the accepted-token accounting; nothing is emitted.
+        assert!(
+            client
+                .try_contribute(&campaign_id, &eve, &unaccepted, &unaccepted_amount)
+                .is_err(),
+            "signed unaccepted-asset contribution must fail"
+        );
+        assert!(
+            env.events()
+                .all()
+                .filter_by_contract(&vault)
+                .events()
+                .is_empty(),
+            "rejected unaccepted-asset pledge must emit no events"
+        );
+        assert_eq!(unaccepted_client.balance(&eve), unaccepted_amount);
+        assert_eq!(unaccepted_client.balance(&vault), 0);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &unaccepted),
+            0
+        );
+        assert_eq!(client.get_contribution(&campaign_id, &eve, &unaccepted), 0);
+        assert_eq!(xlm_client.balance(&vault), xlm_amount);
+        assert_eq!(usdc_client.balance(&vault), usdc_amount);
+
+        // Settlement is creator-authorized. Unsigned claims emit nothing.
+        advance_time(&env, 1_001);
+        env.mock_auths(&[]);
+        assert!(
+            client.try_claim(&campaign_id, &creator).is_err(),
+            "unsigned claim must fail"
+        );
+        assert!(
+            env.events()
+                .all()
+                .filter_by_contract(&vault)
+                .events()
+                .is_empty(),
+            "rejected claim must emit no events"
+        );
+        assert_eq!(xlm_client.balance(&vault), xlm_amount);
+        assert_eq!(usdc_client.balance(&vault), usdc_amount);
+
+        env.mock_all_auths();
+        client.claim(&campaign_id, &creator);
+        assert_vault_auth(&env, &vault, &creator, "claim");
+
+        // Fee truncation is per-token, then each funded token gets one claim
+        // marker with its gross escrow amount. Read the log before any getter
+        // or token-call (those are separate invocations).
+        let xlm_fee = xlm_amount * 100 / 10_000;
+        let usdc_fee = usdc_amount * 100 / 10_000;
+        let xlm_creator_amount = xlm_amount - xlm_fee;
+        let usdc_creator_amount = usdc_amount - usdc_fee;
+        let fee_topics = soroban_sdk::vec![
+            &env,
+            Symbol::new(&env, "Goal").into_val(&env),
+            Symbol::new(&env, "Fee").into_val(&env),
+        ];
+        let claim_topics = soroban_sdk::vec![
+            &env,
+            Symbol::new(&env, "Goal").into_val(&env),
+            Symbol::new(&env, "Claim").into_val(&env),
+        ];
+        let expected = soroban_sdk::vec![
+            &env,
+            (
+                vault.clone(),
+                fee_topics.clone(),
+                FeeCollected {
+                    campaign_id,
+                    token: xlm.clone(),
+                    fee_amount: xlm_fee,
+                    fee_recipient: fee_recipient.clone(),
+                }
+                .into_val(&env),
+            ),
+            (
+                vault.clone(),
+                fee_topics,
+                FeeCollected {
+                    campaign_id,
+                    token: usdc.clone(),
+                    fee_amount: usdc_fee,
+                    fee_recipient: fee_recipient.clone(),
+                }
+                .into_val(&env),
+            ),
+            (
+                vault.clone(),
+                claim_topics.clone(),
+                CampaignClaimed {
+                    campaign_id,
+                    creator: creator.clone(),
+                    token: xlm.clone(),
+                    amount: xlm_amount,
+                }
+                .into_val(&env),
+            ),
+            (
+                vault.clone(),
+                claim_topics,
+                CampaignClaimed {
+                    campaign_id,
+                    creator: creator.clone(),
+                    token: usdc.clone(),
+                    amount: usdc_amount,
+                }
+                .into_val(&env),
+            ),
+        ];
+        assert_eq!(
+            env.events().all().filter_by_contract(&vault),
+            expected,
+            "claim must emit one fee and one claim event per funded token, in order"
+        );
+
+        // Exact payouts: no rounding leaks between tokens, and the unaccepted
+        // asset never enters the vault or either payout recipient.
+        assert_eq!(xlm_client.balance(&creator), xlm_creator_amount);
+        assert_eq!(xlm_client.balance(&fee_recipient), xlm_fee);
+        assert_eq!(usdc_client.balance(&creator), usdc_creator_amount);
+        assert_eq!(usdc_client.balance(&fee_recipient), usdc_fee);
+        assert_eq!(xlm_client.balance(&vault), 0);
+        assert_eq!(usdc_client.balance(&vault), 0);
+        assert_eq!(unaccepted_client.balance(&creator), 0);
+        assert_eq!(unaccepted_client.balance(&fee_recipient), 0);
+        assert_eq!(unaccepted_client.balance(&vault), 0);
+        assert_eq!(unaccepted_client.balance(&eve), unaccepted_amount);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &xlm), 0);
+        assert_eq!(client.get_campaign_token_balance(&campaign_id, &usdc), 0);
+        assert_eq!(
+            client.get_campaign_token_balance(&campaign_id, &unaccepted),
+            0
+        );
+        assert_eq!(
+            client.get_contribution(&campaign_id, &alice, &xlm),
+            xlm_amount
+        );
+        assert_eq!(
+            client.get_contribution(&campaign_id, &bob, &usdc),
+            usdc_amount
+        );
+        assert!(client.get_campaign(&campaign_id).claimed);
     }
 
     // ── #1513: claim authority tests (SGV-2026-133) ───────────────────────────
