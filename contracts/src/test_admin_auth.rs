@@ -16,11 +16,16 @@
 //! it must still be signed by the address it appoints.
 
 use soroban_sdk::{
-    testutils::{Address as _, AuthorizedFunction, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, AuthorizedFunction, Ledger, MockAuth, MockAuthInvoke},
     Address, Env, IntoVal, Symbol, Vec,
 };
 
 use crate::{Campaign, StellarGoalVaultContract, StellarGoalVaultContractClient};
+
+// Keep contract tests independent of the host clock and local timezone.
+// Soroban ledger timestamps are UTC Unix seconds; fixing the mock ledger time
+// makes deadline and lifecycle-related setup deterministic.
+const TEST_LEDGER_TIMESTAMP: u64 = 0;
 
 struct Fixture {
     env: Env,
@@ -32,6 +37,7 @@ struct Fixture {
 /// Auth is fully mocked during setup only.
 fn fixture_with(initialize: bool) -> Fixture {
     let env = Env::default();
+    env.ledger().set_timestamp(TEST_LEDGER_TIMESTAMP);
     env.mock_all_auths();
 
     let contract_id = env.register(StellarGoalVaultContract, ());
