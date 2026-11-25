@@ -31,7 +31,9 @@ mod tests {
     }
 
     fn deploy_token(env: &Env, admin: &Address, recipient: &Address, amount: i128) -> Address {
-        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_id = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let asset_client = StellarAssetClient::new(env, &token_id);
         asset_client.mint(recipient, &amount);
         token_id
@@ -1342,6 +1344,7 @@ mod tests {
         // Explicitly unpaused (default), then create — preserves existing lifecycle.
         client.set_paused(&admin, &false);
 
+        let deadline = env.ledger().timestamp() + 1_000;
         let campaign_id = client.create_campaign(
             &creator,
             &soroban_sdk::vec![&env, token.clone()],

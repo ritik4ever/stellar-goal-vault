@@ -102,6 +102,9 @@ pub enum DataKey {
     ExtensionRequest(u64),
     ExtensionVote(u64, Address),
     HasContributed(u64, Address), // (campaign_id, contributor)
+    /// Ordered list of distinct contributor addresses for a campaign.
+    /// Used by `refund_all` to iterate refunds in a single call.
+    Contributors(u64), // campaign_id
     /// Tracks which (old_contract_id, campaign_id) pairs have already been migrated.
     MigratedId(Address, u64),
     /// Track contributor addresses for a campaign (used in refund_all).
