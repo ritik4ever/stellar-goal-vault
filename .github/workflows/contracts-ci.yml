@@ -60,6 +60,38 @@ jobs:
         working-directory: contracts
         run: cargo test --features testutils
 
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Run contract tests with coverage
+        working-directory: contracts
+        run: |
+          cargo llvm-cov --workspace --lcov --output-path ./lcov.info --features testutils
+          cargo llvm-cov report --features testutils --summary-only | tee /tmp/contracts-coverage.txt
+          echo "### Contracts Coverage" >> $GITHUB_STEP_SUMMARY
+          cat /tmp/contracts-coverage.txt >> $GITHUB_STEP_SUMMARY
+          cargo llvm-cov report --features testutils --fail-under-lines 80
+
+      - name: Upload contract coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contracts-coverage
+          path: |
+            contracts/lcov.info
+            /tmp/contracts-coverage.txt
+          retention-days: 7
+
+      - name: Upload contract coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./contracts/lcov.info
+          flags: contracts
+          verbose: true
+
       - name: Build WASM release binary (no testutils)
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release --no-default-features
