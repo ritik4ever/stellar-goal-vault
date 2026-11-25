@@ -203,7 +203,7 @@ failure point on a fresh database and on one upgraded from the legacy schema.
 | Same key, same body, first request still running | Waits for it, then replays its response. `409 IDEMPOTENCY_REQUEST_IN_PROGRESS` if it takes longer than 10 s. |
 | Same key from a different contributor | Independent request, so it gets its own pledge. |
 | First request failed (non-2xx) | Nothing is stored; the retry runs normally. |
-| Repeat at 24 h or later | A new request. The age is checked against the stored timestamp, so the boundary is exact (`now - storedAt >= 24 h`). |
+| Repeat at 24 h or later | A new request. The age is checked against the stored timestamp, so the boundary is exact (`now - storedAt >= 24 h`). Expired entries encountered in shared storage are actively purged to maintain clean worker boundaries. |
 
 The key is scoped to API key, campaign and contributor. Request bodies are
 compared by a hash that ignores field order.
@@ -252,5 +252,19 @@ history, campaign pledge lists, and active-pledge accounting). All use
   ordered pledge lists after seed / API reads (`listCampaignPledges`).
 - `idx_pledges_transaction_hash` unique partial on `pledges(transaction_hash)`
   where `transaction_hash IS NOT NULL`.
+
+## Campaign transaction observability (SGV-2026-169)
+
+Multi-step SQLite campaign writes in `src/services/campaignStore.ts` (`createCampaign`,
+`addPledge`, `reconcileOnChainPledge`, `reconcileOnChainClaim`, `softDeleteCampaign`,
+`restoreCampaign`, and `refundContributor`) run inside an explicit transaction wrapper
+that emits structured operator logs with a redacted `campaignRef` (never the raw
+campaign ID):
+
+| Event | `outcome` | Meaning |
+| --- | --- | --- |
+| `campaign_transaction_pending` | `pending` | Transaction started for `operation` and redacted `campaignRef`. |
+| `campaign_transaction_committed` | `committed` | All writes committed atomically (`completedWrites` count included). |
+| `campaign_transaction_rejected` | `rejected` | Transaction threw and rolled back (`rolledBack: true`). Includes `failedAfterFirstWrite`, `completedWrites`, and `lastCompletedWrite` so operators can immediately identify when a subsequent write failed after an earlier write succeeded. |
 
 ### Seed-workflo

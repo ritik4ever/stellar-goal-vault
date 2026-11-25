@@ -14,12 +14,13 @@
 //!   `refund_all` is admin-only (it used to be callable by anyone).
 
 use soroban_sdk::{
-    testutils::{Address as _, AuthorizedFunction, Ledger, MockAuth, MockAuthInvoke},
+    symbol_short,
+    testutils::{Address as _, AuthorizedFunction, Events as _, Ledger, MockAuth, MockAuthInvoke},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, IntoVal, String, Symbol,
+    Address, Env, FromVal, IntoVal, String, Symbol, Val,
 };
 
-use crate::{StellarGoalVaultContract, StellarGoalVaultContractClient};
+use crate::{MetadataUpdated, StellarGoalVaultContract, StellarGoalVaultContractClient};
 
 const TARGET: i128 = 1_000;
 const PLEDGE: i128 = 400;
@@ -99,7 +100,11 @@ fn balance(f: &Fixture, who: &Address) -> i128 {
 /// The last top-level call was authorized by exactly one address, `expected`,
 /// for `fn_name` on the vault contract.
 fn assert_sole_signer(f: &Fixture, expected: &Address, fn_name: &str) {
-    let auths = f.env.auths();
+    assert_sole_signer_on(&f.env, &f.client.address, expected, fn_name);
+}
+
+fn assert_sole_signer_on(env: &Env, vault: &Address, expected: &Address, fn_name: &str) {
+    let auths = env.auths();
     assert_eq!(
         auths.len(),
         1,
@@ -112,13 +117,10 @@ fn assert_sole_signer(f: &Fixture, expected: &Address, fn_name: &str) {
     );
     match &invocation.function {
         AuthorizedFunction::Contract((contract, name, _)) => {
-            assert_eq!(
-                contract, &f.client.address,
-                "{fn_name}: auth for another contract"
-            );
+            assert_eq!(contract, vault, "{fn_name}: auth for another contract");
             assert_eq!(
                 name,
-                &Symbol::new(&f.env, fn_name),
+                &Symbol::new(env, fn_name),
                 "{fn_name}: auth for another function"
             );
         }
@@ -140,6 +142,35 @@ fn contribute_requires_exactly_the_contributor_signature() {
         .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
     assert_sole_signer(&f, &f.alice, "contribute");
     assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, PLEDGE);
+}
+
+#[test]
+fn contribute_at_minimum_requires_the_contributor_signature() {
+    let f = fixture();
+    f.client.contribute(&f.campaign_id, &f.alice, &f.token, &1);
+    assert_sole_signer(&f, &f.alice, "contribute");
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 1);
+    assert_eq!(balance(&f, &f.alice), 9_999);
+}
+
+#[test]
+fn contribute_below_minimum_without_signature_changes_nothing() {
+    let f = fixture();
+    enforce_no_signatures(&f);
+
+    let result = f
+        .client
+        .try_contribute(&f.campaign_id, &f.alice, &f.token, &0);
+
+    assert!(result.is_err(), "unsigned below-minimum pledge must fail");
+    assert_eq!(f.client.get_min_contribution(), 1);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        0
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000);
 }
 
 #[test]
@@ -400,4 +431,1125 @@ fn refund_all_requires_an_initialized_admin() {
         .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
     past_deadline(&f.env);
     f.client.refund_all(&f.campaign_id);
+}
+
+// --- refund after failures and on partially refunded campaigns (issue #1518) ---
+//
+// `refund` is contributor-authorized (above). The tests below pin that rule in
+// the two states a failed campaign actually reaches in production: a refund
+// attempt whose token transfer failed, and a campaign where some contributors
+// have already been refunded and others have not.
+
+/// Test double for a token whose `transfer` can be made to fail on demand.
+///
+/// It exists only to reproduce a failed token transfer inside `refund` without
+/// any real funds: `mint`, `balance` and `transfer` are all the vault's pledge
+/// and refund paths touch, and `freeze` makes every later transfer panic the
+/// way a token does when the vault cannot cover it. Never deployed outside
+/// `cfg(test)`.
+#[soroban_sdk::contract]
+pub struct FlakyToken;
+
+#[soroban_sdk::contractimpl]
+impl FlakyToken {
+    pub fn mint(env: Env, to: Address, amount: i128) {
+        let key = (Symbol::new(&env, "balance"), to);
+        let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        env.storage().persistent().set(&key, &(current + amount));
+    }
+
+    pub fn balance(env: Env, id: Address) -> i128 {
+        let key = (Symbol::new(&env, "balance"), id);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    /// `create_campaign` probes `decimals` to reject non-token addresses.
+    pub fn decimals(_env: Env) -> u32 {
+        7
+    }
+
+    pub fn freeze(env: Env) {
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "frozen"), &true);
+    }
+
+    pub fn unfreeze(env: Env) {
+        env.storage()
+            .instance()
+            .remove(&Symbol::new(&env, "frozen"));
+    }
+
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        let frozen: bool = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "frozen"))
+            .unwrap_or(false);
+        if frozen {
+            panic!("token transfer failed");
+        }
+        let from_key = (Symbol::new(&env, "balance"), from);
+        let from_balance: i128 = env.storage().persistent().get(&from_key).unwrap_or(0);
+        if from_balance < amount {
+            panic!("insufficient balance");
+        }
+        env.storage()
+            .persistent()
+            .set(&from_key, &(from_balance - amount));
+        let to_key = (Symbol::new(&env, "balance"), to);
+        let to_balance: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&to_key, &(to_balance + amount));
+    }
+}
+
+/// Underfunded failed campaign that accepts one real SAC token and the test
+/// double, so a refund can be made to fail halfway through its token loop.
+const FAILED_TARGET: i128 = 2_000;
+
+struct FlakyFixture {
+    env: Env,
+    client: StellarGoalVaultContractClient<'static>,
+    creator: Address,
+    alice: Address,
+    bob: Address,
+    token: Address,
+    flaky: Address,
+    campaign_id: u64,
+}
+
+fn flaky_fixture() -> FlakyFixture {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StellarGoalVaultContract, ());
+    let client = StellarGoalVaultContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    let token = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let minter = StellarAssetClient::new(&env, &token);
+    minter.mint(&alice, &10_000);
+    minter.mint(&bob, &10_000);
+
+    let flaky = env.register(FlakyToken, ());
+    FlakyTokenClient::new(&env, &flaky).mint(&alice, &10_000);
+
+    client.initialize(&admin, &1);
+
+    let campaign_id = client.create_campaign(
+        &creator,
+        &soroban_sdk::vec![&env, token.clone(), flaky.clone()],
+        &FAILED_TARGET,
+        &(env.ledger().timestamp() + DURATION),
+        &String::from_str(&env, "refund authority"),
+        &0_i128,
+        &soroban_sdk::vec![&env],
+        &0_u32,
+    );
+
+    FlakyFixture {
+        env,
+        client,
+        creator,
+        alice,
+        bob,
+        token,
+        flaky,
+        campaign_id,
+    }
+}
+
+fn sac_balance(f: &FlakyFixture, who: &Address) -> i128 {
+    TokenClient::new(&f.env, &f.token).balance(who)
+}
+
+fn flaky_balance(f: &FlakyFixture, who: &Address) -> i128 {
+    FlakyTokenClient::new(&f.env, &f.flaky).balance(who)
+}
+
+/// A refund that failed must leave the campaign, the vault and the contributor
+/// exactly as they were: no partial payout, no zeroed contribution.
+fn assert_failed_refund_paid_nothing(f: &FlakyFixture) {
+    let campaign = f.client.get_campaign(&f.campaign_id);
+    assert!(!campaign.claimed);
+    assert_eq!(campaign.pledged_amount, PLEDGE + 600);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        PLEDGE
+    );
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.flaky),
+        600
+    );
+    assert_eq!(sac_balance(f, &f.client.address), PLEDGE);
+    assert_eq!(flaky_balance(f, &f.client.address), 600);
+    assert_eq!(sac_balance(f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(flaky_balance(f, &f.alice), 9_400);
+}
+
+#[test]
+fn refund_after_a_failed_token_transfer_pays_nothing_and_only_the_contributor_can_retry() {
+    let f = flaky_fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.flaky, &600);
+    past_deadline(&f.env);
+
+    // The vault cannot pay this contributor in the second token yet, so the
+    // refund's transfer fails and the whole call reverts.
+    FlakyTokenClient::new(&f.env, &f.flaky).freeze();
+    assert!(f.client.try_refund(&f.campaign_id, &f.alice).is_err());
+    assert_failed_refund_paid_nothing(&f);
+
+    // Neither the creator nor another contributor can complete the refund,
+    // even though the campaign is failed and the funds are waiting.
+    for signer in [&f.creator, &f.bob] {
+        f.env.mock_auths(&[MockAuth {
+            address: signer,
+            invoke: &MockAuthInvoke {
+                contract: &f.client.address,
+                fn_name: "refund",
+                args: (f.campaign_id, f.alice.clone()).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(f.client.try_refund(&f.campaign_id, &f.alice).is_err());
+        assert_failed_refund_paid_nothing(&f);
+    }
+
+    // Once the token is healthy again the contributor's own signature refunds
+    // exactly once.
+    FlakyTokenClient::new(&f.env, &f.flaky).unfreeze();
+    f.env.mock_all_auths();
+    f.client.refund(&f.campaign_id, &f.alice);
+    assert_sole_signer_on(&f.env, &f.client.address, &f.alice, "refund");
+
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        0
+    );
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.flaky),
+        0
+    );
+    assert_eq!(sac_balance(&f, &f.alice), 10_000);
+    assert_eq!(flaky_balance(&f, &f.alice), 10_000);
+    assert_eq!(sac_balance(&f, &f.client.address), 0);
+    assert_eq!(flaky_balance(&f, &f.client.address), 0);
+
+    // A duplicate refund after the retry pays nothing.
+    assert!(f.client.try_refund(&f.campaign_id, &f.alice).is_err());
+    assert_eq!(sac_balance(&f, &f.alice), 10_000);
+    assert_eq!(flaky_balance(&f, &f.alice), 10_000);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+}
+
+#[test]
+fn partially_refunded_campaign_lets_only_each_contributor_release_their_own_pledge() {
+    let f = fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+    f.client
+        .contribute(&f.campaign_id, &f.bob, &f.token, &PLEDGE);
+    past_deadline(&f.env);
+
+    // Alice is refunded first: the campaign is now partially refunded.
+    f.client.refund(&f.campaign_id, &f.alice);
+    assert_sole_signer(&f, &f.alice, "refund");
+    assert_eq!(balance(&f, &f.alice), 10_000);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, PLEDGE);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+
+    // Neither the creator nor another contributor can release Bob's pledge.
+    for signer in [&f.creator, &f.alice] {
+        f.env.mock_auths(&[MockAuth {
+            address: signer,
+            invoke: &MockAuthInvoke {
+                contract: &f.client.address,
+                fn_name: "refund",
+                args: (f.campaign_id, f.bob.clone()).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(f.client.try_refund(&f.campaign_id, &f.bob).is_err());
+    }
+    assert_eq!(balance(&f, &f.bob), 10_000 - PLEDGE);
+    assert_eq!(
+        f.client.get_contribution(&f.campaign_id, &f.bob, &f.token),
+        PLEDGE
+    );
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, PLEDGE);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+
+    // Bob's own signature closes the campaign out, and only for his pledge.
+    f.env.mock_all_auths();
+    f.client.refund(&f.campaign_id, &f.bob);
+    assert_sole_signer(&f, &f.bob, "refund");
+    assert_eq!(balance(&f, &f.bob), 10_000);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        0
+    );
+}
+
+// --- update_metadata (SGV-2026-142) ------------------------------------------
+
+#[test]
+fn update_metadata_requires_exactly_the_creator_signature() {
+    let f = fixture();
+    let updated = String::from_str(&f.env, "updated metadata");
+
+    f.client
+        .update_metadata(&f.campaign_id, &f.creator, &updated);
+    assert_sole_signer(&f, &f.creator, "update_metadata");
+    assert_eq!(f.client.get_campaign(&f.campaign_id).metadata, updated);
+}
+
+#[test]
+fn update_metadata_without_signature_fails_and_leaves_storage_and_balances_intact() {
+    let f = fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+    enforce_no_signatures(&f);
+
+    let result = f.client.try_update_metadata(
+        &f.campaign_id,
+        &f.creator,
+        &String::from_str(&f.env, "unsigned update"),
+    );
+    assert!(result.is_err(), "unsigned update_metadata must fail");
+
+    let campaign = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(campaign.metadata, String::from_str(&f.env, "auth"));
+    assert_eq!(campaign.pledged_amount, PLEDGE);
+    assert_eq!(campaign.contributor_count, 1);
+    assert!(!campaign.claimed);
+    assert!(!campaign.canceled);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        PLEDGE
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+}
+
+#[test]
+fn update_metadata_signed_by_another_account_fails_and_changes_nothing() {
+    let f = fixture();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+
+    let hacked = String::from_str(&f.env, "hacked metadata");
+
+    // Case 1: Bob signs an update_metadata call purporting to act as creator.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.bob,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "update_metadata",
+            args: (f.campaign_id, f.creator.clone(), hacked.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    let result = f
+        .client
+        .try_update_metadata(&f.campaign_id, &f.creator, &hacked);
+    assert!(
+        result.is_err(),
+        "update_metadata signed by a non-creator must fail"
+    );
+
+    // Case 2: Bob signs an update_metadata call with his own address as creator.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.bob,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "update_metadata",
+            args: (f.campaign_id, f.bob.clone(), hacked.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    let result = f
+        .client
+        .try_update_metadata(&f.campaign_id, &f.bob, &hacked);
+    assert!(
+        result.is_err(),
+        "update_metadata by a non-creator caller must fail"
+    );
+
+    let campaign = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(campaign.metadata, String::from_str(&f.env, "auth"));
+    assert_eq!(campaign.pledged_amount, PLEDGE);
+    assert_eq!(campaign.contributor_count, 1);
+    assert!(!campaign.claimed);
+    assert!(!campaign.canceled);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        PLEDGE
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.bob), 10_000);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+}
+
+#[test]
+fn unauthorized_update_metadata_around_pledge_and_settlement_leaves_balances_and_state_valid() {
+    let f = fixture();
+    let original = String::from_str(&f.env, "auth");
+    let tampered = String::from_str(&f.env, "tampered");
+
+    // First pledge moves tokens into the vault.
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+
+    // Contributor Alice tries to overwrite metadata after pledging.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.alice,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "update_metadata",
+            args: (f.campaign_id, f.alice.clone(), tampered.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(f
+        .client
+        .try_update_metadata(&f.campaign_id, &f.alice, &tampered)
+        .is_err());
+
+    let mid_campaign = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(mid_campaign.metadata, original);
+    assert_eq!(mid_campaign.pledged_amount, PLEDGE);
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+
+    // Second pledge completes the funding target.
+    f.env.mock_all_auths();
+    let remainder = TARGET - PLEDGE;
+    f.client
+        .contribute(&f.campaign_id, &f.bob, &f.token, &remainder);
+
+    // Unauthorized caller attempts unsigned metadata update before settlement.
+    enforce_no_signatures(&f);
+    assert!(f
+        .client
+        .try_update_metadata(&f.campaign_id, &f.creator, &tampered)
+        .is_err());
+
+    let pre_claim = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(pre_claim.metadata, original);
+    assert_eq!(pre_claim.pledged_amount, TARGET);
+    assert!(!pre_claim.claimed);
+    assert_eq!(balance(&f, &f.client.address), TARGET);
+    assert_eq!(balance(&f, &f.creator), 0);
+
+    // Settlement still succeeds cleanly for the creator with full payout.
+    f.env.mock_all_auths();
+    past_deadline(&f.env);
+    f.client.claim(&f.campaign_id, &f.creator);
+
+    let post_claim = f.client.get_campaign(&f.campaign_id);
+    assert!(post_claim.claimed);
+    assert_eq!(post_claim.metadata, original);
+    assert_eq!(post_claim.pledged_amount, TARGET);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(balance(&f, &f.creator), TARGET);
+}
+
+#[test]
+fn update_metadata_at_last_moment_before_deadline_enforces_creator_auth_and_emits_event() {
+    let f = fixture();
+    let original = String::from_str(&f.env, "auth");
+    let hacked = String::from_str(&f.env, "unauthorized at deadline-1");
+    let updated = String::from_str(&f.env, "last-second creator update");
+    let too_late = String::from_str(&f.env, "at exact deadline");
+
+    // Seed an active pledge so vault and contributor balances are non-zero.
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &PLEDGE);
+
+    // Move to the exact last second before the deadline (`deadline - 1`).
+    let deadline = f.client.get_campaign(&f.campaign_id).deadline;
+    f.env.ledger().set_timestamp(deadline - 1);
+
+    // Unauthorized caller (non-creator Bob) tries to change metadata at `deadline - 1`.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.bob,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "update_metadata",
+            args: (f.campaign_id, f.bob.clone(), hacked.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        f.client
+            .try_update_metadata(&f.campaign_id, &f.bob, &hacked)
+            .is_err(),
+        "non-creator update_metadata at deadline - 1 must fail"
+    );
+    assert!(
+        f.env
+            .events()
+            .all()
+            .filter_by_contract(&f.client.address)
+            .events()
+            .is_empty(),
+        "rejected non-creator update must emit no events"
+    );
+
+    // Unsigned call purporting to be creator at `deadline - 1` must also fail.
+    enforce_no_signatures(&f);
+    assert!(
+        f.client
+            .try_update_metadata(&f.campaign_id, &f.creator, &hacked)
+            .is_err(),
+        "unsigned update_metadata at deadline - 1 must fail"
+    );
+    assert!(
+        f.env
+            .events()
+            .all()
+            .filter_by_contract(&f.client.address)
+            .events()
+            .is_empty(),
+        "rejected unsigned update must emit no events"
+    );
+
+    // Campaign state and all balances remain untouched after unauthorized attempts.
+    let before_valid = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(before_valid.metadata, original);
+    assert_eq!(before_valid.pledged_amount, PLEDGE);
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.bob), 10_000);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+
+    // Creator-only update at `deadline - 1` succeeds with creator as sole signer.
+    f.env.mock_all_auths();
+    f.client
+        .update_metadata(&f.campaign_id, &f.creator, &updated);
+    assert_sole_signer(&f, &f.creator, "update_metadata");
+
+    // Verify exactly one `MetadataUpdated` event with old and new metadata.
+    let emitted = f.env.events().all().filter_by_contract(&f.client.address);
+    let events = emitted.events();
+    assert_eq!(
+        events.len(),
+        1,
+        "creator update at deadline - 1 must emit exactly one event"
+    );
+    let soroban_sdk::xdr::ContractEventBody::V0(body) = &events[0].body;
+    let expected_topics: soroban_sdk::Vec<Val> =
+        soroban_sdk::vec![&f.env, symbol_short!("Goal").into_val(&f.env), symbol_short!("MetaUpd").into_val(&f.env)];
+    assert_eq!(body.topics.len(), expected_topics.len() as usize);
+    for (i, expected_topic) in expected_topics.iter().enumerate() {
+        assert_eq!(
+            body.topics[i],
+            soroban_sdk::xdr::ScVal::from_val(&f.env, &expected_topic)
+        );
+    }
+    let expected_data: Val = MetadataUpdated {
+        campaign_id: f.campaign_id,
+        creator: f.creator.clone(),
+        old_metadata: original,
+        new_metadata: updated.clone(),
+    }
+    .into_val(&f.env);
+    assert_eq!(
+        body.data,
+        soroban_sdk::xdr::ScVal::from_val(&f.env, &expected_data),
+        "MetadataUpdated event must carry both old and new metadata"
+    );
+
+    // Stored metadata is updated while pledges and token balances remain intact.
+    let after_valid = f.client.get_campaign(&f.campaign_id);
+    assert_eq!(after_valid.metadata, updated);
+    assert_eq!(after_valid.pledged_amount, PLEDGE);
+    assert_eq!(balance(&f, &f.alice), 10_000 - PLEDGE);
+    assert_eq!(balance(&f, &f.bob), 10_000);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+
+    // One second later (`timestamp == deadline`), even the creator is rejected.
+    f.env.ledger().set_timestamp(deadline);
+    assert!(
+        f.client
+            .try_update_metadata(&f.campaign_id, &f.creator, &too_late)
+            .is_err(),
+        "creator update_metadata at exact deadline must fail"
+    );
+    assert!(
+        f.env
+            .events()
+            .all()
+            .filter_by_contract(&f.client.address)
+            .events()
+            .is_empty(),
+        "rejected post-deadline update must emit no events"
+    );
+    assert_eq!(f.client.get_campaign(&f.campaign_id).metadata, updated);
+    assert_eq!(balance(&f, &f.client.address), PLEDGE);
+    assert_eq!(balance(&f, &f.creator), 0);
+}
+
+// ── SGV-2026-118: per-contributor cap authority enforcement ──────────────────
+// Scope:
+// - Verify creator, contributor, or admin authority relevant to two contributions
+//   that sum exactly to the cap and a third contribution exceeding the cap after
+//   a previous failure.
+// - Verify unauthorized calls cannot change campaigns or release funds.
+#[test]
+fn contribute_with_per_contributor_cap_enforces_contributor_authority_at_boundaries() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StellarGoalVaultContract, ());
+    let client = StellarGoalVaultContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    let token = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let minter = StellarAssetClient::new(&env, &token);
+    minter.mint(&alice, &10_000);
+    minter.mint(&bob, &10_000);
+
+    client.initialize(&admin, &1);
+
+    let cap = 500_i128;
+    let campaign_id = client.create_campaign(
+        &creator,
+        &soroban_sdk::vec![&env, token.clone()],
+        &2_000_i128,
+        &(env.ledger().timestamp() + DURATION),
+        &String::from_str(&env, "capped auth"),
+        &cap,
+        &soroban_sdk::vec![&env],
+        &0_u32,
+    );
+
+    let f = Fixture {
+        env,
+        client,
+        admin,
+        creator,
+        alice,
+        bob,
+        token,
+        campaign_id,
+    };
+
+    // 1. Unauthorized unsigned pledge attempt fails and changes nothing.
+    enforce_no_signatures(&f);
+    assert!(
+        f.client
+            .try_contribute(&f.campaign_id, &f.alice, &f.token, &200)
+            .is_err(),
+        "unsigned contribute must fail"
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+
+    // 2. Unauthorized attempt: Creator signs on behalf of Alice. Fails and changes nothing.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.creator,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "contribute",
+            args: (f.campaign_id, f.alice.clone(), f.token.clone(), 200_i128).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        f.client
+            .try_contribute(&f.campaign_id, &f.alice, &f.token, &200)
+            .is_err(),
+        "creator cannot sign Alice's pledge"
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+
+    // 3. Unauthorized attempt: Admin signs on behalf of Alice. Fails and changes nothing.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.admin,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "contribute",
+            args: (f.campaign_id, f.alice.clone(), f.token.clone(), 200_i128).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        f.client
+            .try_contribute(&f.campaign_id, &f.alice, &f.token, &200)
+            .is_err(),
+        "admin cannot sign Alice's pledge"
+    );
+    assert_eq!(balance(&f, &f.alice), 10_000);
+    assert_eq!(balance(&f, &f.client.address), 0);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 0);
+
+    // 4. First contribution: Alice contributes 200 with valid signature.
+    f.env.mock_all_auths();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &200);
+    assert_sole_signer(&f, &f.alice, "contribute");
+    assert_eq!(balance(&f, &f.alice), 9_800);
+    assert_eq!(balance(&f, &f.client.address), 200);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 200);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        200
+    );
+
+    // 5. Prior failure: Attempting a pledge that exceeds the cap (200 + 400 = 600 > 500) fails atomically.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.alice,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "contribute",
+            args: (f.campaign_id, f.alice.clone(), f.token.clone(), 400_i128).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        f.client
+            .try_contribute(&f.campaign_id, &f.alice, &f.token, &400)
+            .is_err(),
+        "contribution exceeding cap must fail"
+    );
+    assert_eq!(balance(&f, &f.alice), 9_800);
+    assert_eq!(balance(&f, &f.client.address), 200);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 200);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        200
+    );
+
+    // 6. Second contribution: Alice contributes 300, summing exactly to the cap (200 + 300 = 500 == cap).
+    f.env.mock_all_auths();
+    f.client
+        .contribute(&f.campaign_id, &f.alice, &f.token, &300);
+    assert_sole_signer(&f, &f.alice, "contribute");
+    assert_eq!(balance(&f, &f.alice), 9_500);
+    assert_eq!(balance(&f, &f.client.address), 500);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 500);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        500
+    );
+
+    // 7. Third contribution exceeding cap after previous failure: Alice tries to pledge 1 (500 + 1 = 501 > 500).
+    f.env.mock_auths(&[MockAuth {
+        address: &f.alice,
+        invoke: &MockAuthInvoke {
+            contract: &f.client.address,
+            fn_name: "contribute",
+            args: (f.campaign_id, f.alice.clone(), f.token.clone(), 1_i128).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        f.client
+            .try_contribute(&f.campaign_id, &f.alice, &f.token, &1)
+            .is_err(),
+        "pledge exceeding cap must fail atomically"
+    );
+    assert_eq!(balance(&f, &f.alice), 9_500);
+    assert_eq!(balance(&f, &f.client.address), 500);
+    assert_eq!(f.client.get_campaign(&f.campaign_id).pledged_amount, 500);
+    assert_eq!(
+        f.client
+            .get_contribution(&f.campaign_id, &f.alice, &f.token),
+        500
+    );
+
+    // 8. Unauthorized calls cannot release funds or change campaigns.
+    // E.g. Creator cannot claim an active/underfunded campaign.
+    f.env.mock_all_auths();
+    assert!(
+        f.client.try_claim(&f.campaign_id, &f.creator).is_err(),
+        "active campaign cannot be claimed"
+    );
+    // Non-creator/admin cannot claim.
+    assert!(
+        f.client.try_claim(&f.campaign_id, &f.admin).is_err(),
+        "admin cannot claim campaign"
+    );
+    // Non-contributor cannot refund.
+    assert!(
+        f.client.try_refund(&f.campaign_id, &f.bob).is_err(),
+        "bob has not contributed"
+    );
+    assert_eq!(balance(&f, &f.client.address), 500);
+}
+
+// ── Multi-token (XLM + USDC) and unaccepted asset authority ───────────────────
+
+#[test]
+fn multi_token_xlm_usdc_and_unaccepted_asset_contribute_and_claim_authority() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StellarGoalVaultContract, ());
+    let client = StellarGoalVaultContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    // XLM (7 decimals: 1 XLM = 10_000_000 stroops), USDC (6 decimals: 1 USDC = 1_000_000 units),
+    // and an unaccepted asset (e.g. EURC).
+    let xlm = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let usdc = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let unaccepted = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+
+    let xlm_amount: i128 = 10_000_000;
+    let usdc_amount: i128 = 1_000_000;
+    let unaccepted_amount: i128 = 5_000_000;
+    let target: i128 = xlm_amount + usdc_amount;
+
+    StellarAssetClient::new(&env, &xlm).mint(&alice, &(xlm_amount * 2));
+    StellarAssetClient::new(&env, &usdc).mint(&bob, &(usdc_amount * 2));
+    StellarAssetClient::new(&env, &unaccepted).mint(&alice, &unaccepted_amount);
+    StellarAssetClient::new(&env, &unaccepted).mint(&bob, &unaccepted_amount);
+
+    client.initialize(&admin, &1);
+
+    let campaign_id = client.create_campaign(
+        &creator,
+        &soroban_sdk::vec![&env, xlm.clone(), usdc.clone()],
+        &target,
+        &(env.ledger().timestamp() + DURATION),
+        &String::from_str(&env, "xlm-usdc-auth"),
+        &0_i128,
+        &soroban_sdk::vec![&env],
+        &0_u32,
+    );
+
+    let xlm_client = TokenClient::new(&env, &xlm);
+    let usdc_client = TokenClient::new(&env, &usdc);
+    let unaccepted_client = TokenClient::new(&env, &unaccepted);
+
+    // 1. Unsigned and wrong-signer contributions in XLM are rejected without moving funds.
+    env.mock_auths(&[]);
+    assert!(
+        client
+            .try_contribute(&campaign_id, &alice, &xlm, &xlm_amount)
+            .is_err(),
+        "unsigned XLM contribution must fail"
+    );
+
+    env.mock_auths(&[MockAuth {
+        address: &creator,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "contribute",
+            args: (campaign_id, alice.clone(), xlm.clone(), xlm_amount).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        client
+            .try_contribute(&campaign_id, &alice, &xlm, &xlm_amount)
+            .is_err(),
+        "creator cannot sign XLM contribution on behalf of alice"
+    );
+    assert_eq!(xlm_client.balance(&alice), xlm_amount * 2);
+    assert_eq!(xlm_client.balance(&client.address), 0);
+    assert_eq!(client.get_campaign(&campaign_id).pledged_amount, 0);
+
+    // 2. Valid contributor-signed XLM pledge succeeds.
+    env.mock_all_auths();
+    client.contribute(&campaign_id, &alice, &xlm, &xlm_amount);
+    assert_sole_signer_on(&env, &client.address, &alice, "contribute");
+    assert_eq!(xlm_client.balance(&client.address), xlm_amount);
+    assert_eq!(client.get_campaign_token_balance(&campaign_id, &xlm), xlm_amount);
+    assert_eq!(client.get_campaign(&campaign_id).pledged_amount, xlm_amount);
+
+    // 3. Payment in an unaccepted asset fails both unsigned and contributor-signed,
+    //    leaving XLM/USDC escrow and campaign state untouched.
+    env.mock_auths(&[]);
+    assert!(
+        client
+            .try_contribute(&campaign_id, &alice, &unaccepted, &1_000_000)
+            .is_err(),
+        "unsigned unaccepted asset contribution must fail"
+    );
+
+    env.mock_auths(&[MockAuth {
+        address: &alice,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "contribute",
+            args: (campaign_id, alice.clone(), unaccepted.clone(), 1_000_000_i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        client
+            .try_contribute(&campaign_id, &alice, &unaccepted, &1_000_000)
+            .is_err(),
+        "signed unaccepted asset contribution must fail"
+    );
+    assert_eq!(unaccepted_client.balance(&alice), unaccepted_amount);
+    assert_eq!(unaccepted_client.balance(&client.address), 0);
+    assert_eq!(client.get_campaign_token_balance(&campaign_id, &unaccepted), 0);
+    assert_eq!(client.get_campaign(&campaign_id).pledged_amount, xlm_amount);
+
+    // 4. Wrong-signer USDC pledge (admin signing for bob) fails; valid bob-signed USDC pledge succeeds.
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "contribute",
+            args: (campaign_id, bob.clone(), usdc.clone(), usdc_amount).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(
+        client
+            .try_contribute(&campaign_id, &bob, &usdc, &usdc_amount)
+            .is_err(),
+        "admin cannot sign USDC contribution on behalf of bob"
+    );
+    assert_eq!(usdc_client.balance(&client.address), 0);
+
+    env.mock_all_auths();
+    client.contribute(&campaign_id, &bob, &usdc, &usdc_amount);
+    assert_sole_signer_on(&env, &client.address, &bob, "contribute");
+    assert_eq!(usdc_client.balance(&client.address), usdc_amount);
+    assert_eq!(client.get_campaign_token_balance(&campaign_id, &usdc), usdc_amount);
+    assert_eq!(client.get_campaign(&campaign_id).pledged_amount, target);
+
+    // 5. After deadline, only the creator can claim and release XLM + USDC escrow.
+    past_deadline(&env);
+
+    env.mock_auths(&[]);
+    assert!(
+        client.try_claim(&campaign_id, &creator).is_err(),
+        "unsigned claim must fail"
+    );
+
+    for non_creator in [&admin, &alice, &bob] {
+        env.mock_auths(&[MockAuth {
+            address: non_creator,
+            invoke: &MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "claim",
+                args: (campaign_id, non_creator.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            client.try_claim(&campaign_id, non_creator).is_err(),
+            "non-creator claim must fail"
+        );
+    }
+    assert!(!client.get_campaign(&campaign_id).claimed);
+    assert_eq!(xlm_client.balance(&client.address), xlm_amount);
+    assert_eq!(usdc_client.balance(&client.address), usdc_amount);
+
+    env.mock_all_auths();
+    client.claim(&campaign_id, &creator);
+    assert_sole_signer_on(&env, &client.address, &creator, "claim");
+
+    assert!(client.get_campaign(&campaign_id).claimed);
+    assert_eq!(xlm_client.balance(&creator), xlm_amount);
+    assert_eq!(usdc_client.balance(&creator), usdc_amount);
+    assert_eq!(unaccepted_client.balance(&creator), 0);
+    assert_eq!(xlm_client.balance(&client.address), 0);
+    assert_eq!(usdc_client.balance(&client.address), 0);
+    assert_eq!(unaccepted_client.balance(&client.address), 0);
+}
+
+#[test]
+fn multi_token_xlm_usdc_and_unaccepted_asset_cancel_and_refund_authority() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StellarGoalVaultContract, ());
+    let client = StellarGoalVaultContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    let xlm = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let usdc = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let unaccepted = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+
+    let xlm_amount: i128 = 10_000_000;
+    let usdc_amount: i128 = 1_000_000;
+    let unaccepted_amount: i128 = 2_500_000;
+
+    StellarAssetClient::new(&env, &xlm).mint(&alice, &xlm_amount);
+    StellarAssetClient::new(&env, &usdc).mint(&bob, &usdc_amount);
+    StellarAssetClient::new(&env, &unaccepted).mint(&bob, &unaccepted_amount);
+
+    client.initialize(&admin, &1);
+
+    let campaign_id = client.create_campaign(
+        &creator,
+        &soroban_sdk::vec![&env, xlm.clone(), usdc.clone()],
+        &20_000_000_i128,
+        &(env.ledger().timestamp() + DURATION),
+        &String::from_str(&env, "xlm-usdc-refund-auth"),
+        &0_i128,
+        &soroban_sdk::vec![&env],
+        &0_u32,
+    );
+
+    client.contribute(&campaign_id, &alice, &xlm, &xlm_amount);
+    client.contribute(&campaign_id, &bob, &usdc, &usdc_amount);
+
+    let xlm_client = TokenClient::new(&env, &xlm);
+    let usdc_client = TokenClient::new(&env, &usdc);
+    let unaccepted_client = TokenClient::new(&env, &unaccepted);
+
+    // Unaccepted asset payment fails atomically without affecting XLM/USDC escrow.
+    assert!(
+        client
+            .try_contribute(&campaign_id, &bob, &unaccepted, &unaccepted_amount)
+            .is_err(),
+        "unaccepted asset payment must fail"
+    );
+    assert_eq!(unaccepted_client.balance(&bob), unaccepted_amount);
+    assert_eq!(unaccepted_client.balance(&client.address), 0);
+
+    // 1. Only creator can cancel the campaign.
+    env.mock_auths(&[]);
+    assert!(
+        client.try_cancel_campaign(&campaign_id, &creator).is_err(),
+        "unsigned cancel_campaign must fail"
+    );
+    for non_creator in [&admin, &alice, &bob] {
+        env.mock_auths(&[MockAuth {
+            address: non_creator,
+            invoke: &MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "cancel_campaign",
+                args: (campaign_id, non_creator.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            client.try_cancel_campaign(&campaign_id, non_creator).is_err(),
+            "non-creator cannot cancel campaign"
+        );
+    }
+    assert!(!client.get_campaign(&campaign_id).canceled);
+
+    env.mock_all_auths();
+    client.cancel_campaign(&campaign_id, &creator);
+    assert_sole_signer_on(&env, &client.address, &creator, "cancel_campaign");
+    assert!(client.get_campaign(&campaign_id).canceled);
+
+    // 2. Only the contributor can refund their own XLM pledge.
+    env.mock_auths(&[]);
+    assert!(
+        client.try_refund(&campaign_id, &alice).is_err(),
+        "unsigned refund must fail"
+    );
+    for wrong_signer in [&creator, &admin, &bob] {
+        env.mock_auths(&[MockAuth {
+            address: wrong_signer,
+            invoke: &MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "refund",
+                args: (campaign_id, alice.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            client.try_refund(&campaign_id, &alice).is_err(),
+            "wrong signer cannot trigger alice's refund"
+        );
+    }
+    assert_eq!(xlm_client.balance(&client.address), xlm_amount);
+    assert_eq!(usdc_client.balance(&client.address), usdc_amount);
+
+    env.mock_all_auths();
+    client.refund(&campaign_id, &alice);
+    assert_sole_signer_on(&env, &client.address, &alice, "refund");
+    assert_eq!(xlm_client.balance(&alice), xlm_amount);
+    assert_eq!(xlm_client.balance(&client.address), 0);
+    assert_eq!(usdc_client.balance(&client.address), usdc_amount);
+
+    // 3. Only the stored admin can execute refund_all for remaining USDC escrow.
+    env.mock_auths(&[]);
+    assert!(
+        client.try_refund_all(&campaign_id).is_err(),
+        "unsigned refund_all must fail"
+    );
+    for non_admin in [&creator, &alice, &bob] {
+        env.mock_auths(&[MockAuth {
+            address: non_admin,
+            invoke: &MockAuthInvoke {
+                contract: &client.address,
+                fn_name: "refund_all",
+                args: (campaign_id,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            client.try_refund_all(&campaign_id).is_err(),
+            "non-admin cannot execute refund_all"
+        );
+    }
+    assert_eq!(usdc_client.balance(&client.address), usdc_amount);
+
+    env.mock_all_auths();
+    client.refund_all(&campaign_id);
+    assert_sole_signer_on(&env, &client.address, &admin, "refund_all");
+    assert_eq!(usdc_client.balance(&bob), usdc_amount);
+    assert_eq!(usdc_client.balance(&client.address), 0);
+    assert_eq!(unaccepted_client.balance(&bob), unaccepted_amount);
+    assert_eq!(unaccepted_client.balance(&client.address), 0);
 }
