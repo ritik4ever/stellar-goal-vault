@@ -40,6 +40,16 @@ interface BlockchainMetadata {
   - `deadline` (`u64`): Expiration timestamp in seconds
   - `metadata` (`String`): Campaign metadata / URI
 
+#### Minimum Contribution Configuration Event (`MinContributionConfiguredEvent`)
+- **Topics**: `[symbol_short!("Goal"), symbol_short!("MinConf")]`
+- **Payload**:
+  - `admin` (`Address`): Admin that configured the floor
+  - `min_contribution` (`i128`): Committed minimum contribution in stroops
+  - `contract_version` (`String`): Contract version that committed the value
+  - `configured_at` (`u64`): Ledger timestamp when the floor was committed
+- **Ordering**: emitted by `initialize` after the floor is stored and after the
+  `Campaign Initialized` (`"Init"`) event; rejected pledges emit nothing.
+
 #### Campaign Pledge Structured Event (`CampaignPledgedEvent`)
 - **Topics**: `[symbol_short!("Goal"), symbol_short!("Pledged")]`
 - **Payload**:
