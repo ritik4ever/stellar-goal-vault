@@ -6,11 +6,17 @@
  *
  * This file provides type-safe bindings to the Soroban StellarGoalVaultContract.
  * Each function is a typed wrapper around the contract's public API.
+ *
+ * ABI version: 0.1.0
+ * Includes: create_campaign, contribute, refund, refund_all, claim, cancel_campaign,
+ *           get_campaign, get_contribution, get_campaign_token_balance,
+ *           get_contributor_count, get_campaign_count, get_next_campaign_id, get_version
  */
 
 import {
   Contract,
   rpc,
+  Transaction,
   TransactionBuilder,
   Networks,
   BASE_FEE,
@@ -47,6 +53,32 @@ export interface CreateCampaignParams {
   target_amount: bigint;
   deadline: number;
   metadata: string;
+}
+
+/**
+ * Parameters for contributing (pledging) to a campaign.
+ * Maps to the contract's `contribute(campaign_id, contributor, token, amount)` ABI.
+ */
+export interface ContributeParams {
+  /** Numeric campaign ID (u64 on-chain) */
+  campaignId: bigint | number;
+  /** Stellar address of the contributor; must match the signed-in wallet */
+  contributor: string;
+  /** Stellar contract address of the accepted token */
+  token: string;
+  /** Contribution amount in contract units (i128 on-chain) */
+  amount: bigint;
+}
+
+/**
+ * Parameters for requesting a refund from a campaign.
+ * Maps to the contract's `refund(campaign_id, contributor)` ABI.
+ */
+export interface RefundParams {
+  /** Numeric campaign ID (u64 on-chain) */
+  campaignId: bigint | number;
+  /** Stellar address of the contributor requesting the refund */
+  contributor: string;
 }
 
 /**
@@ -323,6 +355,117 @@ export class GoalVaultContract {
     }
 
     return result.str().toString();
+  }
+
+  /**
+   * contribute(campaign_id: u64, contributor: Address, token: Address, amount: i128)
+   *
+   * Builds and simulates a pledge (contribution) transaction for the given campaign.
+   * Returns the prepared transaction XDR ready for signing by the contributor's wallet.
+   *
+   * Validation performed before the transaction reaches the network:
+   * - contributor must not equal the vault contract address
+   * - amount must be a positive i128
+   * - token must be a valid Stellar strkey address
+   *
+   * The caller is responsible for signing and submitting the returned transaction
+   * via `rpc.assembleTransaction` + a Freighter/wallet call. This method never
+   * signs or submits by itself, ensuring no funds move until the user approves.
+   */
+  async buildContributeTransaction(params: ContributeParams): Promise<{
+    transaction: Transaction;
+    simulation: rpc.Api.SimulateTransactionResponse;
+  }> {
+    const { campaignId, contributor, token, amount } = params;
+
+    if (!contributor || contributor.trim().length === 0) {
+      throw new Error('contribute: contributor address is required');
+    }
+    if (!token || token.trim().length === 0) {
+      throw new Error('contribute: token address is required');
+    }
+    if (typeof amount !== 'bigint' || amount <= 0n) {
+      throw new Error('contribute: amount must be a positive i128 value');
+    }
+    if (contributor === this.contractId) {
+      throw new Error('contribute: contributor cannot be the vault contract itself');
+    }
+
+    const sourceAccount = await this.server.getAccount(contributor);
+
+    const transaction = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        this.contract.call(
+          'contribute',
+          nativeToScVal(BigInt(campaignId), { type: 'u64' }),
+          new Address(contributor).toScVal(),
+          new Address(token).toScVal(),
+          nativeToScVal(amount, { type: 'i128' }),
+        ),
+      )
+      .setTimeout(60)
+      .build();
+
+    const simulation = await this.server.simulateTransaction(transaction);
+    if (rpc.Api.isSimulationError(simulation)) {
+      throw new Error(`Simulation failed: ${JSON.stringify(simulation.error)}`);
+    }
+
+    return { transaction, simulation };
+  }
+
+  /**
+   * refund(campaign_id: u64, contributor: Address)
+   *
+   * Builds and simulates a refund transaction for the given campaign and contributor.
+   * Returns the prepared transaction XDR ready for signing by the contributor's wallet.
+   *
+   * Validation performed before the transaction reaches the network:
+   * - contributor must be provided
+   * - campaign_id must be a non-negative integer
+   *
+   * The caller is responsible for signing and submitting the returned transaction.
+   * This method never signs or submits by itself, ensuring no funds move until
+   * the user approves.
+   */
+  async buildRefundTransaction(params: RefundParams): Promise<{
+    transaction: Transaction;
+    simulation: rpc.Api.SimulateTransactionResponse;
+  }> {
+    const { campaignId, contributor } = params;
+
+    if (!contributor || contributor.trim().length === 0) {
+      throw new Error('refund: contributor address is required');
+    }
+    if (BigInt(campaignId) < 0n) {
+      throw new Error('refund: campaign ID must be a non-negative integer');
+    }
+
+    const sourceAccount = await this.server.getAccount(contributor);
+
+    const transaction = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        this.contract.call(
+          'refund',
+          nativeToScVal(BigInt(campaignId), { type: 'u64' }),
+          new Address(contributor).toScVal(),
+        ),
+      )
+      .setTimeout(60)
+      .build();
+
+    const simulation = await this.server.simulateTransaction(transaction);
+    if (rpc.Api.isSimulationError(simulation)) {
+      throw new Error(`Simulation failed: ${JSON.stringify(simulation.error)}`);
+    }
+
+    return { transaction, simulation };
   }
 }
 
