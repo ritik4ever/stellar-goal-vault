@@ -374,6 +374,17 @@ accepted-token balances. Covered by
 `multi_token_xlm_usdc_and_unaccepted_asset_cancel_and_refund_authority` in
 `src/test_pledge_auth.rs`.
 
+The exactness and event side of that behavior is covered by
+`test_multi_token_xlm_usdc_exact_transfers_events_and_authorization` in
+`src/test.rs`. Using isolated mock Stellar Asset contracts, it pins that each
+accepted token's raw amount is transferred into and out of escrow unchanged,
+that each pledge emits one `("Goal", "Pledged")` event with that token's amount
+and committed balance, and that a claim emits exactly one `("Goal", "Fee")` and
+one `("Goal", "Claim")` event per funded token. Fee truncation is verified per
+token with 7-decimal XLM stroops and 6-decimal USDC units. Signed or unsigned
+payments in an unaccepted asset, and unsigned claims, emit no events and leave
+both accepted-token balances and contributor balances untouched.
+
 ### `contribute`
 
 Contribute tokens to a campaign. Tokens are transferred from the contributor to the contract.
