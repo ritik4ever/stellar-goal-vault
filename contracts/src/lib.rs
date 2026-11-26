@@ -172,6 +172,22 @@ pub struct ContractInitializedEvent {
     pub contract_version: String,
 }
 
+/// Emitted when the minimum contribution floor is committed by `initialize`.
+///
+/// Published exactly once per successful initialization, after the
+/// `MinContribution` entry has been written and after the legacy
+/// `("Goal", "Init")` event. A consumer that only replays the event log can
+/// therefore reconstruct the configured floor from the committed state without
+/// additional contract reads, and reverted initializations emit nothing.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MinContributionConfiguredEvent {
+    pub admin: Address,
+    pub min_contribution: i128,
+    pub contract_version: String,
+    pub configured_at: u64,
+}
+
 /// Emitted when the contract pause status changes, with stable fields for off-chain indexers.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -317,6 +333,14 @@ pub struct CampaignCreatedEvent {
 /// token balances, contributor counts, and timestamp so indexers can reconstruct
 /// campaign and contributor pledge state without additional reads. Sensitive data
 /// (none exists here) is not duplicated.
+///
+/// Published exactly once per committed `contribute` call, immediately after
+/// `("Goal", "Pledge")` and only after all validations (including the
+/// per-contributor cap check), token transfer, and storage writes succeed.
+/// `contributor_total` is the contributor's cumulative total for `token`;
+/// summing `amount` across accepted tokens in ledger order (against
+/// `CampaignCreatedEvent.max_per_contributor`) reconstructs the contributor's
+/// cross-token cumulative total exactly once. Rejected calls emit nothing.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CampaignPledgedEvent {
@@ -403,7 +427,19 @@ impl StellarGoalVaultContract {
             ContractInitializedEvent {
                 admin: admin.clone(),
                 min_contribution,
+                contract_version: version.clone(),
+            },
+        );
+        // Structured event for the configured floor. Published after the
+        // `MinContribution` write and after the legacy `Init` event so the
+        // committed change is described exactly once, in order.
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("MinConf")),
+            MinContributionConfiguredEvent {
+                admin,
+                min_contribution,
                 contract_version: version,
+                configured_at: env.ledger().timestamp(),
             },
         );
     }
@@ -910,8 +946,8 @@ impl StellarGoalVaultContract {
                 amount,
                 total_pledged: campaign.pledged_amount,
                 contributor_count: campaign.contributor_count,
-                token_balance: current_balance + amount,
-                contributor_total: current_contribution + amount,
+                token_balance: new_balance,
+                contributor_total: new_contribution,
                 pledged_at: env.ledger().timestamp(),
             },
         );
@@ -1255,7 +1291,8 @@ impl StellarGoalVaultContract {
                         let fee_amount = balance
                             .checked_mul(fee_bps)
                             .unwrap_or_else(|| panic!("arithmetic overflow"))
-                            / 10000;
+                            .checked_div(10000)
+                            .unwrap_or_else(|| panic!("arithmetic overflow"));
                         let creator_amount = balance
                             .checked_sub(fee_amount)
                             .unwrap_or_else(|| panic!("arithmetic overflow"));

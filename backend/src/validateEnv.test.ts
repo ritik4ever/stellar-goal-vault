@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { validateEnv, envSchema } from './validateEnv';
+import {
+  MISSING_OR_CONFLICTING_BACKEND_ENV_FIXTURES,
+  VALID_MAINNET_PROD_BACKEND_ENV,
+  VALID_TESTNET_BACKEND_ENV,
+} from '../../scripts/env-config-fixtures';
 
 describe('Environment & Request Input Configuration Validation', () => {
   const validDevEnv: Record<string, string> = {
@@ -170,5 +175,69 @@ describe('Environment & Request Input Configuration Validation', () => {
         /Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for mainnet, but SOROBAN_RPC_URL points to testnet/,
       );
     });
+
+    it('rejects mainnet SOROBAN_RPC_URL when SOROBAN_NETWORK_PASSPHRASE is missing with recovery path', () => {
+      const missingPassphrase = {
+        ...validDevEnv,
+        SOROBAN_RPC_URL: 'https://soroban-mainnet.stellar.org:443',
+        SOROBAN_NETWORK_PASSPHRASE: '',
+      };
+      expect(() => validateEnv(missingPassphrase)).toThrow(
+        /Missing or conflicting network environment variable: SOROBAN_RPC_URL points to mainnet/,
+      );
+      expect(() => validateEnv(missingPassphrase)).toThrow(/Recovery: set SOROBAN_NETWORK_PASSPHRASE/);
+    });
+
+    it('rejects mainnet SOROBAN_NETWORK_PASSPHRASE when SOROBAN_RPC_URL is missing with recovery path', () => {
+      const missingRpc = {
+        ...validDevEnv,
+        SOROBAN_NETWORK_PASSPHRASE: 'Public Global Stellar Network ; September 2015',
+        SOROBAN_RPC_URL: '',
+      };
+      expect(() => validateEnv(missingRpc)).toThrow(
+        /Missing or conflicting network environment variable: SOROBAN_NETWORK_PASSPHRASE is configured for mainnet/,
+      );
+      expect(() => validateEnv(missingRpc)).toThrow(/Recovery: set SOROBAN_RPC_URL/);
+    });
+
+    it('preserves startup error across repeated runs of validateEnv', () => {
+      const mismatched = {
+        ...validDevEnv,
+        SOROBAN_NETWORK_PASSPHRASE: 'Test SDF Network ; September 2015',
+        SOROBAN_RPC_URL: 'https://soroban-mainnet.stellar.org:443',
+      };
+
+      // Run 1 throws startup error
+      expect(() => validateEnv(mismatched)).toThrow(
+        /Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for testnet, but SOROBAN_RPC_URL points to mainnet/,
+      );
+
+      // Repeated run 2 preserves the exact same startup error
+      expect(() => validateEnv(mismatched)).toThrow(
+        /Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for testnet, but SOROBAN_RPC_URL points to mainnet/,
+      );
+    });
+  });
+
+  describe('Deterministic testnet vs mainnet & startup-error fixtures (no live funds)', () => {
+    it('accepts deterministic testnet and mainnet production backend fixtures', () => {
+      expect(() => validateEnv(VALID_TESTNET_BACKEND_ENV)).not.toThrow();
+      expect(() => validateEnv(VALID_MAINNET_PROD_BACKEND_ENV)).not.toThrow();
+    });
+
+    it.each(MISSING_OR_CONFLICTING_BACKEND_ENV_FIXTURES)(
+      'fails startup validation before any signed transaction for $name',
+      ({ env, expectedError }) => {
+        const signAndSubmitTransaction = vi.fn();
+
+        const bootAndSign = () => {
+          validateEnv(env);
+          signAndSubmitTransaction();
+        };
+
+        expect(bootAndSign).toThrow(expectedError);
+        expect(signAndSubmitTransaction).not.toHaveBeenCalled();
+      },
+    );
   });
 });

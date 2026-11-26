@@ -284,3 +284,7 @@ fn config_setter_fails_before_initialize() {
     // configuration cannot be changed before there is an admin to authorize it.
     f.client.set_paused(&f.admin, &true);
 }
+
+// Authority around the minimum contribution rule (SGV-2026-113, issue #1493).
+#[path = "test_min_contribution_authority.rs"]
+mod min_contribution_authority;

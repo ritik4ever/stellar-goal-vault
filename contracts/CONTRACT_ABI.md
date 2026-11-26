@@ -83,6 +83,11 @@ fn initialize(env: Env, admin: Address, min_contribution: i128)
 | `min_contribution <= 0` | `"min_contribution must be positive"` | High | Call with a positive integer (minimum 1 stroop) |
 | Caller not authorized | Soroban auth failure | High | Ensure caller signs with the `admin` address |
 
+**Emits:** `ContractInitializedEvent` with topic pair `("Goal", "Init")`, then
+`MinContributionConfiguredEvent` with topic pair `("Goal", "MinConf")`. Both are
+published after the `MinContribution` entry is stored, so the event log
+describes the committed floor (SGV-2026-114).
+
 **Gas estimate:** 15,000 + 5,000 per storage write (~20,000 units total + 20% headroom = **24,000**)
 
 ---
@@ -287,7 +292,7 @@ fn update_metadata(env: Env, campaign_id: u64, creator: Address, new_metadata: S
 | `creator` | `Address` | Must match the campaign's stored creator |
 | `new_metadata` | `String` | Replacement metadata string |
 
-**Authorization:** Requires `creator.require_auth()` and verifies `campaign.creator == creator` before mutating campaign storage. Unsigned calls or calls signed by any non-creator fail atomically, leaving campaign metadata, pledges, and token balances unchanged.
+**Authorization & deadline boundary:** Requires `creator.require_auth()` and verifies `campaign.creator == creator` before mutating campaign storage. Updates are permitted strictly before the deadline (`ledger.timestamp < deadline`, including the last second `deadline - 1`) and rejected once `ledger.timestamp >= deadline`. Unsigned calls, calls signed by any non-creator, or calls at/after the deadline fail atomically, emitting no events and leaving campaign metadata, pledges, and token balances unchanged.
 
 **Errors:**
 
@@ -319,7 +324,9 @@ twice. Covered by
 `test_update_metadata_emits_one_event_with_old_and_new_values`,
 `test_metadata_update_events_replay_to_committed_metadata`, and
 `test_rejected_metadata_update_commits_nothing_and_emits_no_event` in
-`src/test.rs`.
+`src/test.rs`, and
+`update_metadata_at_last_moment_before_deadline_enforces_creator_auth_and_emits_event`
+in `src/test_pledge_auth.rs`.
 
 **Gas estimate:** 16,000 + storage write + event ≈ 22,000 units + 20% headroom = **26,400**
 
@@ -357,6 +364,27 @@ whatever state the campaign is in. Covered by `src/test_pledge_auth.rs`.
 | `refund` | `contributor` | refunds only that contributor's own pledges |
 | `refund_all` | stored `admin` | contract must be initialized |
 
+For multi-token campaigns accepting assets with different decimal precision
+(such as 7-decimal XLM stroops and 6-decimal USDC units), these authority
+guarantees apply uniformly across all accepted tokens and rejected unaccepted
+assets: unauthorized calls cannot mutate campaign state or release escrowed
+funds, and payments in unaccepted assets fail atomically without altering
+accepted-token balances. Covered by
+`multi_token_xlm_usdc_and_unaccepted_asset_contribute_and_claim_authority` and
+`multi_token_xlm_usdc_and_unaccepted_asset_cancel_and_refund_authority` in
+`src/test_pledge_auth.rs`.
+
+The exactness and event side of that behavior is covered by
+`test_multi_token_xlm_usdc_exact_transfers_events_and_authorization` in
+`src/test.rs`. Using isolated mock Stellar Asset contracts, it pins that each
+accepted token's raw amount is transferred into and out of escrow unchanged,
+that each pledge emits one `("Goal", "Pledged")` event with that token's amount
+and committed balance, and that a claim emits exactly one `("Goal", "Fee")` and
+one `("Goal", "Claim")` event per funded token. Fee truncation is verified per
+token with 7-decimal XLM stroops and 6-decimal USDC units. Signed or unsigned
+payments in an unaccepted asset, and unsigned claims, emit no events and leave
+both accepted-token balances and contributor balances untouched.
+
 ### `contribute`
 
 Contribute tokens to a campaign. Tokens are transferred from the contributor to the contract.
@@ -384,7 +412,7 @@ fn contribute(env: Env, campaign_id: u64, contributor: Address, token: Address, 
 | Deadline passed | `"campaign deadline reached"` | Medium | Campaign funding period has ended |
 | Funding cap exceeded | `"campaign funding cap exceeded"` | Medium | Campaign has reached its `target_amount`; wait for next campaign |
 | Token not accepted | `"token not accepted by this campaign"` | Medium | Contribute one of `campaign.accepted_tokens` |
-| Per-contributor cap exceeded | Soroban arithmetic panic | Medium | Check `max_per_contributor` set at campaign creation |
+| Per-contributor cap exceeded | `"per-contributor cap exceeded"` | Medium | Check `max_per_contributor` set at campaign creation |
 | Insufficient token balance | Soroban token transfer error | High | Ensure contributor has enough tokens and has approved transfer |
 | Caller not authorized | Soroban auth failure | High | Ensure `contributor` signs the transaction |
 | Contributor is the vault contract | `"contributor cannot be the vault contract"` | High | Pledge from a real account; the vault cannot fund itself |
@@ -400,7 +428,15 @@ The floor defaults to 100 stroops when `initialize()` has not been called and
 can be changed with `initialize()`. The minimum check runs before the campaign
 is read, before the token transfer, and before any storage write, so a rejected
 call leaves the contributor balance, the campaign pledge, and the vault balance
-unchanged.
+unchanged. A rejection emits neither the legacy `"Pledge"` event nor the
+structured `"Pledged"` event, and — because the floor itself is unchanged — no
+`("Goal", "MinConf")` configuration event either (SGV-2026-114).
+
+`initialize()` rejects `0` and negative minimum values with
+`"min_contribution must be positive"` before persisting deployment state or
+publishing an initialization event. Valid deployments require a positive
+minimum in stroops; invalid deployment attempts leave the default minimum
+(100 stroops) observable.
 
 **Per-contributor cap boundary & cumulative enforcement (SGV-2026-120):**
 When `max_per_contributor > 0`, the sum of existing contributions across all
@@ -411,6 +447,7 @@ accepted tokens plus the new contribution amount cannot exceed the cap:
   is atomically rejected with `"per-contributor cap exceeded"`.
 - Atomic rollback ensures no tokens move, balances remain unchanged, and no pledge events are emitted.
 - The contributor's cumulative recorded pledge remains strictly within the cap.
+- Cumulative cap checks, campaign token balances, contributor totals, and emitted `CampaignPledgedEvent` totals all use checked `i128` arithmetic so overflow and over-cap attempts are rejected cleanly.
 
 **Per-contributor cap authority enforcement (SGV-2026-118):**
 Pledges made to a capped campaign strictly require the contributor's explicit authorization (`contributor.require_auth()`).
@@ -418,6 +455,25 @@ Pledges made to a capped campaign strictly require the contributor's explicit au
 - Unsigned calls and calls signed by unauthorized parties are rejected before any balance deduction, storage update, or token movement.
 - Multiple contributions summing exactly to the cap require valid contributor authorization for each pledge.
 - Over-cap attempts following prior failures or boundary pledges are atomically rejected, preserving contributor balances, vault escrow, and campaign valuation without releasing funds.
+
+**Per-contributor cap event data, ordering & exactly-once semantics:**
+Every committed `contribute` call publishes two contract events in fixed order,
+only after cap validation, token transfer, and all storage writes succeed:
+1. `("Goal", "Pledge")` (`CampaignPledged`) — legacy pledge event carrying `(campaign_id, contributor, token, amount)`.
+2. `("Goal", "Pledged")` (`CampaignPledgedEvent`) — structured indexer event carrying `amount`, `total_pledged`, `contributor_count`, `token_balance`, `contributor_total` (cumulative for `token`), and `pledged_at`.
+
+To reconstruct a contributor's cumulative amount within `max_per_contributor`
+without extra storage reads, consumers seed the cap from
+`CampaignCreatedEvent.max_per_contributor` and replay `CampaignPledgedEvent` in
+ledger order, summing `amount` across all accepted tokens for that contributor
+(while `contributor_total` tracks the per-token cumulative total). Each
+committed pledge appears exactly once; rejected calls — including single-token
+and cross-token over-cap attempts — panic before token transfer and storage
+writes and emit zero events. Covered by
+`test_capped_pledge_emits_ordered_events_with_committed_state`,
+`test_capped_multi_token_pledge_events_replay_cumulative_total_once`, and
+`test_rejected_over_cap_pledge_commits_nothing_and_emits_no_events` in
+`src/test.rs`.
 
 **Emits:** `CampaignPledged` (legacy event) and `CampaignPledgedEvent` (structured event for indexers)
 
@@ -471,8 +527,8 @@ failed claim.
 is the gross campaign balance claimed for that token, before any fee split.
 Failed calls commit no claim or fee success events.
 
-**Eligibility boundary (issue #1515):** the first eligible ledger is the one
-whose timestamp equals `campaign.deadline` — the guard is
+**Eligibility boundary (issue #1515, SGV-2026-131):** the first eligible ledger
+is the one whose timestamp equals `campaign.deadline` — the guard is
 `timestamp >= deadline`, so the deadline ledger itself may claim. One ledger
 earlier the call is rejected with `"campaign is still active"`. Covered by
 `test_claim_at_first_eligible_ledger_pays_creator_once_and_emits_event`,
@@ -486,6 +542,25 @@ rejected second-claim and non-creator paths keep their #1512 regression tests
 (`test_second_claim_is_atomic_and_leaves_no_partial_payout`,
 `test_non_creator_claim_is_atomic_and_leaves_no_partial_payout`), which assert
 that neither path can move funds or emit an event.
+
+**Claim boundary specification (SGV-2026-131):** five conditions must all be
+satisfied at the moment `claim` is called:
+
+1. `ledger.timestamp >= campaign.deadline` — deadline ledger is first eligible.
+2. `campaign.pledged_amount >= campaign.target_amount` — funded to at least the target.
+3. `creator == campaign.creator` — only the stored creator address may claim.
+4. Single payout, vault zeroed — the vault per-token balance is set to zero after
+   the transfer; `pledged_amount` is preserved as historical contribution accounting.
+5. Fully checked fee arithmetic — `balance.checked_mul(fee_bps)` then
+   `.checked_div(10_000)` for the fee and `balance.checked_sub(fee_amount)` for the
+   creator portion; every step uses `checked_*` so no arithmetic step can overflow.
+
+Covered together by `test_claim_boundary_exact_target_at_deadline_with_fee`
+(exercises all five conditions at once: `pledged == target`, `timestamp == deadline`,
+configured fee recipient, checked fee arithmetic, vault zeroed) and
+`test_claim_boundary_one_ledger_before_deadline_is_rejected` (confirms the lower
+boundary: `timestamp == deadline - 1` is rejected, no funds move, no events
+emitted) in `src/test.rs`.
 
 **Gas estimate:** 20,000 + 15,000 per accepted token (transfer + storage) ≈ base 20,000 + 15,000 per token + 20% headroom: **42,000** (1 token) / **102,000** (5 tokens)
 
@@ -693,19 +768,9 @@ fn approve_extension(env: Env, campaign_id: u64, caller: Address)
 | Not a contributor | `"caller is not a contributor"` | Medium | Only existing contributors can vote |
 | Already voted | `"already voted"` | Low | Each contributor votes once per extension request |
 | No pending request | `"no extension request"` | Low | Call `request_deadline_extension()` first |
-| Stored proposal is stale | `"new deadline must be after current deadline"` | High | The pending proposal no longer advances the campaign; request a new one |
-| Stored proposal exceeds the cap | `"new deadline exceeds maximum campaign duration"` | High | The pending proposal is past 180 days from creation; request a valid one |
 | Caller not authorized | Soroban auth failure | High | Ensure `caller` signs the transaction |
 
 **Emits:** `ExtensionApproved` on every successful call, followed by `DeadlineExtended` only when this vote reaches a majority and the new deadline is committed. Both are emitted after all storage writes, so a failed transaction emits neither. When the extension is committed, the votes recorded for that request are cleared so the next request starts a fresh tally.
-
-**Commit-time validation:** the stored request is validated again on the vote
-that would commit it. A proposal that was legal when written but is no longer
-legal (restored snapshot, injected storage, or a campaign whose deadline moved)
-is rejected before the deadline changes, so the campaign cannot be pushed past
-`MAX_CAMPAIGN_DURATION_SECONDS`. The campaign, pending request, per-contributor
-vote flag and contributor list are all TTL-refreshed around the round so no part
-of the vote state can silently archive mid-round.
 
 **Gas estimate:** 20,000 + storage write + conditional deadline apply + event ≈ 30,000 units + 20% headroom = **36,000**
 
@@ -716,6 +781,7 @@ of the vote state can silently archive mid-round.
   - For $N=4$ contributors, 3 approvals commit the extension (2 approvals is a 50% tie and remains pending).
 - **Checked Arithmetic on Governance Counters:** Calculation of vote majorities (`checked_mul`), approval counts (`checked_add`), and maximum allowed extension durations (`checked_add`) use checked integer arithmetic to eliminate overflow and wrapping risks.
 - **Auditable Unique Votes & Single Extension:** Each distinct contributor can vote at most once per proposal round (`ExtensionVote` deduplication). Once the smallest majority is reached, the extension commits immediately, the pending request is removed, and subsequent approvals are rejected with `"no extension request"`, preserving exactly one valid extension per round.
+- **Failure Atomicity Around Pledges and Settlement:** Injecting a duplicate vote (`"already voted"`) or an extension request beyond `MAX_CAMPAIGN_DURATION_SECONDS` (`"new deadline exceeds maximum campaign duration"`) fails before any storage writes or event emissions. Pending extension state, campaign deadlines, contribution records, and vault/contributor token balances remain unchanged with no partial pledge or payout.
 
 ---
 
@@ -975,9 +1041,9 @@ Structured event emitted for off-chain indexers and audit pipelines upon success
 
 **Stability contract & Indexer guidelines:**
 - Topic symbols `"Goal"` and `"Pledged"` are frozen for this contract version.
-- Emitted only after all validations, auth checks, token transfer, and storage writes succeed. Reverted or rejected transactions emit no event.
+- Emitted exactly once per committed `contribute` call, immediately after `("Goal", "Pledge")` and only after all validations (including the per-contributor cap check), auth checks, token transfer, and storage writes succeed. Reverted or rejected transactions emit no event.
 - All amounts are represented as `i128` stroops.
-- Indexers can reconstruct campaign and contributor pledge state directly without additional contract storage reads.
+- `contributor_total` is the contributor's cumulative total for `token`. For capped campaigns (`max_per_contributor > 0` in `CampaignCreatedEvent`), summing `amount` across accepted tokens in ledger order reconstructs the contributor's cross-token cumulative total (`<= max_per_contributor`) exactly once without additional contract storage reads.
 
 ---
 
@@ -1081,6 +1147,44 @@ committed only if the full claim transaction succeeds.
 | `contract_version` | `String` | Contract version deployed |
 
 **Emitted by:** `initialize`
+
+---
+
+### `MinContributionConfiguredEvent`
+
+Structured event carrying the minimum contribution floor committed by
+`initialize`. Mirrors the `min_contribution` field of
+`ContractInitializedEvent` so consumers that only replay events can reconstruct
+the configured floor exactly once.
+
+| Topic | Type | Value |
+|-------|------|-------|
+| 0 | `symbol` | `"Goal"` |
+| 1 | `symbol` | `"MinConf"` |
+
+**Data** (`MinContributionConfiguredEvent`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `admin` | `Address` | Admin address that configured the floor |
+| `min_contribution` | `i128` | Committed minimum contribution in stroops |
+| `contract_version` | `String` | Contract version that committed the value |
+| `configured_at` | `u64` | Ledger timestamp (seconds) at configuration |
+
+**Emitted by:** `initialize`, exactly once per successful initialization and
+immediately after `("Goal", "Init")`.
+
+**Stability contract & ordering:**
+- Topic symbols `"Goal"` and `"MinConf"` are frozen for this contract version.
+- Published after the `MinContribution` storage write, so replaying
+  `("Goal", "MinConf")` reproduces the committed floor in ledger order;
+  reverted initializations publish nothing.
+- A rejected pledge (`"contribution below minimum"`) publishes no event and
+  deducts no balance: the floor check runs before the campaign read and before
+  the token transfer.
+- Covered by
+  `test_initialize_emits_min_contribution_event_after_committed_state` and
+  `test_below_minimum_rejection_deducts_nothing_and_emits_no_event`.
 
 ---
 
@@ -1525,3 +1629,4 @@ Checking campaign state without mutation.
 ---
 
 *Last updated: 2026-07-29*
+
