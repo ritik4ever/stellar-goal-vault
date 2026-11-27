@@ -87,6 +87,45 @@ npm run gen:bindings
 - Bindings are generated into a temp directory first, so a failed run leaves the committed bindings unchanged.
 - Each successful run writes `frontend/src/generated/.contract-id` with the contract the bindings came from. Rerunning against the same contract produces the same file, so there is no diff.
 - `npm run gen:bindings:check` compares that stamp with the deployed ID without calling the network, and exits with code 1 on drift so CI can fail on it.
+- To verify type-safe generated bindings and CI-visible ABI drift detection offline (no live funds or network access):
+  - Frontend generated bindings: `cd frontend && npx vitest run src/generated/index.test.ts`
+  - Clean-environment regeneration & ABI drift fixtures: `cd backend && npx vitest run tests/bindings-regeneration.test.ts tests/bindings-guard.test.ts`
+
+### Regeneration Inputs
+
+`scripts/gen-bindings.ts` validates all inputs via `resolveBindingRegenerationInputs` (`scripts/bindings-guard.ts`) before running `stellar contract bindings typescript`:
+
+| Input | Source / Default | Purpose |
+| --- | --- | --- |
+| Contract ID | `CONTRACT_ID` env var, falling back to `contracts/contract_id.txt` | Valid 56-character Soroban contract strkey (`C...`); placeholders and account keys are rejected |
+| Network | `NETWORK` env var (default: `testnet`; supports `testnet`, `mainnet`/`public`, `futurenet`, `standalone`, `local`) | Selects default RPC URL and network passphrase and guards against cross-network mismatches |
+| RPC URL | `RPC_URL` env var (defaults per `NETWORK`) | Soroban RPC endpoint queried by the Stellar CLI |
+| Network passphrase | `NETWORK_PASSPHRASE` env var (defaults per `NETWORK`) | Network passphrase passed to `stellar contract bindings typescript` |
+| Output directory | `frontend/src/generated/` | Destination for generated TypeScript bindings (written atomically from a temp staging dir) |
+| Contract stamp | `frontend/src/generated/.contract-id` | Deterministic record of the contract ID used to generate the committed bindings |
+| Drift-check mode | `--check` flag (`npm run gen:bindings:check`) | Compares `frontend/src/generated/.contract-id` against the resolved contract ID offline |
+
+### Expected Result for Contribution or Refund ABI Changes
+
+When a contract change modifies contribution arguments (e.g. `contribute(campaign_id, contributor, token, amount)` or `get_contribution(campaign_id, contributor, token)`) or refund arguments (e.g. `refund(campaign_id, contributor)`):
+
+1. **Type-safe call enforcement**: Regenerating bindings with `npm run gen:bindings` updates the generated TypeScript signatures in `frontend/src/generated/index.ts`. Any mismatched call site in `frontend/src/services/soroban.ts` or other consumers fails `tsc` (`npm --prefix frontend run build`) until updated to match the new argument list and types.
+2. **CI-visible ABI drift failure**: If the contract ABI or deployed contract ID changes without regenerating and committing `frontend/src/generated/`:
+   - `npm run gen:bindings:check` exits with code `1` and prints `ABI drift: bindings were generated for <stamped-id> but the deployed contract is <deployed-id>.` along with the recovery command.
+   - `.github/workflows/check-bindings.yml` regenerates bindings and fails `git diff --exit-code frontend/src/generated/` with `❌ ABI drift detected!`.
+
+### Reproducing from a Clean Checkout (No Live Funds)
+
+```bash
+# 1. Verify binding regeneration inputs and offline drift detection
+npm --prefix backend test -- tests/bindings-guard.test.ts
+
+# 2. Verify committed bindings match contracts/contract_id.txt (exits 0)
+npm run gen:bindings:check
+
+# 3. Reproduce a CI-visible ABI drift failure with a synthetic contract ID (exits 1)
+CONTRACT_ID=CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB npm run gen:bindings:check
+```
 
 ### Mainnet
 

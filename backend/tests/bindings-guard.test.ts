@@ -3,11 +3,15 @@ import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   BindingsError,
+  DEFAULT_BINDINGS_OUTPUT_DIR,
+  STAMP_FILE,
+  buildBindingsCommandArgs,
   checkBindingsDrift,
   isValidContractId,
   isValidSecretKey,
   parseContractIdFile,
   renderStamp,
+  resolveBindingRegenerationInputs,
   resolveContractId,
   resolveDeploymentConfig,
   resolveNetworkConfig,
@@ -385,4 +389,92 @@ describe('Deterministic testnet vs mainnet & startup-error fixtures (no live fun
       expect(signTransaction).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('Soroban binding regeneration inputs (SGV-2026-191)', () => {
+  it('resolves default regeneration inputs from contracts/contract_id.txt on testnet', () => {
+    const inputs = resolveBindingRegenerationInputs({
+      contractIdFileText: ID_FILE,
+    });
+
+    expect(inputs).toEqual({
+      contractId: DEPLOYED,
+      contractIdSource: 'file',
+      network: 'testnet',
+      networkPassphrase: TESTNET_PASSPHRASE,
+      rpcUrl: DEFAULT_TESTNET_RPC,
+      outputDir: DEFAULT_BINDINGS_OUTPUT_DIR,
+      stampFile: STAMP_FILE,
+      checkOnly: false,
+    });
+  });
+
+  it('resolves explicit env inputs and builds exact stellar CLI arguments', () => {
+    const inputs = resolveBindingRegenerationInputs({
+      contractId: MAINNET_FIXTURE.contractId,
+      contractIdFileText: ID_FILE,
+      network: MAINNET_FIXTURE.network,
+      networkPassphrase: MAINNET_FIXTURE.networkPassphrase,
+      rpcUrl: MAINNET_FIXTURE.rpcUrl,
+      outputDir: '/tmp/custom-generated',
+      checkOnly: true,
+    });
+
+    expect(inputs).toEqual({
+      contractId: MAINNET_FIXTURE.contractId,
+      contractIdSource: 'env',
+      network: 'mainnet',
+      networkPassphrase: MAINNET_PASSPHRASE,
+      rpcUrl: DEFAULT_MAINNET_RPC,
+      outputDir: '/tmp/custom-generated',
+      stampFile: '.contract-id',
+      checkOnly: true,
+    });
+
+    expect(buildBindingsCommandArgs(inputs, '/tmp/staging-out')).toEqual([
+      'contract',
+      'bindings',
+      'typescript',
+      '--contract-id',
+      MAINNET_FIXTURE.contractId,
+      '--rpc-url',
+      DEFAULT_MAINNET_RPC,
+      '--network-passphrase',
+      MAINNET_PASSPHRASE,
+      '--output-dir',
+      '/tmp/staging-out',
+    ]);
+  });
+
+  it('rejects conflicting network inputs before invoking binding regeneration', () => {
+    expect(() =>
+      resolveBindingRegenerationInputs({
+        contractId: TESTNET_FIXTURE.contractId,
+        network: 'testnet',
+        networkPassphrase: MAINNET_PASSPHRASE,
+      }),
+    ).toThrow(BindingsError);
+  });
+
+  it('matches committed frontend/src/generated/.contract-id and detects CI-visible ABI drift offline', () => {
+    const contractIdFile = path.join(__dirname, '../../contracts/contract_id.txt');
+    const stampFile = path.join(__dirname, '../../frontend/src/generated/.contract-id');
+
+    const { contractId: committedId } = resolveBindingRegenerationInputs({
+      contractIdFileText: fs.readFileSync(contractIdFile, 'utf8'),
+    });
+    const stampText = fs.readFileSync(stampFile, 'utf8');
+
+    expect(checkBindingsDrift(stampText, committedId)).toEqual({
+      status: 'in-sync',
+      message: `Bindings match deployed contract ${committedId}.`,
+    });
+
+    // Simulate a redeployed contract after an ABI change to contribution or refund arguments.
+    const drift = checkBindingsDrift(stampText, OTHER);
+    expect(drift.status).toBe('drift');
+    expect(drift.message).toContain(committedId);
+    expect(drift.message).toContain(OTHER);
+    expect(drift.message).toContain('npm run gen:bindings');
+  });
 });
