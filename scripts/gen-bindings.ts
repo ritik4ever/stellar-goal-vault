@@ -15,21 +15,22 @@
  *   came from, so CI can report drift.
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
   BindingsError,
+  DEFAULT_BINDINGS_OUTPUT_DIR,
   STAMP_FILE,
+  buildBindingsCommandArgs,
   checkBindingsDrift,
   renderStamp,
-  resolveContractId,
-  resolveNetworkConfig,
+  resolveBindingRegenerationInputs,
 } from './bindings-guard';
 
 const ROOT = path.join(__dirname, '..');
-const OUTPUT_DIR = path.join(ROOT, 'frontend/src/generated');
+const OUTPUT_DIR = path.join(ROOT, DEFAULT_BINDINGS_OUTPUT_DIR);
 const CONTRACT_ID_FILE = path.join(ROOT, 'contracts/contract_id.txt');
 const STAMP_PATH = path.join(OUTPUT_DIR, STAMP_FILE);
 
@@ -38,20 +39,18 @@ function readIfExists(file: string): string | null {
 }
 
 function main(): void {
-  const checkOnly = process.argv.includes('--check');
-  const { id: contractId, source } = resolveContractId(
-    process.env.CONTRACT_ID,
-    readIfExists(CONTRACT_ID_FILE),
-  );
-
-  const { network, networkPassphrase, rpcUrl } = resolveNetworkConfig({
+  const inputs = resolveBindingRegenerationInputs({
+    contractId: process.env.CONTRACT_ID,
+    contractIdFileText: readIfExists(CONTRACT_ID_FILE),
     network: process.env.NETWORK,
     networkPassphrase: process.env.NETWORK_PASSPHRASE,
     rpcUrl: process.env.RPC_URL,
+    outputDir: OUTPUT_DIR,
+    checkOnly: process.argv.includes('--check'),
   });
 
-  if (checkOnly) {
-    const result = checkBindingsDrift(readIfExists(STAMP_PATH), contractId);
+  if (inputs.checkOnly) {
+    const result = checkBindingsDrift(readIfExists(STAMP_PATH), inputs.contractId);
     if (result.status === 'drift') {
       console.error(result.message);
       process.exit(1);
@@ -60,26 +59,21 @@ function main(): void {
     return;
   }
 
-  const from = source === 'env' ? 'CONTRACT_ID' : 'contracts/contract_id.txt';
+  const from = inputs.contractIdSource === 'env' ? 'CONTRACT_ID' : 'contracts/contract_id.txt';
   console.log('Generating TypeScript bindings...');
-  console.log(`Contract ID: ${contractId} (from ${from})`);
-  console.log(`Network: ${network}`);
-  console.log(`Output: ${OUTPUT_DIR}`);
+  console.log(`Contract ID: ${inputs.contractId} (from ${from})`);
+  console.log(`Network: ${inputs.network}`);
+  console.log(`Output: ${inputs.outputDir}`);
 
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sgv-bindings-'));
   const stagingDir = path.join(workDir, 'out');
   try {
-    execSync(
-      `stellar contract bindings typescript ` +
-        `--contract-id ${contractId} ` +
-        `--rpc-url ${rpcUrl} ` +
-        `--network-passphrase "${networkPassphrase}" ` +
-        `--output-dir "${stagingDir}"`,
-      { stdio: 'inherit' },
-    );
-    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-    fs.cpSync(stagingDir, OUTPUT_DIR, { recursive: true, force: true });
-    fs.writeFileSync(STAMP_PATH, renderStamp(contractId));
+    execFileSync('stellar', buildBindingsCommandArgs(inputs, stagingDir), {
+      stdio: 'inherit',
+    });
+    fs.mkdirSync(inputs.outputDir, { recursive: true });
+    fs.cpSync(stagingDir, inputs.outputDir, { recursive: true, force: true });
+    fs.writeFileSync(STAMP_PATH, renderStamp(inputs.contractId));
     console.log('Bindings generated successfully!');
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });

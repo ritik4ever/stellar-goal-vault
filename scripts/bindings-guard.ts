@@ -4,6 +4,7 @@
  */
 
 export const STAMP_FILE = '.contract-id';
+export const DEFAULT_BINDINGS_OUTPUT_DIR = 'frontend/src/generated';
 
 export const PLACEHOLDER_CONTRACT_IDS = [
   'YOUR_CONTRACT_ID',
@@ -272,6 +273,70 @@ export interface DriftResult {
   message: string;
 }
 
+export interface BindingRegenerationInput extends NetworkConfigInput {
+  contractId?: string;
+  contractIdFileText?: string | null;
+  outputDir?: string;
+  checkOnly?: boolean;
+}
+
+export interface ResolvedBindingRegenerationInputs extends ResolvedNetworkConfig {
+  contractId: string;
+  contractIdSource: 'env' | 'file';
+  outputDir: string;
+  stampFile: string;
+  checkOnly: boolean;
+}
+
+/**
+ * Resolves and validates all inputs required for Soroban TypeScript binding
+ * regeneration or offline ABI drift checking.
+ */
+export function resolveBindingRegenerationInputs(
+  input: BindingRegenerationInput = {},
+): ResolvedBindingRegenerationInputs {
+  const { id: contractId, source: contractIdSource } = resolveContractId(
+    input.contractId,
+    input.contractIdFileText ?? null,
+  );
+  const networkConfig = resolveNetworkConfig({
+    network: input.network,
+    networkPassphrase: input.networkPassphrase,
+    rpcUrl: input.rpcUrl,
+  });
+
+  return {
+    ...networkConfig,
+    contractId,
+    contractIdSource,
+    outputDir: input.outputDir?.trim() || DEFAULT_BINDINGS_OUTPUT_DIR,
+    stampFile: STAMP_FILE,
+    checkOnly: Boolean(input.checkOnly),
+  };
+}
+
+/**
+ * Builds the exact argument vector passed to `stellar contract bindings typescript`.
+ */
+export function buildBindingsCommandArgs(
+  inputs: Pick<ResolvedBindingRegenerationInputs, 'contractId' | 'rpcUrl' | 'networkPassphrase'>,
+  stagingDir: string,
+): string[] {
+  return [
+    'contract',
+    'bindings',
+    'typescript',
+    '--contract-id',
+    inputs.contractId,
+    '--rpc-url',
+    inputs.rpcUrl,
+    '--network-passphrase',
+    inputs.networkPassphrase,
+    '--output-dir',
+    stagingDir,
+  ];
+}
+
 export function checkBindingsDrift(stampText: string | null, deployedId: string): DriftResult {
   const generatedFor = parseContractIdFile(stampText);
   if (!generatedFor) {
@@ -292,4 +357,85 @@ export function checkBindingsDrift(stampText: string | null, deployedId: string)
     };
   }
   return { status: 'in-sync', message: `Bindings match deployed contract ${deployedId}.` };
+}
+
+export interface AbiArgumentSpec {
+  readonly name: string;
+  readonly type: string;
+}
+
+export interface AbiMethodSignature {
+  readonly name: string;
+  readonly args: readonly AbiArgumentSpec[];
+  readonly returns: string;
+}
+
+export interface AbiSignatureDriftDetail {
+  readonly method: string;
+  readonly reason: string;
+}
+
+export interface AbiSignatureDriftResult {
+  readonly status: 'in-sync' | 'drift';
+  readonly exitCode: 0 | 1;
+  readonly driftedMethods: readonly AbiSignatureDriftDetail[];
+  readonly message: string;
+}
+
+function formatMethodSignature(sig: AbiMethodSignature): string {
+  const args = sig.args.map((a) => `${a.name}: ${a.type}`).join(', ');
+  return `${sig.name}(${args}) -> ${sig.returns}`;
+}
+
+/**
+ * Compares the expected Soroban contract ABI method signatures against the
+ * generated TypeScript binding signatures. Produces a deterministic, CI-visible
+ * drift result with exitCode 1 when any method is missing or its arguments /
+ * return type diverge.
+ */
+export function detectAbiSignatureDrift(
+  expectedAbi: readonly AbiMethodSignature[],
+  generatedAbi: readonly AbiMethodSignature[],
+): AbiSignatureDriftResult {
+  const generatedByName = new Map(generatedAbi.map((m) => [m.name, m]));
+  const driftedMethods: AbiSignatureDriftDetail[] = [];
+
+  for (const expected of expectedAbi) {
+    const actual = generatedByName.get(expected.name);
+    if (!actual) {
+      driftedMethods.push({
+        method: expected.name,
+        reason: `missing from generated bindings (expected ${formatMethodSignature(expected)})`,
+      });
+      continue;
+    }
+
+    const expectedFormatted = formatMethodSignature(expected);
+    const actualFormatted = formatMethodSignature(actual);
+    if (expectedFormatted !== actualFormatted) {
+      driftedMethods.push({
+        method: expected.name,
+        reason: `expected ${expectedFormatted}, generated ${actualFormatted}`,
+      });
+    }
+  }
+
+  if (driftedMethods.length > 0) {
+    const details = driftedMethods.map((d) => `- ${d.method}: ${d.reason}`).join('\n');
+    return {
+      status: 'drift',
+      exitCode: 1,
+      driftedMethods,
+      message:
+        `ABI drift detected in generated bindings:\n${details}\n` +
+        'Recovery: run `npm run gen:bindings` and commit frontend/src/generated/.',
+    };
+  }
+
+  return {
+    status: 'in-sync',
+    exitCode: 0,
+    driftedMethods: [],
+    message: 'Generated binding signatures match contract ABI.',
+  };
 }
