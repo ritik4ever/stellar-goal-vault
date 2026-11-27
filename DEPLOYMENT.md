@@ -74,6 +74,45 @@ If you want to override the default RPC endpoint or network passphrase:
 SECRET_KEY="S..." NETWORK="testnet" NETWORK_PASSPHRASE="Test SDF Network ; September 2015" RPC_URL="https://soroban-testnet.stellar.org:443" npm run deploy:contract
 ```
 
+### 1.5 Environment and Deployment Config Inputs
+
+All deployment and network environment inputs are defined in `scripts/env-config.ts` and enforced by `scripts/deploy.sh`, `scripts/bindings-guard.ts`, and `backend/src/validateEnv.ts` before any contract build, deployment, or signed transaction:
+
+| Input | Scope | Required | Default | Validation / Behavior |
+| --- | --- | --- | --- | --- |
+| `SECRET_KEY` | Deploy (`scripts/deploy.sh`) | Always | _(none)_ | 56-character Stellar secret key starting with `S` (base32); missing or placeholder values (`S...`, `YOUR_SECRET_KEY`) fail immediately |
+| `NETWORK` | Deploy / Bindings | Optional | `testnet` | `testnet`, `mainnet` (alias: `public`), `futurenet`, `standalone`, `local`; unsupported names fail immediately |
+| `NETWORK_PASSPHRASE` | Deploy / Bindings | Optional | Derived from `NETWORK` | Must match `NETWORK`; cross-network passphrases fail at startup with a `Recovery:` path |
+| `RPC_URL` | Deploy / Bindings | Optional | Derived from `NETWORK` | Must align with `NETWORK`; cross-network RPC URLs fail at startup with a `Recovery:` path |
+| `CONTRACT_ID` | Shared (Backend / Bindings) | Production (and bindings) | `contracts/contract_id.txt` (bindings) or empty in dev/test | 56-character Soroban contract strkey starting with `C` (base32); placeholders (`YOUR_CONTRACT_ID`, `YOUR_MAINNET_CONTRACT_ID`) and account keys (`G...`) are rejected |
+| `SOROBAN_RPC_URL` | Backend (`validateEnv.ts`) | Production | `https://soroban-testnet.stellar.org:443` (non-prod) | Valid URL (HTTPS required in production); must align with `SOROBAN_NETWORK_PASSPHRASE` |
+| `SOROBAN_NETWORK_PASSPHRASE` | Backend (`validateEnv.ts`) | Production | `Test SDF Network ; September 2015` (non-prod) | Must align with `SOROBAN_RPC_URL`; testnet/mainnet conflicts fail at startup |
+
+### 1.6 Expected Result: Testnet vs Mainnet Passphrases and Contract IDs
+
+| Setting | Testnet | Mainnet (`public`) |
+| --- | --- | --- |
+| `NETWORK` | `testnet` | `mainnet` (or `public`) |
+| `NETWORK_PASSPHRASE` / `SOROBAN_NETWORK_PASSPHRASE` | `Test SDF Network ; September 2015` | `Public Global Stellar Network ; September 2015` |
+| Default `RPC_URL` / `SOROBAN_RPC_URL` | `https://soroban-testnet.stellar.org` (or `:443`) | `https://soroban-rpc.mainnet.stellar.org` (or `:443`) |
+| `CONTRACT_ID` | Valid 56-char Soroban contract ID (`^C[A-Z2-7]{55}$`) deployed on **testnet** | Valid 56-char Soroban contract ID (`^C[A-Z2-7]{55}$`) deployed on **mainnet** |
+| Cross-network mismatch result | Startup fails immediately with `Network mismatch` + `Recovery:` before any signed transaction | Startup fails immediately with `Network mismatch` + `Recovery:` before any signed transaction |
+
+### 1.7 Reproducing a Startup Error from a Clean Checkout (No Live Funds)
+
+A maintainer can reproduce startup validation errors before any signed transaction from a clean checkout without live funds or network access:
+
+```bash
+# 1. Run focused unit tests covering deployment inputs, testnet/mainnet fixtures, and backend startup validation
+npm --prefix backend test -- tests/env-config.test.ts src/validateEnv.test.ts tests/bindings-guard.test.ts
+
+# 2. Reproduce a deployment startup error before any build or signed transaction (exits 1)
+NETWORK=testnet NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015" SECRET_KEY="SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" ./scripts/deploy.sh
+
+# 3. Reproduce a preflight config error via scripts/env-config.ts (exits 1)
+cd backend && NETWORK=testnet NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015" SECRET_KEY="SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" npx ts-node --transpile-only ../scripts/env-config.ts
+```
+
 ---
 
 ## 2. Backend Deployment (Render)
