@@ -25,15 +25,13 @@ import {
   checkBindingsDrift,
   renderStamp,
   resolveContractId,
+  resolveNetworkConfig,
 } from './bindings-guard';
 
 const ROOT = path.join(__dirname, '..');
 const OUTPUT_DIR = path.join(ROOT, 'frontend/src/generated');
 const CONTRACT_ID_FILE = path.join(ROOT, 'contracts/contract_id.txt');
 const STAMP_PATH = path.join(OUTPUT_DIR, STAMP_FILE);
-const NETWORK = process.env.NETWORK || 'testnet';
-const RPC_URL = process.env.RPC_URL || 'https://soroban-testnet.stellar.org';
-const NETWORK_PASSPHRASE = process.env.NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015';
 
 function readIfExists(file: string): string | null {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
@@ -45,6 +43,12 @@ function main(): void {
     process.env.CONTRACT_ID,
     readIfExists(CONTRACT_ID_FILE),
   );
+
+  const { network, networkPassphrase, rpcUrl } = resolveNetworkConfig({
+    network: process.env.NETWORK,
+    networkPassphrase: process.env.NETWORK_PASSPHRASE,
+    rpcUrl: process.env.RPC_URL,
+  });
 
   if (checkOnly) {
     const result = checkBindingsDrift(readIfExists(STAMP_PATH), contractId);
@@ -59,7 +63,7 @@ function main(): void {
   const from = source === 'env' ? 'CONTRACT_ID' : 'contracts/contract_id.txt';
   console.log('Generating TypeScript bindings...');
   console.log(`Contract ID: ${contractId} (from ${from})`);
-  console.log(`Network: ${NETWORK}`);
+  console.log(`Network: ${network}`);
   console.log(`Output: ${OUTPUT_DIR}`);
 
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sgv-bindings-'));
@@ -68,8 +72,8 @@ function main(): void {
     execSync(
       `stellar contract bindings typescript ` +
         `--contract-id ${contractId} ` +
-        `--rpc-url ${RPC_URL} ` +
-        `--network-passphrase "${NETWORK_PASSPHRASE}" ` +
+        `--rpc-url ${rpcUrl} ` +
+        `--network-passphrase "${networkPassphrase}" ` +
         `--output-dir "${stagingDir}"`,
       { stdio: 'inherit' },
     );

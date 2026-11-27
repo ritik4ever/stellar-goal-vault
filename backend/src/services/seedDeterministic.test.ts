@@ -10,15 +10,21 @@ type SeedModule = typeof import('./seedDeterministic');
 
 let getDb: DbModule['getDb'];
 let resetDbForTests: DbModule['resetDbForTests'];
+let initDb: DbModule['initDb'];
 let seedDeterministicState: SeedModule['seedDeterministicState'];
 let parseCountArg: SeedModule['parseCountArg'];
+let validateSeedConfig: SeedModule['validateSeedConfig'];
+let SeedConfigError: SeedModule['SeedConfigError'];
+let MAX_SEED_COUNT: SeedModule['MAX_SEED_COUNT'];
 
 beforeAll(async () => {
+  ({ getDb, resetDbForTests, initDb } = await import('./db'));
+  ({ seedDeterministicState, parseCountArg, validateSeedConfig, SeedConfigError, MAX_SEED_COUNT } =
+    await import('./seedDeterministic'));
+  resetDbForTests();
   fs.rmSync(TEST_DB_PATH, { force: true });
   fs.rmSync(`${TEST_DB_PATH}-wal`, { force: true });
   fs.rmSync(`${TEST_DB_PATH}-shm`, { force: true });
-  ({ getDb, resetDbForTests } = await import('./db'));
-  ({ seedDeterministicState, parseCountArg } = await import('./seedDeterministic'));
 });
 
 beforeEach(() => {
@@ -46,7 +52,9 @@ function deriveScenario(row: CampaignStatusRow): 'open' | 'funded' | 'claimed' {
   return 'open';
 }
 
-function readCampaignScenarios(): Array<CampaignStatusRow & { scenario: ReturnType<typeof deriveScenario> }> {
+function readCampaignScenarios(): Array<
+  CampaignStatusRow & { scenario: ReturnType<typeof deriveScenario> }
+> {
   const rows = getDb()
     .prepare(
       `SELECT id, target_amount, pledged_amount, claimed_at
@@ -85,10 +93,10 @@ describe('deterministic seed state', () => {
   });
 
   it('seeds deterministic open, funded, and claimed scenarios from a clean environment', () => {
+    resetDbForTests();
     fs.rmSync(TEST_DB_PATH, { force: true });
     fs.rmSync(`${TEST_DB_PATH}-wal`, { force: true });
     fs.rmSync(`${TEST_DB_PATH}-shm`, { force: true });
-    resetDbForTests();
 
     const ids = seedDeterministicState(3);
     expect(ids).toEqual(['1', '2', '3']);
@@ -137,6 +145,111 @@ describe('deterministic seed state', () => {
       'funded',
       'claimed',
     ]);
+  });
+});
+
+describe('seed rerun safety', () => {
+  it('returns the same ids and rows on a repeated run with the same count without throwing', () => {
+    const firstIds = seedDeterministicState(6);
+    const firstRows = readCampaignScenarios();
+
+    let secondIds: string[] = [];
+    expect(() => {
+      secondIds = seedDeterministicState(6);
+    }).not.toThrow();
+    const secondRows = readCampaignScenarios();
+
+    expect(secondIds).toEqual(firstIds);
+    expect(secondRows).toEqual(firstRows);
+    expect(secondRows.map((row) => row.scenario)).toEqual([
+      'open',
+      'funded',
+      'claimed',
+      'open',
+      'funded',
+      'claimed',
+    ]);
+  });
+
+  it('reports already-seeded on the second run instead of re-wiping', () => {
+    const first = seedDeterministicState(3);
+    expect(first).toEqual(['1', '2', '3']);
+
+    const db = getDb();
+    // A row that a re-wipe would delete; it must survive the guarded rerun.
+    db.prepare(
+      `INSERT INTO notifications (campaign_id, type, title, body, target_wallet, actor_wallet, is_read, created_at)
+       VALUES (?, 'new_pledge', 't', 'b', ?, NULL, 0, ?)`,
+    ).run('1', `G${'S'.repeat(55)}`, 1_750_000_000);
+
+    const second = seedDeterministicState(3);
+    expect(second).toEqual(first);
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM notifications`).get() as { n: number }).n).toBe(
+      1,
+    );
+  });
+
+  it('performs a clean deterministic reset when the count changes', () => {
+    seedDeterministicState(3);
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO notifications (campaign_id, type, title, body, target_wallet, actor_wallet, is_read, created_at)
+       VALUES (?, 'new_pledge', 't', 'b', ?, NULL, 0, ?)`,
+    ).run('1', `G${'T'.repeat(55)}`, 1_750_000_000);
+
+    const ids = seedDeterministicState(6);
+    expect(ids).toEqual(['1', '2', '3', '4', '5', '6']);
+    expect(readCampaignScenarios().map((row) => row.scenario)).toEqual([
+      'open',
+      'funded',
+      'claimed',
+      'open',
+      'funded',
+      'claimed',
+    ]);
+    // The reset wiped dependent rows rather than leaving stale data behind.
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM notifications`).get() as { n: number }).n).toBe(
+      0,
+    );
+  });
+
+  it('bypasses the guard and re-seeds when force is set', () => {
+    seedDeterministicState(3);
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO notifications (campaign_id, type, title, body, target_wallet, actor_wallet, is_read, created_at)
+       VALUES (?, 'new_pledge', 't', 'b', ?, NULL, 0, ?)`,
+    ).run('1', `G${'F'.repeat(55)}`, 1_750_000_000);
+
+    const ids = seedDeterministicState(3, { force: true });
+    expect(ids).toEqual(['1', '2', '3']);
+    expect(readCampaignScenarios().map((row) => row.scenario)).toEqual([
+      'open',
+      'funded',
+      'claimed',
+    ]);
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM notifications`).get() as { n: number }).n).toBe(
+      0,
+    );
+  });
+
+  it('records a seed marker after seeding and leaves none on a fresh database', () => {
+    resetDbForTests();
+    fs.rmSync(TEST_DB_PATH, { force: true });
+    fs.rmSync(`${TEST_DB_PATH}-wal`, { force: true });
+    fs.rmSync(`${TEST_DB_PATH}-shm`, { force: true });
+
+    initDb();
+    const db = getDb();
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM seed_markers`).get() as { n: number }).toEqual({
+      n: 0,
+    });
+
+    seedDeterministicState(3);
+    const marker = db.prepare(`SELECT count FROM seed_markers LIMIT 1`).get() as
+      { count: number } | undefined;
+    expect(marker).toBeDefined();
+    expect(marker?.count).toBe(3);
   });
 });
 
@@ -250,7 +363,7 @@ describe('seed workflow database regression', () => {
     ).run('1', 1_750_000_000);
 
     // Without child cleanup this reseed would fail under foreign_keys=ON.
-    const ids = seedDeterministicState(3);
+    const ids = seedDeterministicState(3, { force: true });
     expect(ids).toEqual(['1', '2', '3']);
 
     expect((db.prepare(`SELECT COUNT(*) AS n FROM notifications`).get() as { n: number }).n).toBe(
@@ -401,6 +514,114 @@ describe('seed workflow query indexes', () => {
 
     for (const row of accounting) {
       expect(row.pledged).toBe(row.sum_pledges);
+    }
+  });
+});
+
+describe('seed configuration validation', () => {
+  it('blocks development seed in production environment before modifying database', () => {
+    expect(() =>
+      validateSeedConfig({
+        count: 3,
+        env: { NODE_ENV: 'production' },
+      }),
+    ).toThrow(SeedConfigError);
+    expect(() =>
+      validateSeedConfig({
+        count: 3,
+        env: { NODE_ENV: 'production' },
+      }),
+    ).toThrow(/blocked in production/i);
+  });
+
+  it('blocks development seed on mainnet network or with mainnet passphrase/RPC', () => {
+    expect(() =>
+      validateSeedConfig({
+        count: 3,
+        env: { NETWORK: 'mainnet' },
+      }),
+    ).toThrow(/blocked on mainnet/i);
+
+    expect(() =>
+      validateSeedConfig({
+        count: 3,
+        env: { NETWORK: 'public' },
+      }),
+    ).toThrow(/blocked on mainnet/i);
+
+    expect(() =>
+      validateSeedConfig({
+        count: 3,
+        env: { SOROBAN_NETWORK_PASSPHRASE: 'Public Global Stellar Network ; September 2015' },
+      }),
+    ).toThrow(/blocked when mainnet network passphrase is configured/i);
+
+    expect(() =>
+      validateSeedConfig({
+        count: 3,
+        env: { SOROBAN_RPC_URL: 'https://soroban-rpc.mainnet.stellar.org:443' },
+      }),
+    ).toThrow(/blocked when mainnet RPC endpoint is configured/i);
+  });
+
+  it('rejects invalid seed counts (<= 0, non-integer, NaN, or exceeding MAX_SEED_COUNT)', () => {
+    expect(() => validateSeedConfig({ count: 0 })).toThrow(/Must be a positive integer/);
+    expect(() => validateSeedConfig({ count: -1 })).toThrow(/Must be a positive integer/);
+    expect(() => validateSeedConfig({ count: 2.5 })).toThrow(/Must be a positive integer/);
+    expect(() => validateSeedConfig({ count: MAX_SEED_COUNT + 1 })).toThrow(
+      /exceeds maximum allowed limit/,
+    );
+  });
+
+  it('rejects database paths that point to an existing directory', () => {
+    expect(() =>
+      validateSeedConfig({
+        count: 3,
+        dbPath: __dirname,
+      }),
+    ).toThrow(/is a directory/i);
+  });
+
+  it('parses count from CLI arguments or environment variable SEED_COUNT', () => {
+    expect(parseCountArg([], {})).toBe(3);
+    expect(parseCountArg([], { SEED_COUNT: '5' })).toBe(5);
+    expect(parseCountArg([], { CAMPAIGN_SEED_COUNT: '8' })).toBe(8);
+    // CLI arg takes precedence over environment variable
+    expect(parseCountArg(['--count', '12'], { SEED_COUNT: '5' })).toBe(12);
+    expect(parseCountArg(['--count=25'], { SEED_COUNT: '5' })).toBe(25);
+  });
+
+  it('rejects invalid count in environment variable SEED_COUNT', () => {
+    expect(() => parseCountArg([], { SEED_COUNT: 'invalid' })).toThrow(/Invalid --count value/);
+    expect(() => parseCountArg([], { SEED_COUNT: '0' })).toThrow(/Invalid --count value/);
+    expect(() => parseCountArg([], { SEED_COUNT: '-5' })).toThrow(/Invalid --count value/);
+  });
+
+  it('correctly creates extra fixtures above the 3 fixed base campaigns with valid fields', () => {
+    const result = seedDeterministicState(7);
+    expect(result.length).toBe(7);
+    expect(result.campaignIds).toEqual(['1', '2', '3', '4', '5', '6', '7']);
+    expect(result.status).toBe('seeded');
+
+    const db = getDb();
+    const campaigns = db
+      .prepare(
+        'SELECT id, creator, target_amount, pledged_amount, deadline FROM campaigns ORDER BY CAST(id AS INTEGER) ASC',
+      )
+      .all() as Array<{
+      id: string;
+      creator: string;
+      target_amount: number;
+      pledged_amount: number;
+      deadline: number;
+    }>;
+
+    expect(campaigns.length).toBe(7);
+    for (const c of campaigns) {
+      expect(c.creator).toMatch(/^G[A-Z2-7]{55}$/);
+      expect(c.target_amount).toBeGreaterThan(0);
+      expect(c.pledged_amount).toBeGreaterThanOrEqual(0);
+      expect(c.deadline).toBeGreaterThan(0);
     }
   });
 });

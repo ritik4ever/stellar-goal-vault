@@ -108,6 +108,67 @@ export const envSchema = z
   })
   .superRefine((data, ctx) => {
     const nodeEnv = data.NODE_ENV;
+    const contractId = data.CONTRACT_ID?.trim();
+
+    if (contractId) {
+      if (
+        contractId === 'YOUR_CONTRACT_ID' ||
+        contractId === 'YOUR_DEPLOYED_CONTRACT_ID' ||
+        contractId === 'YOUR_MAINNET_CONTRACT_ID'
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['CONTRACT_ID'],
+          message: `CONTRACT_ID cannot be placeholder "${contractId}". Set a valid deployed contract ID.`,
+        });
+      } else if (!/^C[A-Z2-7]{55}$/.test(contractId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['CONTRACT_ID'],
+          message: `CONTRACT_ID "${contractId}" is not a valid Soroban contract ID (expected C followed by 55 base32 characters).`,
+        });
+      }
+    }
+
+    const rpcUrl = data.SOROBAN_RPC_URL?.trim();
+    const passphrase = data.SOROBAN_NETWORK_PASSPHRASE?.trim();
+
+    const isTestnetPassphrase = passphrase === 'Test SDF Network ; September 2015';
+    const isMainnetPassphrase = passphrase === 'Public Global Stellar Network ; September 2015';
+
+    if (rpcUrl && (rpcUrl.includes('mainnet') || rpcUrl.includes('publicnode'))) {
+      if (!passphrase) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SOROBAN_NETWORK_PASSPHRASE'],
+          message:
+            'Missing or conflicting network environment variable: SOROBAN_RPC_URL points to mainnet, but SOROBAN_NETWORK_PASSPHRASE is not set for mainnet. Recovery: set SOROBAN_NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015".',
+        });
+      } else if (isTestnetPassphrase) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SOROBAN_RPC_URL'],
+          message:
+            'Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for testnet, but SOROBAN_RPC_URL points to mainnet. Recovery: configure matching testnet SOROBAN_RPC_URL or set SOROBAN_NETWORK_PASSPHRASE for mainnet.',
+        });
+      }
+    } else if (isMainnetPassphrase) {
+      if (!rpcUrl) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SOROBAN_RPC_URL'],
+          message:
+            'Missing or conflicting network environment variable: SOROBAN_NETWORK_PASSPHRASE is configured for mainnet, but SOROBAN_RPC_URL is missing. Recovery: set SOROBAN_RPC_URL to a valid mainnet RPC endpoint.',
+        });
+      } else if (rpcUrl.includes('testnet')) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SOROBAN_RPC_URL'],
+          message:
+            'Network mismatch: SOROBAN_NETWORK_PASSPHRASE is configured for mainnet, but SOROBAN_RPC_URL points to testnet. Recovery: configure matching mainnet SOROBAN_RPC_URL or set SOROBAN_NETWORK_PASSPHRASE for testnet.',
+        });
+      }
+    }
 
     // NODE_ENV selects the policy that applies, so an unrecognized value is a
     // contradictory configuration: e.g. NODE_ENV=prod skips all production
