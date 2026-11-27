@@ -59,7 +59,10 @@ fn assert_sole_signer(f: &Fixture, expected: &Address, fn_name: &str) {
         "{fn_name}: expected exactly one signer, got {auths:?}"
     );
     let (signer, invocation) = &auths[0];
-    assert_eq!(signer, expected, "{fn_name}: authorized by the wrong address");
+    assert_eq!(
+        signer, expected,
+        "{fn_name}: authorized by the wrong address"
+    );
     match &invocation.function {
         AuthorizedFunction::Contract((contract, name, _)) => {
             assert_eq!(
@@ -182,7 +185,10 @@ fn set_fee_recipient_without_signature_is_rejected_and_state_unchanged() {
     let recipient = Address::generate(&f.env);
     enforce_no_signatures(&f);
 
-    assert!(f.client.try_set_fee_recipient(&f.admin, &recipient).is_err());
+    assert!(f
+        .client
+        .try_set_fee_recipient(&f.admin, &recipient)
+        .is_err());
     assert!(f.client.get_fee_recipient().is_none());
 }
 
@@ -278,3 +284,7 @@ fn config_setter_fails_before_initialize() {
     // configuration cannot be changed before there is an admin to authorize it.
     f.client.set_paused(&f.admin, &true);
 }
+
+// Authority around the minimum contribution rule (SGV-2026-113, issue #1493).
+#[path = "test_min_contribution_authority.rs"]
+mod min_contribution_authority;

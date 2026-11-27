@@ -449,6 +449,60 @@ describe('Migration runner database regression tests (#881)', () => {
         db.close();
       }
     });
+
+    it('restarts an interrupted migration without dropping or duplicating committed campaign data', () => {
+      const db = new Database(TEST_DB);
+      try {
+        db.exec(`
+          CREATE TABLE campaigns (
+            id TEXT PRIMARY KEY,
+            creator TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            accepted_tokens_json TEXT NOT NULL,
+            target_amount REAL NOT NULL,
+            pledged_amount REAL NOT NULL DEFAULT 0,
+            deadline INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            claimed_at INTEGER,
+            deleted_at INTEGER
+          );
+        `);
+        db.prepare(
+          `INSERT INTO campaigns (
+            id, creator, title, description, accepted_tokens_json,
+            target_amount, pledged_amount, deadline, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run('c-restart', 'GAA', 'Restart', 'Restart Desc', '["XLM"]', 100, 0, 1000, 100);
+
+        // Simulate an interruption: abort the first run before schema version advances
+        db.exec(`
+          CREATE TRIGGER abort_restart_once
+          BEFORE UPDATE OF pledged_amount ON campaigns
+          BEGIN
+            SELECT RAISE(ABORT, 'simulated interruption');
+          END;
+        `);
+        expect(() => migrate(db)).toThrow('simulated interruption');
+
+        // Remove the injected interruption and rerun
+        db.exec('DROP TRIGGER abort_restart_once;');
+        expect(() => migrate(db)).not.toThrow();
+        expect(() => migrate(db)).not.toThrow();
+
+        const rows = db
+          .prepare('SELECT id FROM campaigns WHERE id = ?')
+          .all('c-restart') as Array<{ id: string }>;
+        expect(rows).toHaveLength(1);
+
+        const campaign = db
+          .prepare('SELECT pledged_amount FROM campaigns WHERE id = ?')
+          .get('c-restart') as { pledged_amount: number };
+        expect(campaign.pledged_amount).toBe(0);
+      } finally {
+        db.close();
+      }
+    });
   });
 
   // =========================================================================

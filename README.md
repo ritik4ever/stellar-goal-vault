@@ -210,10 +210,10 @@ An HTML report is generated at `backend/reports/mutation/mutation.html` and a JS
 
 ### Thresholds
 
-| Level | Score |
-|-------|-------|
-| High  | ≥ 80% |
-| Low   | ≥ 70% |
+| Level | Score            |
+| ----- | ---------------- |
+| High  | ≥ 80%            |
+| Low   | ≥ 70%            |
 | Break | < 65% (CI fails) |
 
 ### CI usage
@@ -306,10 +306,12 @@ Base URL:
 - Returns only pledge information together with pagination metadata.
 
 **Query Parameters:**
+
 - `page` (optional): Page number (e.g., `?page=1`)
 - `limit` (optional): Results per page (e.g., `?limit=20`)
 
 **Response Schema:**
+
 ```json
 {
   "data": [],
@@ -540,25 +542,29 @@ Set a funded Stellar testnet secret key and run:
 SECRET_KEY="S..." npm run deploy:contract
 ```
 
-The script will:
+The script validates configuration upfront (secret key format, network/passphrase/RPC alignment) and then will:
 
 1. Build the Soroban contract
-2. Deploy to Stellar testnet
+2. Deploy to Stellar testnet (or configured `NETWORK`)
 3. Output the contract ID
 4. Save the ID to `contracts/contract_id.txt`
+
+Missing or conflicting network environment variables immediately halt execution with clear stop and recovery instructions (`Recovery: ...`). Repeated runs preserve the startup error without creating partial artifacts or executing signed transactions. Existing `contracts/contract_id.txt` files are left unmodified if a rerun fails.
 
 ## Environment variables
 
 See [docs/SECURE_CONFIGURATION.md](./docs/SECURE_CONFIGURATION.md) for the safe
 production default, local-development override, and the risk of weakening each
-security-relevant setting.
+security-relevant setting. Startup environment validation (`validateEnv`) enforces
+well-formed `CONTRACT_ID` (rejecting placeholders) and validates network passphrase and RPC alignment
+before database operations or transaction assembly.
 
 Backend:
 
 - `PORT` defaults to `3001`
 - `DB_PATH` defaults to `backend/data/campaigns.db`
 - `SOROBAN_RPC_URL` defaults to Stellar testnet RPC
-- `CONTRACT_ID` is required for Freighter pledge signing
+- `CONTRACT_ID` is required for Freighter pledge signing (must be a valid Soroban contract strkey)
 - `NETWORK_PASSPHRASE` defaults to Stellar testnet
 - `CONTRACT_AMOUNT_DECIMALS` defaults to `2` and controls display-to-contract unit scaling
 

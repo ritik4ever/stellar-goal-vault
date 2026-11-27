@@ -91,6 +91,7 @@ local-development override.
   for the intended network (mainnet or a chosen testnet).
 - **Local development:** defaults to the Stellar testnet RPC and passphrase when
   both are unset and `NODE_ENV !== production`.
+- **Rerun safety & recovery paths:** missing or conflicting network variables (e.g. mainnet RPC with testnet passphrase, or mainnet RPC without network passphrase) fail fast at startup (`validateEnv`) before any database mutations or signed transaction submissions, providing explicit `Recovery: ...` instructions. Repeated runs preserve the startup error consistently.
 - **Risk of weakening:** pointing the app at an untrusted RPC can produce false
   transaction results; a passphrase that does not match the network signs for the
   wrong chain.
