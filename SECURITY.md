@@ -188,7 +188,7 @@ Use this checklist when reviewing the Soroban contract (`contracts/src/lib.rs`) 
 |---|-------|----------|------------|--------|
 | 1 | External token transfers occur **after** all state updates (checks-effects-interactions pattern) | **High** | Move `TokenClient::transfer()` calls after storage writes; or add a reentrancy guard if transfers must precede state changes | ☐ Open |
 | 2 | Cross-contract calls do not allow the callee to re-enter and mutate contract state before the first invocation completes | **High** | Verify that Soroban's host-level call-depth limits are sufficient; add a `REENTRANCY_GUARD` flag stored in temporary storage if untrusted contracts are called | ☐ Open |
-| 3 | `claim()` and `refund()` loops call external token contracts on each iteration without intermediate state snapshots | **Medium** | Consider batching transfers or taking a storage snapshot before the loop so a partial failure does not leave state inconsistent | ☐ Open |
+| 3 | `claim()` and `refund()` loops call external token contracts on each iteration without intermediate state snapshots | **Medium** | `refund`/`refund_all` now apply every storage effect first, persist the campaign record, and then pay out — so the batch is atomic and a partial failure reverts fully (issue #1517). `claim()` still transfers token-by-token; a failed transfer reverts the whole claim, but there is no batch-wide state snapshot | ☑ Refund fixed / claim open |
 
 ### Access Control
 

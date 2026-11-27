@@ -1363,6 +1363,8 @@ impl StellarGoalVaultContract {
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        pay_out_refunds(&env, campaign_id, &batch);
     }
 
     /// Refund every contributor of a failed or canceled campaign in one call.
@@ -1403,21 +1405,25 @@ impl StellarGoalVaultContract {
             .get(&contributors_key)
             .unwrap_or_else(|| Vec::new(&env));
 
-        let mut any_refunded = false;
+        // Collect every payout first and persist the final campaign state
+        // before calling any token contract. A reentrant or duplicate refund
+        // sees zeroed pledges and an empty batch, and a failed transfer in
+        // the middle of the batch reverts the entire invocation — the batch is
+        // all-or-nothing rather than partially applied (issue #1517).
+        let mut batch = RefundBatch::new(&env);
         for contributor in contributors.iter() {
-            let refunded = refund_contributor(&env, &mut campaign, campaign_id, &contributor);
-            if refunded > 0 {
-                any_refunded = true;
-            }
+            clear_contributor_pledges(&env, &mut campaign, campaign_id, &contributor, &mut batch);
         }
 
-        if !any_refunded {
+        if batch.is_empty() {
             panic!("nothing to refund");
         }
 
         env.storage()
             .persistent()
             .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        pay_out_refunds(&env, campaign_id, &batch);
     }
 
     pub fn get_campaign(env: Env, campaign_id: u64) -> Campaign {
@@ -1773,9 +1779,8 @@ fn refund_contributor(
     campaign: &mut Campaign,
     campaign_id: u64,
     contributor: &Address,
-) -> i128 {
-    let mut total_refunded = 0_i128;
-    let contract_address = env.current_contract_address();
+    batch: &mut RefundBatch,
+) {
     for token in campaign.accepted_tokens.iter() {
         let contribution_key =
             DataKey::Contribution(campaign_id, contributor.clone(), token.clone());
@@ -1816,5 +1821,25 @@ fn refund_contributor(
             );
         }
     }
-    total_refunded
+}
+
+/// Performs the token transfers and refund events for a fully applied refund
+/// batch. Every storage write has already happened when this runs.
+fn pay_out_refunds(env: &Env, campaign_id: u64, batch: &RefundBatch) {
+    let contract_address = env.current_contract_address();
+    for i in 0..batch.amounts.len() {
+        let contributor = batch.contributors.get(i).unwrap();
+        let token = batch.tokens.get(i).unwrap();
+        let amount = batch.amounts.get(i).unwrap();
+        TokenClient::new(env, &token).transfer(&contract_address, &contributor, &amount);
+        env.events().publish(
+            (symbol_short!("Goal"), symbol_short!("Refund")),
+            CampaignRefunded {
+                campaign_id,
+                contributor,
+                token,
+                amount,
+            },
+        );
+    }
 }
