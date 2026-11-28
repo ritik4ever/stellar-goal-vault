@@ -155,11 +155,16 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
+
+      - name: Install stellar-cli
+        run: |
+          curl -sL https://github.com/stellar/stellar-cli/releases/download/v30.0.1/stellar-cli-30.0.1-x86_64-unknown-linux-gnu.tar.gz \
+            | tar xz -C /usr/local/bin
 
       - name: Build contract
         working-directory: contracts
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: stellar contract build
 
       - name: Check for supply-chain attacks
         if: github.event_name == 'push' || github.event.inputs.supply-chain-checks == 'true'
@@ -170,7 +175,7 @@ jobs:
           # Check for known vulnerable crates
           cargo audit || true
           # Generate checksums for build artifacts
-          find target/wasm32-unknown-unknown/release -name "*.wasm" -exec sha256sum {} \; > /tmp/contract-artifacts.sha256 2>/dev/null || true
+          find target/wasm32v1-none/release -name "*.wasm" -exec sha256sum {} \; > /tmp/contract-artifacts.sha256 2>/dev/null || true
         
       - name: Run contract tests
         working-directory: contracts
